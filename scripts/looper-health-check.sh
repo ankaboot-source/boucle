@@ -6,6 +6,12 @@
 
 set -euo pipefail
 
+# Cron has a minimal PATH and no D-Bus keyring session, so `gh` is neither on
+# PATH nor able to read the keyring. Export both explicitly.
+export PATH="/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin"
+GH_TOKEN="$(grep -oE 'GH_TOKEN = "[^"]+"' "$HOME/.looper/config.toml" 2>/dev/null | grep -oE '"[^"]+"' | tr -d '"' || true)"
+export GH_TOKEN
+
 LOOPER="/tmp/looper-dev/looper"
 DB="$HOME/.looper/looper.sqlite"
 LOG="$HOME/.looper/logs/health-check.log"
