@@ -309,6 +309,46 @@ answerTransport = 'github'
 - **References**: baton's `agent-browser` E2E (verifies before PR), Cursor Background Agents (video recording as verification), CF Browser Rendering binding (serverless browser backend).
 - **Reproduced**: m3llm PR #195 (reviewer marked 405 as UNVERIFIABLE, user verified post-deploy manually).
 
+#### 5.11.1 Ecosystem research — post-deploy verification tools (2026-07-25)
+
+A deeper GitHub/web search (beyond the original 22-tool analysis) found that **post-deploy verification is not a missing tool — it is a missing integration layer**. No single off-the-shelf product implements the full `issue → dev → merge → deploy → verify → reopen` loop, but 5 projects ship post-deploy verification as part of a loop, and a stack of building blocks exist.
+
+**Tier 1 — full dev loops that include post-deploy verification:**
+
+| Project | Post-deploy step | Feedback to issue/PR | Closeness |
+|---------|------------------|----------------------|-----------|
+| [AntaresYuan/claude-devloop](https://github.com/AntaresYuan/claude-devloop) | `curl` live URL + grep for shipped feature | Comments/closes issue, logs to `LOOP-LOG.md`, `ScheduleWakeup` pacing | **85%** — only tool bundling triage→dev→test→review→merge→verify-deploy→update-issue in one skill. Claude-only, no browser E2E, no auto-reopen. |
+| [rkaliupin/DAGent](https://github.com/rkaliupin/DAGent) | **Playwright E2E on live deployed app** + integration tests | `TriageDiagnostic` with fault-domain routing, circuit breakers, loops back to agents | **80%** — 12-agent DAG, real browser E2E post-deploy. Azure-bound (Functions/SWA). |
+| [Vanja Petreski "Proof of Loop"](https://vanja.io/proof-of-loop/) | Verifies running revision matches pushed image, polls external truth | Done-oracle gates exit; auto-files tickets on drift; self-heal pass rewrites harness | **100% in shape, 70% in tooling** — the design document to reference. 9/11 tickets shipped + verified on dev & prod, 0 prod incidents. |
+
+**Tier 2 — deploy→verify→fix bridge (progressive delivery + AI):**
+
+| Project | What it does |
+|---------|--------------|
+| [argoproj-labs/rollouts-plugin-metric-ai](https://github.com/argoproj-labs/rollouts-plugin-metric-ai) (Apache-2.0, 13⭐) | Argo Rollouts canary analysis → AI agent (A2A) → promote/rollback → **auto-opens fix PR on GitHub** via `create_github_pr`. K8s-only. |
+| AgentPatterns "Self-Healing Production Agent" ([pattern](https://agentpatterns.ai/agent-design/self-healing-production-agent/)) | After deploy, run eval suite, compare to baseline, triage causality, dispatch fix agent → PR. **LangChain GTM Agent** is the cited production case. Circuit breaker on `(repo, failing_test)` after N attempts. |
+
+**Tier 3 — production-grade verify engines (plug-in, not full loops):**
+
+| Project | What it does |
+|---------|--------------|
+| [team-poem/cairn](https://github.com/team-poem/cairn) | AI discovers a browser flow once, freezes as JSON, replays **deterministically with zero LLM calls** (~$0.50 discovery, $0/replay). Self-heals on UI drift. The cheap-continuous-verify engine. |
+| [kensaurus/mushi-mushi](https://github.com/kensaurus/mushi-mushi) (open-core: SDK MIT, server AGPLv3) | Sentry detection → 2-stage LLM classify → sandbox fix → **Playwright verify** (`@mushi-mushi/verify`: screenshot diff + step interpreter) → draft PR. |
+| [heymegbyte/claude-skills/agents/deploy-verifier.md](https://github.com/heymegbyte/claude-skills/blob/master/agents/deploy-verifier.md) | Sub-agent spec: `curl + 200 check + console errors + 6-breakpoint screenshots + axe-core audit + SEO + perf`. The minimum-viable verifier shape. |
+| [nahuelsoria/prod-playwright-audit](https://github.com/nahuelsoria/prod-playwright-audit) | Cross-agent (Claude/Codex/Cursor/opencode), read-only audit, waits for deploy propagation, network safety belt aborts mutations. |
+
+**Tier 4 — self-healing CI agents (pre-merge, not post-deploy, but reusable auto-fix-PR pattern):**
+
+`ronitanilkumar/Veylor`, `Canepro/pipelinehealer`, `timix648/TALOS`, `AbdulmoizTalpur/self-healing-devops-agent`, Semaphore self-healing CI. All detect CI failures → AI fix → PR, but stop at "fix the failing test", not "verify the deployed app". The auto-fix-PR pattern is identical to what boucle would need on the post-deploy branch.
+
+**Reference design pattern** — [youngju.dev 7-stage loop](https://www.youngju.dev/blog/culture/2026-05-14-issue-to-deploy-autonomous-pipeline-ai-code-review-ci-cd-auto-verify-rollback-deep-dive-guide-2025.en):
+`S1 Issue→PR (AI) → S2 AI review → S3 CI gate → S4 human merge → S5 CD (preview→canary→prod) → S6 auto-verify (smoke+E2E+SLO) → S7 monitoring → on S6 failure, S7 creates Issue labeled `ai-ready` → re-enters at S1`. **S6 is exactly looper's gap (#604).**
+
+**Recommended path for boucle:**
+1. **Short term (1-2 day POC)** — adopt `heymegbyte/deploy-verifier` shape (curl + axe + screenshot) as a `verifier` sub-agent in opencode/Claude Code.
+2. **Mid term** — adopt `cairn`'s discover→freeze→replay for LLM-free continuous browser verification (~$0/replay).
+3. **Long term** — add a `verifier` role to looper (or boucle-core) that, on failure, **reopens the issue with evidence** — same shape as `argoproj-labs/rollouts-plugin-metric-ai`'s async remediation agent. File an enriched follow-up on looper#604 referencing the near-misses above.
+
 ## 6. What works (confirmed in production)
 
 1. **Issue → Planner → spec PR** — auto-discover by `looper:plan` label ✅
@@ -340,13 +380,99 @@ answerTransport = 'github'
 12. **Fixer auto-discovery in single-identity mode** — self-comment filter excludes bot-authored reviews (§5.10, #603) ❌
 13. **Post-deploy E2E browser verification** — loop ends at merge, no verify-in-production step (§5.11, #604) ❌
 
-## 8. Next steps
+## 8. Decision — POC closed (2026-07-25)
 
-- [ ] Test bot account full loop: label a fresh issue `looper:plan`, let planner (bot) open spec PR, reviewer (bot) review, worker (bot) implement, coordinator (baderdean) request review from baderdean, reviewer (bot) review worker PR — verify no 422.
-- [ ] Re-enable coordinator with bot account.
-- [x] E2E browser test strategy — feature request filed as [nexu-io/looper#604](https://github.com/nexu-io/looper/issues/604) (post-deploy E2E verification step). Implementation TBD.
-- [ ] Decide on tyre-call (GitLab) — no looper path; needs a different tool or a GitLab adapter.
-- [ ] Contribute worker-PR-label patch to looper (#598, Option A).
-- [ ] File upstream issues for §5.5 (loop delete CLI), §5.6 (planner assignee docs), §5.7 (reviewer marker-verification retry).
-- [ ] Budget control — design a mechanism to cap and surface coding-model token spend per loop/day/project (WIP limit / token log / hard $ budget — solution TBD).
-- [ ] After 10 loops or 30 days, evaluate decision (Option A/B/C/D).
+**Verdict: Option B — Move to a more reliable solution. looper does not meet the dev-factory-A→Z bar.**
+
+### 8.1 Evaluation against the Option A criteria
+
+AGENTS.md §3 Option A requires: looper handles ≥80% of the dev-factory flow autonomously (issue → merged PR) with no more than 1 manual intervention per loop, and the gaps are patchable or non-blocking.
+
+| Criterion | Required | Observed | Met? |
+|-----------|----------|----------|------|
+| Autonomous flow coverage | ≥80% | ~57% (4/7 steps fully autonomous: triage→plan→spec→worker; review/fixer need manual triggers; validate/merge is manual) | ❌ |
+| Manual interventions per loop | ≤1 | 3-5 per loop (manual `looper review` for worker PRs, manual merge, SQLite cleanup for stuck loops, daemon restarts, bot-assignee workaround) | ❌ |
+| GitLab gap patchable | yes or non-blocking | **Blocking** for tyre-call, structurally not patchable (GitHub+Forgejo only) | ❌ |
+| E2E browser test gap patchable | yes or non-blocking | Sidecar/Action possible but not native; post-deploy verify is a missing integration layer (#604) | ⚠️ partial |
+| Budget control patchable | yes | Patchable (WIP/token log/$ budget) but not shipped | ⚠️ partial |
+
+**Result: 0/2 hard criteria met. Option A rejected.**
+
+### 8.2 Evidence summary (6 runs, 7 bugs filed)
+
+- **6 POC runs** completed across m3llm (4), ansible-supabase (1, paused), leadminer (1, stuck-PR cleanup).
+- **2 full issue→merge loops** (m3llm#146, m3llm#192) — both required manual merge by baderdean; auto-merge is blocked for bot-authored PRs (#602).
+- **7 upstream bugs filed**: #595 (EBADF), #598 (worker PR review), #599 (marker mismatch), #600 (outbound guard), #602 (auto-merge), #603 (fixer self-comment), #604 (post-deploy E2E). Three (#598, #602, #603) share a single-identity root cause.
+- **Single-identity mode is the dominant failure mode**: 3 of 7 bugs stem from looper's assumption that worker, reviewer, and fixer are different GitHub identities. The bot-account workaround reduces 422s but does not fix auto-merge (#602) or fixer self-comment filtering (#603).
+- **Operational overhead**: a bash health-check cron + an agent health-check cron were required to keep the daemon alive and clear stuck loops. This is the opposite of "autonomous".
+
+### 8.3 What looper proved
+
+- The **loop shape works**: issue → planner → spec PR → reviewer → worker → implementation PR → fixer → re-review → merge ran end-to-end on real issues with genuine deep review (tests run, Mermaid rendered, EPO schema verified, real bugs found).
+- **opencode as harness** is viable: permission propagation, worktree isolation, and HITL via GitHub comments all work.
+- **Label-driven state machine** is a clean, observable coordination model.
+
+### 8.4 What looper cannot deliver (structural)
+
+1. **GitLab support** — structurally GitHub+Forgejo only. tyre-call has no path.
+2. **Auto-merge / full autonomy** — blocked by single-identity design (#598, #602, #603). A second GitHub account per role is not a scalable fix.
+3. **Post-deploy E2E verification** — loop ends at merge; no verify-in-production step (#604).
+4. **Budget control** — no cap or visibility on coding-model token spend.
+5. **Loop operability** — no CLI to delete stuck loops (§5.5); coordinator 422 cascade (§5.4); reviewer marker retry loops (§5.7).
+
+### 8.4.1 Review gate does not prevent shipping bugged code (critical)
+
+**This is the most fundamental finding of the POC — more decisive than the autonomy bugs.** Even if looper were 100% autonomous (no 422s, auto-merge worked, no manual interventions), it would still ship bugged code because the review gate itself is structurally insufficient.
+
+**Evidence — bugs shipped despite passing spec review + code review + fixer cycle:**
+
+| Shipped PR | Review outcome | Bug shipped | How it escaped review |
+|------------|----------------|-------------|----------------------|
+| m3llm PR #180 (engineer tool ezdxf) | Reviewer ran 26 unit tests (pass), rendered Mermaid, verified EPO CPC schema, found 3 real bugs → fixer fixed → re-review approved → **merged** | **#179**: `search_patents` returns HTTP 404 from EPO OPS (wrong endpoint URL / missing auth) — filed the same day | Reviewer reviewed the **diff** (code structure, Mermaid syntax, XML parsing) but never **called the EPO API**. Unit tests mocked the HTTP layer. The 404 only manifests on a real API call. |
+| m3llm PR #195 (magic-link 405 + button overflow) | Reviewer marked 405 as `UNVERIFIABLE` (deployment-dependent), PASS on button fix → **non-blocking → merged** | **Post-deploy**: `cron.unschedule('cleanup-pending-signups')` throws XX000 when the job was never scheduled — migration crashes on fresh installs | Reviewer correctly identified it couldn't verify the 405 from the diff, but `UNVERIFIABLE` is a **non-blocking** outcome — it does not gate merge. The runtime migration error was invisible to diff review. |
+
+**Root cause — the review model is diff-scoped, not behavior-scoped:**
+
+1. **Static analysis + unit tests only.** The reviewer reads the diff, runs existing unit tests (which mock external dependencies), and checks code structure. It does not perform integration testing against real services (EPO API, Supabase Edge Functions, live deployments).
+2. **`UNVERIFIABLE` does not block merge.** When the reviewer correctly identifies that a fix can only be verified post-deploy (e.g. a 405 from an undeployed Edge Function), it marks the outcome `non_blocking` / `UNVERIFIABLE` — and the loop proceeds to merge. The "I can't verify this" signal is recorded but **not acted on**.
+3. **No E2E / browser test step.** The loop is `issue → spec → worker → review → merge`. There is no `→ deploy → verify behavior against acceptance criteria` step (#604). Deployment-dependent bugs (405, migration XX000, wrong API endpoint) are structurally invisible to the review gate.
+4. **Spec review ≠ behavior contract.** The spec PR review checks the plan's coherence, not whether the acceptance criteria are testable post-implementation. A spec can pass review while defining no verifiable behavior.
+
+**Implication for the next solution:**
+
+The next tool must treat **verified behavior in production** as the merge gate, not **reviewed diff**. Concretely:
+- Acceptance criteria in the issue/spec must be **executable** (not prose).
+- The loop must include a **post-deploy verification step** that runs the acceptance criteria against the live system (browser E2E, API smoke test, migration dry-run).
+- `UNVERIFIABLE` must **block merge** until either (a) the behavior is verified post-deploy, or (b) a human explicitly overrides with a recorded reason.
+- The §5.11.1 research (claude-devloop, DAGent, Proof of Loop, cairn, deploy-verifier) defines the shape of this step. `team-poem/cairn` (discover→freeze→replay, $0/replay) is the most cost-effective continuous-verify engine; `rkaliupin/DAGent` (Playwright on live app) is the closest full-loop reference.
+
+This finding alone justifies Option B regardless of the autonomy bugs: **a dev factory that ships buggé code through its own review gate is not a dev factory.**
+
+### 8.5 Decision
+
+**Option B — Adopt another solution.** The POC is closed. looper remains a useful reference for the loop shape (label state machine, worktree isolation, HITL via PR comments, opencode harness integration) but is not reliable enough to serve as the dev-factory orchestrator:
+
+- It requires constant human + cron babysitting (3-5 manual interventions per loop).
+- Its single-identity assumption produces a cluster of blocking bugs that a bot account only partially mitigates.
+- GitLab and post-deploy E2E are structurally out of scope.
+
+**Next: evaluate more reliable alternatives.** Candidates to re-examine (from README §2): autonomous-dev-team (best harness-agnosticism, conformance suite, GitLab pluggable), baton (agent-browser E2E, but dormant), and the original boucle hexagonal TS+Bun design (Option C) if no existing tool fills enough gaps. The post-deploy verification research in §5.11.1 (claude-devloop, DAGent, Proof of Loop, cairn) informs the E2E requirement for whatever comes next.
+
+### 8.6 Artifacts retained
+
+- `docs/poc-looper-status.md` — this file (full run log, bugs, findings).
+- `docs/poc-looper-drawbacks.md` — health-check drawback log.
+- `scripts/looper-health-check.sh` — bash cron (reference for operability gaps).
+- `scripts/looper-agent-health-check.sh` — agent cron (reference for anomaly detection).
+- `README.md` — 22-tool landscape comparison and functional gap matrix.
+- `AGENTS.md` — POC charter and decision framework.
+
+### 8.7 Open items closed / carried forward
+
+- [x] E2E browser test strategy — feature request filed as [nexu-io/looper#604](https://github.com/nexu-io/looper/issues/604).
+- [x] Bot account setup (`ankaboot-bot`) — verified, but does not fix #602/#603.
+- [~] Contribute worker-PR-label patch to looper (#598) — **not contributed**; POC closed, patch no longer prioritized.
+- [~] File upstream issues for §5.5/§5.6/§5.7 — §5.7 filed as #599; §5.5 and §5.6 documented here only.
+- [→] tyre-call GitLab automation — **carried forward** to the next tool evaluation.
+- [→] Budget control — **carried forward** to the next tool evaluation.
+- [→] Post-deploy E2E verification — **carried forward**; §5.11.1 research applies to any tool.
