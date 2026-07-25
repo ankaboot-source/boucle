@@ -171,6 +171,28 @@ answerTransport = 'github'
 - `requireAssigneeCurrentUser = true` in planner config means the issue must be assigned to the **bot account** (ankaboot-bot, the PAT identity), not just baderdean. See §5.6.
 - The engineer tool (`plugins/tools/engineer/`) shipped in #174 has a live bug: `search_patents` hits a 404 from EPO OPS. Likely wrong endpoint URL or missing auth header. The full looper pipeline (planner → spec → worker) is now handling the fix.
 
+### Run 6 — m3llm#192 (magic-link 405 + button overflow)
+
+**Issue**: #192 — magic-link 405 Method Not Allowed on POST `/functions/v1/auth-magic-link` + "Recevoir mon lien" button text overflow
+**Goal**: top-priority bug fix, full loop to merge
+
+| Step | Loop | Status | Notes |
+|------|------|--------|-------|
+| Issue #192 created with `bug` + `looper:plan` | — | ✅ | Manual, assigned to ankaboot-bot |
+| Planner → spec PR #193 | #63 | ✅ | Auto-discovered within 30s |
+| Reviewer → review spec PR #193 | — | ✅ | Manually triggered (specReview didn't fire) |
+| Fixer → fix spec | #66 | ✅ | Auto-triggered by review comments |
+| Reviewer → re-review, promote to `looper:spec-ready` | — | ✅ | 3 reviews total |
+| Worker → implementation PR #195 | #67 | ✅ | 6m, +63/-22, MERGEABLE, bot-authored |
+| Reviewer → review PR #195 | #68 | ✅ (after marker bug #599 retries) | non-blocking (`outcome=non_blocking`): PASS on button fix, UNVERIFIABLE on 405 (deployment issue) |
+| Merge | — | ✅ | **PR #195 merged manually by baderdean.** Issue #192 auto-closed. |
+| Post-deploy E2E | — | ⏳ | 405 is verifiable post-deploy on m3llm.cafe — **E2E browser test gap** (see §5.11, #604). User verified manually. |
+
+**Findings:**
+- Reviewer correctly marks deployment-dependent fixes as UNVERIFIABLE — the 405 can't be verified from the diff, only post-deploy.
+- The loop ends at merge, but real projects need verified-in-production. This is the E2E browser test gap (bug #604).
+- Migration failure root cause: `cron.unschedule('cleanup-pending-signups')` throws XX000 when job never scheduled. Added as comment on issue #192.
+
 ## 5. Bugs
 
 ### 5.1 EBADF on `looper review submit` (issue #595)
@@ -277,6 +299,16 @@ answerTransport = 'github'
 - **Workaround**: manual `looper fix <repo>#<pr>` (bypasses self-comment filter). Health-check cron automates this.
 - **Reproduced**: m3llm PR #189 (fixer never auto-discovered, manual trigger worked).
 
+### 5.11 Post-deploy E2E browser verification gap (issue #604)
+
+- **Severity**: Blocking (verified-in-production)
+- **Status**: Feature request filed — https://github.com/nexu-io/looper/issues/604
+- **Symptom**: Looper's loop ends at merge. Deployment-dependent fixes (e.g. 405 from undeployed Edge Function) are correctly marked UNVERIFIABLE by the reviewer, but ARE verifiable post-deploy by hitting the live endpoint. Looper has no step for this.
+- **Root cause**: the loop is `issue → planner → spec PR → review → worker → impl PR → review → merge`. There is no `→ deploy → E2E verify` step. AGENTS.md mandates browser E2E on m3llm.cafe after deploy (3-30min), but looper can't run browser automation or wait for deploy.
+- **Proposed design**: optional post-deploy E2E step — wait for deploy (GitHub Actions/CF Pages/webhook/delay), run browser automation (Playwright/CF Browser Rendering/agent-browser), verify acceptance criteria from issue, post results as comment, reopen issue or open bug on failure.
+- **References**: baton's `agent-browser` E2E (verifies before PR), Cursor Background Agents (video recording as verification), CF Browser Rendering binding (serverless browser backend).
+- **Reproduced**: m3llm PR #195 (reviewer marked 405 as UNVERIFIABLE, user verified post-deploy manually).
+
 ## 6. What works (confirmed in production)
 
 1. **Issue → Planner → spec PR** — auto-discover by `looper:plan` label ✅
@@ -306,12 +338,13 @@ answerTransport = 'github'
 10. **Superseded-PR detection** — fixer parks conflicting PRs but doesn't detect when the feature is already on main (§Run 4) ❌
 11. **Auto-merge for bot-authored PRs** — `selfApprovalFallback` downgrades APPROVE→COMMENT, auto-merge path requires APPROVE (§5.9, #602) ❌
 12. **Fixer auto-discovery in single-identity mode** — self-comment filter excludes bot-authored reviews (§5.10, #603) ❌
+13. **Post-deploy E2E browser verification** — loop ends at merge, no verify-in-production step (§5.11, #604) ❌
 
 ## 8. Next steps
 
 - [ ] Test bot account full loop: label a fresh issue `looper:plan`, let planner (bot) open spec PR, reviewer (bot) review, worker (bot) implement, coordinator (baderdean) request review from baderdean, reviewer (bot) review worker PR — verify no 422.
 - [ ] Re-enable coordinator with bot account.
-- [ ] Choose E2E browser test strategy (post-merge GitHub Action / CF Browser Rendering / looper fixer with browser MCP).
+- [x] E2E browser test strategy — feature request filed as [nexu-io/looper#604](https://github.com/nexu-io/looper/issues/604) (post-deploy E2E verification step). Implementation TBD.
 - [ ] Decide on tyre-call (GitLab) — no looper path; needs a different tool or a GitLab adapter.
 - [ ] Contribute worker-PR-label patch to looper (#598, Option A).
 - [ ] File upstream issues for §5.5 (loop delete CLI), §5.6 (planner assignee docs), §5.7 (reviewer marker-verification retry).

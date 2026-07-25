@@ -126,6 +126,16 @@ The `enableSelfReview = true` config only relaxes the reviewer's *discovery filt
 
 3. **Coordinator blocks scheduler on 422**: when the Coordinator hits a 422 on any PR, it fails the entire scheduler tick (`looperd scheduler tick failed`), cascading "context canceled" to other in-flight discoveries. `availableSlots:0` until the 422 source is resolved.
 
+4. **Reviewer marker idempotencyKey mismatch** (issue #599, OPEN): the agent sometimes posts `id=reviewer:loopID` (dropping the `:headSHA` suffix) but the daemon expects `id=reviewer:loopID:headSHA`. Intermittent — when the agent includes `:headSHA`, the loop completes; when it drops it, the loop stays `backing_off` (review IS posted, just not verified). Feature request filed.
+
+5. **Outbound content safety gate false positive on GitHub asset URLs** (issue #600, OPEN): `highEntropyCandidateRE` matches GitHub screenshot URLs (`user-images.githubusercontent.com/...`) as "high-entropy tokens", blocking the planner. No config to disable. Planner may succeed on retry (intermittent).
+
+6. **Auto-merge blocked for bot-authored PRs** (issue #602, OPEN): `selfApprovalFallback` downgrades APPROVE→COMMENT (GitHub blocks self-approval), but `publishCriteriaApprovedReview` requires `marker.Event == ReviewEventApprove` → `EnableAutoMerge` never called. Same single-identity root cause as #598.
+
+7. **Fixer self-comment filter in single-identity mode** (issue #603, OPEN): `actionableNativeReviewComments` skips comments where author == current user. In single-identity mode, reviewer and fixer share the same bot identity → all review comments filtered out → fixer never auto-discovers. Same single-identity root cause as #598 and #602.
+
+8. **Post-deploy E2E browser verification gap** (issue #604, OPEN): looper's loop ends at merge. Deployment-dependent fixes (405 from undeployed function) are correctly marked UNVERIFIABLE by the reviewer but ARE verifiable post-deploy. Feature request filed for an optional `→ deploy → E2E verify` step.
+
 ---
 
 ## 4. Functional gaps vs the boucle goal
@@ -183,11 +193,12 @@ The `enableSelfReview = true` config only relaxes the reviewer's *discovery filt
 
 ## 6. Open items
 
-- [ ] Bot account setup (`ankaboot-bot`) for looper — PAT in `[agent.env]`, coordinator re-enable, test full autonomous loop on a fresh issue.
-- [ ] E2E browser test strategy — choose between: (a) post-merge GitHub Action with agent-browser, (b) Cloudflare Browser Rendering binding, (c) looper fixer loop with browser MCP.
+- [x] Bot account setup (`ankaboot-bot`) — PAT in `[agent.env]`, daemon runs as bot via launcher script. Full issue→merge loop verified (m3llm#146, m3llm#192).
+- [x] E2E browser test strategy — feature request filed as [nexu-io/looper#604](https://github.com/nexu-io/looper/issues/604). Implementation TBD.
 - [ ] tyre-call GitLab automation — needs a different tool or a GitLab adapter.
 - [ ] Budget control — cap and make visible coding-model token spend (Ollama Cloud, opencode) per loop/day/project. Mechanism TBD (WIP limit / token log / hard $ budget).
 - [ ] Contribute the worker-PR-label patch to looper (issue #598, Option A: ~5 lines in `worker/runner.go`).
+- [ ] 7 looper issues filed total: #595 (EBADF), #598 (worker PR review), #599 (marker mismatch), #600 (outbound guard), #602 (auto-merge), #603 (fixer self-comment), #604 (post-deploy E2E). Three (#598, #602, #603) share single-identity root cause.
 
 ---
 
@@ -210,3 +221,9 @@ The `enableSelfReview = true` config only relaxes the reviewer's *discovery filt
 - loop-engineering-architecture: https://github.com/hhamja/loop-engineering-architecture
 - Feature request (worker PR review): https://github.com/nexu-io/looper/issues/598
 - EBADF bug: https://github.com/nexu-io/looper/issues/595
+- Worker PR review gap: https://github.com/nexu-io/looper/issues/598
+- Marker idempotencyKey mismatch: https://github.com/nexu-io/looper/issues/599
+- Outbound guard false positive: https://github.com/nexu-io/looper/issues/600
+- Auto-merge blocked: https://github.com/nexu-io/looper/issues/602
+- Fixer self-comment filter: https://github.com/nexu-io/looper/issues/603
+- Post-deploy E2E verification: https://github.com/nexu-io/looper/issues/604
