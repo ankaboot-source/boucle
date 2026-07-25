@@ -194,11 +194,10 @@ answerTransport = 'github'
 1. **Worker PR → Reviewer (auto)** — needs bot account or patch (#598) ❌
 2. **E2E browser test** — not native to looper ❌
 3. **GitLab support** — GitHub + Forgejo only ❌
-4. **Per-step token log in issue** — internal logs only ❌
-5. **WIP gate at board level** — global concurrent limit only ❌
-6. **Sub-issue deduction** — planner writes spec, doesn't decompose ❌
-7. **Self-hostable serverless** — local daemon only ❌
-8. **Coordinator in single-user mode** — 422 cascade blocks scheduler ❌
+4. **Budget control** — no cap or visibility on coding-model token spend (Ollama Cloud, opencode); only a global 3-concurrent-loops limit ❌
+5. **Sub-issue deduction** — planner writes spec, doesn't decompose ❌
+6. **Self-hostable serverless** — local daemon only ❌
+7. **Coordinator in single-user mode** — 422 cascade blocks scheduler ❌
 
 ## 8. Next steps
 
@@ -207,5 +206,5 @@ answerTransport = 'github'
 - [ ] Choose E2E browser test strategy (post-merge GitHub Action / CF Browser Rendering / looper fixer with browser MCP).
 - [ ] Decide on tyre-call (GitLab) — no looper path; needs a different tool or a GitLab adapter.
 - [ ] Contribute worker-PR-label patch to looper (#598, Option A).
-- [ ] Track token consumption per step (looper patch or sidecar).
+- [ ] Budget control — design a mechanism to cap and surface coding-model token spend per loop/day/project (WIP limit / token log / hard $ budget — solution TBD).
 - [ ] After 10 loops or 30 days, evaluate decision (Option A/B/C/D).

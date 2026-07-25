@@ -21,8 +21,7 @@ Determine, through hands-on usage, whether [looper](https://github.com/nexu-io/l
 - **Harness-agnostic** — start with opencode, extensible to Claude Code, Codex, etc.
 - **Forge-agnostic** — GitHub or GitLab (via `glab`).
 - **Models configurable**.
-- **WIP limit** to bound bandwidth.
-- **Log token consumption per step** in the issue.
+- **Budget control** — bound cost per loop / per day / per project, including coding-model token spend (e.g. Ollama Cloud, opencode). The need is to cap spend and make it visible to the approver, not a specific mechanism (WIP limit, token log, hard $ budget) — those are solutions.
 - **Agnostic of skills and orchestrator** (oh-my-opencode-slim style).
 
 ## 2. Methodology
@@ -104,8 +103,7 @@ Re-evaluate when any of these is true:
 |-----|----------|------------|-----------|
 | GitLab support | **Blocking** for tyre-call | No (GitHub+Forgejo only) | loom's ForgeClient (21 methods) |
 | E2E browser test | **Blocking** for m3llm AGENTS.md | Sidecar/Action | baton's agent-browser, CF Browser Rendering |
-| Per-step token log in issue | Medium | Patch (comment writer) | boucle requirement |
-| WIP gate at board level | Medium | Patch or CI check | hhamja hook pattern |
+| Budget control (cap + visibility on coding-model token spend) | Medium | Patch (WIP limit / token log / hard $ budget) | autocode ($5/session, $10/day), boucle requirement |
 | Sub-issue deduction | Low | Patch (planner prompt) | autonomous-dev-team `blocked_by`, oc-ralph Sculptor |
 | Self-hostable serverless | Low (v1) | No (local daemon) | SAM, CF Project Think |
 

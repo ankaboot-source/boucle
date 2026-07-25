@@ -139,8 +139,7 @@ The `enableSelfReview = true` config only relaxes the reviewer's *discovery filt
 | E2E browser test | ❌ not native | ❌ | ❌ | ✅ agent-browser | ❌ | **Only baton** |
 | Analysis in issue (not doc) | ⚠️ spec PR (doc) | ✅ STATE.md | ⚠️ | ❌ | ✅ live table | **Partial** |
 | Sub-issue deduction | ❌ | ❌ | ✅ `blocked_by` edges | ❌ | ✅ Sculptor | **Partial** |
-| WIP gate at board level | ❌ (3 concurrent loops) | ❌ | ❌ | ❌ | ❌ | **None** |
-| Per-step token log in issue | ❌ (internal logs) | ❌ | ❌ | ❌ | ❌ | **None** |
+| Budget control (cap + visibility on coding-model token spend) | ❌ (3 concurrent loops, no $ cap) | ❌ | ❌ | ❌ | ❌ | **None** (autocode has $5/session, $10/day) |
 | Notify owner at each transition | ⚠️ (PR comments) | ❌ | ❌ | ❌ | ✅ Discord webhook | **Partial** |
 | Harness interface first-class | ❌ (vendor flag) | ✅ (meta) | ✅ conformance suite | ❌ | ❌ | **Partial** |
 | Self-hostable serverless | ❌ (local daemon) | ❌ (cron) | ❌ (cron) | ❌ | ❌ | **None** |
@@ -151,13 +150,11 @@ The `enableSelfReview = true` config only relaxes the reviewer's *discovery filt
 
 2. **E2E browser test** — looper's loop ends at PR opened/reviewed. AGENTS.md-mandated browser E2E (e.g. on https://m3llm.cafe after deploy) lives outside looper's scope. baton's agent-browser pattern (open/snapshot/click/fill/type to verify acceptance criteria before PR) is the reference. Cloudflare Browser Rendering binding is the serverless option.
 
-3. **Per-step token log in issue** — looper logs token usage internally but not in the issue comment. boucle's requirement: cost visible to approvers in the issue itself (issue = audit log).
+3. **Budget control** — looper has a global `3 concurrent loops` limit but no way to cap or make visible the coding-model token spend (Ollama Cloud, opencode, etc.) per loop/day/project. The need is to bound cost and surface it to the approver — specific mechanisms (WIP limit, token log in issue, hard $ budget) are solutions, not the requirement. autocode ($5/session, $10/day) is the closest reference.
 
-4. **WIP gate at board level** — looper has a global `3 concurrent loops` limit but no board-level WIP gate (count developing+testing issues vs config.wipLimit). hhamja's hook pattern (CI check on session branch) is the reference.
+4. **Sub-issue deduction** — looper's planner writes a spec PR but doesn't decompose into sub-issues with dependency edges. autonomous-dev-team's `blocked_by` edges and oc-ralph's Sculptor role are the references.
 
-5. **Sub-issue deduction** — looper's planner writes a spec PR but doesn't decompose into sub-issues with dependency edges. autonomous-dev-team's `blocked_by` edges and oc-ralph's Sculptor role are the references.
-
-6. **Self-hostable serverless** — no loop-eng tool runs on Cloudflare Workers. looper is a local Go daemon. The hybrid architecture (control plane serverless on CF Workers+DOs for scheduler/state/WIP gate/notifier; compute plane non-serverless on CF Containers/VM/local daemon for opencode+worktree+tests) is the path. SAM and CF Project Think execution ladder are the references.
+5. **Self-hostable serverless** — no loop-eng tool runs on Cloudflare Workers. looper is a local Go daemon. The hybrid architecture (control plane serverless on CF Workers+DOs for scheduler/state/budget-control/notifier; compute plane non-serverless on CF Containers/VM/local daemon for opencode+worktree+tests) is the path. SAM and CF Project Think execution ladder are the references.
 
 ### 4.2 Gaps looper fills that others don't
 
@@ -189,8 +186,7 @@ The `enableSelfReview = true` config only relaxes the reviewer's *discovery filt
 - [ ] Bot account setup (`ankaboot-bot`) for looper — PAT in `[agent.env]`, coordinator re-enable, test full autonomous loop on a fresh issue.
 - [ ] E2E browser test strategy — choose between: (a) post-merge GitHub Action with agent-browser, (b) Cloudflare Browser Rendering binding, (c) looper fixer loop with browser MCP.
 - [ ] tyre-call GitLab automation — needs a different tool or a GitLab adapter.
-- [ ] Per-step token log in issue — would need a looper patch or a sidecar.
-- [ ] WIP gate at board level — would need a looper patch or a board-level CI check.
+- [ ] Budget control — cap and make visible coding-model token spend (Ollama Cloud, opencode) per loop/day/project. Mechanism TBD (WIP limit / token log / hard $ budget).
 - [ ] Contribute the worker-PR-label patch to looper (issue #598, Option A: ~5 lines in `worker/runner.go`).
 
 ---
