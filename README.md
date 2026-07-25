@@ -1,8 +1,26 @@
 # boucle
 
-Research: autonomous dev loop orchestrators — tool comparison and functional gaps for a **dev factory A→Z** (issue → merged PR) with human validators only at each gate.
+Research and POC: autonomous dev loop orchestrators — can [looper](https://github.com/nexu-io/looper) serve as a **dev factory A→Z** (issue → merged PR) with human validators only at each gate?
 
-> Status: research phase. This repo collects the landscape analysis that informed the decision to adopt [looper](https://github.com/nexu-io/looper) (with patches) over building from scratch or adopting other tools.
+> **Status**: POC phase — running looper in production on real repos. See [`AGENTS.md`](./AGENTS.md) for the charter and decision framework, [`docs/poc-looper-status.md`](./docs/poc-looper-status.md) for the current POC state.
+
+## Repo structure
+
+```
+boucle/
+├── AGENTS.md                      # POC charter — goal, methodology, decision framework
+├── README.md                      # This file — research: tool comparison and functional gaps
+└── docs/
+    └── poc-looper-status.md       # Current POC state — runs, config, bugs, findings
+```
+
+## TL;DR
+
+We analyzed 22 tools/projects (looper, loop-engineering, autonomous-dev-team, baton, oc-ralph, autocode, loom, loop-harness, LoopEngineer, LoopX, next-task, crew, OpenHands, SAM, CF Project Think, Conductor, Sweep, Aider, Cursor, Claude Code headless, 12-Factor Agents, loop-engineering-architecture). We adopted **looper** for GitHub repos (leadminer, m3llm, wikiadviser) and are running a POC to decide whether to stay with looper (with patches), adopt another tool, build from scratch, or change the approach.
+
+**Blocking gaps**: GitLab support (tyre-call), E2E browser test (m3llm AGENTS.md), worker PR → reviewer in single-user mode (#598, workaround: bot account).
+
+**Working**: issue → planner → spec PR → reviewer → worker → implementation PR → fixer → re-review. The full loop ran end-to-end on m3llm#146 with genuine deep review (tests run, Mermaid rendered, EPO schema verified, real bugs found).
 
 ---
 
