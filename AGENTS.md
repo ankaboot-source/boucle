@@ -61,6 +61,9 @@ Every POC run is logged in `docs/poc-looper-status.md` with:
 
 ## 3. Decision framework
 
+> **DECISION ACTED (2026-07-25): Option B — Move to a more reliable solution. POC closed.**
+> See `docs/poc-looper-status.md` §8 for the full evidence and rationale.
+
 After sufficient POC evidence, choose one:
 
 ### Option A — Stay with looper
@@ -69,17 +72,21 @@ After sufficient POC evidence, choose one:
 
 **If chosen**: contribute patches upstream (worker-PR-label #598, EBADF #595), add a GitLab adapter or sidecar, add E2E as a post-merge step.
 
-### Option B — Adopt another tool
+### Option B — Adopt another tool ✅ CHOSEN
 
 **Criteria**: another tool fills more gaps than looper without introducing worse ones, and has comparable or better traction/maintenance.
 
 **Candidates**: autonomous-dev-team (best harness-agnosticism, conformance suite), baton (only one with agent-browser E2E, but dormant + Python), loop-engineering (9,331⭐ but no dev-loop pattern shipped).
+
+**Why chosen**: looper met 0/2 hard Option A criteria (57% autonomous flow coverage vs ≥80% required; 3-5 manual interventions per loop vs ≤1). More decisively, the review gate shipped bugged code despite full spec+code+fixer review cycles (PR #180 shipped `search_patents` 404; PR #195 shipped a migration that throws XX000) — the review is diff-scoped, not behavior-scoped, and `UNVERIFIABLE` does not block merge. A dev factory that ships bugged code through its own review gate is not a dev factory. See `docs/poc-looper-status.md` §8.4.1.
 
 ### Option C — Build from scratch
 
 **Criteria**: no existing tool fills enough gaps, and the gaps are structural (not patchable). The original boucle hexagonal TS+Bun design (boucle-core + boucle-cf + boucle-local adapters, Harness interface, session-branch pattern, CF Workers control plane + Containers compute plane) remains the reference architecture.
 
 **Risk**: high — building a dev orchestrator from scratch is months of work. Only justified if looper's gaps are structural and no other tool fills them.
+
+**Status if reached**: the hexagonal design must add a **mandatory post-deploy verify step** as the merge gate (learned from the looper POC — see §8.4.1). Verified behavior in production, not reviewed diff.
 
 ### Option D — Change the approach
 
@@ -90,8 +97,8 @@ After sufficient POC evidence, choose one:
 ### Decision triggers
 
 Re-evaluate when any of these is true:
-- 10 loops completed (enough sample size)
-- A blocking gap confirmed unfixable (e.g. GitLab support is structurally impossible in looper)
+- 10 loops completed (enough sample size) — **reached at 6 runs / 2 full loops**
+- A blocking gap confirmed unfixable (e.g. GitLab support is structurally impossible in looper) — **confirmed: GitLab + review-gate-ships-bugs**
 - A competitor tool demonstrably fills more gaps
 - 30 days of POC usage
 

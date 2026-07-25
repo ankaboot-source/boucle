@@ -2,7 +2,7 @@
 
 Research and POC: autonomous dev loop orchestrators — can [looper](https://github.com/nexu-io/looper) serve as a **dev factory A→Z** (issue → merged PR) with human validators only at each gate?
 
-> **Status**: POC phase — running looper in production on real repos. See [`AGENTS.md`](./AGENTS.md) for the charter and decision framework, [`docs/poc-looper-status.md`](./docs/poc-looper-status.md) for the current POC state.
+> **Status**: POC closed (2026-07-25) — **Option B chosen: looper does not meet the dev-factory-A→Z bar; moving to a more reliable solution.** See [`docs/poc-looper-status.md`](./docs/poc-looper-status.md) §8 for the decision and evidence, [`AGENTS.md`](./AGENTS.md) for the charter and decision framework.
 
 ## Repo structure
 
@@ -158,7 +158,7 @@ The `enableSelfReview = true` config only relaxes the reviewer's *discovery filt
 
 1. **GitLab support** — looper is GitHub + Forgejo only. tyre-call (Framagit/GitLab) has no automation path. Would need a `glab` adapter or a forge abstraction layer (loom's `ForgeClient` with 21 methods is the reference).
 
-2. **E2E browser test** — looper's loop ends at PR opened/reviewed. AGENTS.md-mandated browser E2E (e.g. on https://m3llm.cafe after deploy) lives outside looper's scope. baton's agent-browser pattern (open/snapshot/click/fill/type to verify acceptance criteria before PR) is the reference. Cloudflare Browser Rendering binding is the serverless option.
+2. **E2E browser test / post-deploy verification** — looper's loop ends at PR opened/reviewed/merged. AGENTS.md-mandated browser E2E (e.g. on https://m3llm.cafe after deploy) lives outside looper's scope. baton's agent-browser pattern (open/snapshot/click/fill/type to verify acceptance criteria before PR) is the pre-merge reference. **Post-deploy verification tools DO exist in the ecosystem** — see `docs/poc-looper-status.md` §5.11.1 for the full research. Closest full-loop matches: `AntaresYuan/claude-devloop` (85%, curl+grep post-deploy), `rkaliupin/DAGent` (80%, Playwright on live app), Vanja Petreski "Proof of Loop" (100% in shape). The gap is a missing integration layer in looper, not a missing tool category. Cloudflare Browser Rendering binding is the serverless option; `team-poem/cairn` is the LLM-free replay engine.
 
 3. **Budget control** — looper has a global `3 concurrent loops` limit but no way to cap or make visible the coding-model token spend (Ollama Cloud, opencode, etc.) per loop/day/project. The need is to bound cost and surface it to the approver — specific mechanisms (WIP limit, token log in issue, hard $ budget) are solutions, not the requirement. autocode ($5/session, $10/day) is the closest reference.
 
@@ -176,29 +176,40 @@ The `enableSelfReview = true` config only relaxes the reviewer's *discovery filt
 
 ## 5. Decision
 
-**Adopt looper** for leadminer, m3llm, wikiadviser (GitHub, opencode, dev end-to-end delivered).
+**POC closed (2026-07-25) — Option B: looper does not meet the dev-factory-A→Z bar. Moving to a more reliable solution.**
 
-**Blockers**:
-- tyre-call (GitLab/Framagit) — no looper support. Needs a GitLab adapter or a different tool.
-- Worker PR → Reviewer in single-user mode — needs either a bot account (different GitHub identity) or a patch (worker labels its PRs `looper:needs-review`, reviewer discovers by label). Feature request filed: [nexu-io/looper#598](https://github.com/nexu-io/looper/issues/598).
-- EBADF bug — workaround: run dev build of looper/looperd.
+Two independent failure classes drove the decision:
 
-**Not adopted**:
-- **loop-engineering** (9,331⭐): meta-framework, no dev-loop pattern shipped, no daemon, GitHub-only. Opportunity to contribute the dev-loop pattern, but looper already delivers it.
+1. **Autonomy gaps** — single-identity mode produces a cluster of blocking bugs (#598, #602, #603); 3-5 manual interventions per loop; GitLab structurally unsupported; no budget control. See `docs/poc-looper-status.md` §8.1-8.4.
+
+2. **Review gate ships bugged code (critical)** — even when the full review cycle runs (spec review + code review + fixer + re-review), bugged code reaches merge:
+   - PR #180 shipped `search_patents` 404 (EPO OPS endpoint wrong) — reviewer ran unit tests that mocked the HTTP layer, never called the real API.
+   - PR #195 shipped a migration that throws XX000 on fresh installs — reviewer marked the 405 `UNVERIFIABLE` (non-blocking) and merged anyway.
+   - Root cause: the review is **diff-scoped** (static analysis + mocked unit tests), not **behavior-scoped** (integration / E2E / post-deploy verify). `UNVERIFIABLE` does not block merge. There is no post-deploy verification step (#604).
+   - **A dev factory that ships bugged code through its own review gate is not a dev factory.** This finding alone justifies Option B regardless of the autonomy bugs.
+
+**What looper proved (retained as reference):** the loop shape works — label-driven state machine, worktree isolation, opencode harness, HITL via PR comments, genuine deep review (tests run, Mermaid rendered, external schemas verified). The problem is not the loop shape; it is the **verification model** and the **single-identity assumption**.
+
+**Next: evaluate more reliable alternatives.** The next tool must treat **verified behavior in production** as the merge gate, not reviewed diff. Candidates to re-examine: autonomous-dev-team (harness-agnostic, GitLab pluggable, conformance suite), baton (agent-browser E2E, dormant), and the original boucle hexagonal TS+Bun design (Option C) if no existing tool fills enough gaps. The post-deploy verification research in `docs/poc-looper-status.md` §5.11.1 (claude-devloop, DAGent, Proof of Loop, cairn, deploy-verifier) defines the required verification shape.
+
+**Not adopted (unchanged):**
+- **loop-engineering** (9,331⭐): meta-framework, no dev-loop pattern shipped, no daemon, GitHub-only.
 - **autonomous-dev-team** (29⭐): best harness-agnosticism (conformance suite) but no daemon, no license file at root.
 - **baton** (19⭐, dormant): only one with agent-browser E2E, but Python + dormant.
-- **Building from scratch** (original boucle hexagonal TS+Bun design): deferred. The looper adoption proves the loop works; if looper's gaps (GitLab, E2E, serverless) become blocking, the hexagonal design remains a viable future path.
+- **Building from scratch** (original boucle hexagonal TS+Bun design): deferred. The looper POC proves the loop works but exposes the verification gap; if no existing tool fills it, the hexagonal design with a mandatory post-deploy verify step remains the reference architecture.
 
 ---
 
 ## 6. Open items
 
-- [x] Bot account setup (`ankaboot-bot`) — PAT in `[agent.env]`, daemon runs as bot via launcher script. Full issue→merge loop verified (m3llm#146, m3llm#192).
-- [x] E2E browser test strategy — feature request filed as [nexu-io/looper#604](https://github.com/nexu-io/looper/issues/604). Implementation TBD.
-- [ ] tyre-call GitLab automation — needs a different tool or a GitLab adapter.
-- [ ] Budget control — cap and make visible coding-model token spend (Ollama Cloud, opencode) per loop/day/project. Mechanism TBD (WIP limit / token log / hard $ budget).
-- [ ] Contribute the worker-PR-label patch to looper (issue #598, Option A: ~5 lines in `worker/runner.go`).
-- [ ] 7 looper issues filed total: #595 (EBADF), #598 (worker PR review), #599 (marker mismatch), #600 (outbound guard), #602 (auto-merge), #603 (fixer self-comment), #604 (post-deploy E2E). Three (#598, #602, #603) share single-identity root cause.
+- [x] Bot account setup (`ankaboot-bot`) — PAT in `[agent.env]`, daemon runs as bot via launcher script. Full issue→merge loop verified (m3llm#146, m3llm#192). Does NOT fix #602/#603.
+- [x] E2E browser test strategy — feature request filed as [nexu-io/looper#604](https://github.com/nexu-io/looper/issues/604). Implementation TBD (carried to next tool).
+- [x] POC closed — Option B chosen (2026-07-25). See `docs/poc-looper-status.md` §8.
+- [→] tyre-call GitLab automation — carried forward to next tool evaluation.
+- [→] Budget control — carried forward to next tool evaluation.
+- [→] Post-deploy E2E verification — carried forward; §5.11.1 research applies to any tool. **Critical requirement**: next tool must gate merge on verified behavior, not reviewed diff.
+- [~] Contribute worker-PR-label patch to looper (#598) — not contributed; POC closed.
+- [x] 7 looper issues filed total: #595 (EBADF), #598 (worker PR review), #599 (marker mismatch), #600 (outbound guard), #602 (auto-merge), #603 (fixer self-comment), #604 (post-deploy E2E). Three (#598, #602, #603) share single-identity root cause.
 
 ---
 
