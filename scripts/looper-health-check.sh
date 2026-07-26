@@ -116,4 +116,60 @@ if [ -n "$SPEC_PRS" ]; then
   done
 fi
 
+# 6. Spec PRs deadlocked by bug #602 (single-identity self-approval fallback)
+# Reviewer loop completed but review state is COMMENTED (not APPROVE) because
+# selfApprovalFallback downgrades APPROVE→COMMENT when PR author == reviewer (bot).
+# The spec PR never gets promoted from looper:spec-reviewing → looper:spec-ready,
+# so the worker discovery lane (keys on looper:worker-ready on the ISSUE) never fires.
+# Fix: detect the deadlock and manually promote both the spec PR and the issue.
+DEADLOCKED_SPEC_PRS=$(gh api "repos/ankaboot-source/m3llm/pulls?state=open" --jq '
+  [.[] | select(.labels[].name=="looper:spec-reviewing") | .number] | .[]
+' 2>/dev/null || true)
+if [ -n "$DEADLOCKED_SPEC_PRS" ]; then
+  for pr in $DEADLOCKED_SPEC_PRS; do
+    # Has a completed reviewer loop?
+    REVIEWER_DONE=$(sqlite3 "$DB" "SELECT COUNT(*) FROM loops WHERE type='reviewer' AND pr_number=$pr AND repo='ankaboot-source/m3llm' AND status='completed';" 2>/dev/null || echo "0")
+    if [ "$REVIEWER_DONE" -eq 0 ]; then
+      continue  # reviewer hasn't run yet — section 5 handles triggering
+    fi
+    # Is the latest review COMMENTED (not APPROVE, not REQUEST_CHANGES)?
+    LATEST_REVIEW_STATE=$(gh api "repos/ankaboot-source/m3llm/pulls/$pr/reviews" --jq '[.[] | select(.user.login=="ankaboot-bot")] | if length > 0 then (sort_by(.submitted_at) | last | .state) else "NONE" end' 2>/dev/null || echo "NONE")
+    if [ "$LATEST_REVIEW_STATE" != "COMMENTED" ]; then
+      continue  # APPROVE → looper promotes automatically; REQUEST_CHANGES → fixer runs
+    fi
+    # Deadlock confirmed: reviewer completed but only COMMENTED (bug #602).
+    # Find the source issue from the spec PR body (planner writes "Closes #N" or title has (#N)).
+    SOURCE_ISSUE=$(gh api "repos/ankaboot-source/m3llm/pulls/$pr" --jq '
+      (.body | capture("#(?<n>[0-9]+)")?.n // empty) // (.title | capture("\\(#(?<n>[0-9]+)\\)")?.n // empty)
+    ' 2>/dev/null || true)
+    if [ -z "$SOURCE_ISSUE" ]; then
+      log "DRAWBACK: spec PR m3llm#$pr deadlocked by #602 but can't find source issue — skipping"
+      echo "## $TS — spec PR #$pr deadlocked by #602, source issue unknown" >> "$DRAWBACKS"
+      echo "- **Symptom:** reviewer loop completed, review state COMMENTED (bug #602), but source issue not found in PR body/title" >> "$DRAWBACKS"
+      echo "- **Quick-win:** none (needs manual promotion)" >> "$DRAWBACKS"
+      echo "- **Root cause:** bug #602 — selfApprovalFallback downgrades APPROVE→COMMENT in single-identity mode" >> "$DRAWBACKS"
+      echo "" >> "$DRAWBACKS"
+      continue
+    fi
+    # Verify the issue still has looper:plan (not already promoted/closed)
+    ISSUE_HAS_PLAN=$(gh api "repos/ankaboot-source/m3llm/issues/$SOURCE_ISSUE" --jq '[.labels[].name | select(.=="looper:plan")] | length' 2>/dev/null || echo "0")
+    if [ "$ISSUE_HAS_PLAN" -eq 0 ]; then
+      continue  # issue already promoted or closed — nothing to do
+    fi
+    log "DRAWBACK: spec PR m3llm#$pr deadlocked by #602 (reviewer COMMENTED) — promoting spec PR #$pr → looper:spec-ready, issue #$SOURCE_ISSUE → looper:worker-ready"
+    echo "## $TS — spec PR #$pr deadlocked by #602 (reviewer COMMENTED, not APPROVE)" >> "$DRAWBACKS"
+    echo "- **Symptom:** reviewer loop completed on spec PR #$pr but review state is COMMENTED (selfApprovalFallback downgraded APPROVE→COMMENT, bug #602)" >> "$DRAWBACKS"
+    echo "- **Quick-win:** manually promote spec PR #$pr to looper:spec-ready, issue #$SOURCE_ISSUE to looper:worker-ready" >> "$DRAWBACKS"
+    echo "- **Root cause:** bug #602 — single-identity mode, bot authored PR and bot is reviewer, APPROVE downgraded to COMMENT" >> "$DRAWBACKS"
+    echo "" >> "$DRAWBACKS"
+    # Promote spec PR: looper:spec-reviewing → looper:spec-ready
+    gh api -X DELETE "repos/ankaboot-source/m3llm/issues/$pr/labels/looper:spec-reviewing" >/dev/null 2>&1 || log "failed to remove looper:spec-reviewing from PR #$pr"
+    gh api -X POST "repos/ankaboot-source/m3llm/issues/$pr/labels" -f labels[]="looper:spec-ready" >/dev/null 2>&1 || log "failed to add looper:spec-ready to PR #$pr"
+    # Promote issue: looper:plan → looper:worker-ready
+    gh api -X DELETE "repos/ankaboot-source/m3llm/issues/$SOURCE_ISSUE/labels/looper:plan" >/dev/null 2>&1 || log "failed to remove looper:plan from issue #$SOURCE_ISSUE"
+    gh api -X POST "repos/ankaboot-source/m3llm/issues/$SOURCE_ISSUE/labels" -f labels[]="looper:worker-ready" >/dev/null 2>&1 || log "failed to add looper:worker-ready to issue #$SOURCE_ISSUE"
+    log "promoted spec PR #$pr → looper:spec-ready, issue #$SOURCE_ISSUE → looper:worker-ready"
+  done
+fi
+
 log "=== health check end ==="
