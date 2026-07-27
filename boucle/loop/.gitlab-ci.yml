@@ -1,0 +1,388 @@
+# boucle — MVP dev loop pipeline
+# Spec: issue #1 (boucle MVP spec)
+# Five jobs: triage, worker, reviewer, deploy, e2e
+# Dispatcher: single entry, parses webhook payload, routes to triage
+
+stages:
+  - dispatch
+  - triage
+  - work
+  - review
+  - deploy
+  - verify
+
+variables:
+  BOUCLE_FORGE_HOST: framagit.org
+
+# ── Dispatcher ──────────────────────────────────────────────────────────
+dispatch:
+  stage: dispatch
+  rules:
+    - if: $BOUCLE_ENABLED != "true"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "trigger"
+  script:
+    - |
+      ACTOR=$(jq -r '.user.username // empty' "$TRIGGER_PAYLOAD")
+      [ "$ACTOR" = "up-bot" ] && exit 0
+
+      OBJECT_KIND=$(jq -r '.object_kind // empty' "$TRIGGER_PAYLOAD")
+      IID=$(jq -r '.object_attributes.iid // .issue.iid // empty' "$TRIGGER_PAYLOAD")
+
+      if [ -z "$IID" ]; then
+        echo "No issue IID in payload, skipping"
+        exit 0
+      fi
+
+      # Get current labels
+      LABELS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID" | jq -r '.labels | join(",")')
+
+      # Resolve: issue opened, body edited in triage/needs-info/todo, or author reply on needs-info
+      ACTION=$(jq -r '.object_attributes.action // empty' "$TRIGGER_PAYLOAD")
+
+      SHOULD_TRIAGE=false
+      if echo "$LABELS" | grep -q "boucle:triage"; then
+        SHOULD_TRIAGE=true
+      elif echo "$LABELS" | grep -q "boucle:needs-info"; then
+        # Check if author replied (note event by non-bot)
+        if [ "$OBJECT_KIND" = "note" ] && [ "$ACTOR" != "up-bot" ]; then
+          SHOULD_TRIAGE=true
+        fi
+      elif echo "$LABELS" | grep -q "boucle:todo"; then
+        # Body edit re-triggers triage
+        if [ "$ACTION" = "update" ]; then
+          SHOULD_TRIAGE=true
+        fi
+      elif [ -z "$LABELS" ] || [ "$ACTION" = "open" ]; then
+        # New issue with no boucle label → triage
+        SHOULD_TRIAGE=true
+      fi
+
+      if [ "$SHOULD_TRIAGE" = "true" ]; then
+        echo "Triggering triage for issue #$IID"
+        # Chain to triage job by writing to a file that downstream jobs read
+        echo "$IID" > .boucle-issue
+        # Apply boucle:triage label if not present
+        if ! echo "$LABELS" | grep -q "boucle:triage"; then
+          glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" \
+            -f labels="boucle:triage" > /dev/null
+        fi
+      else
+        echo "No action needed for issue #$IID (labels: $LABELS)"
+        exit 0
+      fi
+  artifacts:
+    paths:
+      - .boucle-issue
+  tags:
+    - boucle
+
+# ── Triage ──────────────────────────────────────────────────────────────
+triage:
+  stage: triage
+  resource_group: boucle-issue-$BOUCLE_ISSUE
+  needs: [dispatch]
+  rules:
+    - if: $BOUCLE_ENABLED != "true"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "trigger"
+  variables:
+    BOUCLE_ROLE: triage
+    BOUCLE_ITERATION: 1
+  script:
+    - |
+      IID=$(cat .boucle-issue)
+      export BOUCLE_ISSUE="$IID"
+
+      # Run the agent
+      ./bin/oc triage
+
+      # Parse the triage comment for Disposition and Size
+      COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+        | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | last | .body')
+
+      DISPOSITION=$(echo "$COMMENT" | grep -A1 "^## Disposition" | tail -1 | tr -d ' \n' || echo "")
+      SIZE=$(echo "$COMMENT" | grep -A1 "^## Classification" | tail -1 | grep -oE 'Size: [SML]' | cut -d' ' -f2 || echo "")
+
+      # Route based on disposition
+      case "$DISPOSITION" in
+        READY)
+          if [ "$SIZE" = "L" ]; then
+            glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" \
+              -f labels="boucle:human,size:l" > /dev/null
+          else
+            glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" \
+              -f labels="boucle:todo,size:$(echo $SIZE | tr '[:upper:]' '[:lower:]')" > /dev/null
+            # Chain to worker
+            curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
+              -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+              -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+          fi
+          ;;
+        NEEDS-INFO)
+          glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" \
+            -f labels="boucle:needs-info" > /dev/null
+          ;;
+        NEEDS-SPLIT)
+          glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" \
+            -f labels="boucle:human" > /dev/null
+          ;;
+        *)
+          echo "Unparsable disposition: $DISPOSITION → routing to human"
+          glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" \
+            -f labels="boucle:human" > /dev/null
+          ;;
+      esac
+
+      # Assert: triage comment exists and disposition parsable
+      if [ -z "$DISPOSITION" ]; then
+        echo "FAIL: disposition not parsable" >&2
+        exit 1
+      fi
+  tags:
+    - boucle
+  timeout: 10m
+
+# ── Worker ──────────────────────────────────────────────────────────────
+worker:
+  stage: work
+  resource_group: boucle-issue-$BOUCLE_ISSUE
+  rules:
+    - if: $BOUCLE_ENABLED != "true"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "worker"
+  variables:
+    BOUCLE_ROLE: worker
+  script:
+    - |
+      export BOUCLE_ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
+      ITERATION="${BOUCLE_ITERATION:-1}"
+      export BOUCLE_ITERATION
+
+      # Set working label
+      glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
+        -f labels="boucle:working" > /dev/null
+
+      # Create/checkout branch
+      BRANCH="boucle/$BOUCLE_ISSUE-$(date +%s)"
+      git checkout -b "$BRANCH"
+
+      # Seed state.md on first run
+      if [ ! -f ".boucle/$BOUCLE_ISSUE/state.md" ]; then
+        mkdir -p ".boucle/$BOUCLE_ISSUE"
+        # Seed from triage comment
+        TRIAGE_COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+          | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | last | .body')
+        cat > ".boucle/$BOUCLE_ISSUE/state.md" << EOF
+      # Issue #$BOUCLE_ISSUE
+
+      ## Goal
+      $(echo "$TRIAGE_COMMENT" | sed -n '/^## Analysis/,/^## /p' | head -n -1 | tail -n +2)
+
+      ## Acceptance criteria
+      $(echo "$TRIAGE_COMMENT" | sed -n '/^## Draft acceptance criteria/,/^## /p' | head -n -1 | tail -n +2)
+
+      ## Approach
+      (to be determined by worker)
+
+      ## Tried and rejected
+      (none yet)
+
+      ## Awaiting human
+      nothing
+      EOF
+      fi
+
+      # Run the agent
+      ./bin/oc worker
+
+      # Build
+      npm ci && npm run build
+
+      # Deploy to preview
+      PREVIEW_URL=$(npx wrangler pages deploy public --branch "$BRANCH" --project-name urgence-palestine 2>&1 | grep -oE 'https://[a-z0-9.-]+\.pages\.dev' | head -1)
+
+      # Push branch
+      git add -A
+      git commit -m "boucle: implement issue #$BOUCLE_ISSUE [skip ci]"
+      git push origin "$BRANCH"
+
+      # Open MR
+      glab mr create --source-branch "$BRANCH" --target-branch master \
+        --title "boucle: issue #$BOUCLE_ISSUE" \
+        --description "Preview: $PREVIEW_URL" > /dev/null
+
+      # Write preview URL into MR description (update)
+      MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?source_branch=$BRANCH" | jq -r '.[0].iid')
+      glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID" \
+        -f description="Preview: $PREVIEW_URL" > /dev/null
+
+      # Assert: branch exists, MR open, preview returns 200
+      if [ -z "$PREVIEW_URL" ]; then
+        echo "FAIL: no preview URL" >&2; exit 1
+      fi
+      if ! curl -s -o /dev/null -w "%{http_code}" "$PREVIEW_URL" | grep -q "200"; then
+        echo "FAIL: preview URL not 200" >&2; exit 1
+      fi
+
+      # Set review label
+      glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
+        -f labels="boucle:review" > /dev/null
+
+      # Chain to reviewer
+      curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
+        -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+        -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=reviewer" > /dev/null
+  tags:
+    - boucle
+  timeout: 30m
+
+# ── Reviewer ────────────────────────────────────────────────────────────
+reviewer:
+  stage: review
+  resource_group: boucle-issue-$BOUCLE_ISSUE
+  rules:
+    - if: $BOUCLE_ENABLED != "true"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "reviewer"
+  variables:
+    BOUCLE_ROLE: reviewer
+  script:
+    - |
+      export BOUCLE_ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
+
+      # Find the MR for this issue
+      MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?state=opened" \
+        | jq -r '.[] | select(.source_branch | startswith("boucle/'"$BOUCLE_ISSUE"'-")) | .iid' | head -1)
+
+      MR_DATA=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID")
+      PREVIEW_URL=$(echo "$MR_DATA" | jq -r '.description' | grep -oE 'https://[a-z0-9.-]+\.pages\.dev' | head -1)
+
+      export BOUCLE_PREVIEW_URL="$PREVIEW_URL"
+
+      # Run the agent against the preview
+      ./bin/oc reviewer
+
+      # Parse verdict
+      COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+        | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer"))] | last | .body')
+
+      VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+
+      case "$VERDICT" in
+        PASS)
+          glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
+            -f labels="boucle:human" > /dev/null
+          ;;
+        FAIL)
+          ITERATION="${BOUCLE_ITERATION:-1}"
+          if [ "$ITERATION" -lt 3 ]; then
+            glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
+              -f labels="boucle:todo" > /dev/null
+            # Chain back to worker with incremented iteration
+            curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
+              -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+              -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=worker" \
+              -F "variables[BOUCLE_ITERATION]=$((ITERATION+1))" > /dev/null
+          else
+            glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
+              -f labels="boucle:blocked" > /dev/null
+          fi
+          ;;
+        UNCERTAIN|*)
+          glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
+            -f labels="boucle:human" > /dev/null
+          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+            -f body="Verdict unparsable or uncertain. Human review needed." > /dev/null
+          ;;
+      esac
+
+      # Assert: verdict comment exists and VERDICT: parsable
+      if [ -z "$VERDICT" ]; then
+        echo "FAIL: verdict not parsable" >&2; exit 1
+      fi
+  tags:
+    - boucle
+  timeout: 15m
+
+# ── Deploy (on merge to master) ─────────────────────────────────────────
+deploy:
+  stage: deploy
+  rules:
+    - if: $BOUCLE_ENABLED != "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+  script:
+    - |
+      npm ci && npm run build
+      npx wrangler pages deploy public --project-name urgence-palestine --branch main
+
+      # Assert: production URL returns 200 on new deployment
+      PROD_URL="https://urgence-palestine.fr"
+      if ! curl -s -o /dev/null -w "%{http_code}" "$PROD_URL" | grep -q "200"; then
+        echo "FAIL: production URL not 200" >&2; exit 1
+      fi
+
+      # Chain to e2e
+      curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
+        -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+        -F "variables[BOUCLE_ROLE]=e2e" > /dev/null
+  tags:
+    - boucle
+  timeout: 10m
+
+# ── E2E (after deploy) ─────────────────────────────────────────────────
+e2e:
+  stage: verify
+  resource_group: boucle-issue-$BOUCLE_ISSUE
+  rules:
+    - if: $BOUCLE_ENABLED != "true"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "e2e"
+  script:
+    - |
+      export BOUCLE_ISSUE="${BOUCLE_ISSUE:-}"
+      PROD_URL="https://urgence-palestine.fr"
+      export BOUCLE_LIVE_URL="$PROD_URL"
+
+      # Run the agent on the live URL
+      ./bin/oc e2e
+
+      # Parse verdict
+      COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+        | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | last | .body')
+
+      VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+
+      case "$VERDICT" in
+        PASS)
+          glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
+            -f labels="boucle:done" > /dev/null
+          ;;
+        FAIL)
+          # Loop closure: open a new issue in triage with the trace
+          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues" \
+            -f title="E2E failure for issue #$BOUCLE_ISSUE" \
+            -f description="E2E verification failed for issue #$BOUCLE_ISSUE.
+
+      ## Trace
+      $(echo "$COMMENT")
+
+      ## Live URL
+      $PROD_URL" \
+            -f labels="boucle:triage" > /dev/null
+          # Note: auto-re-triggering this new issue is out of scope (human picks it up)
+          ;;
+        UNCERTAIN|*)
+          glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
+            -f labels="boucle:human" > /dev/null
+          ;;
+      esac
+
+      # Assert: verdict comment + screenshot attached
+      if [ -z "$VERDICT" ]; then
+        echo "FAIL: e2e verdict not parsable" >&2; exit 1
+      fi
+  tags:
+    - boucle
+  timeout: 15m
