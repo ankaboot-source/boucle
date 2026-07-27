@@ -1,0 +1,351 @@
+#!/usr/bin/env bash
+# bin/setup — Day 0 infrastructure setup for boucle on a target GitLab repo.
+# Idempotent: safe to run multiple times. Checks before creating.
+# Usage: bin/setup --project <id-or-path> --host <forge-host> [--bot-id <id>] [--bot-token <pat>] [--cf-token <token>] [--skip-cf] [--dry-run]
+
+set -euo pipefail
+
+# ── Args ──────────────────────────────────────────────────────────────
+PROJECT=""
+HOST="framagit.org"
+BOT_ID=""
+BOT_TOKEN=""
+CF_TOKEN=""
+OPENCODE_AUTH_PATH="${OPENCODE_AUTH_PATH:-$HOME/.local/share/opencode/auth.json}"
+SKIP_CF=false
+DRY_RUN=false
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --project) PROJECT="$2"; shift 2 ;;
+    --host) HOST="$2"; shift 2 ;;
+    --bot-id) BOT_ID="$2"; shift 2 ;;
+    --bot-token) BOT_TOKEN="$2"; shift 2 ;;
+    --cf-token) CF_TOKEN="$2"; shift 2 ;;
+    --auth-path) OPENCODE_AUTH_PATH="$2"; shift 2 ;;
+    --skip-cf) SKIP_CF=true; shift ;;
+    --dry-run) DRY_RUN=true; shift ;;
+    -h|--help)
+      echo "Usage: bin/setup --project <id-or-path> --host <forge-host> [options]"
+      echo ""
+      echo "Options:"
+      echo "  --project <id-or-path>   Target GitLab project ID or path (e.g. 126561 or up/urgence-palestine.fr)"
+      echo "  --host <forge-host>      GitLab host (default: framagit.org)"
+      echo "  --bot-id <id>            Bot user ID (for adding as project member)"
+      echo "  --bot-token <pat>        Bot PAT (used as BOUCLE_TOKEN CI variable)"
+      echo "  --cf-token <token>        Cloudflare API token (for Pages project)"
+      echo "  --auth-path <path>        Path to opencode auth.json (default: ~/.local/share/opencode/auth.json)"
+      echo "  --skip-cf                Skip Cloudflare Pages project creation"
+      echo "  --dry-run                 Print what would be done, don't execute"
+      exit 0
+      ;;
+    *) echo "Unknown arg: $1" >&2; exit 1 ;;
+  esac
+done
+
+# Validate required args
+[ -z "$PROJECT" ] && { echo "Error: --project is required" >&2; exit 1; }
+
+# ── Helpers ───────────────────────────────────────────────────────────
+PASS=0; FAIL=0; SKIP=0
+log_pass() { echo "  ✓ $1"; PASS=$((PASS+1)); }
+log_fail() { echo "  ✗ $1" >&2; FAIL=$((FAIL+1)); }
+log_skip() { echo "  - $1 (skipped)"; SKIP=$((SKIP+1)); }
+
+# Resolve project ID (if path given, look up ID)
+resolve_project_id() {
+  if [[ "$PROJECT" =~ ^[0-9]+$ ]]; then
+    echo "$PROJECT"
+  else
+    # URL-encode the path
+    ENCODED=$(echo "$PROJECT" | sed 's/\//%2F/g')
+    glab api --hostname "$HOST" "/projects/$ENCODED" 2>/dev/null | jq -r '.id'
+  fi
+}
+
+echo "boucle setup — Day 0 infrastructure"
+echo "Project: $PROJECT on $HOST"
+echo ""
+
+PROJECT_ID=$(resolve_project_id)
+[ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "null" ] && { echo "Error: could not resolve project ID" >&2; exit 1; }
+echo "Project ID: $PROJECT_ID"
+echo ""
+
+# Dry-run wrapper
+run() {
+  if [ "$DRY_RUN" = "true" ]; then
+    echo "  [dry-run] $*"
+  else
+    eval "$@"
+  fi
+}
+
+# ── 1. CI Variables ───────────────────────────────────────────────────
+echo "=== CI Variables ==="
+
+# BOUCLE_TOKEN (from --bot-token)
+if [ -n "$BOT_TOKEN" ]; then
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_TOKEN" 2>/dev/null | jq -r '.key // empty')
+  if [ -n "$EXISTING" ]; then
+    log_skip "BOUCLE_TOKEN already exists"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_TOKEN -f value='$BOT_TOKEN' -f masked=true -f protected=true >/dev/null"
+    log_pass "BOUCLE_TOKEN set"
+  fi
+else
+  log_skip "BOUCLE_TOKEN (no --bot-token provided)"
+fi
+
+# CLOUDFLARE_API_TOKEN (from --cf-token)
+if [ -n "$CF_TOKEN" ]; then
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/CLOUDFLARE_API_TOKEN" 2>/dev/null | jq -r '.key // empty')
+  if [ -n "$EXISTING" ]; then
+    log_skip "CLOUDFLARE_API_TOKEN already exists"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=CLOUDFLARE_API_TOKEN -f value='$CF_TOKEN' -f masked=true -f protected=true >/dev/null"
+    log_pass "CLOUDFLARE_API_TOKEN set"
+  fi
+else
+  log_skip "CLOUDFLARE_API_TOKEN (no --cf-token provided)"
+fi
+
+# BOUCLE_ENABLED
+EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_ENABLED" 2>/dev/null | jq -r '.key // empty')
+if [ -n "$EXISTING" ]; then
+  log_skip "BOUCLE_ENABLED already exists"
+else
+  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_ENABLED -f value=true -f masked=false -f protected=false >/dev/null"
+  log_pass "BOUCLE_ENABLED set"
+fi
+
+# OPENCODE_AUTH (file type) — requires auth.json to exist locally
+if [ -f "$OPENCODE_AUTH_PATH" ]; then
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/OPENCODE_AUTH" 2>/dev/null | jq -r '.key // empty')
+  if [ -n "$EXISTING" ]; then
+    log_skip "OPENCODE_AUTH already exists"
+  else
+    # Copy auth.json to temp file for @file syntax
+    TMP_AUTH=$(mktemp)
+    cp "$OPENCODE_AUTH_PATH" "$TMP_AUTH"
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables --field key=OPENCODE_AUTH --field value=@$TMP_AUTH --field variable_type=file >/dev/null"
+    rm -f "$TMP_AUTH"
+    log_pass "OPENCODE_AUTH set (file type)"
+  fi
+else
+  log_fail "OPENCODE_AUTH — auth.json not found at $OPENCODE_AUTH_PATH"
+fi
+
+echo ""
+
+# ── 2. Labels ─────────────────────────────────────────────────────────
+echo "=== Labels ==="
+
+# boucle:* labels (8)
+for label in triage needs-info todo working review human blocked done; do
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2>/dev/null | jq -r '.[0].name // empty')
+  if [ -n "$EXISTING" ]; then
+    log_skip "boucle:$label already exists"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/labels -f name=boucle:$label -f color=#0033CC -f 'description=boucle state: $label' >/dev/null"
+    log_pass "boucle:$label created"
+  fi
+done
+
+# size:* labels (3)
+for size in s m l; do
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=size:$size" 2>/dev/null | jq -r '.[0].name // empty')
+  if [ -n "$EXISTING" ]; then
+    log_skip "size:$size already exists"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/labels -f name=size:$size -f color=#F0AD4E -f 'description=size: $size' >/dev/null"
+    log_pass "size:$size created"
+  fi
+done
+
+echo ""
+
+# ── 3. Issue Board ────────────────────────────────────────────────────
+echo "=== Issue Board ==="
+
+# Check if boucle board already exists
+BOARD_ID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/boards" 2>/dev/null | jq -r '.[] | select(.name=="boucle") | .id' | head -1)
+if [ -n "$BOARD_ID" ] && [ "$BOARD_ID" != "null" ]; then
+  log_skip "boucle board already exists (ID: $BOARD_ID)"
+else
+  BOARD_RESPONSE=$(run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/boards -f name=boucle")
+  BOARD_ID=$(echo "$BOARD_RESPONSE" | jq -r '.id')
+  if [ -n "$BOARD_ID" ] && [ "$BOARD_ID" != "null" ]; then
+    log_pass "boucle board created (ID: $BOARD_ID)"
+    # Add lists for each boucle:* label
+    for label in triage needs-info todo working review human blocked done; do
+      LABEL_ID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2>/dev/null | jq -r '.[0].id')
+      if [ -n "$LABEL_ID" ] && [ "$LABEL_ID" != "null" ]; then
+        run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/boards/$BOARD_ID/lists -f label_id=$LABEL_ID >/dev/null"
+        log_pass "  list boucle:$label added"
+      fi
+    done
+  else
+    log_fail "boucle board creation failed"
+  fi
+fi
+
+echo ""
+
+# ── 4. Branch Protection ─────────────────────────────────────────────
+echo "=== Branch Protection ==="
+
+# Get default branch
+DEFAULT_BRANCH=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID" 2>/dev/null | jq -r '.default_branch')
+if [ -z "$DEFAULT_BRANCH" ] || [ "$DEFAULT_BRANCH" = "null" ]; then
+  log_fail "could not determine default branch"
+  DEFAULT_BRANCH="master"
+fi
+
+# Check if branch is already protected
+PROTECTION=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/protected_branches/$DEFAULT_BRANCH" 2>/dev/null)
+if [ -n "$PROTECTION" ] && echo "$PROTECTION" | jq -e '.name' >/dev/null 2>&1; then
+  # Already protected — verify merge access level
+  MERGE_LEVEL=$(echo "$PROTECTION" | jq -r '.merge_access_levels[0].access_level')
+  if [ "$MERGE_LEVEL" = "40" ]; then
+    log_skip "$DEFAULT_BRANCH protected (merge=Maintainer only)"
+  else
+    echo "  ! $DEFAULT_BRANCH protected but merge_access_level=$MERGE_LEVEL (expected 40)"
+    run "glab api --hostname $HOST -X PUT /projects/$PROJECT_ID/protected_branches/$DEFAULT_BRANCH -f merge_access_level=40 >/dev/null"
+    log_pass "$DEFAULT_BRANCH merge access updated to Maintainer only"
+  fi
+else
+  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/protected_branches -f name=$DEFAULT_BRANCH -f merge_access_level=40 >/dev/null"
+  log_pass "$DEFAULT_BRANCH protected (merge=Maintainer only)"
+fi
+
+echo ""
+
+# ── 5. Bot Member ────────────────────────────────────────────────────
+echo "=== Bot Member ==="
+
+if [ -n "$BOT_ID" ]; then
+  # Check if bot is already a member
+  EXISTING_MEMBER=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/members/$BOT_ID" 2>/dev/null | jq -r '.access_level // empty')
+  if [ -n "$EXISTING_MEMBER" ]; then
+    if [ "$EXISTING_MEMBER" = "30" ]; then
+      log_skip "bot (ID: $BOT_ID) already Developer"
+    else
+      run "glab api --hostname $HOST -X PUT /projects/$PROJECT_ID/members/$BOT_ID -f access_level=30 >/dev/null"
+      log_pass "bot (ID: $BOT_ID) access level updated to Developer"
+    fi
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/members -f user_id=$BOT_ID -f access_level=30 >/dev/null"
+    log_pass "bot (ID: $BOT_ID) added as Developer"
+  fi
+else
+  log_skip "bot member (no --bot-id provided)"
+fi
+
+echo ""
+
+# ── 6. Trigger Token ──────────────────────────────────────────────────
+echo "=== Trigger Token ==="
+
+# Check if trigger token already exists
+TRIGGER_TOKEN=""
+EXISTING_TRIGGERS=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/triggers" 2>/dev/null)
+BOUCLE_TRIGGER=$(echo "$EXISTING_TRIGGERS" | jq -r '.[] | select(.description=="boucle-loop") | .token' | head -1)
+if [ -n "$BOUCLE_TRIGGER" ]; then
+  TRIGGER_TOKEN="$BOUCLE_TRIGGER"
+  log_skip "trigger token already exists"
+else
+  TRIGGER_RESPONSE=$(run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/triggers -f description=boucle-loop")
+  TRIGGER_TOKEN=$(echo "$TRIGGER_RESPONSE" | jq -r '.token')
+  if [ -n "$TRIGGER_TOKEN" ] && [ "$TRIGGER_TOKEN" != "null" ]; then
+    log_pass "trigger token created"
+  else
+    log_fail "trigger token creation failed (needs Owner access)"
+  fi
+fi
+
+# Store trigger token as CI variable
+if [ -n "$TRIGGER_TOKEN" ] && [ "$TRIGGER_TOKEN" != "null" ]; then
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_TRIGGER_TOKEN" 2>/dev/null | jq -r '.key // empty')
+  if [ -n "$EXISTING" ]; then
+    log_skip "BOUCLE_TRIGGER_TOKEN CI variable already exists"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_TRIGGER_TOKEN -f value=$TRIGGER_TOKEN -f masked=true -f protected=true >/dev/null"
+    log_pass "BOUCLE_TRIGGER_TOKEN stored as CI variable"
+  fi
+fi
+
+echo ""
+
+# ── 7. Webhook ────────────────────────────────────────────────────────
+echo "=== Webhook ==="
+
+if [ -n "$TRIGGER_TOKEN" ] && [ "$TRIGGER_TOKEN" != "null" ]; then
+  WEBHOOK_URL="https://$HOST/api/v4/projects/$PROJECT_ID/trigger/pipeline?token=$TRIGGER_TOKEN&ref=$DEFAULT_BRANCH"
+  
+  # Check if webhook already exists
+  EXISTING_WEBHOOK=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/hooks" 2>/dev/null | jq -r '.[] | select(.url | contains("trigger/pipeline")) | .id' | head -1)
+  if [ -n "$EXISTING_WEBHOOK" ]; then
+    log_skip "webhook already exists (ID: $EXISTING_WEBHOOK)"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/hooks -f url=$WEBHOOK_URL -f issues_events=true -f note_events=true -f confidential_issues_events=false -f confidential_note_events=false -f merge_requests_events=false -f push_events=false -f pipeline_events=false -f job_events=false >/dev/null"
+    log_pass "webhook configured (Issues + Note events)"
+  fi
+else
+  log_skip "webhook (no trigger token)"
+fi
+
+echo ""
+
+# ── 8. Cloudflare Pages Project ──────────────────────────────────────
+echo "=== Cloudflare Pages Project ==="
+
+if [ "$SKIP_CF" = "true" ]; then
+  log_skip "CF Pages project (--skip-cf)"
+elif [ -n "$CF_TOKEN" ]; then
+  export CLOUDFLARE_API_TOKEN="$CF_TOKEN"
+  # Check if project already exists
+  if npx wrangler pages project list 2>/dev/null | grep -q "urgence-palestine"; then
+    log_skip "CF Pages project already exists"
+  else
+    # Derive project name from repo path (last segment, hyphenated)
+    CF_PROJECT_NAME=$(echo "$PROJECT" | sed 's|.*/||' | sed 's/\.//g')
+    run "npx wrangler pages project create $CF_PROJECT_NAME --production-branch $DEFAULT_BRANCH >/dev/null 2>&1"
+    if [ $? -eq 0 ]; then
+      log_pass "CF Pages project '$CF_PROJECT_NAME' created"
+    else
+      log_fail "CF Pages project creation failed"
+    fi
+  fi
+else
+  log_skip "CF Pages project (no --cf-token)"
+fi
+
+echo ""
+
+# ── Summary ───────────────────────────────────────────────────────────
+echo "=== Summary ==="
+echo "  Passed: $PASS"
+echo "  Skipped: $SKIP"
+echo "  Failed: $FAIL"
+echo ""
+
+if [ "$FAIL" -gt 0 ]; then
+  echo "Some steps failed. Check output above." >&2
+  exit 1
+fi
+
+echo "Day 0 setup complete."
+echo ""
+echo "Next steps:"
+echo "  1. Register a GitLab runner on your build machine (tag: boucle, docker executor)"
+echo "     This must be done manually — see LOOP.md for instructions."
+echo "  2. Apply the loop template to the target repo:"
+echo "     cp -r boucle/loop/bin <target-repo>/"
+echo "     cp -r boucle/loop/.opencode <target-repo>/"
+echo "     cp boucle/loop/.gitlab-ci.yml <target-repo>/"
+echo "     cp boucle/loop/LOOP.md <target-repo>/"
+echo "  3. Run bin/doctor in CI to verify all prerequisites are met."
+echo "  4. Create your first issue — the webhook will trigger triage."
+
+exit 0
