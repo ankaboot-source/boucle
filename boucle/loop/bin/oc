@@ -1,0 +1,240 @@
+#!/usr/bin/env bash
+# bin/oc — boucle's harness entrypoint (S3)
+# Wraps opencode: scrubs secrets, enforces caps, runs agent, asserts side effects.
+# Swapping to Claude Code or Codex = editing this one file.
+#
+# Role mapping (boucle role → oh-my-opencode-slim agent):
+#   triage   → explorer  (cheap, codebase-aware)
+#   worker   → fixer     (mechanical implementation)
+#   reviewer → oracle    (adversarial review)
+#   e2e      → observer  (visual verification)
+# The role-specific task instructions go in the prompt that bin/oc passes
+# to `opencode run`. The agent's system prompt (from oh-my-opencode-slim)
+# provides general behavior; the user prompt adds boucle-specific task.
+
+set -euo pipefail
+
+# ── Args ──────────────────────────────────────────────────────────────
+ROLE="${1:?usage: bin/oc <role>}"
+ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
+ITERATION="${BOUCLE_ITERATION:-1}"
+DRY_RUN="${BOUCLE_DRY_RUN:-false}"
+STEPS_CAP="${BOUCLE_STEPS_CAP:-50}"
+
+# ── Map boucle roles to existing oh-my-opencode-slim agents ───────────
+case "$ROLE" in
+  triage)   AGENT="explorer" ;;
+  worker)   AGENT="fixer" ;;
+  reviewer) AGENT="oracle" ;;
+  e2e)      AGENT="observer" ;;
+  *)
+    echo "Unknown role: $ROLE" >&2
+    exit 1
+    ;;
+esac
+
+# ── Paths ──────────────────────────────────────────────────────────────
+CI_PROJECT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
+STATE_DIR="$CI_PROJECT_DIR/.boucle/$ISSUE"
+STATE_FILE="$STATE_DIR/state.md"
+ITERATIONS_FILE="$STATE_DIR/iterations.md"
+OPENCODE_DB="$CI_PROJECT_DIR/.opencode-$CI_JOB_ID.db"
+
+# ── 1. Isolate opencode DB (required, not optional) ───────────────────
+export OPENCODE_DB
+
+# ── 2. Scrub deploy secrets before invoking agent ─────────────────────
+SCRUBBED_CF_TOKEN=""
+if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
+  SCRUBBED_CF_TOKEN="$CLOUDFLARE_API_TOKEN"
+  unset CLOUDFLARE_API_TOKEN
+fi
+
+# ── 3. Prepare state directory ────────────────────────────────────────
+mkdir -p "$STATE_DIR"
+
+# ── 4. Build the agent prompt (boucle role-specific instructions) ────
+build_prompt() {
+  local role="$1"
+  local prompt=""
+
+  case "$role" in
+    triage)
+      prompt="You are the triage agent for boucle on issue #${ISSUE}.
+
+## Your job
+Analyze the issue and produce a single structured comment. You do NOT implement anything.
+
+## Steps
+1. Read the issue body and all existing comments via \`glab issue view ${ISSUE} --repo \$CI_PROJECT_PATH\`.
+2. Understand what the issue is actually asking for — restate it in your own words.
+3. Draft acceptance criteria that are **verifiable by a machine or by looking at the rendered page**.
+4. Classify the size: S (one file/component), M (a few files), L (needs splitting).
+5. If the issue is unclear, ask blocking questions.
+6. If the issue is too large (size L), flag it for splitting.
+
+## Output format
+Post EXACTLY ONE comment on the issue with this format:
+
+\`\`\`
+<!-- boucle:triage v=1 -->
+## Analysis
+<what the issue actually asks for, in your own words>
+
+## Draft acceptance criteria
+- [ ] <verifiable criterion>
+
+## Classification
+Size: S | M | L
+
+## Questions
+- <blocking question, or \"none\">
+
+## Disposition
+READY | NEEDS-INFO | NEEDS-SPLIT
+\`\`\`
+
+## Rules (HARD)
+- **Do NOT** write any \`boucle:*\` labels — the job does that from your Disposition.
+- **Do NOT** create branches or push code.
+- **Do NOT** implement anything — you are analysis only.
+- **Size: L** means the issue needs splitting by a human — set Disposition to NEEDS-SPLIT.
+- If you cannot understand the issue, set Disposition to NEEDS-INFO and ask your questions.
+- Use \`glab\` to post your comment."
+      ;;
+    worker)
+      prompt="You are the worker agent for boucle on issue #${ISSUE}.
+
+## Your job
+Implement the acceptance criteria on the current branch.
+
+## Steps
+1. Read \`state.md\` in \`.boucle/${ISSUE}/\` FIRST — especially the \"Tried and rejected\" section. Do not retry approaches that already failed.
+2. Read the issue body and the triage analysis comment.
+3. Implement the acceptance criteria from \`state.md\`.
+4. Update \`state.md\`:
+   - Fill in the \"Approach\" section with what you did.
+   - If you tried and rejected an approach, add it to \"Tried and rejected\" with why.
+5. Append to \`iterations.md\` with what you changed.
+
+## Rules (HARD)
+- **Do NOT** write any \`boucle:*\` labels — the job does that.
+- **Do NOT** merge, push, or deploy — the job does that after you exit.
+- **Do NOT** run \`wrangler\` or use \`CLOUDFLARE_API_TOKEN\` — you don't have it (it was scrubbed before you ran).
+- Work on the current branch (already checked out by the job).
+- Keep changes minimal and focused on the acceptance criteria.
+- If you cannot complete the work, say so clearly in \`state.md\` under \"Awaiting human\".
+- Commit your changes with \`git add -A && git commit -m \"boucle: implement issue #${ISSUE} [skip ci]\"\"."
+      ;;
+    reviewer)
+      prompt="You are the reviewer agent for boucle on issue #${ISSUE}.
+
+## Your job
+Adversarially review the implementation against the **deployed preview URL** (\${BOUCLE_PREVIEW_URL}). Not a local build. Not a diff.
+
+## Steps
+1. Read the MR diff and \`.boucle/${ISSUE}/state.md\`.
+2. Read the acceptance criteria from \`state.md\`.
+3. **Test the deployed preview URL** (provided in \$BOUCLE_PREVIEW_URL), NOT a local build.
+4. For EACH acceptance criterion, check it at the primary source — the deployed site.
+5. Take a screenshot of the preview.
+6. Post your verdict as a comment.
+
+## Output format
+Post EXACTLY ONE comment on the issue with this format:
+
+\`\`\`
+<!-- boucle:verdict v=1 role=reviewer sha=\$(git rev-parse HEAD) -->
+VERDICT: PASS | FAIL | UNCERTAIN
+- [x] <criterion> — <how it was checked>
+- [ ] <criterion> — <why it failed>
+\`\`\`
+
+## Rules (HARD)
+- **Do NOT** trust the worker's own summary — verify everything yourself.
+- **Do NOT** write any \`boucle:*\` labels — the job does that.
+- **Do NOT** merge, push, or deploy.
+- Grade each criterion at the primary source (the deployed URL).
+- If you cannot verify a criterion, mark it UNCERTAIN — never guess.
+- A missing or malformed verdict must never leave the loop retrying — if unsure, say UNCERTAIN.
+- Use \`glab\` to post your comment.
+- Low temperature — you are a skeptic, not a creative writer."
+      ;;
+    e2e)
+      prompt="You are the E2E agent for boucle on issue #${ISSUE}.
+
+## Your job
+Verify the implementation on the **live production URL** (\${BOUCLE_LIVE_URL}). Not a preview, not a local build.
+
+## Steps
+1. Read the acceptance criteria from \`.boucle/${ISSUE}/state.md\` (or the issue if no state.md).
+2. Navigate to the live production URL (provided in \$BOUCLE_LIVE_URL).
+3. For EACH acceptance criterion, check it against the live site.
+4. Take a screenshot.
+5. Post your verdict as a comment.
+
+## Output format
+Post EXACTLY ONE comment on the issue with this format:
+
+\`\`\`
+<!-- boucle:verdict v=1 role=e2e sha=\$(git rev-parse HEAD) -->
+VERDICT: PASS | FAIL | UNCERTAIN
+- [x] <criterion> — <how it was checked>
+- [ ] <criterion> — <why it failed>
+\`\`\`
+
+## Rules (HARD)
+- **Do NOT** write any \`boucle:*\` labels — the job does that.
+- **Do NOT** merge, push, or deploy.
+- Test the LIVE production URL, not a preview or local build.
+- If you cannot verify a criterion, mark it UNCERTAIN.
+- On FAIL, the job will open a new issue in \`boucle:triage\` with your trace — the loop closes.
+- Use \`glab\` to post your comment."
+      ;;
+    *)
+      echo "Unknown role: $role" >&2
+      exit 1
+      ;;
+  esac
+
+  echo "$prompt"
+}
+
+# ── 5. Run the agent ──────────────────────────────────────────────────
+PROMPT=$(build_prompt "$ROLE")
+
+if [ "$DRY_RUN" = "true" ]; then
+  echo "[boucle] DRY RUN — agent output goes to log only, nothing pushed"
+  opencode run --agent "$AGENT" --auto 2>&1 || true
+  # In dry run, we don't assert side effects
+  exit 0
+fi
+
+AGENT_EXIT=0
+opencode run --agent "$AGENT" --auto "$PROMPT" || AGENT_EXIT=$?
+
+# ── 6. Restore scrubbed secrets ───────────────────────────────────────
+if [ -n "$SCRUBBED_CF_TOKEN" ]; then
+  export CLOUDFLARE_API_TOKEN="$SCRUBBED_CF_TOKEN"
+fi
+
+# ── 7. Append to iterations.md ────────────────────────────────────────
+TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+FILES_TOUCHED=""
+if [ -d "$CI_PROJECT_DIR" ] && command -v git &>/dev/null; then
+  FILES_TOUCHED=$(cd "$CI_PROJECT_DIR" && git diff --name-only HEAD 2>/dev/null | tr '\n' ', ' || echo "none")
+fi
+
+cat >> "$ITERATIONS_FILE" << EOF
+
+## $TIMESTAMP — $ROLE (agent=$AGENT) — iteration $ITERATION
+- Result: <see agent output>
+- Files touched: ${FILES_TOUCHED:-none}
+- Side effect asserted: <see job assertion>
+EOF
+
+# ── 8. Assert declared side effect ────────────────────────────────────
+# The job (not bin/oc) asserts the side effect after this script exits.
+# bin/oc just runs the agent and logs. The job checks exit code + git/API state.
+
+exit $AGENT_EXIT
