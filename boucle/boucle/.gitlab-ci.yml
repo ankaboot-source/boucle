@@ -16,31 +16,17 @@ variables:
   BOUCLE_FORGE_HOST: framagit.org
   # File-type CI variable: $OPENCODE_AUTH holds a path to the auth.json temp file
 
-# ── Default before_script: bootstrap tools on shell executor ───────────
-# Shared runners are shell executors — they may lack node/glab/opencode/wrangler.
-# This installs them to ~/.local/bin on first run. Subsequent runs in the same
-# workspace may reuse cached installs.
+# ── Default: use node:22 image (has node, npm, curl pre-installed) ─────
+# The shared runner is a docker executor. node:22 gives us node+npm+curl.
+# before_script installs glab + opencode + wrangler (not in the image).
 default:
+  image: node:22
   before_script:
     - |
       set -x
       export PATH="$HOME/.local/bin:$PATH"
       export GITLAB_TOKEN="$BOUCLE_TOKEN"
       export GITLAB_HOST="$BOUCLE_FORGE_HOST"
-
-      # ── Node.js (via nvm) ──────────────────────────────────────────
-      if ! command -v node &>/dev/null; then
-        echo "Installing nvm + node 22..."
-        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
-        export NVM_DIR="$HOME/.nvm"
-        [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-        nvm install 22
-        nvm use 22
-      else
-        # Source nvm if present (for npx/npm in PATH)
-        export NVM_DIR="$HOME/.nvm"
-        [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" 2>/dev/null || true
-      fi
 
       # ── glab CLI ───────────────────────────────────────────────────
       if ! command -v glab &>/dev/null; then
