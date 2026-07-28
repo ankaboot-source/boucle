@@ -16,11 +16,11 @@ variables:
   BOUCLE_FORGE_HOST: framagit.org
   # File-type CI variable: $OPENCODE_AUTH holds a path to the auth.json temp file
 
-# ── Default: use node:22 image (has node, npm, curl pre-installed) ─────
-# The shared runner is a docker executor. node:22 gives us node+npm+curl.
+# ── Default: use node:22-slim (has node, npm, curl — much smaller than node:22) ─
+# The shared runner is a docker executor. node:22-slim is ~250MB vs ~1GB.
 # before_script installs glab + opencode + wrangler (not in the image).
 default:
-  image: node:22
+  image: node:22-slim
   before_script:
     - |
       set -x
@@ -364,13 +364,16 @@ deploy:
   script:
     - |
       npm ci && npm run build
-      npx wrangler pages deploy public --project-name urgence-palestine --branch master
+      DEPLOY_URL=$(npx wrangler pages deploy public --project-name urgence-palestine --branch master 2>&1 | grep -oE 'https://[a-z0-9.-]+\.pages\.dev' | head -1)
 
-      # Assert: production URL returns 200 on new deployment
-      PROD_URL="https://urgence-palestine.fr"
-      if ! curl -s -o /dev/null -w "%{http_code}" "$PROD_URL" | grep -q "200"; then
-        echo "FAIL: production URL not 200" >&2; exit 1
+      # Assert: deployment URL returns 200 (production domain may not have DNS yet)
+      if [ -z "$DEPLOY_URL" ]; then
+        echo "FAIL: no deployment URL from wrangler" >&2; exit 1
       fi
+      if ! curl -s -o /dev/null -w "%{http_code}" "$DEPLOY_URL" | grep -q "200"; then
+        echo "FAIL: deployment URL $DEPLOY_URL not 200" >&2; exit 1
+      fi
+      echo "Deployed to $DEPLOY_URL (200 OK)"
 
       # Chain to e2e
       curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
