@@ -77,6 +77,26 @@ default:
       wrangler --version 2>/dev/null || echo "wrangler: MISSING"
       echo "==================="
 
+# ── Debug (temporary — diagnose trigger pipeline variable access) ──────
+debug:
+  stage: dispatch
+  rules:
+    - when: always
+  script:
+    - |
+      echo "=== Debug: CI environment ==="
+      echo "CI_PIPELINE_SOURCE=$CI_PIPELINE_SOURCE"
+      echo "CI_COMMIT_BRANCH=$CI_COMMIT_BRANCH"
+      echo "CI_DEFAULT_BRANCH=$CI_DEFAULT_BRANCH"
+      echo "BOUCLE_ENABLED=${BOUCLE_ENABLED:-<undefined>}"
+      echo "BOUCLE_ROLE=${BOUCLE_ROLE:-<undefined>}"
+      echo "BOUCLE_ISSUE=${BOUCLE_ISSUE:-<undefined>}"
+      echo "BOUCLE_FORGE_HOST=${BOUCLE_FORGE_HOST:-<undefined>}"
+      echo "TRIGGER_PAYLOAD=${TRIGGER_PAYLOAD:-<undefined>}"
+      echo "=== All BOUCLE_* vars ==="
+      env | grep -i boucle || echo "(none)"
+      echo "========================="
+
 # ── Dispatcher ──────────────────────────────────────────────────────────
 dispatch:
   stage: dispatch
