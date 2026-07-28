@@ -386,10 +386,11 @@ deploy:
       fi
       echo "Deployed to $DEPLOY_URL (200 OK)"
 
-      # Chain to e2e
+      # Chain to e2e with the deployment URL (production domain may not have DNS yet)
       curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
         -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-        -F "variables[BOUCLE_ROLE]=e2e" > /dev/null
+        -F "variables[BOUCLE_ROLE]=e2e" \
+        -F "variables[BOUCLE_LIVE_URL]=$DEPLOY_URL" > /dev/null
   timeout: 10m
 
 # ── E2E (after deploy) ─────────────────────────────────────────────────
@@ -403,8 +404,10 @@ e2e:
   script:
     - |
       export BOUCLE_ISSUE="${BOUCLE_ISSUE:-}"
-      PROD_URL="https://urgence-palestine.fr"
-      export BOUCLE_LIVE_URL="$PROD_URL"
+      # Use deployment URL passed from deploy job (production domain may not have DNS yet)
+      LIVE_URL="${BOUCLE_LIVE_URL:-https://urgence-palestine.fr}"
+      export BOUCLE_LIVE_URL="$LIVE_URL"
+      echo "E2E testing URL: $LIVE_URL"
 
       # Run the agent on the live URL
       ./bin/oc e2e
@@ -431,7 +434,7 @@ e2e:
       $(echo "$COMMENT")
 
       ## Live URL
-      $PROD_URL" \
+      $LIVE_URL" \
               -f labels="boucle:triage" > /dev/null
             ;;
           UNCERTAIN|*)
@@ -447,4 +450,4 @@ e2e:
         # Deploy-triggered e2e (no specific issue) — log verdict only
         echo "E2E ran without a specific issue (deploy-triggered). Verdict logged in agent output."
       fi
-  timeout: 15m
+  timeout: 20m
