@@ -28,10 +28,10 @@ default:
       export GITLAB_TOKEN="$BOUCLE_TOKEN"
       export GITLAB_HOST="$BOUCLE_FORGE_HOST"
 
-      # ── curl (slim image lacks it) ─────────────────────────────────
-      if ! command -v curl &>/dev/null; then
-        echo "Installing curl..."
-        apt-get update -qq && apt-get install -y -qq curl
+      # ── curl + jq (slim image lacks both) ───────────────────────────
+      if ! command -v curl &>/dev/null || ! command -v jq &>/dev/null; then
+        echo "Installing curl + jq..."
+        apt-get update -qq && apt-get install -y -qq curl jq
       fi
 
       # ── glab CLI ───────────────────────────────────────────────────
@@ -73,7 +73,7 @@ default:
       node --version 2>/dev/null || echo "node: MISSING"
       npm --version 2>/dev/null || echo "npm: MISSING"
       glab version 2>/dev/null | head -1 || echo "glab: MISSING"
-      opencode version 2>/dev/null || echo "opencode: MISSING"
+      opencode --version 2>/dev/null || echo "opencode: MISSING"
       wrangler --version 2>/dev/null || echo "wrangler: MISSING"
       echo "==================="
 
