@@ -16,7 +16,7 @@ set -euo pipefail
 
 # ── Args ──────────────────────────────────────────────────────────────
 ROLE="${1:?usage: bin/oc <role>}"
-ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
+ISSUE="${BOUCLE_ISSUE:-}"
 ITERATION="${BOUCLE_ITERATION:-1}"
 DRY_RUN="${BOUCLE_DRY_RUN:-false}"
 STEPS_CAP="${BOUCLE_STEPS_CAP:-50}"
