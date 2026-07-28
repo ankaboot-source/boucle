@@ -166,7 +166,9 @@ dispatch:
 triage:
   stage: triage
   resource_group: boucle-issue-$BOUCLE_ISSUE
-  needs: [dispatch]
+  needs:
+    - job: dispatch
+      optional: true
   rules:
     - if: $BOUCLE_ENABLED != "true"
       when: never
