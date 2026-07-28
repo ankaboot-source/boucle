@@ -77,26 +77,6 @@ default:
       wrangler --version 2>/dev/null || echo "wrangler: MISSING"
       echo "==================="
 
-# ── Debug (temporary — diagnose trigger pipeline variable access) ──────
-debug:
-  stage: dispatch
-  rules:
-    - when: always
-  script:
-    - |
-      echo "=== Debug: CI environment ==="
-      echo "CI_PIPELINE_SOURCE=$CI_PIPELINE_SOURCE"
-      echo "CI_COMMIT_BRANCH=$CI_COMMIT_BRANCH"
-      echo "CI_DEFAULT_BRANCH=$CI_DEFAULT_BRANCH"
-      echo "BOUCLE_ENABLED=${BOUCLE_ENABLED:-<undefined>}"
-      echo "BOUCLE_ROLE=${BOUCLE_ROLE:-<undefined>}"
-      echo "BOUCLE_ISSUE=${BOUCLE_ISSUE:-<undefined>}"
-      echo "BOUCLE_FORGE_HOST=${BOUCLE_FORGE_HOST:-<undefined>}"
-      echo "TRIGGER_PAYLOAD=${TRIGGER_PAYLOAD:-<undefined>}"
-      echo "=== All BOUCLE_* vars ==="
-      env | grep -i boucle || echo "(none)"
-      echo "========================="
-
 # ── Dispatcher ──────────────────────────────────────────────────────────
 dispatch:
   stage: dispatch
@@ -171,6 +151,10 @@ triage:
       optional: true
   rules:
     - if: $BOUCLE_ENABLED != "true"
+      when: never
+    # Only run triage on webhook triggers (no BOUCLE_ROLE set).
+    # Role-specific chains (worker/reviewer/e2e) set BOUCLE_ROLE and skip triage.
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE
       when: never
     - if: $CI_PIPELINE_SOURCE == "trigger"
   variables:
@@ -430,39 +414,42 @@ e2e:
       # Run the agent on the live URL
       ./bin/oc e2e
 
-      # Parse verdict
-      COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-        | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | last | .body')
+      # Parse verdict from agent output (bin/oc logs to stdout)
+      # If BOUCLE_ISSUE is set, parse from issue comment; otherwise from agent stdout
+      if [ -n "$BOUCLE_ISSUE" ]; then
+        COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+          | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | last | .body')
+        VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
 
-      VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
-
-      case "$VERDICT" in
-        PASS)
-          glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
-            -f labels="boucle:done" > /dev/null
-          ;;
-        FAIL)
-          # Loop closure: open a new issue in triage with the trace
-          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues" \
-            -f title="E2E failure for issue #$BOUCLE_ISSUE" \
-            -f description="E2E verification failed for issue #$BOUCLE_ISSUE.
+        case "$VERDICT" in
+          PASS)
+            glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
+              -f labels="boucle:done" > /dev/null
+            ;;
+          FAIL)
+            # Loop closure: open a new issue in triage with the trace
+            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues" \
+              -f title="E2E failure for issue #$BOUCLE_ISSUE" \
+              -f description="E2E verification failed for issue #$BOUCLE_ISSUE.
 
       ## Trace
       $(echo "$COMMENT")
 
       ## Live URL
       $PROD_URL" \
-            -f labels="boucle:triage" > /dev/null
-          # Note: auto-re-triggering this new issue is out of scope (human picks it up)
-          ;;
-        UNCERTAIN|*)
-          glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
-            -f labels="boucle:human" > /dev/null
-          ;;
-      esac
+              -f labels="boucle:triage" > /dev/null
+            ;;
+          UNCERTAIN|*)
+            glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
+              -f labels="boucle:human" > /dev/null
+            ;;
+        esac
 
-      # Assert: verdict comment + screenshot attached
-      if [ -z "$VERDICT" ]; then
-        echo "FAIL: e2e verdict not parsable" >&2; exit 1
+        if [ -z "$VERDICT" ]; then
+          echo "FAIL: e2e verdict not parsable" >&2; exit 1
+        fi
+      else
+        # Deploy-triggered e2e (no specific issue) — log verdict only
+        echo "E2E ran without a specific issue (deploy-triggered). Verdict logged in agent output."
       fi
   timeout: 15m
