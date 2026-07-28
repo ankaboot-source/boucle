@@ -3,14 +3,14 @@
 # Wraps opencode: scrubs secrets, enforces caps, runs agent, asserts side effects.
 # Swapping to Claude Code or Codex = editing this one file.
 #
-# Role mapping (boucle role → oh-my-opencode-slim agent):
-#   triage   → explorer  (cheap, codebase-aware)
-#   worker   → fixer     (mechanical implementation)
-#   reviewer → oracle    (adversarial review)
-#   e2e      → observer  (visual verification)
-# The role-specific task instructions go in the prompt that bin/oc passes
-# to `opencode run`. The agent's system prompt (from oh-my-opencode-slim)
-# provides general behavior; the user prompt adds boucle-specific task.
+# Role mapping (boucle role → project-local agent in .opencode/agents/):
+#   triage   → triage    (minimax-m3, analyzes issue)
+#   worker   → worker    (minimax-m3, implements)
+#   reviewer → reviewer  (glm-5.2, adversarial review)
+#   e2e      → e2e       (kimi-k2.7-code, visual verification)
+# Project-local agents are defined in .opencode/agents/*.md and travel
+# with the repo. The agent's system prompt provides general behavior;
+# the user prompt (built below) adds boucle-specific task instructions.
 
 set -euo pipefail
 
@@ -21,12 +21,12 @@ ITERATION="${BOUCLE_ITERATION:-1}"
 DRY_RUN="${BOUCLE_DRY_RUN:-false}"
 STEPS_CAP="${BOUCLE_STEPS_CAP:-50}"
 
-# ── Map boucle roles to existing oh-my-opencode-slim agents ───────────
+# ── Map boucle roles to project-local agents (.opencode/agents/*.md) ──
 case "$ROLE" in
-  triage)   AGENT="explorer" ;;
-  worker)   AGENT="fixer" ;;
-  reviewer) AGENT="oracle" ;;
-  e2e)      AGENT="observer" ;;
+  triage)   AGENT="triage" ;;
+  worker)   AGENT="worker" ;;
+  reviewer) AGENT="reviewer" ;;
+  e2e)      AGENT="e2e" ;;
   *)
     echo "Unknown role: $ROLE" >&2
     exit 1
