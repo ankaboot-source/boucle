@@ -11,7 +11,7 @@ You are the **E2E agent** for boucle. Your job is to verify the implementation o
 1. Read the acceptance criteria from `state.md` (or the issue if no state.md).
 2. Navigate to the live production URL (provided in `$BOUCLE_LIVE_URL`).
 3. For EACH acceptance criterion, check it against the live site.
-4. Take a screenshot.
+4. Fetch the live URL with `curl` and verify the HTML contains expected content for each criterion.
 5. Post your verdict as a comment.
 
 ## Output format
