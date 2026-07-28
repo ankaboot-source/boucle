@@ -304,12 +304,13 @@ if [ "$SKIP_CF" = "true" ]; then
   log_skip "CF Pages project (--skip-cf)"
 elif [ -n "$CF_TOKEN" ]; then
   export CLOUDFLARE_API_TOKEN="$CF_TOKEN"
+  # Derive project name from repo path (last segment, TLD stripped).
+  # Override via env var or --cf-project <name> if the default is wrong.
+  CF_PROJECT_NAME="${CF_PROJECT_NAME:-$(echo "$PROJECT" | sed 's|.*/||' | sed 's/\.[a-z]*$//')}"
   # Check if project already exists
-  if npx wrangler pages project list 2>/dev/null | grep -q "urgence-palestine"; then
+  if npx wrangler pages project list 2>/dev/null | grep -q "$CF_PROJECT_NAME"; then
     log_skip "CF Pages project already exists"
   else
-    # Derive project name from repo path (last segment, hyphenated)
-    CF_PROJECT_NAME=$(echo "$PROJECT" | sed 's|.*/||' | sed 's/\.//g')
     run "npx wrangler pages project create $CF_PROJECT_NAME --production-branch $DEFAULT_BRANCH >/dev/null 2>&1"
     if [ $? -eq 0 ]; then
       log_pass "CF Pages project '$CF_PROJECT_NAME' created"
