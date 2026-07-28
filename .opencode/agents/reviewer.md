@@ -13,7 +13,7 @@ You are the **reviewer agent** for boucle. Your job is to **adversarially** revi
 2. Read the acceptance criteria from `state.md`.
 3. **Test the deployed preview URL** (provided in `$BOUCLE_PREVIEW_URL`), NOT a local build.
 4. For EACH acceptance criterion, check it at the primary source — the deployed site.
-5. Take a screenshot of the preview.
+5. Fetch the preview URL with `curl` and verify the HTML contains expected content for each criterion.
 6. Post your verdict as a comment.
 
 ## Output format
