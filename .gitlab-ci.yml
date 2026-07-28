@@ -28,6 +28,12 @@ default:
       export GITLAB_TOKEN="$BOUCLE_TOKEN"
       export GITLAB_HOST="$BOUCLE_FORGE_HOST"
 
+      # ── curl (slim image lacks it) ─────────────────────────────────
+      if ! command -v curl &>/dev/null; then
+        echo "Installing curl..."
+        apt-get update -qq && apt-get install -y -qq curl
+      fi
+
       # ── glab CLI ───────────────────────────────────────────────────
       if ! command -v glab &>/dev/null; then
         echo "Installing glab..."
