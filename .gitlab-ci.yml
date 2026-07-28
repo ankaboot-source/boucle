@@ -156,6 +156,11 @@ triage:
     BOUCLE_ITERATION: 1
   script:
     - |
+      # Guard: if dispatch skipped (bot note event, anti-loop), no .boucle-issue artifact
+      if [ ! -f .boucle-issue ]; then
+        echo "No .boucle-issue artifact (dispatch skipped). Nothing to triage."
+        exit 0
+      fi
       IID=$(cat .boucle-issue)
       export BOUCLE_ISSUE="$IID"
 
