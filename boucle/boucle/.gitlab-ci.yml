@@ -83,6 +83,10 @@ dispatch:
   rules:
     - if: $BOUCLE_ENABLED != "true"
       when: never
+    # Only run dispatch on webhook triggers (no BOUCLE_ROLE set).
+    # Role-specific chains (worker/reviewer/e2e) set BOUCLE_ROLE and skip dispatch.
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE
+      when: never
     - if: $CI_PIPELINE_SOURCE == "trigger"
   script:
     - |
