@@ -153,7 +153,6 @@ triage:
       when: never
     - if: $CI_PIPELINE_SOURCE == "trigger"
   variables:
-    BOUCLE_ROLE: triage
     BOUCLE_ITERATION: 1
   script:
     - |
@@ -211,12 +210,13 @@ triage:
 worker:
   stage: work
   resource_group: boucle-issue-$BOUCLE_ISSUE
+  needs:
+    - job: dispatch
+      optional: true
   rules:
     - if: $BOUCLE_ENABLED != "true"
       when: never
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "worker"
-  variables:
-    BOUCLE_ROLE: worker
   script:
     - |
       export BOUCLE_ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
@@ -303,12 +303,13 @@ worker:
 reviewer:
   stage: review
   resource_group: boucle-issue-$BOUCLE_ISSUE
+  needs:
+    - job: dispatch
+      optional: true
   rules:
     - if: $BOUCLE_ENABLED != "true"
       when: never
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "reviewer"
-  variables:
-    BOUCLE_ROLE: reviewer
   script:
     - |
       export BOUCLE_ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
@@ -397,6 +398,9 @@ deploy:
 e2e:
   stage: verify
   resource_group: boucle-issue-$BOUCLE_ISSUE
+  needs:
+    - job: dispatch
+      optional: true
   rules:
     - if: $BOUCLE_ENABLED != "true"
       when: never
