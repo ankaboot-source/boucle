@@ -14,6 +14,8 @@ stages:
 
 variables:
   BOUCLE_FORGE_HOST: framagit.org
+  BOUCLE_BUILD_CMD: "npm ci && npm run build"
+  BOUCLE_BUILD_OUTPUT: "public"
   # File-type CI variable: $OPENCODE_AUTH holds a path to the auth.json temp file
 
 # ── Default: use node:22-slim (has node, npm, curl — much smaller than node:22) ─
@@ -96,6 +98,15 @@ dispatch:
         exit 0
       fi
 
+      # Label helper: preserve non-boucle labels when writing a boucle label
+      set_boucle_label() {
+        local iid="$1" new="$2"
+        local current
+        current=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        local merged="${current:+$current,}$new"
+        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
+      }
+
       # Get current labels
       LABELS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID" | jq -r '.labels | join(",")')
 
@@ -124,10 +135,9 @@ dispatch:
         echo "Triggering triage for issue #$IID"
         # Chain to triage job by writing to a file that downstream jobs read
         echo "$IID" > .boucle-issue
-        # Apply boucle:triage label if not present
+        # Apply boucle:triage label if not present (preserving any non-boucle labels)
         if ! echo "$LABELS" | grep -q "boucle:triage"; then
-          glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" \
-            -f labels="boucle:triage" > /dev/null
+          set_boucle_label "$IID" "boucle:triage"
         fi
       else
         echo "No action needed for issue #$IID (labels: $LABELS)"
@@ -140,7 +150,7 @@ dispatch:
 # ── Triage ──────────────────────────────────────────────────────────────
 triage:
   stage: triage
-  resource_group: boucle-issue-$BOUCLE_ISSUE
+  # resource_group omitted — BOUCLE_ISSUE not available at pipeline eval time for triage
   needs:
     - job: dispatch
       optional: true
@@ -164,6 +174,15 @@ triage:
       IID=$(cat .boucle-issue)
       export BOUCLE_ISSUE="$IID"
 
+      # Label helper: preserve non-boucle labels when writing a boucle label
+      set_boucle_label() {
+        local iid="$1" new="$2"
+        local current
+        current=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        local merged="${current:+$current,}$new"
+        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
+      }
+
       # Run the agent
       ./bin/oc triage
 
@@ -171,18 +190,16 @@ triage:
       COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
         | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | last | .body')
 
-      DISPOSITION=$(echo "$COMMENT" | grep -A1 "^## Disposition" | tail -1 | tr -d ' \n' || echo "")
-      SIZE=$(echo "$COMMENT" | grep -A1 "^## Classification" | tail -1 | grep -oE 'Size: [SML]' | cut -d' ' -f2 || echo "")
+      DISPOSITION=$(echo "$COMMENT" | grep -oiE '(READY|NEEDS-INFO|NEEDS-SPLIT)' | head -1 | tr '[:lower:]' '[:upper:]')
+      SIZE=$(echo "$COMMENT" | grep -oiE 'Size:\s*[SML]' | grep -oiE '[SML]' | head -1 | tr '[:lower:]' '[:upper:]')
 
       # Route based on disposition
       case "$DISPOSITION" in
         READY)
           if [ "$SIZE" = "L" ]; then
-            glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" \
-              -f labels="boucle:human,size:l" > /dev/null
+            set_boucle_label "$IID" "boucle:human,size:l"
           else
-            glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" \
-              -f labels="boucle:todo,size:$(echo $SIZE | tr '[:upper:]' '[:lower:]')" > /dev/null
+            set_boucle_label "$IID" "boucle:todo,size:$(echo $SIZE | tr '[:upper:]' '[:lower:]')"
             # Chain to worker
             curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
               -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
@@ -190,17 +207,14 @@ triage:
           fi
           ;;
         NEEDS-INFO)
-          glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" \
-            -f labels="boucle:needs-info" > /dev/null
+          set_boucle_label "$IID" "boucle:needs-info"
           ;;
         NEEDS-SPLIT)
-          glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" \
-            -f labels="boucle:human" > /dev/null
+          set_boucle_label "$IID" "boucle:human"
           ;;
         *)
           echo "Unparsable disposition: $DISPOSITION → routing to human"
-          glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" \
-            -f labels="boucle:human" > /dev/null
+          set_boucle_label "$IID" "boucle:human"
           ;;
       esac
 
@@ -228,13 +242,31 @@ worker:
       ITERATION="${BOUCLE_ITERATION:-1}"
       export BOUCLE_ITERATION
 
-      # Set working label
-      glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
-        -f labels="boucle:working" > /dev/null
+      # Label helper: preserve non-boucle labels when writing a boucle label
+      set_boucle_label() {
+        local iid="$1" new="$2"
+        local current
+        current=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        local merged="${current:+$current,}$new"
+        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
+      }
 
-      # Create/checkout branch
-      BRANCH="boucle/$BOUCLE_ISSUE-$(date +%s)"
-      git checkout -b "$BRANCH"
+      # Set working label
+      set_boucle_label "$BOUCLE_ISSUE" "boucle:working"
+
+      # Create/checkout branch (stable name — iteration 2+ reuses & resets to master)
+      BRANCH="boucle/$BOUCLE_ISSUE"
+      if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+        git checkout "$BRANCH"
+        git reset --hard origin/master
+      else
+        git checkout -b "$BRANCH"
+      fi
+
+      # Configure git credentials for push
+      git config user.email "bot@ankaboot.dev"
+      git config user.name "up-bot"
+      git remote set-url origin "https://up-bot:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${CI_PROJECT_PATH}.git"
 
       # Seed state.md on first run
       if [ ! -f ".boucle/$BOUCLE_ISSUE/state.md" ]; then
@@ -262,19 +294,23 @@ worker:
       EOF
       fi
 
-      # Run the agent
+      # Run the agent (agent commits its own work)
       ./bin/oc worker
 
+      # Ensure wrangler cache isn't committed
+      if ! grep -q '.wrangler/' .gitignore 2>/dev/null; then
+        echo '.wrangler/' >> .gitignore
+        git add .gitignore
+      fi
+
       # Build
-      npm ci && npm run build
+      $BOUCLE_BUILD_CMD
 
       # Deploy to preview
-      PREVIEW_URL=$(npx wrangler pages deploy public --branch "$BRANCH" --project-name urgence-palestine 2>&1 | grep -oE 'https://[a-z0-9.-]+\.pages\.dev' | head -1)
+      PREVIEW_URL=$(npx wrangler pages deploy "$BOUCLE_BUILD_OUTPUT" --branch "$BRANCH" --project-name urgence-palestine 2>&1 | grep -oE 'https://[a-z0-9.-]+\.pages\.dev' | head -1)
 
-      # Push branch
-      git add -A
-      git commit -m "boucle: implement issue #$BOUCLE_ISSUE [skip ci]"
-      git push origin "$BRANCH"
+      # Push branch (agent already committed; we just push)
+      git push --force origin "$BRANCH"
 
       # Open MR
       glab mr create --source-branch "$BRANCH" --target-branch master \
@@ -295,8 +331,7 @@ worker:
       fi
 
       # Set review label
-      glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
-        -f labels="boucle:review" > /dev/null
+      set_boucle_label "$BOUCLE_ISSUE" "boucle:review"
 
       # Chain to reviewer
       curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
@@ -319,6 +354,15 @@ reviewer:
     - |
       export BOUCLE_ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
 
+      # Label helper: preserve non-boucle labels when writing a boucle label
+      set_boucle_label() {
+        local iid="$1" new="$2"
+        local current
+        current=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        local merged="${current:+$current,}$new"
+        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
+      }
+
       # Find the MR for this issue
       MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?state=opened" \
         | jq -r '.[] | select(.source_branch | startswith("boucle/'"$BOUCLE_ISSUE"'-")) | .iid' | head -1)
@@ -339,27 +383,23 @@ reviewer:
 
       case "$VERDICT" in
         PASS)
-          glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
-            -f labels="boucle:human" > /dev/null
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:human"
           ;;
         FAIL)
           ITERATION="${BOUCLE_ITERATION:-1}"
           if [ "$ITERATION" -lt 3 ]; then
-            glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
-              -f labels="boucle:todo" > /dev/null
+            set_boucle_label "$BOUCLE_ISSUE" "boucle:todo"
             # Chain back to worker with incremented iteration
             curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
               -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
               -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=worker" \
               -F "variables[BOUCLE_ITERATION]=$((ITERATION+1))" > /dev/null
           else
-            glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
-              -f labels="boucle:blocked" > /dev/null
+            set_boucle_label "$BOUCLE_ISSUE" "boucle:blocked"
           fi
           ;;
         UNCERTAIN|*)
-          glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
-            -f labels="boucle:human" > /dev/null
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:human"
           glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
             -f body="Verdict unparsable or uncertain. Human review needed." > /dev/null
           ;;
@@ -380,8 +420,8 @@ deploy:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
   script:
     - |
-      npm ci && npm run build
-      DEPLOY_URL=$(npx wrangler pages deploy public --project-name urgence-palestine --branch master 2>&1 | grep -oE 'https://[a-z0-9.-]+\.pages\.dev' | head -1)
+      $BOUCLE_BUILD_CMD
+      DEPLOY_URL=$(npx wrangler pages deploy "$BOUCLE_BUILD_OUTPUT" --project-name urgence-palestine --branch master 2>&1 | grep -oE 'https://[a-z0-9.-]+\.pages\.dev' | head -1)
 
       # Assert: deployment URL returns 200 (production domain may not have DNS yet)
       if [ -z "$DEPLOY_URL" ]; then
@@ -418,45 +458,60 @@ e2e:
       export BOUCLE_LIVE_URL="$LIVE_URL"
       echo "E2E testing URL: $LIVE_URL"
 
+      # Label helper: preserve non-boucle labels when writing a boucle label
+      set_boucle_label() {
+        local iid="$1" new="$2"
+        local current
+        current=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        local merged="${current:+$current,}$new"
+        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
+      }
+
+      # Deploy-triggered e2e: no issue context. Run a deterministic HTTP smoke test.
+      if [ -z "${BOUCLE_ISSUE:-}" ]; then
+        echo "Deploy-triggered e2e — no issue context. Running HTTP smoke test."
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BOUCLE_LIVE_URL")
+        if [ "$HTTP_CODE" = "200" ]; then
+          echo "E2E smoke test PASS — $BOUCLE_LIVE_URL returns 200"
+          exit 0
+        else
+          echo "E2E smoke test FAIL — $BOUCLE_LIVE_URL returns $HTTP_CODE" >&2
+          exit 1
+        fi
+      fi
+
       # Run the agent on the live URL
       ./bin/oc e2e
 
       # Parse verdict from agent output (bin/oc logs to stdout)
       # If BOUCLE_ISSUE is set, parse from issue comment; otherwise from agent stdout
-      if [ -n "$BOUCLE_ISSUE" ]; then
-        COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-          | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | last | .body')
-        VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+      COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+        | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | last | .body')
+      VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
 
-        case "$VERDICT" in
-          PASS)
-            glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
-              -f labels="boucle:done" > /dev/null
-            ;;
-          FAIL)
-            # Loop closure: open a new issue in triage with the trace
-            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues" \
-              -f title="E2E failure for issue #$BOUCLE_ISSUE" \
-              -f description="E2E verification failed for issue #$BOUCLE_ISSUE.
+      case "$VERDICT" in
+        PASS)
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:done"
+          ;;
+        FAIL)
+          # Loop closure: open a new issue in triage with the trace
+          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues" \
+            -f title="E2E failure for issue #$BOUCLE_ISSUE" \
+            -f description="E2E verification failed for issue #$BOUCLE_ISSUE.
 
       ## Trace
       $(echo "$COMMENT")
 
       ## Live URL
       $LIVE_URL" \
-              -f labels="boucle:triage" > /dev/null
-            ;;
-          UNCERTAIN|*)
-            glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" \
-              -f labels="boucle:human" > /dev/null
-            ;;
-        esac
+            -f labels="boucle:triage" > /dev/null
+          ;;
+        UNCERTAIN|*)
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:human"
+          ;;
+      esac
 
-        if [ -z "$VERDICT" ]; then
-          echo "FAIL: e2e verdict not parsable" >&2; exit 1
-        fi
-      else
-        # Deploy-triggered e2e (no specific issue) — log verdict only
-        echo "E2E ran without a specific issue (deploy-triggered). Verdict logged in agent output."
+      if [ -z "$VERDICT" ]; then
+        echo "FAIL: e2e verdict not parsable" >&2; exit 1
       fi
   timeout: 20m
