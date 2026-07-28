@@ -75,7 +75,7 @@ dispatch:
     paths:
       - .boucle-issue
   tags:
-    - boucle
+    - tooling
 
 # ── Triage ──────────────────────────────────────────────────────────────
 triage:
@@ -140,7 +140,7 @@ triage:
         exit 1
       fi
   tags:
-    - boucle
+    - tooling
   timeout: 10m
 
 # ── Worker ──────────────────────────────────────────────────────────────
@@ -234,7 +234,7 @@ worker:
         -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
         -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=reviewer" > /dev/null
   tags:
-    - boucle
+    - tooling
   timeout: 30m
 
 # ── Reviewer ────────────────────────────────────────────────────────────
@@ -302,7 +302,7 @@ reviewer:
         echo "FAIL: verdict not parsable" >&2; exit 1
       fi
   tags:
-    - boucle
+    - tooling
   timeout: 15m
 
 # ── Deploy (on merge to master) ─────────────────────────────────────────
@@ -328,7 +328,7 @@ deploy:
         -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
         -F "variables[BOUCLE_ROLE]=e2e" > /dev/null
   tags:
-    - boucle
+    - tooling
   timeout: 10m
 
 # ── E2E (after deploy) ─────────────────────────────────────────────────
@@ -384,5 +384,5 @@ e2e:
         echo "FAIL: e2e verdict not parsable" >&2; exit 1
       fi
   tags:
-    - boucle
+    - tooling
   timeout: 15m
