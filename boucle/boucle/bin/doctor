@@ -62,17 +62,20 @@ else
 fi
 
 # ── Runner online ──────────────────────────────────────────────────────
-if glab api --hostname "$HOST" "/projects/$PROJECT_ID/runners" 2>/dev/null | jq -e '.[] | select(.status=="online" and (.tag_list | contains(["tooling"])))' >/dev/null 2>&1; then
-  pass "tooling-tagged runner online"
+RUNNER_TAG="${BOUCLE_RUNNER_TAG:-tooling}"
+if glab api --hostname "$HOST" "/projects/$PROJECT_ID/runners" 2>/dev/null | jq -e ".[] | select(.status==\"online\" and (.tag_list | contains([\"$RUNNER_TAG\"])))" >/dev/null 2>&1; then
+  pass "runner with tag '$RUNNER_TAG' online"
 else
-  fail "no tooling-tagged runner online"
+  fail "no runner with tag '$RUNNER_TAG' online"
 fi
 
 # ── Agents parse ───────────────────────────────────────────────────────
-# (boucle roles map to existing oh-my-opencode-slim agents — no .md files to check)
-# Verify opencode can list the expected agents instead.
 for role in triage worker reviewer e2e; do
-  pass "role $role maps to existing oh-my-opencode-slim agent (checked at runtime by bin/oc)"
+  if [ -f ".opencode/agents/$role.md" ]; then
+    pass "agent $role.md exists"
+  else
+    fail "agent $role.md missing"
+  fi
 done
 
 # ── opencode reachable ─────────────────────────────────────────────────
