@@ -2,6 +2,7 @@
 # Spec: issue #1 (boucle MVP spec)
 # Five jobs: triage, worker, reviewer, deploy, e2e
 # Dispatcher: single entry, parses webhook payload, routes to triage
+# Runner: shared shell executor (Atchoum) — before_script bootstraps tools
 
 stages:
   - dispatch
@@ -13,6 +14,74 @@ stages:
 
 variables:
   BOUCLE_FORGE_HOST: framagit.org
+  # File-type CI variable: $OPENCODE_AUTH holds a path to the auth.json temp file
+
+# ── Default before_script: bootstrap tools on shell executor ───────────
+# Shared runners are shell executors — they may lack node/glab/opencode/wrangler.
+# This installs them to ~/.local/bin on first run. Subsequent runs in the same
+# workspace may reuse cached installs.
+default:
+  before_script:
+    - |
+      set -x
+      export PATH="$HOME/.local/bin:$PATH"
+      export GITLAB_TOKEN="$BOUCLE_TOKEN"
+      export GITLAB_HOST="$BOUCLE_FORGE_HOST"
+
+      # ── Node.js (via nvm) ──────────────────────────────────────────
+      if ! command -v node &>/dev/null; then
+        echo "Installing nvm + node 22..."
+        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+        export NVM_DIR="$HOME/.nvm"
+        [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+        nvm install 22
+        nvm use 22
+      else
+        # Source nvm if present (for npx/npm in PATH)
+        export NVM_DIR="$HOME/.nvm"
+        [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" 2>/dev/null || true
+      fi
+
+      # ── glab CLI ───────────────────────────────────────────────────
+      if ! command -v glab &>/dev/null; then
+        echo "Installing glab..."
+        mkdir -p "$HOME/.local/bin"
+        GLAB_VER="1.50.0"
+        curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VER}/downloads/glab_${GLAB_VER}_linux_amd64.tar.gz" -o /tmp/glab.tar.gz
+        tar xzf /tmp/glab.tar.gz -C /tmp
+        cp /tmp/bin/glab "$HOME/.local/bin/glab" 2>/dev/null || cp /tmp/glab "$HOME/.local/bin/glab"
+        chmod +x "$HOME/.local/bin/glab"
+      fi
+
+      # ── opencode ──────────────────────────────────────────────────
+      if ! command -v opencode &>/dev/null; then
+        echo "Installing opencode..."
+        mkdir -p "$HOME/.local/bin"
+        curl -fsSL -o "$HOME/.local/bin/opencode" \
+          "https://github.com/sst/opencode/releases/latest/download/opencode-linux-amd64"
+        chmod +x "$HOME/.local/bin/opencode"
+      fi
+
+      # ── wrangler ──────────────────────────────────────────────────
+      if ! command -v wrangler &>/dev/null; then
+        echo "Installing wrangler..."
+        npm install -g wrangler 2>/dev/null || true
+      fi
+
+      # ── opencode auth (file-type CI variable → expected path) ──────
+      if [ -n "${OPENCODE_AUTH:-}" ] && [ -f "$OPENCODE_AUTH" ]; then
+        mkdir -p "$HOME/.local/share/opencode"
+        cp "$OPENCODE_AUTH" "$HOME/.local/share/opencode/auth.json"
+      fi
+
+      # ── Verify ────────────────────────────────────────────────────
+      echo "=== Environment ==="
+      node --version 2>/dev/null || echo "node: MISSING"
+      npm --version 2>/dev/null || echo "npm: MISSING"
+      glab version 2>/dev/null | head -1 || echo "glab: MISSING"
+      opencode version 2>/dev/null || echo "opencode: MISSING"
+      wrangler --version 2>/dev/null || echo "wrangler: MISSING"
+      echo "==================="
 
 # ── Dispatcher ──────────────────────────────────────────────────────────
 dispatch:
@@ -74,8 +143,6 @@ dispatch:
   artifacts:
     paths:
       - .boucle-issue
-  tags:
-    - tooling
 
 # ── Triage ──────────────────────────────────────────────────────────────
 triage:
@@ -139,8 +206,6 @@ triage:
         echo "FAIL: disposition not parsable" >&2
         exit 1
       fi
-  tags:
-    - tooling
   timeout: 10m
 
 # ── Worker ──────────────────────────────────────────────────────────────
@@ -233,8 +298,6 @@ worker:
       curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
         -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
         -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=reviewer" > /dev/null
-  tags:
-    - tooling
   timeout: 30m
 
 # ── Reviewer ────────────────────────────────────────────────────────────
@@ -301,11 +364,9 @@ reviewer:
       if [ -z "$VERDICT" ]; then
         echo "FAIL: verdict not parsable" >&2; exit 1
       fi
-  tags:
-    - tooling
   timeout: 15m
 
-# ── Deploy (on merge to master) ─────────────────────────────────────────
+# ── Deploy (on push to master) ─────────────────────────────────────────
 deploy:
   stage: deploy
   rules:
@@ -315,7 +376,7 @@ deploy:
   script:
     - |
       npm ci && npm run build
-      npx wrangler pages deploy public --project-name urgence-palestine --branch main
+      npx wrangler pages deploy public --project-name urgence-palestine --branch master
 
       # Assert: production URL returns 200 on new deployment
       PROD_URL="https://urgence-palestine.fr"
@@ -327,8 +388,6 @@ deploy:
       curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
         -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
         -F "variables[BOUCLE_ROLE]=e2e" > /dev/null
-  tags:
-    - tooling
   timeout: 10m
 
 # ── E2E (after deploy) ─────────────────────────────────────────────────
@@ -383,6 +442,4 @@ e2e:
       if [ -z "$VERDICT" ]; then
         echo "FAIL: e2e verdict not parsable" >&2; exit 1
       fi
-  tags:
-    - tooling
   timeout: 15m
