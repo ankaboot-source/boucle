@@ -10,6 +10,8 @@
     "build:symbols": "node scripts/build-symbols.mjs"
   },
   "dependencies": {
-    "astro": "^5.6.1"
+    "@astrojs/tailwind": "^6.0.2",
+    "astro": "^5.6.1",
+    "tailwindcss": "^3.4.19"
   }
 }
