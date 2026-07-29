@@ -1,11 +1,21 @@
 /* =============================================================================
  * Urgence Palestine — Global stylesheet
  * -----------------------------------------------------------------------------
- * Loaded once from Layout.astro. Defines @font-face for the brand fonts, applies
- * the heading/body type tokens site-wide, and resets a few things.
+ * Loaded once from Layout.astro. Bootstraps Tailwind (preflight + utilities),
+ * defines @font-face for the brand fonts, applies the heading/body type tokens
+ * site-wide, and resets a few things.
  * ========================================================================== */
 
 @import "./tokens.css";
+
+/* ---------- Tailwind layers (preflight + component + utility) ----------
+ * Preflight provides a modern reset (margin/typography reset, box-sizing).
+ * The brand-specific overrides below intentionally sit AFTER the Tailwind
+ * layers so they win against preflight defaults where they conflict.
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 /* ---------- Brand webfonts (self-hosted under /fonts/) ---------- */
 
