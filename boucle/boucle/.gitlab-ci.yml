@@ -272,6 +272,15 @@ triage:
           fi
           ;;
         NEEDS-SPLIT)
+          # Idempotency guard: if the parent already has a split-parent marker,
+          # the split was already done — skip to avoid duplicate sub-issues
+          # (e.g. on re-trigger after a partial failure).
+          EXISTING_SPLIT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+            | jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | length' 2>/dev/null || echo 0)
+          if [ "${EXISTING_SPLIT:-0}" -gt 0 ]; then
+            echo "Parent #$IID already has a boucle:split-parent marker — skipping split (idempotency guard)"
+            exit 0
+          fi
           # Parse sub-issues from the triage comment. Format:
           #   ## Sub-issues
           #   <!-- boucle:sub-issue v=1 -->
@@ -346,8 +355,8 @@ triage:
                 CREATED_JSON=$(glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues" \
                   -f title="$CUR_TITLE" \
                   -f description="$SUB_BODY" \
-                  -f labels="boucle:triage,size:$SUB_SIZE_LOWER" 2>&1) || CREATED_JSON=""
-                NEW_IID=$(echo "$CREATED_JSON" | jq -r '.iid // empty' 2>/dev/null)
+                  -f labels="boucle:triage,size:$SUB_SIZE_LOWER" 2>/dev/null) || CREATED_JSON=""
+                NEW_IID=$(echo "$CREATED_JSON" | jq -r '.iid // empty' 2>/dev/null || true)
                 if [ -n "$NEW_IID" ] && [ "$NEW_IID" != "null" ]; then
                   CREATED_IIDS="${CREATED_IIDS:+$CREATED_IIDS,}$NEW_IID"
                   SUBISSUE_COUNT=$((SUBISSUE_COUNT + 1))
