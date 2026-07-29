@@ -35,9 +35,6 @@ variables:
 # before_script installs glab + opencode + wrangler (not in the image).
 default:
   image: node:22-slim
-  # Route to the project's dedicated runner (tag: tooling) instead of
-  # piling up on the shared instance runner with 30+ pending jobs.
-  tags: [tooling]
   before_script:
     - |
       set -x
