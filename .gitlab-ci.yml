@@ -246,6 +246,28 @@ triage:
         glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
       }
 
+      # Resolve the human reporter to notify on NEEDS-INFO. For a sub-issue
+      # created by the bot via NEEDS-SPLIT, the issue's own author is up-bot
+      # (useless to assign). The human who must answer is the PARENT issue's
+      # author. Parse the "## Parent issue\n#N" link from the sub-issue body
+      # (same format maybe_close_parent uses) and fetch the parent's author.
+      # For a top-level issue, use its own author.
+      # NOTE: use printf '%s' (not echo) to feed JSON to jq — echo in some
+      # shells (zsh) interprets backslash escapes and corrupts JSON whose
+      # description contains literal control characters.
+      resolve_reporter_id() {
+        local iid="$1" data parent_iid parent_data reporter_id
+        data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null) || { echo ""; return; }
+        parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+        if [ -n "$parent_iid" ]; then
+          parent_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid" 2>/dev/null) || { echo ""; return; }
+          reporter_id=$(printf '%s' "$parent_data" | jq -r '.author.id // empty')
+        else
+          reporter_id=$(printf '%s' "$data" | jq -r '.author.id // empty')
+        fi
+        echo "$reporter_id"
+      }
+
       # Run the agent
       ./bin/oc triage
 
@@ -278,12 +300,18 @@ triage:
         NEEDS-INFO)
           set_boucle_label "$IID" "boucle:needs-info"
           # Assign the issue to its reporter (author) so they're notified
-          # and know to answer the blocking questions. The loop pauses here
-          # until the author replies, which re-triggers triage.
-          AUTHOR_ID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID" | jq -r '.author.id')
+          # and know to answer the blocking questions. For a sub-issue
+          # created by the bot via NEEDS-SPLIT, the author is up-bot — so
+          # resolve the PARENT issue's author instead (the human who filed
+          # the original request). The loop pauses here until the reporter
+          # replies, which re-triggers triage.
+          AUTHOR_ID=$(resolve_reporter_id "$IID")
           if [ -n "$AUTHOR_ID" ] && [ "$AUTHOR_ID" != "null" ]; then
-            glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" \
-              -f "assignee_ids[]=$AUTHOR_ID" > /dev/null
+            # NOTE: glab's `-f "assignee_ids[]=N"` is broken (GitLab rejects
+            # the form encoding). Use curl with --data-urlencode instead.
+            curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$IID" \
+              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+              --data-urlencode "assignee_ids[]=$AUTHOR_ID"
           fi
           ;;
         NEEDS-SPLIT)
@@ -357,6 +385,14 @@ triage:
                 CUR_BODY_NO_SIZE=$(echo "$CUR_BODY" | sed '/^Size:[[:space:]]*[SML]/d')
                 # Default size to M if not present
                 CUR_SIZE="${CUR_SIZE_RAW:-M}"
+                # Validate: if "- [ ]" appears mid-line (not at start), newlines
+                # were stripped — the agent posted a single-line body that won't
+                # render as markdown. Skip creation so we fall back to human
+                # instead of shipping an unrenderable sub-issue.
+                if echo "$CUR_BODY_NO_SIZE" | grep -qE '[^[:space:]]- \[ \]'; then
+                  echo "WARN: sub-issue '$CUR_TITLE' has checkbox markers not at line start (newlines stripped) — skipping creation"
+                  PARSE_FAILURES=$((PARSE_FAILURES + 1))
+                else
                 # Build the sub-issue body with parent reference (single-line to keep YAML literal block happy)
                 SUB_BODY=$(printf 'Split from #%s (%s).\n\n%s\n\n## Parent issue\n#%s — %s' "$PARENT_IID" "$PARENT_TITLE" "$CUR_BODY_NO_SIZE" "$PARENT_IID" "$PARENT_URL")
                 SUB_SIZE_LOWER=$(echo "$CUR_SIZE" | tr '[:upper:]' '[:lower:]')
@@ -384,6 +420,7 @@ triage:
                 else
                   echo "  → FAIL to create sub-issue: $CREATED_JSON" >&2
                   PARSE_FAILURES=$((PARSE_FAILURES + 1))
+                fi
                 fi
               fi
               # Reset for next record
