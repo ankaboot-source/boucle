@@ -318,6 +318,17 @@ elif [ -n "$CF_TOKEN" ]; then
       log_fail "CF Pages project creation failed"
     fi
   fi
+  # Store the CF Pages project name as BOUCLE_DEPLOY_PROJECT CI variable
+  # so the pipeline's deploy/worker jobs know which project to deploy to.
+  # Without this, BOUCLE_DEPLOY_CMD expands to an empty --project-name and
+  # both the deploy job and worker preview deploy fail silently.
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_DEPLOY_PROJECT" 2>/dev/null | jq -r '.key // empty')
+  if [ -n "$EXISTING" ]; then
+    log_skip "BOUCLE_DEPLOY_PROJECT already exists"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_DEPLOY_PROJECT -f value=$CF_PROJECT_NAME -f masked=false -f protected=false >/dev/null"
+    log_pass "BOUCLE_DEPLOY_PROJECT set to '$CF_PROJECT_NAME'"
+  fi
 else
   log_skip "CF Pages project (no --cf-token)"
 fi
