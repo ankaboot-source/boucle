@@ -467,6 +467,10 @@ worker:
       # Set working label
       set_boucle_label "$BOUCLE_ISSUE" "boucle:working"
 
+      # Fetch latest master so the branch is based on current master, not the
+      # stale CI clone (master may have advanced between clone and this job).
+      git fetch origin master
+
       # Create/checkout branch (stable name — iteration 2+ reuses & resets to master)
       BRANCH="boucle/$BOUCLE_ISSUE"
       if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
@@ -522,8 +526,23 @@ worker:
       # Deploy to preview (configurable via BOUCLE_DEPLOY_CMD)
       PREVIEW_URL=$(eval "$BOUCLE_DEPLOY_CMD" 2>&1 | grep -oE "$BOUCLE_DEPLOY_URL_REGEX" | head -1)
 
+      # Rebase onto latest master before pushing. master may have advanced
+      # (other MRs merged) since this branch was created — without a rebase
+      # the MR goes stale and GitLab reports it as conflicted, blocking merge.
+      # On rebase conflict: fail fast to human instead of shipping a broken MR.
+      git fetch origin master
+      if ! git rebase origin/master; then
+        echo "FAIL: rebase onto origin/master conflicted — master advanced since branch creation." >&2
+        echo "Escalating to human (boucle:human). The worker cannot auto-resolve merge conflicts." >&2
+        git rebase --abort 2>/dev/null || true
+        set_boucle_label "$BOUCLE_ISSUE" "boucle:human"
+        glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+          -f body="⚠️ Worker could not rebase onto master (conflict). Master advanced since this branch was created. Human rebase needed." > /dev/null
+        exit 1
+      fi
+
       # Push branch (agent already committed; we just push)
-      git push --force origin "$BRANCH"
+      git push --force-with-lease origin "$BRANCH"
 
       # Build MR description with context (printf keeps YAML-valid, no multi-line string)
       ITERATION="${BOUCLE_ITERATION:-1}"
