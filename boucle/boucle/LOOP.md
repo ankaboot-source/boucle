@@ -1,6 +1,6 @@
-# LOOP — urgence-palestine.fr
+# LOOP — <target repo>
 
-Purpose: Autonomous dev loop for the urgence-palestine.fr static site.
+Purpose: Autonomous dev loop for the target static site.
 Cadence: webhook (primary); jobs chain to the next role via the trigger token.
 Human gates: MR approval (only).
 Iteration cap: 3 worker runs per issue.
