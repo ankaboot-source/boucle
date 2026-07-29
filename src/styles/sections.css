@@ -246,3 +246,107 @@
 	color: var(--color-text-muted);
 	margin: 0;
 }
+
+/* ---------- Site footer (site-wide, in Layout) ---------- */
+
+.site-footer {
+	margin-top: var(--space-3xl);
+	background: var(--color-flag-black);
+	color: var(--color-ink-on-dark);
+	padding: var(--space-2xl) 0 var(--space-l);
+}
+
+.site-footer__inner {
+	width: min(100% - 2 * var(--space-s), var(--container-wide));
+	margin-inline: auto;
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: var(--space-l);
+}
+
+@media (min-width: 48rem) {
+	.site-footer__inner {
+		grid-template-columns: 1.4fr 1fr 1.4fr;
+		gap: var(--space-2xl);
+		align-items: start;
+	}
+}
+
+.site-footer__brand {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2xs);
+}
+
+.site-footer__eyebrow {
+	color: var(--color-flag-red);
+}
+
+.site-footer__title {
+	font-family: var(--font-heading);
+	font-size: var(--text-2xl);
+	margin: 0;
+	color: var(--color-ink-on-dark);
+}
+
+.site-footer__description {
+	margin: 0;
+	color: oklch(85% 0 0);
+	font-size: var(--text-base);
+	max-width: 40ch;
+}
+
+.site-footer__nav-title {
+	font-family: var(--font-body);
+	font-size: var(--text-xs);
+	font-weight: var(--weight-semibold);
+	letter-spacing: var(--tracking-mega);
+	text-transform: uppercase;
+	color: oklch(75% 0 0);
+	margin: 0 0 var(--space-s);
+}
+
+.site-footer__list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2xs);
+}
+
+.site-footer__list a {
+	color: var(--color-ink-on-dark);
+	text-decoration: none;
+	font-size: var(--text-base);
+	transition: color var(--duration-base) var(--ease-out);
+}
+
+.site-footer__list a:hover {
+	color: var(--color-flag-red);
+}
+
+.site-footer__newsletter {
+	display: flex;
+	flex-direction: column;
+}
+
+.site-footer__base {
+	width: min(100% - 2 * var(--space-s), var(--container-wide));
+	margin: var(--space-l) auto 0;
+	padding-top: var(--space-m);
+	border-top: 1px solid oklch(28% 0 0);
+}
+
+.site-footer__copy {
+	margin: 0;
+	font-size: var(--text-xs);
+	color: oklch(70% 0 0);
+}
+
+/* ---------- Newsletter section (homepage) ---------- */
+
+.newsletter-section {
+	width: min(100% - 2 * var(--space-s), var(--container-base));
+	margin-inline: auto;
+}

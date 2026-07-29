@@ -1,16 +1,16 @@
 ---
 import "../styles/global.css";
-import SiteFooter from "../components/SiteFooter.astro";
+import "../styles/sections.css";
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
 
 interface Props {
 	title?: string;
 	description?: string;
 	/**
-	 * Optional element to render at the very end of <body> — used by
-	 * pages that want to include the NewsletterModal. We render via a
-	 * slot so the modal can declare its own `delayMs` prop and own the
-	 * dialog markup (which needs to be in the DOM for the inactivity
-	 * script to find it).
+	 * Reserved for future use. Pages that want to inject a modal (e.g. the
+	 * NewsletterModal) pass it through the named `modal` slot so the dialog
+	 * is rendered as part of the same layout.
 	 */
 }
 
@@ -18,12 +18,6 @@ const {
 	title = "Urgence Palestine",
 	description = "Solidarité avec le peuple palestinien. Informations, actions et ressources pour soutenir la Palestine.",
 } = Astro.props;
-
-const navItems = [
-	{ href: "/", label: "Accueil" },
-	{ href: "/symboles", label: "Symboles" },
-	{ href: "/engagement", label: "S'engager" },
-];
 ---
 
 <!doctype html>
@@ -33,7 +27,7 @@ const navItems = [
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="generator" content={Astro.generator} />
 		<meta name="description" content={description} />
-		<meta name="theme-color" content="#0a0a0a" />
+		<meta name="theme-color"="#0a0a0a" />
 
 		<title>{title}</title>
 
@@ -58,133 +52,9 @@ const navItems = [
 		<link rel="icon" type="image/svg+xml" href="./favicon.svg" />
 	</head>
 	<body>
-		<a class="skip-link" href="#main">Aller au contenu</a>
-		<header class="site-header" aria-label="En-tête du site">
-			<div class="site-header__inner">
-				<a class="site-header__brand" href="/">
-					<span class="site-header__brand-mark" aria-hidden="true"></span>
-					<span class="site-header__brand-text">Urgence Palestine</span>
-				</a>
-				<nav class="site-header__nav" aria-label="Navigation principale">
-					<ul>
-						{
-							navItems.map((item) => (
-								<li>
-									<a href={item.href}>{item.label}</a>
-								</li>
-							))
-						}
-					</ul>
-				</nav>
-			</div>
-		</header>
-
-		<slot id="main" />
-
-		<SiteFooter />
-
-		{/*
-		  Optional page-level modals (e.g. the newsletter modal). Pages
-		  that want one pass it via the named slot `modal` so the dialog
-		  is part of the same render and the inactivity script can find
-		  it on load.
-		*/}
+		<Header />
+		<slot />
 		<slot name="modal" />
+		<Footer />
 	</body>
 </html>
-
-<style>
-	.skip-link {
-		position: absolute;
-		left: var(--space-s);
-		top: var(--space-s);
-		padding: var(--space-2xs) var(--space-s);
-		background: var(--color-ink);
-		color: var(--color-ink-on-dark);
-		border-radius: var(--radius-s);
-		font-size: var(--text-sm);
-		font-weight: var(--weight-semibold);
-		text-decoration: none;
-		transform: translateY(-200%);
-		transition: transform var(--duration-fast) var(--ease-out);
-		z-index: 100;
-	}
-
-	.skip-link:focus-visible {
-		transform: translateY(0);
-	}
-
-	.site-header {
-		position: sticky;
-		top: 0;
-		z-index: 10;
-		background: color-mix(in oklch, var(--color-bg) 92%, transparent);
-		backdrop-filter: blur(8px);
-		border-block-end: 1px solid var(--color-border);
-	}
-
-	.site-header__inner {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: var(--space-s);
-		width: min(100% - 2 * var(--space-s), var(--container-wide));
-		margin-inline: auto;
-		padding: var(--space-2xs) 0;
-	}
-
-	.site-header__brand {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--space-2xs);
-		text-decoration: none;
-		color: var(--color-ink);
-		font-family: var(--font-heading);
-		font-weight: var(--weight-bold);
-		font-size: var(--text-base);
-		letter-spacing: var(--tracking-tight);
-	}
-
-	.site-header__brand-mark {
-		display: inline-block;
-		width: 14px;
-		height: 14px;
-		border-radius: 3px;
-		background: linear-gradient(
-			135deg,
-			var(--color-flag-red) 0 50%,
-			var(--color-flag-green) 50% 100%
-		);
-	}
-
-	.site-header__nav ul {
-		list-style: none;
-		margin: 0;
-		padding: 0;
-		display: flex;
-		gap: var(--space-s);
-	}
-
-	.site-header__nav a {
-		font-size: var(--text-sm);
-		font-weight: var(--weight-medium);
-		color: var(--color-text);
-		text-decoration: none;
-		padding: var(--space-2xs) var(--space-2xs);
-		border-radius: var(--radius-s);
-		transition: color var(--duration-fast) var(--ease-out);
-	}
-
-	.site-header__nav a:hover,
-	.site-header__nav a:focus-visible {
-		color: var(--color-accent);
-	}
-
-	@media (max-width: 32rem) {
-		.site-header__inner {
-			flex-direction: column;
-			align-items: flex-start;
-			gap: var(--space-2xs);
-		}
-	}
-</style>

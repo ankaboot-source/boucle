@@ -1,0 +1,124 @@
+---
+/*
+ * DonationCTA
+ * -----------
+ * A high-impact donation block used on the homepage. No props required;
+ * renders a prominent link to the Donorbox campaign.
+ */
+---
+
+<section class="donation-cta" aria-labelledby="donation-cta-title">
+	<div class="donation-cta__inner container">
+		<p class="eyebrow donation-cta__eyebrow">Soutenir notre action</p>
+		<h2 id="donation-cta-title" class="donation-cta__title">
+			Donnez-nous les moyens de résister
+		</h2>
+		<p class="donation-cta__lede">
+			Chaque don, quel qu'il soit, alimente une mobilisation concrète :
+			matériel d'information, actions de solidarité et relais de la voix
+			palestinienne.
+		</p>
+		<a
+			href="https://donorbox.org/soutenir-up"
+			target="_blank"
+			rel="noopener"
+			class="donation-cta__button"
+		>
+			Faire un don
+		</a>
+	</div>
+</section>
+
+<style>
+	.donation-cta {
+		width: min(100% - 2 * var(--space-s), var(--container-wide));
+		margin-inline: auto;
+		padding: clamp(var(--space-xl), 5vw, var(--space-3xl))
+			clamp(var(--space-l), 5vw, var(--space-2xl));
+		background: var(--color-flag-red);
+		color: var(--color-flag-white);
+		border-radius: var(--radius-l);
+		overflow: hidden;
+		position: relative;
+	}
+
+	.donation-cta::before {
+		content: "";
+		position: absolute;
+		inset: 0;
+		background: linear-gradient(
+			135deg,
+			var(--color-flag-green-deep) 0%,
+			transparent 45%,
+			var(--color-flag-black) 100%
+		);
+		opacity: 0.18;
+		pointer-events: none;
+	}
+
+	.donation-cta__inner {
+		position: relative;
+		z-index: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: var(--space-m);
+	}
+
+	.donation-cta__eyebrow {
+		color: var(--color-flag-white);
+		opacity: 0.85;
+	}
+
+	.donation-cta__title {
+		font-family: var(--font-heading);
+		font-size: var(--text-3xl);
+		line-height: var(--leading-tight);
+		color: var(--color-flag-white);
+		margin: 0;
+		max-width: 22ch;
+	}
+
+	.donation-cta__lede {
+		margin: 0;
+		color: var(--color-flag-white);
+		opacity: 0.92;
+		max-width: 52ch;
+		font-size: var(--text-base);
+	}
+
+	.donation-cta__button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 56px;
+		padding: 0 var(--space-l);
+		font-family: var(--font-body);
+		font-size: var(--text-base);
+		font-weight: var(--weight-bold);
+		letter-spacing: 0.01em;
+		color: var(--color-flag-black);
+		background: var(--color-flag-white);
+		border: 2px solid var(--color-flag-white);
+		border-radius: var(--radius-pill);
+		text-decoration: none;
+		cursor: pointer;
+		transition:
+			background-color var(--duration-base) var(--ease-out),
+			color var(--duration-base) var(--ease-out),
+			transform var(--duration-fast) var(--ease-out);
+	}
+
+	.donation-cta__button:hover {
+		background: transparent;
+		color: var(--color-flag-white);
+		transform: translateY(-2px);
+	}
+
+	@media (min-width: 48rem) {
+		.donation-cta__inner {
+			align-items: center;
+			text-align: center;
+		}
+	}
+</style>
