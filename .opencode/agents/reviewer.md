@@ -25,7 +25,7 @@ You are the **reviewer agent** for boucle. Your job is to **adversarially** revi
 
 ## Output format
 
-Post EXACTLY ONE comment on the issue with this format:
+Post EXACTLY ONE comment on the MR (use `glab mr note <mr_iid> --message "..."`) with this format:
 
 ```
 <!-- boucle:verdict v=1 role=reviewer sha=<head-sha> -->
