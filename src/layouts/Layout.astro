@@ -1,5 +1,7 @@
 ---
 import "../styles/global.css";
+import "../styles/sections.css";
+import NewsletterSignup from "../components/NewsletterSignup.astro";
 
 interface Props {
 	title?: string;
@@ -10,6 +12,8 @@ const {
 	title = "Urgence Palestine",
 	description = "Solidarité avec le peuple palestinien. Informations, actions et ressources pour soutenir la Palestine.",
 } = Astro.props;
+
+const year = new Date().getFullYear();
 ---
 
 <!doctype html>
@@ -45,5 +49,40 @@ const {
 	</head>
 	<body>
 		<slot />
+
+		<footer class="site-footer" aria-labelledby="site-footer-title">
+			<div class="site-footer__inner">
+				<div class="site-footer__brand">
+					<p class="eyebrow site-footer__eyebrow">Urgence Palestine</p>
+					<h2 id="site-footer-title" class="site-footer__title">
+						Solidarité en action.
+					</h2>
+					<p class="site-footer__description">
+						Une plateforme d'information, d'action et de mémoire. Pour
+						que chaque voix porte et chaque geste compte.
+					</p>
+				</div>
+
+				<div class="site-footer__nav" aria-label="Liens utiles">
+					<h3 class="site-footer__nav-title">Liens</h3>
+					<ul class="site-footer__list">
+						<li><a href="/">Accueil</a></li>
+						<li><a href="/engagement">S'engager</a></li>
+						<li><a href="/symboles">Symboles</a></li>
+					</ul>
+				</div>
+
+				<div class="site-footer__newsletter">
+					<h3 class="site-footer__nav-title">Newsletter</h3>
+					<NewsletterSignup variant="inline" />
+				</div>
+			</div>
+
+			<div class="site-footer__base">
+				<p class="site-footer__copy">
+					© {year} Urgence Palestine. Tous droits réservés.
+				</p>
+			</div>
+		</footer>
 	</body>
 </html>
