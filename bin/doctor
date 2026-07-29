@@ -87,10 +87,14 @@ fi
 
 # ── CLOUDFLARE_API_TOKEN can deploy ────────────────────────────────────
 if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
-  if npx wrangler pages project list 2>/dev/null | grep -q urgence-palestine; then
-    pass "CF Pages project exists"
+  if [ -n "${BOUCLE_DEPLOY_PROJECT:-}" ]; then
+    if npx wrangler pages project list 2>/dev/null | grep -q "$BOUCLE_DEPLOY_PROJECT"; then
+      pass "CF Pages project '$BOUCLE_DEPLOY_PROJECT' exists"
+    else
+      fail "CF Pages project '$BOUCLE_DEPLOY_PROJECT' not found"
+    fi
   else
-    fail "CF Pages project not found"
+    fail "BOUCLE_DEPLOY_PROJECT not set (required for CF Pages check)"
   fi
 else
   fail "CLOUDFLARE_API_TOKEN not in env (run in CI, not locally)"

@@ -4,31 +4,34 @@
  * ---------------------------------------------------------------------------
  * A reusable newsletter signup form. Accepts an `email` address and a
  * label/eyebrow override for context. Submitting the form runs a small
- * client-side handler that simulates a POST (no real backend in this
- * static site) and replaces the form with a French-language success
- * message. A `sessionStorage` flag is set so we never re-prompt the same
- * visitor twice in the same session — used by the modal variant.
+ * client-side handler that validates the email, simulates a POST, and
+ * replaces the form with a French confirmation message. A
+ * `sessionStorage` flag is set under `up-newsletter-subscribed` so we
+ * never re-prompt the same visitor twice in the same session — used
+ * by the modal variant.
+ *
+ * Variants (all share the same DOM):
+ *  - "inline" (default): compact horizontal layout, for the site footer
+ *  - "block" / "stacked": stacked layout with a title and lead text,
+ *      for page sections and the modal
+ *  - "footer": compact single-row treatment, no visible label/hint
  *
  * Props:
  *  - id: required unique id so multiple instances on the same page don't
  *        collide (used by the input/label pair and the result region).
- *  - variant: "inline" (default) renders the email + button in a single
- *             row, "stacked" puts the button on its own line. "footer"
- *             is reserved for the compact footer treatment.
+ *  - variant: see above.
  *  - heading/description/buttonLabel: small copy overrides.
+ *  - labelledBy: optional override for the form's `aria-labelledby`.
+ *    Useful when the form is rendered inside a parent that already
+ *    provides a heading (e.g. the newsletter modal) so we don't end up
+ *    with an empty heading as the form's accessible name.
  */
 interface Props {
 	id?: string;
-	variant?: "inline" | "stacked" | "footer";
+	variant?: "inline" | "block" | "stacked" | "footer";
 	heading?: string;
 	description?: string;
 	buttonLabel?: string;
-	/**
-	 * Optional override for the form's `aria-labelledby`. Useful when the
-	 * form is rendered inside a parent that already provides a heading
-	 * (e.g. the newsletter modal) so we don't end up with an empty
-	 * heading as the form's accessible name.
-	 */
 	labelledBy?: string;
 }
 
@@ -41,6 +44,11 @@ const {
 	labelledBy,
 } = Astro.props;
 
+// Normalise `stacked` to `block` so the modal (which historically used
+// `stacked`) and pages (which use `block`) render identically.
+const normalisedVariant: "inline" | "block" | "footer" =
+	variant === "stacked" ? "block" : variant;
+
 // The form's accessible name is normally the h3 below, but a parent can
 // override it via the `labelledBy` prop.
 const formLabelledBy = labelledBy ?? `${id}-title`;
@@ -49,13 +57,13 @@ const hasDescription = description.trim().length > 0;
 ---
 
 <form
-	class:list={["newsletter", `newsletter--${variant}`]}
+	class:list={["newsletter", `newsletter--${normalisedVariant}`]}
 	data-newsletter
-	data-variant={variant}
+	data-variant={normalisedVariant}
 	novalidate
 	aria-labelledby={formLabelledBy}
 >
-	{(hasHeading || hasDescription) && (
+	{normalisedVariant !== "inline" && normalisedVariant !== "footer" && (hasHeading || hasDescription) && (
 		<div class="newsletter__intro">
 			{hasHeading && (
 				<h3 id={`${id}-title`} class="newsletter__heading">{heading}</h3>
@@ -64,6 +72,13 @@ const hasDescription = description.trim().length > 0;
 				<p class="newsletter__description">{description}</p>
 			)}
 		</div>
+	)}
+
+	{normalisedVariant === "inline" && hasHeading && (
+		<h3 id={`${id}-title`} class="visually-hidden newsletter__heading">{heading}</h3>
+	)}
+	{normalisedVariant === "inline" && hasDescription && (
+		<p class="visually-hidden newsletter__description">{description}</p>
 	)}
 
 	<div class="newsletter__row">
@@ -262,6 +277,24 @@ const hasDescription = description.trim().length > 0;
 		color: var(--color-accent-strong);
 	}
 
+	/* ---------- Block variant (stacked, for sections + modal) ---------- */
+
+	.newsletter--block {
+		padding: clamp(var(--space-m), 4vw, var(--space-xl));
+		background: var(--color-bg-soft);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-l);
+		gap: var(--space-m);
+	}
+
+	.newsletter--block .newsletter__heading {
+		font-size: var(--text-2xl);
+	}
+
+	.newsletter--block .newsletter__description {
+		font-size: var(--text-base);
+	}
+
 	/* ---------- Footer variant (compact, single row) ---------- */
 
 	.newsletter--footer {
@@ -291,6 +324,20 @@ const hasDescription = description.trim().length > 0;
 	.newsletter--footer .newsletter__label,
 	.newsletter--footer .newsletter__hint {
 		display: none;
+	}
+
+	/* ---------- Visually hidden helper (for inline variant) ---------- */
+
+	.visually-hidden {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 </style>
 
@@ -340,6 +387,19 @@ const hasDescription = description.trim().length > 0;
 		}
 	};
 
+	const hideFormRows = (form: NewsletterForm): void => {
+		const row = form.querySelector<HTMLElement>(".newsletter__row");
+		const intro = form.querySelector<HTMLElement>(".newsletter__intro");
+		const hint = form.querySelector<HTMLElement>(".newsletter__hint");
+		const success = form.querySelector<HTMLElement>(
+			"[data-newsletter-success]",
+		);
+		if (row) row.hidden = true;
+		if (intro) intro.hidden = true;
+		if (hint) hint.hidden = true;
+		if (success) success.hidden = false;
+	};
+
 	const handleSubmit = async (form: NewsletterForm): Promise<void> => {
 		const error = form.querySelector<HTMLElement>("[data-newsletter-error]");
 		if (error) error.hidden = true;
@@ -372,17 +432,7 @@ const hasDescription = description.trim().length > 0;
 
 		markSubscribed();
 
-		const row = form.querySelector<HTMLElement>(".newsletter__row");
-		const intro = form.querySelector<HTMLElement>(".newsletter__intro");
-		const hint = form.querySelector<HTMLElement>(".newsletter__hint");
-		const success = form.querySelector<HTMLElement>(
-			"[data-newsletter-success]",
-		);
-
-		if (row) row.hidden = true;
-		if (intro) intro.hidden = true;
-		if (hint) hint.hidden = true;
-		if (success) success.hidden = false;
+		hideFormRows(form);
 
 		// Notify the modal (and any other listener) that the user just
 		// converted, so it can stop tracking inactivity and clear any
@@ -405,16 +455,7 @@ const hasDescription = description.trim().length > 0;
 				// Already subscribed this session: skip the input row,
 				// show the success state immediately, and dispatch the
 				// event so the modal closes its timer too.
-				const row = form.querySelector<HTMLElement>(".newsletter__row");
-				const intro = form.querySelector<HTMLElement>(".newsletter__intro");
-				const hint = form.querySelector<HTMLElement>(".newsletter__hint");
-				const success = form.querySelector<HTMLElement>(
-					"[data-newsletter-success]",
-				);
-				if (row) row.hidden = true;
-				if (intro) intro.hidden = true;
-				if (hint) hint.hidden = true;
-				if (success) success.hidden = false;
+				hideFormRows(form);
 				document.dispatchEvent(
 					new CustomEvent("up:newsletter:subscribed", {
 						bubbles: false,

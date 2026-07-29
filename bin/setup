@@ -29,7 +29,7 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: bin/setup --project <id-or-path> --host <forge-host> [options]"
       echo ""
       echo "Options:"
-      echo "  --project <id-or-path>   Target GitLab project ID or path (e.g. 126561 or up/urgence-palestine.fr)"
+      echo "  --project <id-or-path>   Target GitLab project ID or path (e.g. 123456 or group/project)"
       echo "  --host <forge-host>      GitLab host (default: framagit.org)"
       echo "  --bot-id <id>            Bot user ID (for adding as project member)"
       echo "  --bot-token <pat>        Bot PAT (used as BOUCLE_TOKEN CI variable)"
