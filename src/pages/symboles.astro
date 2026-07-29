@@ -1,6 +1,7 @@
 ---
 import "../styles/sections.css";
 import Layout from "../layouts/Layout.astro";
+import NewsletterModal from "../components/NewsletterModal.astro";
 
 /*
  * The 9 hand-drawn brand symbols, loaded as raster images from /static/symbols/.
@@ -58,7 +59,7 @@ const symbols = [
 ---
 
 <Layout title="Symboles — Urgence Palestine">
-	<main class="home">
+	<main id="main" class="home">
 		<section class="hero" aria-labelledby="symbols-title">
 			<div class="hero__inner">
 				<p class="eyebrow">Identité visuelle</p>
@@ -96,6 +97,8 @@ const symbols = [
 			</ul>
 		</section>
 	</main>
+
+	<NewsletterModal slot="modal" />
 </Layout>
 
 <style>
