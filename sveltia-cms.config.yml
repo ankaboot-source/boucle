@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=https://unpkg.com/@sveltia/cms/schema/sveltia-cms.json
+#
+# Sveltia CMS configuration for Urgence Palestine.
+#
+# This file is auto-discovered by Sveltia CMS when it boots from
+# /admin/index.html. The `test-repo` backend is a built-in, in-memory
+# backend that lets editors sign in to the local dev build of the CMS
+# without wiring up real GitHub / GitLab OAuth. Swap it for `github`,
+# `gitlab` or `gitea` once credentials and a remote repo are available.
+#
+# `media_folder` / `public_folder` are shared across all three collections
+# so images uploaded via the editor land in `static/media/` and are served
+# from `/media/`.
+#
+# Every collection's `folder` is rooted under `src/content/<name>/`, which
+# is also where `src/content.config.ts` reads from via `glob()`. This keeps
+# the CMS writes and the Astro reads pointing at the same on-disk files.
+
+backend:
+  name: test-repo
+
+media_folder: static/media
+public_folder: /media
+
+collections:
+  - name: communiques
+    label: Communiqués
+    label_singular: Communiqué
+    description: Prises de parole officielles du collectif Urgence Palestine.
+    folder: src/content/communiques
+    create: true
+    fields:
+      - { name: title, label: Titre, widget: string }
+      - { name: date, label: Date, widget: datetime, date_format: YYYY-MM-DD, time_format: false }
+      - { name: description, label: Résumé, widget: text }
+      - { name: body, label: Contenu, widget: markdown }
+
+  - name: sections-locales
+    label: Sections locales
+    label_singular: Section locale
+    description: Collectifs locaux d'Urgence Palestine (par ville / région).
+    folder: src/content/sections-locales
+    create: true
+    fields:
+      - { name: title, label: Nom du collectif, widget: string }
+      - { name: city, label: Ville, widget: string }
+      - { name: description, label: Présentation, widget: text }
+      - { name: body, label: Activités et contact, widget: markdown }
+
+  - name: mobilisation
+    label: Événements & mobilisation
+    label_singular: Événement
+    description: Manifestations, rassemblements et actions de mobilisation.
+    folder: src/content/mobilisation
+    create: true
+    fields:
+      - { name: title, label: Titre de l'événement, widget: string }
+      - { name: date, label: Date et heure, widget: datetime }
+      - { name: location, label: Lieu, widget: string }
+      - { name: description, label: Résumé, widget: text }
+      - { name: body, label: Détails, widget: markdown }
