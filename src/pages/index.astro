@@ -1,6 +1,8 @@
 ---
 import "../styles/sections.css";
 import Layout from "../layouts/Layout.astro";
+import NewsletterSignup from "../components/NewsletterSignup.astro";
+import NewsletterModal from "../components/NewsletterModal.astro";
 ---
 
 <Layout>
@@ -14,7 +16,7 @@ import Layout from "../layouts/Layout.astro";
 		<section class="hero" aria-labelledby="hero-title">
 			<div class="hero__inner">
 				<p class="eyebrow">Urgence Palestine</p>
-				<h1 id="hero-title" class="display">
+				<h1 id="hero-title" class="display font-display tracking-tight text-ink">
 					Solidarité<br />avec la Palestine.
 				</h1>
 				<p class="hero__lede">
@@ -23,7 +25,7 @@ import Layout from "../layouts/Layout.astro";
 					chaque geste compte.
 				</p>
 				<div class="hero__cta">
-					<a class="btn btn--primary" href="/agir">Agir maintenant</a>
+					<a class="btn btn--primary" href="/engagement">Agir maintenant</a>
 					<a class="btn btn--ghost" href="/symboles">Découvrir nos symboles</a>
 				</div>
 			</div>
@@ -39,6 +41,26 @@ import Layout from "../layouts/Layout.astro";
 					decoding="async"
 				/>
 			</figure>
+		</section>
+
+		<!--
+		  ============================================================
+		  Tailwind utility callout: exercises the Palestinian flag color
+		  tokens (bg-palestine-red) and the font-display utility, proving
+		  that the Tailwind integration is wired into the build. Kept
+		  intentionally small: page content beyond the placeholder is
+		  owned by parent issue #1.
+		  ============================================================
+		-->
+		<section
+			aria-label="Appel à la solidarité"
+			class="bg-palestine-red text-white rounded-2xl px-8 py-10 w-full max-w-2xl mx-auto text-center font-sans"
+		>
+			<p class="eyebrow !text-white/80">Appel urgent</p>
+			<h2 class="font-display text-3xl mt-2 mb-4">Le cessez-le-feu, maintenant.</h2>
+			<p class="!text-white/90 text-base m-0">
+				Informez-vous, agissez, partagez. Chaque geste compte.
+			</p>
 		</section>
 
 		<!--
@@ -95,5 +117,21 @@ import Layout from "../layouts/Layout.astro";
 				</li>
 			</ol>
 		</section>
+
+		<!--
+		  ============================================================
+		  Newsletter: a dedicated content section that re-uses the
+		  <NewsletterSignup /> component.
+		  ============================================================
+		-->
+		<section class="newsletter-section" aria-labelledby="newsletter-section-title">
+			<header class="section-head">
+				<p class="eyebrow">Newsletter</p>
+				<h2 id="newsletter-section-title">Suivez nos actions.</h2>
+			</header>
+			<NewsletterSignup variant="block" />
+		</section>
 	</main>
+
+	<NewsletterModal />
 </Layout>
