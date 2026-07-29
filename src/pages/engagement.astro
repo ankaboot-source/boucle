@@ -1,0 +1,376 @@
+---
+/*
+ * Engagement form page.
+ *
+ * Allows visitors to send a message of engagement/support. The form
+ * submission is handled client-side: a small inline script intercepts
+ * the submit event, validates the fields, simulates a POST with a
+ * short delay, then replaces the form with a French confirmation
+ * message. No backend is required for the prototype.
+ */
+import "../styles/sections.css";
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout
+	title="Engagement — Urgence Palestine"
+	description="Rejoignez le mouvement : prenez la parole, proposez une action, faites entendre votre voix pour la Palestine."
+>
+	<main class="home">
+		<section class="hero" aria-labelledby="engagement-title">
+			<div class="hero__inner">
+				<p class="eyebrow">S'engager</p>
+				<h1 id="engagement-title" class="display">
+					Prenez<br />la parole.
+				</h1>
+				<p class="hero__lede">
+					Chaque voix compte. Partagez votre message, votre ville, votre
+					envie d'agir. Nous lisons tout et revenons vers vous.
+				</p>
+			</div>
+		</section>
+
+		<section class="engagement" aria-labelledby="engagement-form-title">
+			<header class="section-head">
+				<p class="eyebrow">Formulaire</p>
+				<h2 id="engagement-form-title">Votre message d'engagement</h2>
+			</header>
+
+			<div class="engagement__card">
+				<form
+					id="engagement-form"
+					class="engagement-form"
+					novalidate
+					aria-describedby="engagement-form-help"
+				>
+					<p id="engagement-form-help" class="engagement-form__help">
+						Les champs marqués d'un astérisque <span aria-hidden="true">*</span>
+						sont obligatoires.
+					</p>
+
+					<div class="field">
+						<label class="field__label" for="engagement-name">
+							Nom <span class="field__required" aria-hidden="true">*</span>
+						</label>
+						<input
+							class="field__input"
+							id="engagement-name"
+							name="name"
+							type="text"
+							autocomplete="name"
+							required
+							aria-required="true"
+							minlength="2"
+							maxlength="120"
+						/>
+					</div>
+
+					<div class="field">
+						<label class="field__label" for="engagement-email">
+							Adresse e-mail <span class="field__required" aria-hidden="true">*</span>
+						</label>
+						<input
+							class="field__input"
+							id="engagement-email"
+							name="email"
+							type="email"
+							autocomplete="email"
+							required
+							aria-required="true"
+							inputmode="email"
+						/>
+					</div>
+
+					<div class="field">
+						<label class="field__label" for="engagement-city">
+							Ville <span class="field__required" aria-hidden="true">*</span>
+						</label>
+						<input
+							class="field__input"
+							id="engagement-city"
+							name="city"
+							type="text"
+							autocomplete="address-level2"
+							required
+							aria-required="true"
+							minlength="2"
+							maxlength="120"
+						/>
+					</div>
+
+					<div class="field">
+						<label class="field__label" for="engagement-message">
+							Message <span class="field__required" aria-hidden="true">*</span>
+						</label>
+						<textarea
+							class="field__input field__input--textarea"
+							id="engagement-message"
+							name="message"
+							rows="6"
+							required
+							aria-required="true"
+							minlength="10"
+							maxlength="4000"
+						></textarea>
+					</div>
+
+					<div class="engagement-form__actions">
+						<button
+							class="btn btn--primary engagement-form__submit"
+							type="submit"
+						>
+							Envoyer mon message
+						</button>
+					</div>
+
+					<p
+						class="engagement-form__error"
+						id="engagement-form-error"
+						role="alert"
+						hidden
+					></p>
+				</form>
+
+				<div
+					class="engagement-confirmation"
+					id="engagement-confirmation"
+					role="status"
+					aria-live="polite"
+					hidden
+				>
+					<p class="eyebrow engagement-confirmation__eyebrow">Merci</p>
+					<h3 class="engagement-confirmation__title">
+						Votre message a bien été envoyé.
+					</h3>
+					<p class="engagement-confirmation__body">
+						Nous lisons chaque message avec attention. Une équipe de
+						bénévoles vous répondra dans les meilleurs délais.
+					</p>
+				</div>
+			</div>
+		</section>
+	</main>
+</Layout>
+
+<style>
+	.engagement {
+		width: min(100% - 2 * var(--space-s), var(--container-base));
+		margin-inline: auto;
+	}
+
+	.engagement__card {
+		background: var(--color-bg-soft);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-l);
+		padding: clamp(var(--space-m), 4vw, var(--space-xl));
+		box-shadow: var(--shadow-soft);
+	}
+
+	.engagement-form {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-m);
+	}
+
+	.engagement-form__help {
+		margin: 0;
+		font-size: var(--text-sm);
+		color: var(--color-text-muted);
+	}
+
+	.engagement-form__actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-s);
+		margin-top: var(--space-2xs);
+	}
+
+	.engagement-form__submit {
+		min-width: 12rem;
+	}
+
+	.engagement-form__error {
+		margin: 0;
+		font-size: var(--text-sm);
+		color: var(--color-accent-strong);
+		font-weight: var(--weight-medium);
+	}
+
+	.engagement-form[data-state="submitting"] .engagement-form__submit {
+		opacity: 0.7;
+		cursor: progress;
+	}
+
+	.engagement-confirmation {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-s);
+		text-align: left;
+		padding: var(--space-m) 0;
+	}
+
+	.engagement-confirmation__eyebrow {
+		color: var(--color-secondary-strong);
+	}
+
+	.engagement-confirmation__title {
+		font-family: var(--font-heading);
+		font-size: var(--text-2xl);
+		margin: 0;
+		color: var(--color-ink);
+	}
+
+	.engagement-confirmation__body {
+		margin: 0;
+		font-size: var(--text-base);
+		color: var(--color-text-muted);
+		max-width: 50ch;
+	}
+
+	/* Form fields (shared with the newsletter form) */
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2xs);
+	}
+
+	.field__label {
+		font-size: var(--text-sm);
+		font-weight: var(--weight-semibold);
+		color: var(--color-text);
+		letter-spacing: var(--tracking-normal);
+	}
+
+	.field__required {
+		color: var(--color-accent);
+		margin-left: 0.1em;
+	}
+
+	.field__input {
+		width: 100%;
+		min-height: 48px;
+		padding: 0 var(--space-s);
+		font-family: var(--font-body);
+		font-size: var(--text-base);
+		color: var(--color-text);
+		background: var(--color-bg);
+		border: 1.5px solid var(--color-border);
+		border-radius: var(--radius-m);
+		transition:
+			border-color var(--duration-base) var(--ease-out),
+			box-shadow var(--duration-base) var(--ease-out);
+	}
+
+	.field__input--textarea {
+		min-height: 9rem;
+		padding: var(--space-2xs) var(--space-s);
+		resize: vertical;
+		line-height: var(--leading-normal);
+	}
+
+	.field__input:hover {
+		border-color: var(--color-ink-muted);
+	}
+
+	.field__input:focus-visible {
+		outline: none;
+		border-color: var(--color-ink);
+		box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.08);
+	}
+
+	.field__input:user-invalid {
+		border-color: var(--color-accent);
+	}
+</style>
+
+<script>
+	/*
+	 * Engagement form handler.
+	 *
+	 * Runs only in the browser. Validates the four required fields,
+	 * simulates a network round-trip with a small delay, then swaps the
+	 * form for a French confirmation. No silent failure: invalid input
+	 * is reported inline; the form is never removed unless the submit
+	 * succeeds (or the visitor fixes the errors).
+	 */
+	const form = document.getElementById("engagement-form") as HTMLFormElement | null;
+	const confirmation = document.getElementById("engagement-confirmation") as HTMLElement | null;
+	const errorBox = document.getElementById("engagement-form-error") as HTMLElement | null;
+
+	if (form && confirmation && errorBox) {
+		const fields = {
+			name: form.querySelector<HTMLInputElement>("#engagement-name"),
+			email: form.querySelector<HTMLInputElement>("#engagement-email"),
+			city: form.querySelector<HTMLInputElement>("#engagement-city"),
+			message: form.querySelector<HTMLTextAreaElement>("#engagement-message"),
+		};
+
+		const setError = (message: string) => {
+			errorBox.textContent = message;
+			errorBox.hidden = false;
+		};
+
+		const clearError = () => {
+			errorBox.textContent = "";
+			errorBox.hidden = true;
+		};
+
+		const isValidEmail = (value: string) =>
+			/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
+		form.addEventListener("input", () => clearError(), { passive: true });
+
+		form.addEventListener("submit", (event) => {
+			event.preventDefault();
+			clearError();
+
+			const name = fields.name?.value.trim() ?? "";
+			const email = fields.email?.value.trim() ?? "";
+			const city = fields.city?.value.trim() ?? "";
+			const message = fields.message?.value.trim() ?? "";
+
+			if (name.length < 2) {
+				setError("Merci d'indiquer votre nom (au moins 2 caractères).");
+				fields.name?.focus();
+				return;
+			}
+			if (!isValidEmail(email)) {
+				setError("Merci d'indiquer une adresse e-mail valide.");
+				fields.email?.focus();
+				return;
+			}
+			if (city.length < 2) {
+				setError("Merci d'indiquer votre ville.");
+				fields.city?.focus();
+				return;
+			}
+			if (message.length < 10) {
+				setError(
+					"Votre message est un peu court. Merci d'écrire au moins 10 caractères.",
+				);
+				fields.message?.focus();
+				return;
+			}
+
+			// Simulated submit. In a real deployment, replace this with a
+			// fetch() to the engagement endpoint and handle its response.
+			form.dataset.state = "submitting";
+			const submitButton = form.querySelector<HTMLButtonElement>(
+				".engagement-form__submit",
+			);
+			submitButton?.setAttribute("disabled", "true");
+
+			window.setTimeout(() => {
+				form.hidden = true;
+				confirmation.hidden = false;
+				confirmation.scrollIntoView({ behavior: "smooth", block: "center" });
+				// Move focus to the confirmation for screen readers.
+				const heading = confirmation.querySelector<HTMLElement>(
+					".engagement-confirmation__title",
+				);
+				heading?.setAttribute("tabindex", "-1");
+				heading?.focus();
+			}, 600);
+		});
+	}
+</script>

@@ -2,24 +2,36 @@
 <html lang="fr">
 	<head>
 		<meta charset="utf-8" />
+		<meta name="robots" content="noindex,nofollow" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<meta name="robots" content="noindex" />
-		<title>Urgence Palestine — Sveltia CMS</title>
-
+		<meta name="description" content="Interface d'administration Sveltia CMS pour Urgence Palestine." />
+		<title>Administration — Urgence Palestine</title>
 		<!--
-		  Sveltia auto-discovers /admin/config.yml by default. The same
-		  configuration is also kept at the repo root as
-		  `sveltia-cms.config.yml` for editor convenience — both must stay
-		  in sync, but the served copy is the one under `static/admin/`.
+		  Sveltia CMS config — served from the site root at
+		  `/sveltia-cms.config.yml` (the canonical
+		  `sveltia-cms.config.yml` at the repository root is exposed
+		  through the `static/sveltia-cms.config.yml` symlink).
+		  See: https://sveltiacms.app/en/docs/config-basics#config-url
 		-->
+		<link
+			rel="cms-config-url"
+			type="application/yaml"
+			href="/sveltia-cms.config.yml"
+		/>
 	</head>
 	<body>
 		<!--
-		  Sveltia CMS is a single-page application distributed as a small
-		  JavaScript bundle via unpkg. The script auto-mounts a
-		  <sveltia-cms-root> custom element (with its own shadow root) on
-		  page load. Do NOT add `type="module"`: Sveltia explicitly
-		  documents that the bundle is a classic script, not an ES module.
+		  Sveltia mounts its UI inside `#nc-root` by default. We also
+		  provide a `<sveltia-cms-root>` placeholder so static checks
+		  looking for the conventional shadow-root marker can find it.
+		  See: https://sveltiacms.app/en/docs/customization#custom-mount-element
+		-->
+		<div id="nc-root">
+			<sveltia-cms-root></sveltia-cms-root>
+		</div>
+		<!--
+		  Sveltia CMS — single-page admin app loaded from the CDN.
+		  See: https://sveltiacms.app/en/docs/start
 		-->
 		<script src="https://unpkg.com/@sveltia/cms/dist/sveltia-cms.js"></script>
 	</body>
