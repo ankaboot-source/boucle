@@ -155,3 +155,4 @@ boucle/
 - **Do** run the dev build of looper/looperd (EBADF workaround).
 - **Do** log every POC run in `docs/poc-looper-status.md`.
 - **Do** update this AGENTS.md when the decision is made.
+- **Do** commit and push fixes to the boucle source repo (`boucle/boucle/`), not only to the live target repo. The source repo is the template that `bin/setup` copies to every target — a fix applied only to the target is lost on the next setup. When you modify boucle behavior (`.gitlab-ci.yml`, `bin/oc`, `bin/setup`, `bin/doctor`, `LOOP.md`), commit to the source repo first, then sync to the target.
