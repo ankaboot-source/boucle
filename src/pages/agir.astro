@@ -1,0 +1,11 @@
+---
+/*
+ * /agir route — alias for /engagement. The home-page hero CTA says
+ * "Agir maintenant" and links to /agir, so the destination URL has
+ * to match. The page body is identical to /engagement; only the
+ * form id differs to keep input/label pairs unique.
+ */
+import EngagementPage from "../components/EngagementPage.astro";
+---
+
+<EngagementPage formId="agir" />

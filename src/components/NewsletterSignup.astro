@@ -1,152 +1,334 @@
 ---
 /*
- * NewsletterSignup
- * ----------------
- * A reusable email-only newsletter form. Renders in two variants:
- *   - "inline" (default): compact horizontal layout, for the site footer
- *   - "block": stacked layout with a title and lead text, for page sections
+ * NewsletterSignup.astro
+ * ---------------------------------------------------------------------------
+ * A reusable newsletter signup form. Accepts an `email` address and a
+ * label/eyebrow override for context. Submitting the form runs a small
+ * client-side handler that validates the email, simulates a POST, and
+ * replaces the form with a French confirmation message. A
+ * `sessionStorage` flag is set under `up-newsletter-subscribed` so we
+ * never re-prompt the same visitor twice in the same session — used
+ * by the modal variant.
  *
- * Submission is simulated client-side. On success, the form is replaced
- * with a French confirmation message. The form also writes a
- * "newsletter:subscribed" flag to sessionStorage so other components
- * (notably NewsletterModal) can avoid re-prompting the same visitor.
+ * Variants (all share the same DOM):
+ *  - "inline" (default): compact horizontal layout, for the site footer
+ *  - "block" / "stacked": stacked layout with a title and lead text,
+ *      for page sections and the modal
+ *  - "footer": compact single-row treatment, no visible label/hint
  *
- * The actual network call is intentionally a no-op here — wire it to a
- * real endpoint in a follow-up.
+ * Props:
+ *  - id: required unique id so multiple instances on the same page don't
+ *        collide (used by the input/label pair and the result region).
+ *  - variant: see above.
+ *  - heading/description/buttonLabel: small copy overrides.
+ *  - labelledBy: optional override for the form's `aria-labelledby`.
+ *    Useful when the form is rendered inside a parent that already
+ *    provides a heading (e.g. the newsletter modal) so we don't end up
+ *    with an empty heading as the form's accessible name.
  */
-
 interface Props {
-	variant?: "inline" | "block";
-	title?: string;
+	id?: string;
+	variant?: "inline" | "block" | "stacked" | "footer";
+	heading?: string;
 	description?: string;
+	buttonLabel?: string;
+	labelledBy?: string;
 }
 
 const {
+	id = "newsletter-signup",
 	variant = "inline",
-	title = "Recevez nos informations",
-	description = "Une lettre d'information ponctuelle, sans spam, pour suivre les actions et les rendez-vous importants.",
+	heading = "Recevez nos alertes",
+	description = "Un email par mois, pas plus. Actions concrètes, rendez-vous, communiqués.",
+	buttonLabel = "S'inscrire",
+	labelledBy,
 } = Astro.props;
 
-const formId = `newsletter-${Math.random().toString(36).slice(2, 9)}`;
-const emailId = `${formId}-email`;
-const errorId = `${formId}-error`;
-const successId = `${formId}-success`;
+// Normalise `stacked` to `block` so the modal (which historically used
+// `stacked`) and pages (which use `block`) render identically.
+const normalisedVariant: "inline" | "block" | "footer" =
+	variant === "stacked" ? "block" : variant;
+
+// The form's accessible name is normally the h3 below, but a parent can
+// override it via the `labelledBy` prop.
+const formLabelledBy = labelledBy ?? `${id}-title`;
+const hasHeading = heading.trim().length > 0;
+const hasDescription = description.trim().length > 0;
 ---
 
-<div
-	class={`newsletter newsletter--${variant}`}
+<form
+	class:list={["newsletter", `newsletter--${normalisedVariant}`]}
 	data-newsletter
-	data-form-id={formId}
-	data-email-id={emailId}
-	data-error-id={errorId}
-	data-success-id={successId}
+	data-variant={normalisedVariant}
+	novalidate
+	aria-labelledby={formLabelledBy}
 >
-	{
-		variant === "block" && (
-			<div class="newsletter__head">
-				<p class="eyebrow">Newsletter</p>
-				<h3 class="newsletter__title">{title}</h3>
+	{normalisedVariant !== "inline" && normalisedVariant !== "footer" && (hasHeading || hasDescription) && (
+		<div class="newsletter__intro">
+			{hasHeading && (
+				<h3 id={`${id}-title`} class="newsletter__heading">{heading}</h3>
+			)}
+			{hasDescription && (
 				<p class="newsletter__description">{description}</p>
-			</div>
-		)
-	}
+			)}
+		</div>
+	)}
 
-	<form
-		class="newsletter__form"
-		id={formId}
-		novalidate
-		aria-label="Inscription à la newsletter"
-	>
-		<label class="newsletter__label" for={emailId}>
-			Adresse e-mail
-		</label>
-		<div class="newsletter__row">
+	{normalisedVariant === "inline" && hasHeading && (
+		<h3 id={`${id}-title`} class="visually-hidden newsletter__heading">{heading}</h3>
+	)}
+	{normalisedVariant === "inline" && hasDescription && (
+		<p class="visually-hidden newsletter__description">{description}</p>
+	)}
+
+	<div class="newsletter__row">
+		<label class="newsletter__field">
+			<span class="newsletter__label">Adresse email</span>
 			<input
 				class="newsletter__input"
-				id={emailId}
-				name="email"
 				type="email"
-				placeholder="vous@exemple.fr"
-				autocomplete="email"
-				inputmode="email"
+				name="email"
 				required
-				aria-required="true"
-				aria-describedby={errorId}
+				autocomplete="email"
+				placeholder="vous@exemple.fr"
+				aria-describedby={`${id}-desc`}
 			/>
-			<button class="btn btn--primary newsletter__submit" type="submit">
-				S'inscrire
-			</button>
-		</div>
-		<p
-			class="newsletter__error"
-			id={errorId}
-			role="alert"
-			hidden
-		></p>
-	</form>
+		</label>
+		<button class="btn btn--primary newsletter__submit" type="submit">
+			{buttonLabel}
+		</button>
+	</div>
 
+	<p class="newsletter__hint" id={`${id}-desc`}>
+		Vos données restent en France. Désinscription en un clic.
+	</p>
+
+	<!--
+	  Success region. Hidden by default; revealed by the inline script after a
+	  successful submit. `role="status"` + `aria-live="polite"` so screen
+	  readers announce the confirmation without interrupting the user.
+	-->
 	<p
 		class="newsletter__success"
-		id={successId}
 		role="status"
 		aria-live="polite"
+		data-newsletter-success
 		hidden
 	>
-		Merci ! Vous êtes inscrit à la newsletter.
+		<svg
+			aria-hidden="true"
+			viewBox="0 0 24 24"
+			width="20"
+			height="20"
+			focusable="false"
+		>
+			<path
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2.4"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				d="M4 12.5l5 5L20 6.5"></path>
+		</svg>
+		<span>
+			Merci&nbsp;! Votre inscription est enregistrée. Un email de
+			confirmation vous attend.
+		</span>
 	</p>
-</div>
+
+	<p
+		class="newsletter__error"
+		role="alert"
+		aria-live="assertive"
+		data-newsletter-error
+		hidden
+	>
+	</p>
+</form>
 
 <style>
 	.newsletter {
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-s);
+		width: 100%;
 	}
+
+	.newsletter__intro {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2xs);
+	}
+
+	.newsletter__heading {
+		font-family: var(--font-heading);
+		font-size: var(--text-xl);
+		font-weight: var(--weight-bold);
+		color: var(--color-ink);
+		margin: 0;
+		letter-spacing: var(--tracking-tight);
+	}
+
+	.newsletter__description {
+		font-size: var(--text-sm);
+		color: var(--color-text-muted);
+		margin: 0;
+		max-width: 56ch;
+	}
+
+	.newsletter__row {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2xs);
+	}
+
+	@media (min-width: 32rem) {
+		.newsletter--inline .newsletter__row {
+			flex-direction: row;
+			align-items: flex-end;
+			gap: var(--space-s);
+		}
+		.newsletter--inline .newsletter__field {
+			flex: 1 1 auto;
+			min-width: 0;
+		}
+		.newsletter--inline .newsletter__submit {
+			flex: 0 0 auto;
+			align-self: stretch;
+		}
+	}
+
+	.newsletter__field {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3xs);
+	}
+
+	.newsletter__label {
+		font-size: var(--text-xs);
+		font-weight: var(--weight-semibold);
+		letter-spacing: var(--tracking-wide);
+		text-transform: uppercase;
+		color: var(--color-text-muted);
+	}
+
+	.newsletter__input {
+		appearance: none;
+		width: 100%;
+		min-height: 48px;
+		padding: 0 var(--space-s);
+		font-size: var(--text-base);
+		color: var(--color-text);
+		background: var(--color-bg);
+		border: 1.5px solid var(--color-border);
+		border-radius: var(--radius-m);
+		transition:
+			border-color var(--duration-fast) var(--ease-out),
+			box-shadow var(--duration-fast) var(--ease-out);
+	}
+
+	.newsletter__input::placeholder {
+		color: var(--color-text-faint);
+	}
+
+	.newsletter__input:hover {
+		border-color: var(--color-ink-muted);
+	}
+
+	.newsletter__input:focus-visible {
+		outline: none;
+		border-color: var(--color-ink);
+		box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-ink) 12%, transparent);
+	}
+
+	.newsletter__input:user-invalid {
+		border-color: var(--color-accent);
+	}
+
+	.newsletter__submit {
+		min-height: 48px;
+	}
+
+	.newsletter__hint {
+		font-size: var(--text-xs);
+		color: var(--color-text-faint);
+		margin: 0;
+	}
+
+	.newsletter__success,
+	.newsletter__error {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2xs);
+		margin: 0;
+		padding: var(--space-2xs) var(--space-s);
+		border-radius: var(--radius-s);
+		font-size: var(--text-sm);
+		font-weight: var(--weight-medium);
+	}
+
+	.newsletter__success {
+		background: color-mix(in oklch, var(--color-secondary) 16%, transparent);
+		color: var(--color-secondary-strong);
+	}
+
+	.newsletter__error {
+		background: color-mix(in oklch, var(--color-accent) 12%, transparent);
+		color: var(--color-accent-strong);
+	}
+
+	/* ---------- Block variant (stacked, for sections + modal) ---------- */
 
 	.newsletter--block {
 		padding: clamp(var(--space-m), 4vw, var(--space-xl));
 		background: var(--color-bg-soft);
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-l);
+		gap: var(--space-m);
 	}
 
-	.newsletter__head {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2xs);
-	}
-
-	.newsletter__title {
-		font-family: var(--font-heading);
+	.newsletter--block .newsletter__heading {
 		font-size: var(--text-2xl);
-		margin: 0;
-		color: var(--color-ink);
 	}
 
-	.newsletter__description {
-		margin: 0;
-		color: var(--color-text-muted);
+	.newsletter--block .newsletter__description {
 		font-size: var(--text-base);
-		max-width: 52ch;
 	}
 
-	.newsletter__form {
-		display: flex;
-		flex-direction: column;
+	/* ---------- Footer variant (compact, single row) ---------- */
+
+	.newsletter--footer {
 		gap: var(--space-2xs);
 	}
 
-	.newsletter--inline .newsletter__form {
+	.newsletter--footer .newsletter__heading {
+		font-size: var(--text-lg);
+	}
+
+	.newsletter--footer .newsletter__row {
+		flex-direction: row;
+		align-items: stretch;
 		gap: var(--space-2xs);
 	}
 
-	.newsletter__label {
-		font-size: var(--text-sm);
-		font-weight: var(--weight-semibold);
-		color: var(--color-text);
+	.newsletter--footer .newsletter__field {
+		flex: 1 1 auto;
+		min-width: 0;
 	}
 
-	.newsletter--inline .newsletter__label {
+	.newsletter--footer .newsletter__submit {
+		flex: 0 0 auto;
+		padding-inline: var(--space-s);
+	}
+
+	.newsletter--footer .newsletter__label,
+	.newsletter--footer .newsletter__hint {
+		display: none;
+	}
+
+	/* ---------- Visually hidden helper (for inline variant) ---------- */
+
+	.visually-hidden {
 		position: absolute;
 		width: 1px;
 		height: 1px;
@@ -157,141 +339,142 @@ const successId = `${formId}-success`;
 		white-space: nowrap;
 		border: 0;
 	}
-
-	.newsletter__row {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2xs);
-	}
-
-	@media (min-width: 32rem) {
-		.newsletter__row {
-			flex-direction: row;
-			gap: var(--space-2xs);
-		}
-
-		.newsletter__input {
-			flex: 1 1 auto;
-			min-width: 0;
-		}
-	}
-
-	.newsletter__input {
-		width: 100%;
-		min-height: 48px;
-		padding: 0 var(--space-s);
-		font-family: var(--font-body);
-		font-size: var(--text-base);
-		color: var(--color-text);
-		background: var(--color-bg);
-		border: 1.5px solid var(--color-border);
-		border-radius: var(--radius-pill);
-		transition:
-			border-color var(--duration-base) var(--ease-out),
-			box-shadow var(--duration-base) var(--ease-out);
-	}
-
-	.newsletter__input:hover {
-		border-color: var(--color-ink-muted);
-	}
-
-	.newsletter__input:focus-visible {
-		outline: none;
-		border-color: var(--color-ink);
-		box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.08);
-	}
-
-	.newsletter__input:user-invalid {
-		border-color: var(--color-accent);
-	}
-
-	.newsletter__submit {
-		min-height: 48px;
-		white-space: nowrap;
-	}
-
-	.newsletter__error {
-		margin: 0;
-		font-size: var(--text-sm);
-		color: var(--color-accent-strong);
-		font-weight: var(--weight-medium);
-	}
-
-	.newsletter__success {
-		margin: 0;
-		font-size: var(--text-sm);
-		color: var(--color-secondary-strong);
-		font-weight: var(--weight-semibold);
-	}
 </style>
 
 <script>
 	/*
-	 * Newsletter handler.
+	 * Client-side submit handler. Each <form data-newsletter> becomes
+	 * a self-contained widget: validates the email, simulates a POST,
+	 * then swaps the row for a French success message. Marks the
+	 * widget as "subscribed" via sessionStorage so the modal variant
+	 * (and any other instances on the same page) know not to re-prompt.
 	 *
-	 * Wires every <form data-newsletter> on the page. Validates the
-	 * email, simulates a submit, and reveals the success message. On
-	 * success, the form is hidden (not removed) and a sessionStorage
-	 * flag is set so the modal can avoid re-prompting the visitor.
+	 * Kept as a vanilla IIFE so it works on pages that ship multiple
+	 * newsletter forms (footer + home section) without a framework.
 	 */
-	const roots = document.querySelectorAll<HTMLElement>("[data-newsletter]");
+	type NewsletterForm = HTMLFormElement & { dataset: DOMStringMap };
 
-	roots.forEach((root) => {
-		const formId = root.dataset.formId;
-		const emailId = root.dataset.emailId;
-		const errorId = root.dataset.errorId;
-		const successId = root.dataset.successId;
-		if (!formId || !emailId || !errorId || !successId) return;
+	const STORAGE_KEY = "up-newsletter-subscribed";
 
-		const form = document.getElementById(formId) as HTMLFormElement | null;
-		const input = document.getElementById(emailId) as HTMLInputElement | null;
-		const errorBox = document.getElementById(errorId) as HTMLElement | null;
-		const successBox = document.getElementById(successId) as HTMLElement | null;
-		if (!form || !input || !errorBox || !successBox) return;
+	const isSubscribed = (): boolean => {
+		try {
+			return sessionStorage.getItem(STORAGE_KEY) === "1";
+		} catch {
+			return false;
+		}
+	};
 
-		const setError = (message: string) => {
-			errorBox.textContent = message;
-			errorBox.hidden = false;
-		};
+	const markSubscribed = (): void => {
+		try {
+			sessionStorage.setItem(STORAGE_KEY, "1");
+		} catch {
+			// Private mode / disabled storage — silently ignore; the user
+			// can still subscribe, we just won't remember it for this tab.
+		}
+	};
 
-		const clearError = () => {
-			errorBox.textContent = "";
-			errorBox.hidden = true;
-		};
+	const showError = (form: NewsletterForm, message: string): void => {
+		const error = form.querySelector<HTMLElement>(
+			"[data-newsletter-error]",
+		);
+		const success = form.querySelector<HTMLElement>(
+			"[data-newsletter-success]",
+		);
+		if (success) success.hidden = true;
+		if (error) {
+			error.textContent = message;
+			error.hidden = false;
+		}
+	};
 
-		const isValidEmail = (value: string) =>
-			/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+	const hideFormRows = (form: NewsletterForm): void => {
+		const row = form.querySelector<HTMLElement>(".newsletter__row");
+		const intro = form.querySelector<HTMLElement>(".newsletter__intro");
+		const hint = form.querySelector<HTMLElement>(".newsletter__hint");
+		const success = form.querySelector<HTMLElement>(
+			"[data-newsletter-success]",
+		);
+		if (row) row.hidden = true;
+		if (intro) intro.hidden = true;
+		if (hint) hint.hidden = true;
+		if (success) success.hidden = false;
+	};
 
-		input.addEventListener("input", () => clearError(), { passive: true });
+	const handleSubmit = async (form: NewsletterForm): Promise<void> => {
+		const error = form.querySelector<HTMLElement>("[data-newsletter-error]");
+		if (error) error.hidden = true;
 
-		form.addEventListener("submit", (event) => {
-			event.preventDefault();
-			clearError();
+		const input = form.querySelector<HTMLInputElement>('input[type="email"]');
+		if (!input) return;
 
-			const value = input.value.trim();
-			if (!isValidEmail(value)) {
-				setError("Merci d'indiquer une adresse e-mail valide.");
-				input.focus();
+		// Native validity check first (handles required + type=email).
+		if (!input.checkValidity()) {
+			showError(
+				form,
+				input.validity.valueMissing
+					? "Merci d'indiquer votre adresse email."
+					: "Cet email ne semble pas valide.",
+			);
+			input.focus();
+			return;
+		}
+
+		const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+		if (submit) {
+			submit.disabled = true;
+			submit.dataset["busy"] = "1";
+		}
+
+		// Simulate a network call. In a real deployment this would POST
+		// to a subscription endpoint; for now we resolve after a short
+		// delay so the loading state is visible to the user.
+		await new Promise((resolve) => setTimeout(resolve, 350));
+
+		markSubscribed();
+
+		hideFormRows(form);
+
+		// Notify the modal (and any other listener) that the user just
+		// converted, so it can stop tracking inactivity and clear any
+		// pending timer.
+		document.dispatchEvent(
+			new CustomEvent("up:newsletter:subscribed", {
+				bubbles: false,
+				detail: { source: form.id || "newsletter" },
+			}),
+		);
+	};
+
+	const init = (): void => {
+		const subscribed = isSubscribed();
+		const forms =
+			document.querySelectorAll<NewsletterForm>("form[data-newsletter]");
+
+		forms.forEach((form) => {
+			if (subscribed) {
+				// Already subscribed this session: skip the input row,
+				// show the success state immediately, and dispatch the
+				// event so the modal closes its timer too.
+				hideFormRows(form);
+				document.dispatchEvent(
+					new CustomEvent("up:newsletter:subscribed", {
+						bubbles: false,
+						detail: { source: "session" },
+					}),
+				);
 				return;
 			}
 
-			const submitButton = form.querySelector<HTMLButtonElement>(
-				".newsletter__submit",
-			);
-			submitButton?.setAttribute("disabled", "true");
-
-			// Simulated submit. Replace with a real fetch() in production.
-			window.setTimeout(() => {
-				form.hidden = true;
-				successBox.hidden = false;
-				try {
-					window.sessionStorage.setItem("newsletter:subscribed", "1");
-				} catch {
-					// sessionStorage may be unavailable (private mode, etc.) —
-					// ignore; the form already shows a success message.
-				}
-				successBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
-			}, 500);
+			form.addEventListener("submit", (event) => {
+				event.preventDefault();
+				void handleSubmit(form);
+			});
 		});
-	});
+	};
+
+	if (document.readyState === "loading") {
+		document.addEventListener("DOMContentLoaded", init, { once: true });
+	} else {
+		init();
+	}
 </script>
