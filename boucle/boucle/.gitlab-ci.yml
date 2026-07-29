@@ -35,6 +35,12 @@ variables:
 # before_script installs glab + opencode + wrangler (not in the image).
 default:
   image: node:22-slim
+  # Route to the project's dedicated runner (tag: tooling). It's a shell
+  # executor (ignores image:), so before_script self-installs node — but
+  # the install persists across runs, making subsequent runs faster than
+  # docker (which reinstalls every time). Falls back to shared docker
+  # runner (Atchoum) if tooling is offline.
+  tags: [tooling]
   before_script:
     - |
       set -x
@@ -42,10 +48,20 @@ default:
       export GITLAB_TOKEN="$BOUCLE_TOKEN"
       export GITLAB_HOST="$BOUCLE_FORGE_HOST"
 
-      # ── curl + jq (slim image lacks both) ───────────────────────────
+      # ── curl + jq (slim image / shell host may lack both) ──────────
       if ! command -v curl &>/dev/null || ! command -v jq &>/dev/null || ! command -v git &>/dev/null; then
         echo "Installing curl + jq + git..."
         apt-get update -qq && apt-get install -y -qq curl jq git
+      fi
+
+      # ── node + npm (shell executor ignores image:; install if missing) ──
+      # Persists across runs on shell executor — only downloads once.
+      if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then
+        echo "Installing Node.js (shell executor has no image support)..."
+        NODE_VER="v22.11.0"
+        curl -sL "https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-linux-x64.tar.xz" -o /tmp/node.tar.xz
+        tar xf /tmp/node.tar.xz -C "$HOME/.local" --strip-components=1
+        rm -f /tmp/node.tar.xz
       fi
 
       # ── glab CLI ───────────────────────────────────────────────────
