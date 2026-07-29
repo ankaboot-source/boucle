@@ -16,6 +16,18 @@ variables:
   BOUCLE_FORGE_HOST: framagit.org
   BOUCLE_BUILD_CMD: "npm ci && npm run build"
   BOUCLE_BUILD_OUTPUT: "public"
+  # Deploy: swap to any deploy command. Use $BRANCH (worker preview) or master (deploy job).
+  # Examples:
+  #   CF Pages:  "npx wrangler pages deploy $BOUCLE_BUILD_OUTPUT --project-name $BOUCLE_DEPLOY_PROJECT --branch $BRANCH"
+  #   Netlify:   "npx netlify deploy --dir $BOUCLE_BUILD_OUTPUT --alias $BRANCH"
+  #   Vercel:    "npx vercel deploy $BOUCLE_BUILD_OUTPUT --prod=false"
+  #   GitLab Pages: "rsync -a $BOUCLE_BUILD_OUTPUT/ /srv/pages/$BRANCH/"
+  BOUCLE_DEPLOY_CMD: "npx wrangler pages deploy $BOUCLE_BUILD_OUTPUT --project-name $BOUCLE_DEPLOY_PROJECT --branch $BRANCH"
+  BOUCLE_DEPLOY_PROJECT: "urgence-palestine"
+  # Regex to extract the deployed URL from the deploy command's stdout
+  BOUCLE_DEPLOY_URL_REGEX: "https://[a-z0-9.-]+\\.pages\\.dev"
+  # Production URL (for e2e fallback when deploy doesn't pass a live URL)
+  BOUCLE_PRODUCTION_URL: "https://urgence-palestine.fr"
   # File-type CI variable: $OPENCODE_AUTH holds a path to the auth.json temp file
 
 # ── Default: use node:22-slim (has node, npm, curl — much smaller than node:22) ─
@@ -53,8 +65,8 @@ default:
         npm install -g opencode-ai 2>/dev/null || true
       fi
 
-      # ── wrangler ──────────────────────────────────────────────────
-      if ! command -v wrangler &>/dev/null; then
+      # ── wrangler (only if deploy uses it) ──────────────────────────
+      if echo "$BOUCLE_DEPLOY_CMD" | grep -q "wrangler" && ! command -v wrangler &>/dev/null; then
         echo "Installing wrangler..."
         npm install -g wrangler 2>/dev/null || true
       fi
@@ -71,7 +83,7 @@ default:
       npm --version 2>/dev/null || echo "npm: MISSING"
       glab version 2>/dev/null | head -1 || echo "glab: MISSING"
       opencode --version 2>/dev/null || echo "opencode: MISSING"
-      wrangler --version 2>/dev/null || echo "wrangler: MISSING"
+      echo "$BOUCLE_DEPLOY_CMD" | grep -q wrangler && { wrangler --version 2>/dev/null || echo "wrangler: MISSING"; } || echo "wrangler: not needed (deploy doesn't use it)"
       echo "==================="
 
 # ── Dispatcher ──────────────────────────────────────────────────────────
@@ -434,8 +446,8 @@ worker:
       # Build (eval needed so && in BOUCLE_BUILD_CMD is interpreted as shell operator)
       eval "$BOUCLE_BUILD_CMD"
 
-      # Deploy to preview
-      PREVIEW_URL=$(npx wrangler pages deploy "$BOUCLE_BUILD_OUTPUT" --branch "$BRANCH" --project-name urgence-palestine 2>&1 | grep -oE 'https://[a-z0-9.-]+\.pages\.dev' | head -1)
+      # Deploy to preview (configurable via BOUCLE_DEPLOY_CMD)
+      PREVIEW_URL=$(eval "$BOUCLE_DEPLOY_CMD" 2>&1 | grep -oE "$BOUCLE_DEPLOY_URL_REGEX" | head -1)
 
       # Push branch (agent already committed; we just push)
       git push --force origin "$BRANCH"
@@ -563,7 +575,9 @@ deploy:
   script:
     - |
       eval "$BOUCLE_BUILD_CMD"
-      DEPLOY_URL=$(npx wrangler pages deploy "$BOUCLE_BUILD_OUTPUT" --project-name urgence-palestine --branch master 2>&1 | grep -oE 'https://[a-z0-9.-]+\.pages\.dev' | head -1)
+      # Deploy to production (configurable via BOUCLE_DEPLOY_CMD, force master branch)
+      BRANCH=master
+      DEPLOY_URL=$(eval "$BOUCLE_DEPLOY_CMD" 2>&1 | grep -oE "$BOUCLE_DEPLOY_URL_REGEX" | head -1)
 
       # Assert: deployment URL returns 200 (production domain may not have DNS yet)
       if [ -z "$DEPLOY_URL" ]; then
@@ -596,7 +610,7 @@ e2e:
     - |
       export BOUCLE_ISSUE="${BOUCLE_ISSUE:-}"
       # Use deployment URL passed from deploy job (production domain may not have DNS yet)
-      LIVE_URL="${BOUCLE_LIVE_URL:-https://urgence-palestine.fr}"
+      LIVE_URL="${BOUCLE_LIVE_URL:-$BOUCLE_PRODUCTION_URL}"
       export BOUCLE_LIVE_URL="$LIVE_URL"
       echo "E2E testing URL: $LIVE_URL"
 
