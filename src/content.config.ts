@@ -1,46 +1,67 @@
 import { defineCollection, z } from "astro:content";
 import { glob } from "astro/loaders";
 
-/*
- * Astro content collections for Urgence Palestine.
+/**
+ * Astro 5 content collections.
  *
- * Mirrors the three collections declared in sveltia-cms.config.yml so
- * that content authored by editors in /admin/ — which writes Markdown
- * files with YAML frontmatter into src/content/<name>/ — is consumable
- * by Astro pages via `getCollection()`.
+ * Mirrors the three collections declared in `sveltia-cms.config.yml` at the
+ * repository root, so the same Markdown files authored through the Sveltia
+ * admin UI (under `src/content/<collection>/`) can be read with
+ * `getCollection()` from pages and components.
  *
- * Field names match the Sveltia config 1:1; that is the contract that
- * keeps the two sides in agreement.
+ * The Zod field names below match the Sveltia `fields` schema 1:1, including
+ * optional ones — keep them in sync if a collection is extended.
+ *
+ * @see https://docs.astro.build/en/guides/content-collections/
  */
 
+/** A short, non-empty string. */
+const requiredString = z.string().min(1);
+
+/** An optional, possibly-empty string. */
+const optionalString = z.string().optional();
+
+/** An optional ISO-8601 date string. */
+const optionalDate = z.coerce.date().optional();
+
+// =============================================================================
+// Communiqués / Prises de parole
+// =============================================================================
 const communiques = defineCollection({
-	loader: glob({ base: "./src/content/communiques", pattern: "**/*.md" }),
+	loader: glob({ pattern: "**/*.md", base: "./src/content/communiques" }),
 	schema: z.object({
-		title: z.string(),
+		title: requiredString,
 		date: z.coerce.date(),
-		description: z.string().optional(),
-		body: z.string().optional(),
+		description: optionalString,
 	}),
 });
 
+// =============================================================================
+// Sections locales (Collectif)
+// =============================================================================
 const sectionsLocales = defineCollection({
-	loader: glob({ base: "./src/content/sections-locales", pattern: "**/*.md" }),
+	loader: glob({ pattern: "**/*.md", base: "./src/content/sections-locales" }),
 	schema: z.object({
-		title: z.string(),
-		city: z.string(),
-		description: z.string().optional(),
-		body: z.string().optional(),
+		// `city` doubles as the entry identifier (slug source) in Sveltia.
+		city: requiredString,
+		title: optionalString,
+		contact_email: z.string().email().optional(),
+		description: optionalString,
+		// We allow `date` for future use, even if not in the Sveltia schema.
+		date: optionalDate,
 	}),
 });
 
+// =============================================================================
+// Événements / Mobilisation
+// =============================================================================
 const mobilisation = defineCollection({
-	loader: glob({ base: "./src/content/mobilisation", pattern: "**/*.md" }),
+	loader: glob({ pattern: "**/*.md", base: "./src/content/mobilisation" }),
 	schema: z.object({
-		title: z.string(),
+		title: requiredString,
 		date: z.coerce.date(),
-		location: z.string(),
-		description: z.string().optional(),
-		body: z.string().optional(),
+		location: requiredString,
+		description: optionalString,
 	}),
 });
 
