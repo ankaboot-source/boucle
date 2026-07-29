@@ -545,9 +545,11 @@ worker:
       git push --force-with-lease origin "$BRANCH"
 
       # Build MR description with context (printf keeps YAML-valid, no multi-line string)
+      # NOTE: CI checks out a detached HEAD — there is no local `master` ref.
+      # Use origin/master (remote-tracking ref, refreshed by the fetch above) instead.
       ITERATION="${BOUCLE_ITERATION:-1}"
-      COMMIT_COUNT=$(git log master.."$BRANCH" --oneline 2>/dev/null | wc -l | tr -d ' ')
-      COMMIT_SUMMARY=$(git log master.."$BRANCH" --format='- %s' 2>/dev/null | head -10)
+      COMMIT_COUNT=$(git log origin/master.."$BRANCH" --oneline 2>/dev/null | wc -l | tr -d ' ')
+      COMMIT_SUMMARY=$(git log origin/master.."$BRANCH" --format='- %s' 2>/dev/null | head -10)
       APPROACH=""
       if [ -f ".boucle/$BOUCLE_ISSUE/state.md" ]; then
         APPROACH=$(sed -n '/^## Approach/,/^## /p' ".boucle/$BOUCLE_ISSUE/state.md" | head -n -1 | tail -n +2 | head -20)
