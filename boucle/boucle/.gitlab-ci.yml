@@ -241,8 +241,11 @@ triage:
       COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
         | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## Disposition"))] | first | .body')
 
-      DISPOSITION=$(echo "$COMMENT" | grep -oiE '(READY|NEEDS-INFO|NEEDS-SPLIT)' | head -1 | tr '[:lower:]' '[:upper:]')
-      SIZE=$(echo "$COMMENT" | grep -oiE 'Size:\s*[SML]' | grep -oiE '[SML]' | head -1 | tr '[:lower:]' '[:upper:]')
+      # Parse Disposition and Size from their SECTIONS only, not the whole body.
+      # Scoping prevents false matches: e.g. "already" in an acceptance criterion
+      # contains "ready" and would match a whole-body grep for READY.
+      DISPOSITION=$(echo "$COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
+      SIZE=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
 
       # Route based on disposition
       case "$DISPOSITION" in
