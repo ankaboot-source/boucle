@@ -190,10 +190,17 @@ triage:
     - |
       # Guard: if dispatch skipped (bot note event, anti-loop), no .boucle-issue artifact
       if [ ! -f .boucle-issue ]; then
-        echo "No .boucle-issue artifact (dispatch skipped). Nothing to triage."
-        exit 0
+        # Recovery path: allow manual triage trigger via BOUCLE_ISSUE variable
+        if [ -n "${BOUCLE_ISSUE:-}" ]; then
+          echo "No .boucle-issue artifact, but BOUCLE_ISSUE=$BOUCLE_ISSUE set via trigger. Using it."
+          IID="$BOUCLE_ISSUE"
+        else
+          echo "No .boucle-issue artifact (dispatch skipped) and no BOUCLE_ISSUE variable. Nothing to triage."
+          exit 0
+        fi
+      else
+        IID=$(cat .boucle-issue)
       fi
-      IID=$(cat .boucle-issue)
       export BOUCLE_ISSUE="$IID"
 
       # Label helper: preserve non-boucle labels when writing a boucle label
