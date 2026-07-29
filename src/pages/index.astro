@@ -1,6 +1,8 @@
 ---
 import "../styles/sections.css";
 import Layout from "../layouts/Layout.astro";
+import NewsletterSignup from "../components/NewsletterSignup.astro";
+import NewsletterModal from "../components/NewsletterModal.astro";
 ---
 
 <Layout>
@@ -23,7 +25,7 @@ import Layout from "../layouts/Layout.astro";
 					chaque geste compte.
 				</p>
 				<div class="hero__cta">
-					<a class="btn btn--primary" href="/agir">Agir maintenant</a>
+					<a class="btn btn--primary" href="/engagement">Agir maintenant</a>
 					<a class="btn btn--ghost" href="/symboles">Découvrir nos symboles</a>
 				</div>
 			</div>
@@ -95,5 +97,21 @@ import Layout from "../layouts/Layout.astro";
 				</li>
 			</ol>
 		</section>
+
+		<!--
+		  ============================================================
+		  Newsletter: a dedicated content section that re-uses the
+		  <NewsletterSignup /> component.
+		  ============================================================
+		-->
+		<section class="newsletter-section" aria-labelledby="newsletter-section-title">
+			<header class="section-head">
+				<p class="eyebrow">Newsletter</p>
+				<h2 id="newsletter-section-title">Suivez nos actions.</h2>
+			</header>
+			<NewsletterSignup variant="block" />
+		</section>
 	</main>
+
+	<NewsletterModal />
 </Layout>
