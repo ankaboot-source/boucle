@@ -41,7 +41,8 @@ Post EXACTLY ONE comment on the issue with this format. **If you already posted 
 Size: S | M | L
 
 ## Questions
-- <blocking question, or "none">
+Numbered list so the author can answer by number. If there are blocking questions, list them as `1.`, `2.`, `3.`… If there are none, write `none` on its own line.
+1. <blocking question>
 
 ## Disposition
 READY | NEEDS-INFO | NEEDS-SPLIT
@@ -77,9 +78,9 @@ The Disposition field is not a free choice. It is **determined** by your Questio
 ### What counts as a blocking question
 
 A blocking question is one where the answer changes what the worker would build. Examples:
-- "What email address should the contact form send to?" — changes the implementation.
-- "Should the newsletter modal appear on page load or on scroll?" — changes the implementation.
-- "Which pages should use the brand symbols?" — changes the implementation.
+1. "What email address should the contact form send to?" — changes the implementation.
+2. "Should the newsletter modal appear on page load or on scroll?" — changes the implementation.
+3. "Which pages should use the brand symbols?" — changes the implementation.
 
 If a question is just a note or suggestion (the answer doesn't change what gets built), put it in the Analysis section, not in Questions. Only list questions that **block** implementation.
 
@@ -112,6 +113,6 @@ Rules for sub-issues:
 - Each sub-issue must be **Size S or M** — never L. If a piece is L, split it further.
 - Each sub-issue must have **verifiable** acceptance criteria (machine-checkable or visible on the rendered page).
 - Sub-issues must be **independent** (no required sequential ordering). Each should be implementable standalone.
-- The **parent issue is NOT implemented** — only the sub-issues are. The job labels the parent `boucle:done` after the split.
+- The **parent issue is NOT implemented** — only the sub-issues are. The job leaves the parent **open** after the split; it is closed automatically when the last sub-issue completes.
 - **Before posting your comment, verify it is complete**: the `## Sub-issues` section must contain all your `### Sub-issue N:` blocks with their full body and `Size:` line. A truncated comment will cause the parser to fail and the split will not happen.
 - Use `glab` to post your comment: `glab issue note <iid> --repo <project> --message "$(cat <<'EOF' ... EOF)"`
