@@ -13,6 +13,12 @@ import NewsletterSignup from "./NewsletterSignup.astro";
  * Uses the native <dialog> element so we get focus trapping, the
  * `::backdrop` pseudo-element, and Escape-to-close for free.
  *
+ * Session keys (must match NewsletterSignup.astro):
+ *  - `up-newsletter-modal-dismissed` — visitor closed the modal without
+ *    subscribing; suppress for the rest of the session.
+ *  - `up-newsletter-subscribed` — visitor converted; suppress the modal
+ *    and any re-prompt for the rest of the session.
+ *
  * Props:
  *  - delayMs: how long to wait before opening (default 30 000 ms).
  *  - heading / description / buttonLabel: copy overrides for the modal.
@@ -90,14 +96,14 @@ const formId = "newsletter-modal-form";
 			</p>
 
 			{/*
-			  Reuse the inline newsletter form. The script in
+			  Reuse the block newsletter form. The script in
 			  NewsletterSignup.astro already dispatches
 			  `up:newsletter:subscribed` on success, which the modal
 			  listens for in order to close itself.
 			*/}
 			<NewsletterSignup
 				id={formId}
-				variant="stacked"
+				variant="block"
 				buttonLabel={buttonLabel}
 				heading=""
 				description=""
@@ -294,6 +300,7 @@ const formId = "newsletter-modal-form";
 	type ModalEl = HTMLDialogElement & { dataset: DOMStringMap };
 
 	const STORAGE_KEY = "up-newsletter-modal-dismissed";
+	const SUBSCRIBED_KEY = "up-newsletter-subscribed";
 	const ACTIVITY_EVENTS = ["click", "scroll", "keydown"] as const;
 
 	const isDismissed = (): boolean => {
@@ -314,7 +321,7 @@ const formId = "newsletter-modal-form";
 
 	const isSubscribed = (): boolean => {
 		try {
-			return sessionStorage.getItem("up-newsletter-subscribed") === "1";
+			return sessionStorage.getItem(SUBSCRIBED_KEY) === "1";
 		} catch {
 			return false;
 		}
