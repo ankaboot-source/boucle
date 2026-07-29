@@ -1,0 +1,361 @@
+---
+/*
+ * NewsletterModal
+ * ---------------
+ * A modal that opens after a configurable delay of inactivity
+ * (`delayMs`, default 30s) to invite the visitor to subscribe to the
+ * newsletter. "Inactivity" here means no `click`, `scroll`, or
+ * `keypress` has been observed on the document during that window.
+ *
+ * Behaviour
+ * ---------
+ * - The modal element is always present in the DOM but hidden until
+ *   the timer fires. This keeps the markup stable for screen readers
+ *   and avoids layout shift.
+ * - Any of `click`, `scroll`, `keypress` on the document cancels the
+ *   pending timer and marks the visitor as "active" — once active, the
+ *   modal will not open during this session.
+ * - The modal can be dismissed via the close button, by clicking the
+ *   backdrop, or by pressing the Escape key.
+ * - Dismissal, conversion, or detected activity writes a flag to
+ *   `sessionStorage`. On subsequent page loads, the timer is not
+ *   scheduled at all.
+ * - The script is defensive: every `document.querySelector` call is
+ *   null-checked, and sessionStorage access is wrapped in try/catch.
+ *   Nothing in this script logs warnings or errors on page load.
+ */
+
+import NewsletterSignup from "./NewsletterSignup.astro";
+
+interface Props {
+	delayMs?: number;
+}
+
+const { delayMs = 30000 } = Astro.props;
+---
+
+<div
+	class="newsletter-modal"
+	data-newsletter-modal
+	data-delay-ms={delayMs}
+	role="dialog"
+	aria-modal="true"
+	aria-labelledby="newsletter-modal-title"
+	aria-describedby="newsletter-modal-description"
+	hidden
+>
+	<div
+		class="newsletter-modal__backdrop"
+		data-newsletter-modal-backdrop
+	></div>
+
+	<div
+		class="newsletter-modal__panel"
+		role="document"
+		tabindex="-1"
+	>
+		<button
+			class="newsletter-modal__close"
+			type="button"
+			data-newsletter-modal-close
+			aria-label="Fermer la fenêtre d'inscription à la newsletter"
+		>
+			<svg
+				aria-hidden="true"
+				viewBox="0 0 24 24"
+				width="24"
+				height="24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+			>
+				<line x1="6" y1="6" x2="18" y2="18"></line>
+				<line x1="18" y1="6" x2="6" y2="18"></line>
+			</svg>
+		</button>
+
+		<header class="newsletter-modal__head">
+			<p class="eyebrow newsletter-modal__eyebrow">Newsletter</p>
+			<h2 id="newsletter-modal-title" class="newsletter-modal__title">
+				Restez informé·e.
+			</h2>
+			<p id="newsletter-modal-description" class="newsletter-modal__lede">
+				Une lettre d'information courte et ponctuelle pour suivre nos
+				actions, nos rendez-vous et les échéances importantes.
+			</p>
+		</header>
+
+		<div class="newsletter-modal__form">
+			<NewsletterSignup variant="block" />
+		</div>
+	</div>
+</div>
+
+<style>
+	.newsletter-modal {
+		position: fixed;
+		inset: 0;
+		z-index: 1000;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: var(--space-s);
+	}
+
+	.newsletter-modal[hidden] {
+		display: none;
+	}
+
+	.newsletter-modal__backdrop {
+		position: absolute;
+		inset: 0;
+		background: rgba(10, 10, 10, 0.6);
+		backdrop-filter: blur(2px);
+		animation: newsletter-modal-fade var(--duration-base) var(--ease-out);
+	}
+
+	.newsletter-modal__panel {
+		position: relative;
+		width: min(100%, 32rem);
+		max-height: calc(100vh - 2 * var(--space-s));
+		overflow-y: auto;
+		background: var(--color-bg);
+		border-radius: var(--radius-l);
+		padding: clamp(var(--space-m), 4vw, var(--space-xl));
+		box-shadow: var(--shadow-lift);
+		animation: newsletter-modal-pop var(--duration-base) var(--ease-out);
+	}
+
+	.newsletter-modal__panel:focus {
+		outline: none;
+	}
+
+	.newsletter-modal__close {
+		position: absolute;
+		top: var(--space-s);
+		right: var(--space-s);
+		width: 44px;
+		height: 44px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--color-text);
+		background: transparent;
+		border: 1.5px solid transparent;
+		border-radius: var(--radius-pill);
+		cursor: pointer;
+		transition:
+			background-color var(--duration-base) var(--ease-out),
+			border-color var(--duration-base) var(--ease-out);
+	}
+
+	.newsletter-modal__close:hover {
+		background: var(--color-bg-soft);
+		border-color: var(--color-border);
+	}
+
+	.newsletter-modal__close:focus-visible {
+		outline: 2px solid var(--color-accent);
+		outline-offset: 3px;
+	}
+
+	.newsletter-modal__head {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2xs);
+		margin-bottom: var(--space-m);
+	}
+
+	.newsletter-modal__eyebrow {
+		color: var(--color-accent);
+	}
+
+	.newsletter-modal__title {
+		font-family: var(--font-heading);
+		font-size: var(--text-2xl);
+		margin: 0;
+		color: var(--color-ink);
+	}
+
+	.newsletter-modal__lede {
+		margin: 0;
+		color: var(--color-text-muted);
+		font-size: var(--text-base);
+	}
+
+	.newsletter-modal__form :global(.newsletter) {
+		padding: 0;
+		background: transparent;
+		border: 0;
+	}
+
+	@keyframes newsletter-modal-fade {
+		from {
+			opacity: 0;
+		}
+		to {
+			opacity: 1;
+		}
+	}
+
+	@keyframes newsletter-modal-pop {
+		from {
+			opacity: 0;
+			transform: translateY(8px) scale(0.98);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0) scale(1);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.newsletter-modal__backdrop,
+		.newsletter-modal__panel {
+			animation: none;
+		}
+	}
+
+	@media (max-width: 32rem) {
+		.newsletter-modal__panel {
+			padding: var(--space-l) var(--space-m);
+		}
+	}
+</style>
+
+<script>
+	/*
+	 * Inactivity timer + modal behaviour.
+	 *
+	 * - On load, look for a single [data-newsletter-modal] on the page.
+	 * - If sessionStorage already flags the visitor as "subscribed",
+	 *   "dismissed", or "active", do not schedule the timer at all.
+	 * - Otherwise, register a single {once: true} listener on each of
+	 *   click, scroll, keypress. The first event wins: it cancels the
+	 *   timer and marks the visitor as active.
+	 * - If no event fires before `delayMs`, open the modal.
+	 * - The modal writes "newsletter:modal-dismissed" on dismissal and
+	 *   the NewsletterSignup form writes "newsletter:subscribed" on
+	 *   successful submit. Either flag suppresses the timer on the
+	 *   next page load.
+	 */
+
+	const SESSION_SUBSCRIBED = "newsletter:subscribed";
+	const SESSION_DISMISSED = "newsletter:modal-dismissed";
+	const SESSION_ACTIVE = "newsletter:active";
+
+	const safeSessionGet = (key: string): string | null => {
+		try {
+			return window.sessionStorage.getItem(key);
+		} catch {
+			return null;
+		}
+	};
+
+	const safeSessionSet = (key: string, value: string) => {
+		try {
+			window.sessionStorage.setItem(key, value);
+		} catch {
+			// ignore — private mode, quota, etc.
+		}
+	};
+
+	const root = document.querySelector<HTMLElement>("[data-newsletter-modal]");
+	if (root) {
+		const delayMs = Number(root.dataset.delayMs ?? "30000");
+		const backdrop = root.querySelector<HTMLElement>(
+			"[data-newsletter-modal-backdrop]",
+		);
+		const closeButton = root.querySelector<HTMLButtonElement>(
+			"[data-newsletter-modal-close]",
+		);
+		const panel = root.querySelector<HTMLElement>(".newsletter-modal__panel");
+
+		// If the visitor already converted or dismissed (or interacted
+		// earlier this session), do nothing — the modal stays hidden and
+		// no timer is scheduled.
+		const alreadyHandled =
+			safeSessionGet(SESSION_SUBSCRIBED) !== null ||
+			safeSessionGet(SESSION_DISMISSED) !== null ||
+			safeSessionGet(SESSION_ACTIVE) !== null;
+
+		if (
+			!alreadyHandled &&
+			Number.isFinite(delayMs) &&
+			delayMs >= 0
+		) {
+			let timerId: number | null = null;
+			let opened = false;
+
+			const openModal = () => {
+				if (opened) return;
+				opened = true;
+				root.hidden = false;
+				// Defer focus to next frame so the element is in the DOM tree.
+				window.requestAnimationFrame(() => {
+					(closeButton ?? panel)?.focus();
+				});
+			};
+
+			const cancelTimer = (reason: string) => {
+				if (timerId !== null) {
+					window.clearTimeout(timerId);
+					timerId = null;
+				}
+				if (reason === "active") {
+					safeSessionSet(SESSION_ACTIVE, "1");
+				}
+			};
+
+			const markActive = () => cancelTimer("active");
+
+			// Any of click / scroll / keypress on the document counts as
+			// activity. Use { once: true } listeners so the first event
+			// stops the timer permanently for this page.
+			document.addEventListener("click", markActive, { once: true });
+			document.addEventListener("scroll", markActive, { once: true });
+			document.addEventListener("keypress", markActive, { once: true });
+
+			timerId = window.setTimeout(openModal, delayMs);
+
+			// Dismissal paths. Each writes a session flag so the modal
+			// will not reappear during the same browser session.
+			const dismiss = () => {
+				safeSessionSet(SESSION_DISMISSED, "1");
+				root.hidden = true;
+				if (timerId !== null) {
+					window.clearTimeout(timerId);
+					timerId = null;
+				}
+			};
+
+			closeButton?.addEventListener("click", dismiss);
+			backdrop?.addEventListener("click", dismiss);
+
+			// Escape key dismisses when the modal is open.
+			document.addEventListener("keydown", (event) => {
+				if (event.key === "Escape" && !root.hidden) {
+					event.preventDefault();
+					dismiss();
+				}
+			});
+
+			// If the form inside the modal converts, that path is handled
+			// by NewsletterSignup writing "newsletter:subscribed". The
+			// modal is still visible at that point, so we hide it on the
+			// next microtask once the success state is rendered.
+			const observer = new MutationObserver(() => {
+				const success = root.querySelector<HTMLElement>(
+					".newsletter__success:not([hidden])",
+				);
+				if (success) {
+					observer.disconnect();
+					window.setTimeout(dismiss, 1500);
+				}
+			});
+			observer.observe(root, { subtree: true, attributes: true, childList: true });
+		}
+	}
+</script>
