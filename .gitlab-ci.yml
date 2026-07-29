@@ -23,11 +23,11 @@ variables:
   #   Vercel:    "npx vercel deploy $BOUCLE_BUILD_OUTPUT --prod=false"
   #   GitLab Pages: "rsync -a $BOUCLE_BUILD_OUTPUT/ /srv/pages/$BRANCH/"
   BOUCLE_DEPLOY_CMD: "npx wrangler pages deploy $BOUCLE_BUILD_OUTPUT --project-name $BOUCLE_DEPLOY_PROJECT --branch $BRANCH"
-  BOUCLE_DEPLOY_PROJECT: "urgence-palestine"
+  BOUCLE_DEPLOY_PROJECT: ""
   # Regex to extract the deployed URL from the deploy command's stdout
   BOUCLE_DEPLOY_URL_REGEX: "https://[a-z0-9.-]+\\.pages\\.dev"
   # Production URL (for e2e fallback when deploy doesn't pass a live URL)
-  BOUCLE_PRODUCTION_URL: "https://urgence-palestine.fr"
+  BOUCLE_PRODUCTION_URL: ""
   # File-type CI variable: $OPENCODE_AUTH holds a path to the auth.json temp file
 
 # ── Default: use node:22-slim (has node, npm, curl — much smaller than node:22) ─
