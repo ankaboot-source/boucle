@@ -115,4 +115,5 @@ Rules for sub-issues:
 - Sub-issues must be **independent** (no required sequential ordering). Each should be implementable standalone.
 - The **parent issue is NOT implemented** — only the sub-issues are. The job leaves the parent **open** after the split; it is closed automatically when the last sub-issue completes.
 - **Before posting your comment, verify it is complete**: the `## Sub-issues` section must contain all your `### Sub-issue N:` blocks with their full body and `Size:` line. A truncated comment will cause the parser to fail and the split will not happen.
+- **CRITICAL — preserve newlines**: each `- [ ]` checkbox MUST be on its own line, with a blank line before the `Acceptance criteria:` line and before each `Size:` line. Do NOT collapse the body into a single line. If the parser detects `- [ ]` not at the start of a line (e.g. `...plumbing.Acceptance criteria:- [ ]...`), it will reject the sub-issue and fall back to a human. Markdown only renders checklists, headings, and lists when they start a new line.
 - Use `glab` to post your comment: `glab issue note <iid> --repo <project> --message "$(cat <<'EOF' ... EOF)"`
