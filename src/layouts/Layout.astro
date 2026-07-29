@@ -1,22 +1,49 @@
+---
+import "../styles/global.css";
+
+interface Props {
+	title?: string;
+	description?: string;
+}
+
+const {
+	title = "Urgence Palestine",
+	description = "Solidarité avec le peuple palestinien. Informations, actions et ressources pour soutenir la Palestine.",
+} = Astro.props;
+---
+
 <!doctype html>
-<html lang="en">
+<html lang="fr">
 	<head>
 		<meta charset="UTF-8" />
-		<meta name="viewport" content="width=device-width" />
-		<link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="generator" content={Astro.generator} />
-		<title>Astro Basics</title>
+		<meta name="description" content={description} />
+		<meta name="theme-color" content="#0a0a0a" />
+
+		<title>{title}</title>
+
+		<!--
+		  Preload the most critical font file to avoid a late reflow when the
+		  heading face arrives. Body Poppins at 400 is the most-used weight.
+		-->
+		<link
+			rel="preload"
+			href="/fonts/the-bold-font.woff2"
+			as="font"
+			type="font/woff2"
+			crossorigin
+		/>
+		<link
+			rel="preload"
+			href="/fonts/poppins-400.woff2"
+			as="font"
+			type="font/woff2"
+			crossorigin
+		/>
+		<link rel="icon" type="image/svg+xml" href="./favicon.svg" />
 	</head>
 	<body>
 		<slot />
 	</body>
 </html>
-
-<style>
-	html,
-	body {
-		margin: 0;
-		width: 100%;
-		height: 100%;
-	}
-</style>

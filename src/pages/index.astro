@@ -1,11 +1,99 @@
 ---
-import Welcome from '../components/Welcome.astro';
-import Layout from '../layouts/Layout.astro';
-
-// Welcome to Astro! Wondering what to do next? Check out the Astro documentation at https://docs.astro.build
-// Don't want to use any of this? Delete everything in this file, the `assets`, `components`, and `layouts` directories, and start fresh.
+import "../styles/sections.css";
+import Layout from "../layouts/Layout.astro";
 ---
 
 <Layout>
-	<Welcome />
+	<main class="home">
+		<!--
+		  ============================================================
+		  Top brand band: statement headline, optional symbol, and
+		  the four flag colors as a thin tri-color stripe.
+		  ============================================================
+		-->
+		<section class="hero" aria-labelledby="hero-title">
+			<div class="hero__inner">
+				<p class="eyebrow">Urgence Palestine</p>
+				<h1 id="hero-title" class="display">
+					Solidarité<br />avec la Palestine.
+				</h1>
+				<p class="hero__lede">
+					Une plateforme d'information, d'action et de mémoire. Pour
+					que chaque voix porte, chaque histoire soit entendue, et
+					chaque geste compte.
+				</p>
+				<div class="hero__cta">
+					<a class="btn btn--primary" href="/agir">Agir maintenant</a>
+					<a class="btn btn--ghost" href="/symboles">Découvrir nos symboles</a>
+				</div>
+			</div>
+
+			<figure class="hero__symbol" aria-label="Symbole de la clef antique palestinienne">
+				<img
+					src="/symbols/antique-key.webp"
+					alt="Clef ancienne palestinienne, symbole du retour"
+					width="512"
+					height="512"
+					loading="eager"
+					fetchpriority="high"
+					decoding="async"
+				/>
+			</figure>
+		</section>
+
+		<!--
+		  ============================================================
+		  Flag stripe: a horizontal Palestinian flag that doubles as a
+		  brand color reference.
+		  ============================================================
+		-->
+		<div class="flag-stripe" role="img" aria-label="Drapeau palestinien : noir, blanc, vert, rouge">
+			<span class="flag-stripe__band flag-stripe__band--black"></span>
+			<span class="flag-stripe__band flag-stripe__band--white"></span>
+			<span class="flag-stripe__band flag-stripe__band--green"></span>
+			<span class="flag-stripe__band flag-stripe__band--red"></span>
+		</div>
+
+		<!--
+		  ============================================================
+		  Three pillars: the visual brand distilled.
+		  ============================================================
+		-->
+		<section class="pillars" aria-labelledby="pillars-title">
+			<header class="section-head">
+				<p class="eyebrow">Notre identité</p>
+				<h2 id="pillars-title">Trois piliers, un message clair.</h2>
+			</header>
+
+			<ol class="pillars__list">
+				<li class="pillar">
+					<p class="pillar__index">01</p>
+					<h3>Le noir et le blanc d'abord</h3>
+					<p>
+						Une base monochrome, lisible, sans distraction. Les
+						couleurs du drapeau sont réservées aux moments où elles
+						portent un sens.
+					</p>
+				</li>
+				<li class="pillar">
+					<p class="pillar__index">02</p>
+					<h3>Une typographie qui s'impose</h3>
+					<p>
+						The Bold Font pour les titres, Poppins pour le reste.
+						Contraste assumé entre un display géométrique et un
+						sans-serif moderne.
+					</p>
+				</li>
+				<li class="pillar">
+					<p class="pillar__index">03</p>
+					<h3>Neuf symboles, dessinés à la main</h3>
+					<p>
+						Clef antique, grenade, huile d'olive, keffieh, souimanga,
+						coquelicot, Al-Quds, Al-Aqsa, orange. Une grammaire
+						visuelle pour parler de Palestine.
+					</p>
+				</li>
+			</ol>
+		</section>
+	</main>
 </Layout>
