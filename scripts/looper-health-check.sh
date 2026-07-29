@@ -172,4 +172,36 @@ if [ -n "$DEADLOCKED_SPEC_PRS" ]; then
   done
 fi
 
+# 7. Spec PRs whose source issue is closed — auto-close the spec PR (planning artifact cleanup)
+# Spec PRs are planning artifacts, not implementation. Once the source issue is closed
+# (worker PR merged), the spec PR is redundant. looper never closes them — this pollutes
+# the GitHub PR list with stale spec PRs. This section auto-closes them.
+SPEC_PRS_OPEN=$(gh api "repos/ankaboot-source/m3llm/pulls?state=open" --jq '
+  [.[] | select(.labels[].name=="looper:spec-ready" or .labels[].name=="looper:spec-reviewing") | {number, title}] | .[]
+' 2>/dev/null || true)
+if [ -n "$SPEC_PRS_OPEN" ]; then
+  while IFS=$'\t' read -r pr title; do
+    [ -z "$pr" ] && continue
+    # Extract source issue number from title (format: "... (#NNN)" or "...#NNN")
+    SOURCE_ISSUE=$(echo "$title" | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+    if [ -z "$SOURCE_ISSUE" ]; then
+      continue
+    fi
+    # Is the source issue closed?
+    ISSUE_STATE=$(gh api "repos/ankaboot-source/m3llm/issues/$SOURCE_ISSUE" --jq '.state' 2>/dev/null || echo "OPEN")
+    if [ "$ISSUE_STATE" != "closed" ]; then
+      continue
+    fi
+    log "DRAWBACK: spec PR m3llm#$pr is stale (source issue #$SOURCE_ISSUE closed) — auto-closing"
+    echo "## $TS — spec PR #$pr auto-closed (source issue #$SOURCE_ISSUE closed)" >> "$DRAWBACKS"
+    echo "- **Symptom:** spec PR #$pr still open but source issue #$SOURCE_ISSUE is closed" >> "$DRAWBACKS"
+    echo "- **Quick-win:** auto-close spec PR with comment + delete branch" >> "$DRAWBACKS"
+    echo "- **Root cause:** looper never closes spec PRs after issue completion — no cleanup mechanism" >> "$DRAWBACKS"
+    echo "" >> "$DRAWBACKS"
+    gh pr close "$pr" --repo ankaboot-source/m3llm \
+      --comment "Auto-closing stale spec PR: source issue #$SOURCE_ISSUE is closed. This was a planning artifact, not an implementation PR." \
+      --delete-branch >> "$LOG" 2>&1 || log "failed to close spec PR #$pr"
+  done < <(echo "$SPEC_PRS_OPEN" | jq -r '(.number|tostring) + "\t" + .title')
+fi
+
 log "=== health check end ==="
