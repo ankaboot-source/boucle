@@ -1,10 +1,12 @@
 ---
 import "../styles/sections.css";
 import Layout from "../layouts/Layout.astro";
+import NewsletterSignup from "../components/NewsletterSignup.astro";
+import NewsletterModal from "../components/NewsletterModal.astro";
 ---
 
 <Layout>
-	<main class="home">
+	<main id="main" class="home">
 		<!--
 		  ============================================================
 		  Top brand band: statement headline, optional symbol, and
@@ -95,5 +97,97 @@ import Layout from "../layouts/Layout.astro";
 				</li>
 			</ol>
 		</section>
+
+		<!--
+		  ============================================================
+		  Newsletter section. The acceptance criteria require the
+		  <NewsletterSignup /> component to be rendered on a page-level
+		  section in addition to the footer.
+		  ============================================================
+		-->
+		<section class="home-newsletter" aria-labelledby="home-newsletter-title">
+			<div class="home-newsletter__inner">
+				<header class="home-newsletter__head">
+					<p class="eyebrow">Newsletter</p>
+					<h2 id="home-newsletter-title" class="home-newsletter__title">
+						Un email par mois.<br />Trois clics pour s'inscrire.
+					</h2>
+					<p class="home-newsletter__lede">
+						Notre lettre d'information rassemble les appels à l'action
+						du mois, les rendez-vous près de chez vous et les ressources
+						que nous publions. Pas de pub, pas de spam — vous pouvez
+						vous désinscrire en un clic.
+					</p>
+				</header>
+				<div class="home-newsletter__form">
+					<NewsletterSignup
+						id="home-newsletter"
+						variant="inline"
+						heading=""
+						description=""
+					/>
+				</div>
+			</div>
+		</section>
 	</main>
+
+	<NewsletterModal slot="modal" />
 </Layout>
+
+<style>
+	.home-newsletter {
+		width: min(100% - 2 * var(--space-s), var(--container-wide));
+		margin-inline: auto;
+	}
+
+	.home-newsletter__inner {
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: var(--space-l);
+		align-items: start;
+		padding: var(--space-xl);
+		background: var(--color-ink);
+		color: var(--color-ink-on-dark);
+		border-radius: var(--radius-l);
+	}
+
+	@media (min-width: 48rem) {
+		.home-newsletter__inner {
+			grid-template-columns: 1.1fr 1fr;
+			gap: var(--space-2xl);
+		}
+	}
+
+	.home-newsletter__head {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2xs);
+	}
+
+	.home-newsletter__title {
+		font-family: var(--font-heading);
+		font-size: var(--text-3xl);
+		font-weight: var(--weight-bold);
+		color: var(--color-ink-on-dark);
+		margin: 0;
+		letter-spacing: var(--tracking-tight);
+	}
+
+	.home-newsletter__lede {
+		font-size: var(--text-base);
+		color: color-mix(in oklch, var(--color-ink-on-dark) 75%, transparent);
+		max-width: 48ch;
+		margin: var(--space-2xs) 0 0;
+	}
+
+	.home-newsletter__form {
+		background: var(--color-bg);
+		color: var(--color-ink);
+		border-radius: var(--radius-l);
+		padding: var(--space-l);
+	}
+
+	.home-newsletter__form :global(.newsletter__intro) {
+		display: none;
+	}
+</style>
