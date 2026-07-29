@@ -116,8 +116,14 @@ dispatch:
       fi
 
       if [ -z "$IID" ]; then
-        echo "No issue IID in payload, skipping"
-        exit 0
+        # Recovery path: allow manual triage trigger via BOUCLE_ISSUE variable
+        if [ -n "${BOUCLE_ISSUE:-}" ]; then
+          echo "No IID in payload, but BOUCLE_ISSUE=$BOUCLE_ISSUE set via trigger. Using it."
+          IID="$BOUCLE_ISSUE"
+        else
+          echo "No issue IID in payload, skipping"
+          exit 0
+        fi
       fi
 
       # Label helper: preserve non-boucle labels when writing a boucle label
