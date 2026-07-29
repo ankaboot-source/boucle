@@ -31,9 +31,9 @@ default:
       export GITLAB_HOST="$BOUCLE_FORGE_HOST"
 
       # ── curl + jq (slim image lacks both) ───────────────────────────
-      if ! command -v curl &>/dev/null || ! command -v jq &>/dev/null; then
-        echo "Installing curl + jq..."
-        apt-get update -qq && apt-get install -y -qq curl jq
+      if ! command -v curl &>/dev/null || ! command -v jq &>/dev/null || ! command -v git &>/dev/null; then
+        echo "Installing curl + jq + git..."
+        apt-get update -qq && apt-get install -y -qq curl jq git
       fi
 
       # ── glab CLI ───────────────────────────────────────────────────
