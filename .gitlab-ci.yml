@@ -155,6 +155,7 @@ dispatch:
       ACTION=$(jq -r '.object_attributes.action // empty' "$TRIGGER_PAYLOAD")
 
       SHOULD_TRIAGE=false
+      SHOULD_WORK=false
       if echo "$LABELS" | grep -q "boucle:triage"; then
         SHOULD_TRIAGE=true
       elif echo "$LABELS" | grep -q "boucle:needs-info"; then
@@ -163,9 +164,17 @@ dispatch:
           SHOULD_TRIAGE=true
         fi
       elif echo "$LABELS" | grep -q "boucle:todo"; then
-        # Body edit re-triggers triage
-        if [ "$ACTION" = "update" ]; then
-          SHOULD_TRIAGE=true
+        # If boucle:todo was just added (by triage), triage already triggered
+        # the worker — skip to avoid a duplicate worker pipeline. Detect by
+        # checking whether boucle:todo was in the previous labels (before
+        # this webhook event). If it was already there, this is a re-trigger
+        # (body edit, note, manual label toggle) → trigger worker directly.
+        PREV_LABELS=$(jq -r '.changes.labels.previous // [] | join(",")' "$TRIGGER_PAYLOAD" 2>/dev/null)
+        if echo "$PREV_LABELS" | grep -q "boucle:todo"; then
+          SHOULD_WORK=true
+        else
+          echo "boucle:todo just added (likely by triage) — worker already triggered, skipping"
+          exit 0
         fi
       elif [ -z "$LABELS" ] || [ "$ACTION" = "open" ]; then
         # New issue with no boucle label → triage
@@ -180,6 +189,12 @@ dispatch:
         if ! echo "$LABELS" | grep -q "boucle:triage"; then
           set_boucle_label "$IID" "boucle:triage"
         fi
+      elif [ "$SHOULD_WORK" = "true" ]; then
+        echo "Triggering worker for issue #$IID (boucle:todo re-trigger)"
+        curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
+          -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+          -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+        exit 0
       else
         echo "No action needed for issue #$IID (labels: $LABELS)"
         exit 0
@@ -395,13 +410,15 @@ triage:
             glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
               -f body="Triage requested NEEDS-SPLIT but no sub-issues could be created from the triage comment. Please split this issue manually." > /dev/null
           else
-            # Post a comment listing the new sub-issues
-            SPLIT_MSG="Split into: $(echo "$CREATED_IIDS" | sed 's/,/#, #/g')#"
+            # Post a comment listing the new sub-issues, with a machine-readable
+            # marker carrying the sibling IIDs so the parent-close cascade can
+            # find them later without parsing free-text.
+            SPLIT_MSG=$(printf 'Split into: %s\n\n<!-- boucle:split-parent v=1 iids=%s -->\nParent stays open until all sub-issues close. The loop closes this parent automatically when the last sub-issue completes.' "$(echo "$CREATED_IIDS" | sed 's/,/#, #/g')#" "$CREATED_IIDS")
             glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
               -f body="$SPLIT_MSG" > /dev/null
-            # Mark the parent as done (split completed)
-            set_boucle_label "$IID" "boucle:done"
-            echo "Split parent #$IID into $SUBISSUE_COUNT sub-issue(s): $CREATED_IIDS"
+            # Parent stays open (NOT marked boucle:done). It will be closed by
+            # maybe_close_parent() when the last sub-issue reaches boucle:done.
+            echo "Split parent #$IID into $SUBISSUE_COUNT sub-issue(s): $CREATED_IIDS (parent left open)"
             if [ "$PARSE_FAILURES" -gt 0 ]; then
               echo "WARN: $PARSE_FAILURES sub-issue(s) failed to create"
             fi
@@ -679,6 +696,63 @@ e2e:
         glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
       }
 
+      # Close a GitLab issue (boucle:done is a board label, not a close state)
+      close_issue() {
+        local iid="$1"
+        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" \
+          -f state_event=close > /dev/null 2>&1 || true
+      }
+
+      # Parent-close cascade: if this issue is a sub-issue (has a "## Parent issue"
+      # section in its body), check whether ALL its sibling sub-issues are closed.
+      # If so, close the parent too. No-op if the issue is not a sub-issue.
+      maybe_close_parent() {
+        local child_iid="$1"
+        # Parse parent IID from the sub-issue body ("## Parent issue\n#N — <url>")
+        local child_data parent_iid
+        child_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$child_iid" 2>/dev/null) || { echo "maybe_close_parent: can't fetch issue #$child_iid — skipping."; return 0; }
+        parent_iid=$(echo "$child_data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+        if [ -z "$parent_iid" ]; then
+          echo "maybe_close_parent: no parent issue link in #$child_iid — not a sub-issue."
+          return 0
+        fi
+
+        # Fetch parent; skip if already closed
+        local parent_data parent_state
+        parent_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid" 2>/dev/null) || { echo "maybe_close_parent: can't fetch parent #$parent_iid — skipping."; return 0; }
+        parent_state=$(echo "$parent_data" | jq -r '.state')
+        if [ "$parent_state" = "closed" ]; then
+          echo "maybe_close_parent: parent #$parent_iid already closed."
+          return 0
+        fi
+
+        # Parse the parent's split-parent marker comment for sibling IIDs
+        local parent_notes sibling_iids
+        parent_notes=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid/notes" 2>/dev/null) || { echo "maybe_close_parent: can't fetch parent notes — skipping."; return 0; }
+        sibling_iids=$(echo "$parent_notes" | jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | first | .body // empty' | grep -oE 'iids=[0-9,]+' | cut -d= -f2)
+        if [ -z "$sibling_iids" ]; then
+          echo "maybe_close_parent: parent #$parent_iid has no split-parent marker — can't check siblings."
+          return 0
+        fi
+
+        # Check each sibling: all must be closed
+        local all_closed=true iid
+        for iid in $(echo "$sibling_iids" | tr ',' ' '); do
+          local sib_state
+          sib_state=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null | jq -r '.state // "unknown"')
+          if [ "$sib_state" != "closed" ]; then
+            echo "maybe_close_parent: sibling #$iid is $sib_state — parent #$parent_iid stays open."
+            all_closed=false
+            break
+          fi
+        done
+
+        if [ "$all_closed" = "true" ]; then
+          echo "maybe_close_parent: all sub-issues of #$parent_iid are closed — closing parent."
+          close_issue "$parent_iid"
+        fi
+      }
+
       # Deploy-triggered e2e: no issue context. Run a deterministic HTTP smoke test.
       if [ -z "${BOUCLE_ISSUE:-}" ]; then
         echo "Deploy-triggered e2e — no issue context. Running HTTP smoke test."
@@ -704,6 +778,11 @@ e2e:
       case "$VERDICT" in
         PASS)
           set_boucle_label "$BOUCLE_ISSUE" "boucle:done"
+          # boucle:done is a board label, not a GitLab close state — close the issue too
+          close_issue "$BOUCLE_ISSUE"
+          # If this issue is a sub-issue, check whether all siblings are closed
+          # and close the parent when the last sub-issue completes.
+          maybe_close_parent "$BOUCLE_ISSUE"
           ;;
         FAIL)
           # Loop closure: open a new issue in triage with the trace
