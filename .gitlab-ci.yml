@@ -187,8 +187,11 @@ triage:
       ./bin/oc triage
 
       # Parse the triage comment for Disposition and Size
+      # GitLab notes API returns notes newest-first, so `first` = newest.
+      # The agent sometimes posts duplicate/truncated comments; pick the newest
+      # that has a complete body (with a Disposition line).
       COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-        | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | last | .body')
+        | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## Disposition"))] | first | .body')
 
       DISPOSITION=$(echo "$COMMENT" | grep -oiE '(READY|NEEDS-INFO|NEEDS-SPLIT)' | head -1 | tr '[:lower:]' '[:upper:]')
       SIZE=$(echo "$COMMENT" | grep -oiE 'Size:\s*[SML]' | grep -oiE '[SML]' | head -1 | tr '[:lower:]' '[:upper:]')
@@ -218,7 +221,16 @@ triage:
           #   Size: S | M
           #   ### Sub-issue 2: ...
           SUBISSUES_SECTION=$(echo "$COMMENT" | sed -n '/^## Sub-issues/,/^## /p' | head -n -1)
-          # Skip if the section is missing or only contains the marker line
+          # If the selected comment has no Sub-issues section, the agent may have
+          # posted a truncated duplicate. Search ALL triage comments (newest-first)
+          # for one that has a parseable Sub-issues section.
+          if [ -z "$SUBISSUES_SECTION" ] || ! echo "$SUBISSUES_SECTION" | grep -qE '^### Sub-issue [0-9]+:'; then
+            echo "Selected triage comment has no Sub-issues section — searching all triage comments..."
+            SUBISSUES_SECTION=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+              | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("### Sub-issue [0-9]+:"))] | first | .body' \
+              | sed -n '/^## Sub-issues/,/^## /p' | head -n -1)
+          fi
+          # Skip if still no parseable sub-issues after searching all comments
           if [ -z "$SUBISSUES_SECTION" ] || ! echo "$SUBISSUES_SECTION" | grep -qE '^### Sub-issue [0-9]+:'; then
             echo "NEEDS-SPLIT but no parseable sub-issues — falling back to boucle:human"
             set_boucle_label "$IID" "boucle:human"
@@ -428,15 +440,24 @@ worker:
       # Push branch (agent already committed; we just push)
       git push --force origin "$BRANCH"
 
-      # Open MR
+      # Build MR description with context (printf keeps YAML-valid, no multi-line string)
+      ITERATION="${BOUCLE_ITERATION:-1}"
+      COMMIT_COUNT=$(git log master.."$BRANCH" --oneline 2>/dev/null | wc -l | tr -d ' ')
+      COMMIT_SUMMARY=$(git log master.."$BRANCH" --format='- %s' 2>/dev/null | head -10)
+      APPROACH=""
+      if [ -f ".boucle/$BOUCLE_ISSUE/state.md" ]; then
+        APPROACH=$(sed -n '/^## Approach/,/^## /p' ".boucle/$BOUCLE_ISSUE/state.md" | head -n -1 | tail -n +2 | head -20)
+      fi
+      MR_DESCRIPTION=$(printf '## Issue #%s — iteration %s\n\nPreview: %s\n\n### What changed\n%s\n\n### Approach\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s_' \
+        "$BOUCLE_ISSUE" "$ITERATION" "$PREVIEW_URL" "${COMMIT_SUMMARY:-(no commits)}" "${APPROACH:-(not recorded)}" "$BOUCLE_ISSUE" "$COMMIT_COUNT" "$ITERATION")
+
+      # Open MR with rich description
       glab mr create --source-branch "$BRANCH" --target-branch master \
         --title "boucle: issue #$BOUCLE_ISSUE" \
-        --description "Preview: $PREVIEW_URL" > /dev/null
+        --description "$MR_DESCRIPTION" > /dev/null
 
-      # Write preview URL into MR description (update)
+      # Get MR IID for downstream jobs
       MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?source_branch=$BRANCH" | jq -r '.[0].iid')
-      glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID" \
-        -f description="Preview: $PREVIEW_URL" > /dev/null
 
       # Assert: branch exists, MR open, preview returns 200
       if [ -z "$PREVIEW_URL" ]; then
