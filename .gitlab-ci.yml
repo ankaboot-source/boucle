@@ -16,6 +16,18 @@ variables:
   BOUCLE_FORGE_HOST: framagit.org
   BOUCLE_BUILD_CMD: "npm ci && npm run build"
   BOUCLE_BUILD_OUTPUT: "public"
+  # Deploy: swap to any deploy command. Use $BRANCH (worker preview) or master (deploy job).
+  # Examples:
+  #   CF Pages:  "npx wrangler pages deploy $BOUCLE_BUILD_OUTPUT --project-name $BOUCLE_DEPLOY_PROJECT --branch $BRANCH"
+  #   Netlify:   "npx netlify deploy --dir $BOUCLE_BUILD_OUTPUT --alias $BRANCH"
+  #   Vercel:    "npx vercel deploy $BOUCLE_BUILD_OUTPUT --prod=false"
+  #   GitLab Pages: "rsync -a $BOUCLE_BUILD_OUTPUT/ /srv/pages/$BRANCH/"
+  BOUCLE_DEPLOY_CMD: "npx wrangler pages deploy $BOUCLE_BUILD_OUTPUT --project-name $BOUCLE_DEPLOY_PROJECT --branch $BRANCH"
+  BOUCLE_DEPLOY_PROJECT: ""
+  # Regex to extract the deployed URL from the deploy command's stdout
+  BOUCLE_DEPLOY_URL_REGEX: "https://[a-z0-9.-]+\\.pages\\.dev"
+  # Production URL (for e2e fallback when deploy doesn't pass a live URL)
+  BOUCLE_PRODUCTION_URL: ""
   # File-type CI variable: $OPENCODE_AUTH holds a path to the auth.json temp file
 
 # ── Default: use node:22-slim (has node, npm, curl — much smaller than node:22) ─
@@ -23,6 +35,12 @@ variables:
 # before_script installs glab + opencode + wrangler (not in the image).
 default:
   image: node:22-slim
+  # Route to the project's dedicated runner (tag: tooling). It's a shell
+  # executor (ignores image:), so before_script self-installs node — but
+  # the install persists across runs, making subsequent runs faster than
+  # docker (which reinstalls every time). Falls back to shared docker
+  # runner (Atchoum) if tooling is offline.
+  tags: [tooling]
   before_script:
     - |
       set -x
@@ -30,10 +48,20 @@ default:
       export GITLAB_TOKEN="$BOUCLE_TOKEN"
       export GITLAB_HOST="$BOUCLE_FORGE_HOST"
 
-      # ── curl + jq (slim image lacks both) ───────────────────────────
+      # ── curl + jq (slim image / shell host may lack both) ──────────
       if ! command -v curl &>/dev/null || ! command -v jq &>/dev/null || ! command -v git &>/dev/null; then
         echo "Installing curl + jq + git..."
         apt-get update -qq && apt-get install -y -qq curl jq git
+      fi
+
+      # ── node + npm (shell executor ignores image:; install if missing) ──
+      # Persists across runs on shell executor — only downloads once.
+      if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then
+        echo "Installing Node.js (shell executor has no image support)..."
+        NODE_VER="v22.11.0"
+        curl -sL "https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-linux-x64.tar.xz" -o /tmp/node.tar.xz
+        tar xf /tmp/node.tar.xz -C "$HOME/.local" --strip-components=1
+        rm -f /tmp/node.tar.xz
       fi
 
       # ── glab CLI ───────────────────────────────────────────────────
@@ -53,8 +81,8 @@ default:
         npm install -g opencode-ai 2>/dev/null || true
       fi
 
-      # ── wrangler ──────────────────────────────────────────────────
-      if ! command -v wrangler &>/dev/null; then
+      # ── wrangler (only if deploy uses it) ──────────────────────────
+      if echo "$BOUCLE_DEPLOY_CMD" | grep -q "wrangler" && ! command -v wrangler &>/dev/null; then
         echo "Installing wrangler..."
         npm install -g wrangler 2>/dev/null || true
       fi
@@ -71,7 +99,7 @@ default:
       npm --version 2>/dev/null || echo "npm: MISSING"
       glab version 2>/dev/null | head -1 || echo "glab: MISSING"
       opencode --version 2>/dev/null || echo "opencode: MISSING"
-      wrangler --version 2>/dev/null || echo "wrangler: MISSING"
+      echo "$BOUCLE_DEPLOY_CMD" | grep -q wrangler && { wrangler --version 2>/dev/null || echo "wrangler: MISSING"; } || echo "wrangler: not needed (deploy doesn't use it)"
       echo "==================="
 
 # ── Dispatcher ──────────────────────────────────────────────────────────
@@ -91,11 +119,24 @@ dispatch:
       [ "$ACTOR" = "up-bot" ] && exit 0
 
       OBJECT_KIND=$(jq -r '.object_kind // empty' "$TRIGGER_PAYLOAD")
-      IID=$(jq -r '.object_attributes.iid // .issue.iid // empty' "$TRIGGER_PAYLOAD")
+      # For note events, .object_attributes.iid is the note's DB id, not the issue IID.
+      # The issue IID lives in the sibling key: .issue.iid (classic issues),
+      # .work_item.iid (work items), or .epic.iid (epics).
+      if [ "$OBJECT_KIND" = "note" ]; then
+        IID=$(jq -r '.issue.iid // .work_item.iid // .epic.iid // empty' "$TRIGGER_PAYLOAD")
+      else
+        IID=$(jq -r '.object_attributes.iid // .issue.iid // empty' "$TRIGGER_PAYLOAD")
+      fi
 
       if [ -z "$IID" ]; then
-        echo "No issue IID in payload, skipping"
-        exit 0
+        # Recovery path: allow manual triage trigger via BOUCLE_ISSUE variable
+        if [ -n "${BOUCLE_ISSUE:-}" ]; then
+          echo "No IID in payload, but BOUCLE_ISSUE=$BOUCLE_ISSUE set via trigger. Using it."
+          IID="$BOUCLE_ISSUE"
+        else
+          echo "No issue IID in payload, skipping"
+          exit 0
+        fi
       fi
 
       # Label helper: preserve non-boucle labels when writing a boucle label
@@ -168,10 +209,17 @@ triage:
     - |
       # Guard: if dispatch skipped (bot note event, anti-loop), no .boucle-issue artifact
       if [ ! -f .boucle-issue ]; then
-        echo "No .boucle-issue artifact (dispatch skipped). Nothing to triage."
-        exit 0
+        # Recovery path: allow manual triage trigger via BOUCLE_ISSUE variable
+        if [ -n "${BOUCLE_ISSUE:-}" ]; then
+          echo "No .boucle-issue artifact, but BOUCLE_ISSUE=$BOUCLE_ISSUE set via trigger. Using it."
+          IID="$BOUCLE_ISSUE"
+        else
+          echo "No .boucle-issue artifact (dispatch skipped) and no BOUCLE_ISSUE variable. Nothing to triage."
+          exit 0
+        fi
+      else
+        IID=$(cat .boucle-issue)
       fi
-      IID=$(cat .boucle-issue)
       export BOUCLE_ISSUE="$IID"
 
       # Label helper: preserve non-boucle labels when writing a boucle label
@@ -187,11 +235,17 @@ triage:
       ./bin/oc triage
 
       # Parse the triage comment for Disposition and Size
+      # GitLab notes API returns notes newest-first, so `first` = newest.
+      # The agent sometimes posts duplicate/truncated comments; pick the newest
+      # that has a complete body (with a Disposition line).
       COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-        | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | last | .body')
+        | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## Disposition"))] | first | .body')
 
-      DISPOSITION=$(echo "$COMMENT" | grep -oiE '(READY|NEEDS-INFO|NEEDS-SPLIT)' | head -1 | tr '[:lower:]' '[:upper:]')
-      SIZE=$(echo "$COMMENT" | grep -oiE 'Size:\s*[SML]' | grep -oiE '[SML]' | head -1 | tr '[:lower:]' '[:upper:]')
+      # Parse Disposition and Size from their SECTIONS only, not the whole body.
+      # Scoping prevents false matches: e.g. "already" in an acceptance criterion
+      # contains "ready" and would match a whole-body grep for READY.
+      DISPOSITION=$(echo "$COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
+      SIZE=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
 
       # Route based on disposition
       case "$DISPOSITION" in
@@ -208,8 +262,25 @@ triage:
           ;;
         NEEDS-INFO)
           set_boucle_label "$IID" "boucle:needs-info"
+          # Assign the issue to its reporter (author) so they're notified
+          # and know to answer the blocking questions. The loop pauses here
+          # until the author replies, which re-triggers triage.
+          AUTHOR_ID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID" | jq -r '.author.id')
+          if [ -n "$AUTHOR_ID" ] && [ "$AUTHOR_ID" != "null" ]; then
+            glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" \
+              -f "assignee_ids[]=$AUTHOR_ID" > /dev/null
+          fi
           ;;
         NEEDS-SPLIT)
+          # Idempotency guard: if the parent already has a split-parent marker,
+          # the split was already done — skip to avoid duplicate sub-issues
+          # (e.g. on re-trigger after a partial failure).
+          EXISTING_SPLIT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+            | jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | length' 2>/dev/null || echo 0)
+          if [ "${EXISTING_SPLIT:-0}" -gt 0 ]; then
+            echo "Parent #$IID already has a boucle:split-parent marker — skipping split (idempotency guard)"
+            exit 0
+          fi
           # Parse sub-issues from the triage comment. Format:
           #   ## Sub-issues
           #   <!-- boucle:sub-issue v=1 -->
@@ -218,7 +289,16 @@ triage:
           #   Size: S | M
           #   ### Sub-issue 2: ...
           SUBISSUES_SECTION=$(echo "$COMMENT" | sed -n '/^## Sub-issues/,/^## /p' | head -n -1)
-          # Skip if the section is missing or only contains the marker line
+          # If the selected comment has no Sub-issues section, the agent may have
+          # posted a truncated duplicate. Search ALL triage comments (newest-first)
+          # for one that has a parseable Sub-issues section.
+          if [ -z "$SUBISSUES_SECTION" ] || ! echo "$SUBISSUES_SECTION" | grep -qE '^### Sub-issue [0-9]+:'; then
+            echo "Selected triage comment has no Sub-issues section — searching all triage comments..."
+            SUBISSUES_SECTION=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+              | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("### Sub-issue [0-9]+:"))] | first | .body' \
+              | sed -n '/^## Sub-issues/,/^## /p' | head -n -1)
+          fi
+          # Skip if still no parseable sub-issues after searching all comments
           if [ -z "$SUBISSUES_SECTION" ] || ! echo "$SUBISSUES_SECTION" | grep -qE '^### Sub-issue [0-9]+:'; then
             echo "NEEDS-SPLIT but no parseable sub-issues — falling back to boucle:human"
             set_boucle_label "$IID" "boucle:human"
@@ -275,8 +355,8 @@ triage:
                 CREATED_JSON=$(glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues" \
                   -f title="$CUR_TITLE" \
                   -f description="$SUB_BODY" \
-                  -f labels="boucle:triage,size:$SUB_SIZE_LOWER" 2>&1) || CREATED_JSON=""
-                NEW_IID=$(echo "$CREATED_JSON" | jq -r '.iid // empty' 2>/dev/null)
+                  -f labels="boucle:triage,size:$SUB_SIZE_LOWER" 2>/dev/null) || CREATED_JSON=""
+                NEW_IID=$(echo "$CREATED_JSON" | jq -r '.iid // empty' 2>/dev/null || true)
                 if [ -n "$NEW_IID" ] && [ "$NEW_IID" != "null" ]; then
                   CREATED_IIDS="${CREATED_IIDS:+$CREATED_IIDS,}$NEW_IID"
                   SUBISSUE_COUNT=$((SUBISSUE_COUNT + 1))
@@ -422,21 +502,30 @@ worker:
       # Build (eval needed so && in BOUCLE_BUILD_CMD is interpreted as shell operator)
       eval "$BOUCLE_BUILD_CMD"
 
-      # Deploy to preview
-      PREVIEW_URL=$(npx wrangler pages deploy "$BOUCLE_BUILD_OUTPUT" --branch "$BRANCH" --project-name urgence-palestine 2>&1 | grep -oE 'https://[a-z0-9.-]+\.pages\.dev' | head -1)
+      # Deploy to preview (configurable via BOUCLE_DEPLOY_CMD)
+      PREVIEW_URL=$(eval "$BOUCLE_DEPLOY_CMD" 2>&1 | grep -oE "$BOUCLE_DEPLOY_URL_REGEX" | head -1)
 
       # Push branch (agent already committed; we just push)
       git push --force origin "$BRANCH"
 
-      # Open MR
+      # Build MR description with context (printf keeps YAML-valid, no multi-line string)
+      ITERATION="${BOUCLE_ITERATION:-1}"
+      COMMIT_COUNT=$(git log master.."$BRANCH" --oneline 2>/dev/null | wc -l | tr -d ' ')
+      COMMIT_SUMMARY=$(git log master.."$BRANCH" --format='- %s' 2>/dev/null | head -10)
+      APPROACH=""
+      if [ -f ".boucle/$BOUCLE_ISSUE/state.md" ]; then
+        APPROACH=$(sed -n '/^## Approach/,/^## /p' ".boucle/$BOUCLE_ISSUE/state.md" | head -n -1 | tail -n +2 | head -20)
+      fi
+      MR_DESCRIPTION=$(printf '## Issue #%s — iteration %s\n\nPreview: %s\n\n### What changed\n%s\n\n### Approach\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s_' \
+        "$BOUCLE_ISSUE" "$ITERATION" "$PREVIEW_URL" "${COMMIT_SUMMARY:-(no commits)}" "${APPROACH:-(not recorded)}" "$BOUCLE_ISSUE" "$COMMIT_COUNT" "$ITERATION")
+
+      # Open MR with rich description
       glab mr create --source-branch "$BRANCH" --target-branch master \
         --title "boucle: issue #$BOUCLE_ISSUE" \
-        --description "Preview: $PREVIEW_URL" > /dev/null
+        --description "$MR_DESCRIPTION" > /dev/null
 
-      # Write preview URL into MR description (update)
+      # Get MR IID for downstream jobs
       MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?source_branch=$BRANCH" | jq -r '.[0].iid')
-      glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID" \
-        -f description="Preview: $PREVIEW_URL" > /dev/null
 
       # Assert: branch exists, MR open, preview returns 200
       if [ -z "$PREVIEW_URL" ]; then
@@ -542,7 +631,9 @@ deploy:
   script:
     - |
       eval "$BOUCLE_BUILD_CMD"
-      DEPLOY_URL=$(npx wrangler pages deploy "$BOUCLE_BUILD_OUTPUT" --project-name urgence-palestine --branch master 2>&1 | grep -oE 'https://[a-z0-9.-]+\.pages\.dev' | head -1)
+      # Deploy to production (configurable via BOUCLE_DEPLOY_CMD, force master branch)
+      BRANCH=master
+      DEPLOY_URL=$(eval "$BOUCLE_DEPLOY_CMD" 2>&1 | grep -oE "$BOUCLE_DEPLOY_URL_REGEX" | head -1)
 
       # Assert: deployment URL returns 200 (production domain may not have DNS yet)
       if [ -z "$DEPLOY_URL" ]; then
@@ -575,7 +666,7 @@ e2e:
     - |
       export BOUCLE_ISSUE="${BOUCLE_ISSUE:-}"
       # Use deployment URL passed from deploy job (production domain may not have DNS yet)
-      LIVE_URL="${BOUCLE_LIVE_URL:-https://urgence-palestine.fr}"
+      LIVE_URL="${BOUCLE_LIVE_URL:-$BOUCLE_PRODUCTION_URL}"
       export BOUCLE_LIVE_URL="$LIVE_URL"
       echo "E2E testing URL: $LIVE_URL"
 
