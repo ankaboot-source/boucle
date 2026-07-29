@@ -1,0 +1,129 @@
+---
+/*
+ * Header
+ * ------
+ * Site chrome: a sticky top bar with the wordmark and the four
+ * primary navigation links. Uses the brand black surface and the
+ * flag-red hover accent from the design tokens.
+ */
+
+const navItems = [
+	{ label: "Prise de Paroles", href: "/" },
+	{ label: "Collectif", href: "/collectif" },
+	{ label: "Faites un don", href: "/don" },
+	{ label: "Mobilisation", href: "/mobilisation" },
+];
+---
+
+<header class="site-header">
+	<div class="site-header__inner container">
+		<a
+			href="/"
+			class="site-header__wordmark"
+			aria-label="Urgence Palestine — Accueil"
+		>
+			<span class="site-header__title">Urgence Palestine</span>
+		</a>
+
+		<nav class="site-header__nav" aria-label="Navigation principale">
+			<ul class="site-header__list">
+				{
+					navItems.map((item) => (
+						<li>
+							<a href={item.href} class="site-header__link">
+								{item.label}
+							</a>
+						</li>
+					))
+				}
+			</ul>
+		</nav>
+	</div>
+</header>
+
+<style>
+	.site-header {
+		position: sticky;
+		top: 0;
+		z-index: 100;
+		background: var(--color-flag-black);
+		color: var(--color-ink-on-dark);
+		border-bottom: 1px solid oklch(28% 0 0);
+	}
+
+	.site-header__inner {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-s);
+		min-height: 64px;
+		padding-block: var(--space-xs);
+	}
+
+	.site-header__wordmark {
+		display: inline-flex;
+		align-items: center;
+		color: var(--color-ink-on-dark);
+		text-decoration: none;
+		transition: color var(--duration-base) var(--ease-out);
+	}
+
+	.site-header__wordmark:hover {
+		color: var(--color-flag-red);
+	}
+
+	.site-header__title {
+		font-family: var(--font-heading);
+		font-size: var(--text-lg);
+		font-weight: var(--weight-bold);
+		letter-spacing: var(--tracking-tight);
+		line-height: var(--leading-tight);
+		text-transform: uppercase;
+	}
+
+	.site-header__nav {
+		display: flex;
+	}
+
+	.site-header__list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: flex-end;
+		gap: var(--space-2xs) var(--space-s);
+	}
+
+	.site-header__link {
+		display: inline-flex;
+		align-items: center;
+		min-height: 44px;
+		padding: 0 var(--space-2xs);
+		font-family: var(--font-body);
+		font-size: var(--text-sm);
+		font-weight: var(--weight-semibold);
+		color: var(--color-ink-on-dark);
+		text-decoration: none;
+		letter-spacing: 0.01em;
+		transition: color var(--duration-base) var(--ease-out);
+	}
+
+	.site-header__link:hover {
+		color: var(--color-flag-red);
+	}
+
+	@media (max-width: 40rem) {
+		.site-header__inner {
+			flex-direction: column;
+			align-items: flex-start;
+			gap: var(--space-2xs);
+			padding-block: var(--space-xs) var(--space-s);
+		}
+
+		.site-header__list {
+			justify-content: flex-start;
+		}
+	}
+</style>
