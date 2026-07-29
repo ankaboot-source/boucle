@@ -1,0 +1,91 @@
+# yaml-language-server: $schema=https://unpkg.com/@sveltia/cms/schema/sveltia-cms.json
+#
+# Sveltia CMS configuration for Urgence Palestine.
+#
+# This file is the canonical configuration. It is also exposed at
+# `/sveltia-cms.config.yml` by the static site through the symlink
+# `static/sveltia-cms.config.yml -> ../sveltia-cms.config.yml`, so the
+# admin page at `/admin/` can fetch it via the
+# `<link rel="cms-config-url">` tag in `static/admin/index.html`.
+#
+# See: https://sveltiacms.app/en/docs/start
+#
+# Note: the `test-repo` backend keeps the login UI renderable in
+# development without requiring a real Git OAuth provider. Swap it for
+# `github` (or `gitlab` / `gitea`) when an OAuth app is wired up.
+
+backend:
+  name: test-repo
+  branch: master
+
+# Media storage — internal, served from the same origin.
+media_folder: /static/media
+public_folder: /media
+
+# =============================================================================
+# Collections
+# =============================================================================
+# Three content streams:
+#   - communiques      → Communiqués / Prises de parole
+#   - sections-locales → Sections locales (Collectif)
+#   - mobilisation     → Événements / Mobilisation
+#
+# The `folder` path is relative to the repository root, so it matches the
+# `src/content/<name>/` path used by Astro's `glob()` loader in
+# `src/content.config.ts`.
+# =============================================================================
+
+collections:
+  # ---------------------------------------------------------------------------
+  # Communiqués / Prises de parole
+  # ---------------------------------------------------------------------------
+  - name: communiques
+    label: Communiqués
+    label_singular: Communiqué
+    description: Prises de parole officielles du collectif.
+    folder: src/content/communiques
+    create: true
+    delete: true
+    slug: "{{year}}-{{month}}-{{slug}}"
+    fields:
+      - { name: title, label: Titre, widget: string }
+      - { name: date, label: Date, widget: datetime, date_format: YYYY-MM-DD, time_format: false, picker_utc: true }
+      - { name: description, label: Résumé, widget: text, required: false }
+      - { name: body, label: Contenu, widget: markdown }
+
+  # ---------------------------------------------------------------------------
+  # Sections locales (Collectif)
+  # ---------------------------------------------------------------------------
+  - name: sections-locales
+    label: Sections locales
+    label_singular: Section locale
+    description: Fiches des sections locales du collectif (Marseille, Lyon, etc.).
+    folder: src/content/sections-locales
+    create: true
+    delete: true
+    slug: "{{slug}}"
+    identifier_field: city
+    fields:
+      - { name: city, label: Ville, widget: string }
+      - { name: title, label: Titre, widget: string, required: false }
+      - { name: contact_email, label: Email de contact, widget: string, required: false }
+      - { name: description, label: Description, widget: text, required: false }
+      - { name: body, label: Présentation, widget: markdown, required: false }
+
+  # ---------------------------------------------------------------------------
+  # Événements / Mobilisation
+  # ---------------------------------------------------------------------------
+  - name: mobilisation
+    label: Mobilisation
+    label_singular: Événement
+    description: Manifestations, rassemblements, actions de mobilisation.
+    folder: src/content/mobilisation
+    create: true
+    delete: true
+    slug: "{{year}}-{{month}}-{{slug}}"
+    fields:
+      - { name: title, label: Titre, widget: string }
+      - { name: date, label: Date, widget: datetime, date_format: YYYY-MM-DD, time_format: false, picker_utc: true }
+      - { name: location, label: Lieu, widget: string }
+      - { name: description, label: Résumé, widget: text, required: false }
+      - { name: body, label: Détails, widget: markdown }
