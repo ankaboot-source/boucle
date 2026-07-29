@@ -210,7 +210,123 @@ triage:
           set_boucle_label "$IID" "boucle:needs-info"
           ;;
         NEEDS-SPLIT)
-          set_boucle_label "$IID" "boucle:human"
+          # Parse sub-issues from the triage comment. Format:
+          #   ## Sub-issues
+          #   <!-- boucle:sub-issue v=1 -->
+          #   ### Sub-issue 1: <title>
+          #   <body...>
+          #   Size: S | M
+          #   ### Sub-issue 2: ...
+          SUBISSUES_SECTION=$(echo "$COMMENT" | sed -n '/^## Sub-issues/,/^## /p' | head -n -1)
+          # Skip if the section is missing or only contains the marker line
+          if [ -z "$SUBISSUES_SECTION" ] || ! echo "$SUBISSUES_SECTION" | grep -qE '^### Sub-issue [0-9]+:'; then
+            echo "NEEDS-SPLIT but no parseable sub-issues — falling back to boucle:human"
+            set_boucle_label "$IID" "boucle:human"
+            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+              -f body="Triage requested NEEDS-SPLIT but no parseable sub-issues were found in the triage comment. Please split this issue manually." > /dev/null
+            exit 0
+          fi
+
+          # Extract parent context (title + URL) for the sub-issue body
+          PARENT_DATA=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID")
+          PARENT_TITLE=$(echo "$PARENT_DATA" | jq -r '.title')
+          PARENT_URL=$(echo "$PARENT_DATA" | jq -r '.web_url')
+          PARENT_IID="$IID"
+
+          CREATED_IIDS=""
+          # awk splits the section into records, one per sub-issue.
+          # First line of each record is "TITLE:<title>"; following lines are body;
+          # last non-empty line should be "Size: X".
+          SUBISSUE_COUNT=0
+          PARSE_FAILURES=0
+          echo "$SUBISSUES_SECTION" | awk '
+            BEGIN { rec = 0 }
+            /^<!-- boucle:sub-issue/ { next }
+            /^### Sub-issue [0-9]+:/ {
+              if (rec > 0) { print "---END---" }
+              rec++
+              sub(/^### Sub-issue [0-9]+: /, "")
+              print "TITLE:" $0
+              next
+            }
+            /^## Sub-issues/ { next }
+            { print }
+            END { if (rec > 0) print "---END---" }
+          ' > /tmp/subissues.parsed
+
+          while IFS= read -r line; do
+            if [ "$line" = "---END---" ]; then
+              # Finalize the current sub-issue
+              if [ -n "$CUR_TITLE" ]; then
+                # Strip the Size: line from the body
+                CUR_BODY_NO_SIZE=$(echo "$CUR_BODY" | sed '/^Size:[[:space:]]*[SML]/d')
+                # Default size to M if not present
+                CUR_SIZE="${CUR_SIZE_RAW:-M}"
+                # Build the sub-issue body with parent reference (single-line to keep YAML literal block happy)
+                SUB_BODY=$(printf 'Split from #%s (%s).\n\n%s\n\n## Parent issue\n#%s — %s' "$PARENT_IID" "$PARENT_TITLE" "$CUR_BODY_NO_SIZE" "$PARENT_IID" "$PARENT_URL")
+                SUB_SIZE_LOWER=$(echo "$CUR_SIZE" | tr '[:upper:]' '[:lower:]')
+                # Validate: only S or M
+                if [ "$CUR_SIZE" != "S" ] && [ "$CUR_SIZE" != "M" ]; then
+                  echo "WARN: sub-issue '$CUR_TITLE' has size '$CUR_SIZE' (not S/M) — defaulting to M"
+                  CUR_SIZE="M"
+                  SUB_SIZE_LOWER="m"
+                fi
+                echo "Creating sub-issue: $CUR_TITLE (Size: $CUR_SIZE)"
+                CREATED_JSON=$(glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues" \
+                  -f title="$CUR_TITLE" \
+                  -f description="$SUB_BODY" \
+                  -f labels="boucle:triage,size:$SUB_SIZE_LOWER" 2>&1) || CREATED_JSON=""
+                NEW_IID=$(echo "$CREATED_JSON" | jq -r '.iid // empty' 2>/dev/null)
+                if [ -n "$NEW_IID" ] && [ "$NEW_IID" != "null" ]; then
+                  CREATED_IIDS="${CREATED_IIDS:+$CREATED_IIDS,}$NEW_IID"
+                  SUBISSUE_COUNT=$((SUBISSUE_COUNT + 1))
+                  echo "  → created #$NEW_IID"
+                  # Trigger triage directly via trigger API (bot-created issues would
+                  # hit the anti-loop guard in dispatch because ACTOR=up-bot).
+                  curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
+                    -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+                    -F "variables[BOUCLE_ISSUE]=$NEW_IID" > /dev/null
+                else
+                  echo "  → FAIL to create sub-issue: $CREATED_JSON" >&2
+                  PARSE_FAILURES=$((PARSE_FAILURES + 1))
+                fi
+              fi
+              # Reset for next record
+              CUR_TITLE=""
+              CUR_BODY=""
+              CUR_SIZE_RAW=""
+            elif [[ "$line" == TITLE:* ]]; then
+              CUR_TITLE="${line#TITLE:}"
+              CUR_BODY=""
+              CUR_SIZE_RAW=""
+            else
+              # Append line to body (printf to keep it on one logical line for YAML)
+              CUR_BODY=$(printf '%s%s\n' "$CUR_BODY" "$line")
+              # Capture Size: line
+              if [[ "$line" =~ ^Size:[[:space:]]*([SML]) ]]; then
+                CUR_SIZE_RAW="${BASH_REMATCH[1]}"
+              fi
+            fi
+          done < /tmp/subissues.parsed
+
+          if [ "$SUBISSUE_COUNT" -eq 0 ]; then
+            echo "NEEDS-SPLIT but zero sub-issues created — falling back to boucle:human"
+            set_boucle_label "$IID" "boucle:human"
+            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+              -f body="Triage requested NEEDS-SPLIT but no sub-issues could be created from the triage comment. Please split this issue manually." > /dev/null
+          else
+            # Post a comment listing the new sub-issues
+            SPLIT_MSG="Split into: $(echo "$CREATED_IIDS" | sed 's/,/#, #/g')#"
+            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+              -f body="$SPLIT_MSG" > /dev/null
+            # Mark the parent as done (split completed)
+            set_boucle_label "$IID" "boucle:done"
+            echo "Split parent #$IID into $SUBISSUE_COUNT sub-issue(s): $CREATED_IIDS"
+            if [ "$PARSE_FAILURES" -gt 0 ]; then
+              echo "WARN: $PARSE_FAILURES sub-issue(s) failed to create"
+            fi
+          fi
+          rm -f /tmp/subissues.parsed
           ;;
         *)
           echo "Unparsable disposition: $DISPOSITION → routing to human"
