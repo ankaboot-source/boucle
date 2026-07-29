@@ -1,0 +1,10 @@
+---
+/*
+ * /engagement route. Renders the shared <EngagementPage> with a
+ * unique form id so the input/label pairs and the success region
+ * don't collide with /agir or any other instance.
+ */
+import EngagementPage from "../components/EngagementPage.astro";
+---
+
+<EngagementPage formId="engagement" />
