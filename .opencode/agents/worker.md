@@ -34,8 +34,9 @@ Load a skill with the `skill` tool before doing work in its domain. For example,
 ## Rules
 
 - **Do NOT** write any `boucle:*` labels — the job does that.
-- **Do NOT** merge, push, or deploy — the job does that after you exit.
+- **Do NOT** merge, push, or deploy — the job does that after you exit (including rebasing onto master).
 - **Do NOT** run `wrangler` or use `CLOUDFLARE_API_TOKEN` — you don't have it.
+- **Do NOT** rebase or merge master into your branch — the job rebases onto master after you commit. If you rebase yourself, you risk losing `MERGE_HEAD` and producing a single-parent commit that leaves the MR conflicted.
 - Work on the current branch (already checked out by the job).
 - Keep changes minimal and focused on the acceptance criteria.
 - If you cannot complete the work, say so clearly in `state.md` under "Awaiting human".
