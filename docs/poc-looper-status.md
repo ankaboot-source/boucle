@@ -379,6 +379,14 @@ A deeper GitHub/web search (beyond the original 22-tool analysis) found that **p
 11. **Auto-merge for bot-authored PRs** — `selfApprovalFallback` downgrades APPROVE→COMMENT, auto-merge path requires APPROVE (§5.9, #602) ❌
 12. **Fixer auto-discovery in single-identity mode** — self-comment filter excludes bot-authored reviews (§5.10, #603) ❌
 13. **Post-deploy E2E browser verification** — loop ends at merge, no verify-in-production step (§5.11, #604) ❌
+14. **Spec freeze on human comment** — human comments on a spec PR after review are invisible to the worker; no re-review trigger, no spec-amendment flow (§8.4.2) ❌
+15. **Issue misdiagnosis propagation** — triage takes the issue's framing at face value; no root-cause validation against the codebase; no author re-diagnosis lever once the loop is running (§8.4.3) ❌
+
+**autonomous-dev-team gaps (discovered during the §8.4.4 corrected re-do):**
+
+16. **Premature merge bypasses review gate** — review failure sets `pending-dev` but nothing blocks a human from merging the PR in that state; fixes get stranded on the branch (§8.4.4 Gap 1) ❌
+17. **Worktree conflict → silent retry loop** — worktree naming is branch-scoped not issue-scoped; collisions cause 17-second silent exits; dispatcher retries the same dead session 3× then stalls (§8.4.4 Gap 2) ❌
+18. **Comment filtering ignores human corrections** — dev agent reads issue body unconditionally but filters comments for `Review findings:`/`BLOCKING`/`[P1]` tokens only; human corrections without these markers are invisible (§8.4.4 Gap 3) ❌
 
 ## 8. Decision — POC closed (2026-07-25)
 
@@ -398,13 +406,14 @@ AGENTS.md §3 Option A requires: looper handles ≥80% of the dev-factory flow a
 
 **Result: 0/2 hard criteria met. Option A rejected.**
 
-### 8.2 Evidence summary (6 runs, 7 bugs filed)
+### 8.2 Evidence summary (7 runs, 7 bugs filed)
 
-- **6 POC runs** completed across m3llm (4), ansible-supabase (1, paused), leadminer (1, stuck-PR cleanup).
-- **2 full issue→merge loops** (m3llm#146, m3llm#192) — both required manual merge by baderdean; auto-merge is blocked for bot-authored PRs (#602).
+- **7 POC runs** completed across m3llm (5), ansible-supabase (1, paused), leadminer (1, stuck-PR cleanup).
+- **3 full issue→merge loops** (m3llm#146, m3llm#192, m3llm#186) — all required manual merge by baderdean; auto-merge is blocked for bot-authored PRs (#602). The 3rd loop (m3llm#186 → PR #205) shipped non-compliant code: the worker ignored an explicit user instruction on the spec PR and hand-crafted content instead of capturing real agent outputs (§8.4.1 row 3, §8.4.2).
 - **7 upstream bugs filed**: #595 (EBADF), #598 (worker PR review), #599 (marker mismatch), #600 (outbound guard), #602 (auto-merge), #603 (fixer self-comment), #604 (post-deploy E2E). Three (#598, #602, #603) share a single-identity root cause.
 - **Single-identity mode is the dominant failure mode**: 3 of 7 bugs stem from looper's assumption that worker, reviewer, and fixer are different GitHub identities. The bot-account workaround reduces 422s but does not fix auto-merge (#602) or fixer self-comment filtering (#603).
 - **Operational overhead**: a bash health-check cron + an agent health-check cron were required to keep the daemon alive and clear stuck loops. This is the opposite of "autonomous".
+- **Corrected re-do on autonomous-dev-team** (§8.4.4): issue #206 filed with the canonical prompts baked in. autonomous-dev-team captured 32/32 real agent outputs, used canonical prompts, produced real illustration-tool output, and its review gate caught 9 blocking findings looper would have shipped. But premature merge (Gap 1), worktree conflict (Gap 2), and comment filtering (Gap 3) surfaced as new gaps — all fixable in the skill/config layer, none structural.
 
 ### 8.3 What looper proved
 
@@ -419,6 +428,7 @@ AGENTS.md §3 Option A requires: looper handles ≥80% of the dev-factory flow a
 3. **Post-deploy E2E verification** — loop ends at merge; no verify-in-production step (#604).
 4. **Budget control** — no cap or visibility on coding-model token spend.
 5. **Loop operability** — no CLI to delete stuck loops (§5.5); coordinator 422 cascade (§5.4); reviewer marker retry loops (§5.7).
+6. **Issue misdiagnosis propagation** — triage reads the issue but does not re-diagnose against the codebase; the spec inherits the issue's framing, and the author has no abort-and-replan lever once the loop is running (§8.4.3).
 
 ### 8.4.1 Review gate does not prevent shipping bugged code (critical)
 
@@ -430,6 +440,7 @@ AGENTS.md §3 Option A requires: looper handles ≥80% of the dev-factory flow a
 |------------|----------------|-------------|----------------------|
 | m3llm PR #180 (engineer tool ezdxf) | Reviewer ran 26 unit tests (pass), rendered Mermaid, verified EPO CPC schema, found 3 real bugs → fixer fixed → re-review approved → **merged** | **#179**: `search_patents` returns HTTP 404 from EPO OPS (wrong endpoint URL / missing auth) — filed the same day | Reviewer reviewed the **diff** (code structure, Mermaid syntax, XML parsing) but never **called the EPO API**. Unit tests mocked the HTTP layer. The 404 only manifests on a real API call. |
 | m3llm PR #195 (magic-link 405 + button overflow) | Reviewer marked 405 as `UNVERIFIABLE` (deployment-dependent), PASS on button fix → **non-blocking → merged** | **Post-deploy**: `cron.unschedule('cleanup-pending-signups')` throws XX000 when the job was never scheduled — migration crashes on fresh installs | Reviewer correctly identified it couldn't verify the 405 from the diff, but `UNVERIFIABLE` is a **non-blocking** outcome — it does not gate merge. The runtime migration error was invisible to diff review. |
+| m3llm PR #205 (replace fake conversations with real ones) | Reviewer found 2 factual issues in spec (15 vs 16 capabilities, ChatLine explicit vs implicit) → `non_blocking` → worker implemented → **merged** | **3 failures**: (1) conversations are still fake — worker lightly reworded existing hand-written fakes instead of launching prompts via agentic browser on m3llm.cafe; (2) Yassine image is 108 lines of hand-crafted SVG, not m3llm agent illustration-tool output; (3) worker invented its own prompts instead of using the 14 canonical prompts in `config/prompt-suggestions.json` (explicit user instruction on spec PR #187 ignored) | Reviewer reviewed the spec diff (capability count, ChatLine shape) but never verified the worker actually launched prompts via browser or captured real agent outputs. The user's comment on spec PR #187 (posted 24 min after review) was invisible to the worker — looper has no re-review trigger on human comments. |
 
 **Root cause — the review model is diff-scoped, not behavior-scoped:**
 
@@ -447,6 +458,191 @@ The next tool must treat **verified behavior in production** as the merge gate, 
 - The §5.11.1 research (claude-devloop, DAGent, Proof of Loop, cairn, deploy-verifier) defines the shape of this step. `team-poem/cairn` (discover→freeze→replay, $0/replay) is the most cost-effective continuous-verify engine; `rkaliupin/DAGent` (Playwright on live app) is the closest full-loop reference.
 
 This finding alone justifies Option B regardless of the autonomy bugs: **a dev factory that ships buggé code through its own review gate is not a dev factory.**
+
+### 8.4.2 Spec freeze: human comments after review are invisible to the worker (2026-07-26)
+
+**A second structural failure surfaced in the PR #205 post-mortem.** Even when the user catches a missing requirement during the spec-review window, looper has no mechanism to carry that correction into implementation.
+
+**Timeline (m3llm #186 → PR #205):**
+1. 2026-07-25T14:55:36Z — Reviewer (ankaboot-bot) reviews spec PR #187, finds 2 factual issues (non_blocking), spec promoted to `looper:spec-ready`.
+2. 2026-07-25T15:19:05Z — User (baderdean) comments on spec PR #187: **"Use prompt suggestion on the openwebui interface already present when available rather than inventing your own prompt."** (24 min after review).
+3. Worker picks up the spec (frozen at the pre-comment version), implements, PR #205 merged.
+
+**Root cause — the spec is frozen at review time, and the worker reads the spec PR body, not PR comments:**
+
+1. **No re-review trigger on human comment.** Looper's reviewer discovers spec PRs by label (`looper:spec-reviewing`), reviews once, and promotes. A human comment arriving after promotion does not re-trigger review. The spec is frozen.
+2. **Worker input = spec PR body, not PR comments.** The worker's input is the spec PR body (the planner's output). Comments on the spec PR — including explicit user corrections — are not part of the worker's input. The instruction never reached implementation.
+3. **No "spec amendment" flow.** There is no mechanism for a human to amend a spec after review without re-running the planner. The user's only option would have been to close the loop and re-file — which defeats the purpose of an autonomous loop.
+
+**Implication for the next solution:**
+
+- Human comments on a spec PR must **re-trigger spec review** (or at minimum flag the spec as "amended, needs re-review") before the worker picks it up.
+- The worker's input must include **all comments on the spec PR**, not just the PR body — or the spec must be re-rendered to incorporate comment-driven amendments before handoff.
+- The loop needs a **spec-freeze gate**: a spec is only promoted to `worker-ready` after a configurable quiet period (e.g. 1h) with no new comments, OR after a human explicitly marks it "approved, no amendments".
+
+**Corrected re-do filed:** [m3llm#206](https://github.com/ankaboot-source/m3llm/issues/206) (tagged `autonomous` for autonomous-dev-team, not looper). The corrected runbook bakes in the 14 canonical prompts from `config/prompt-suggestions.json`, mandates agentic browser capture on m3llm.cafe only (not local OpenWebUI), and requires real agent illustration-tool output for images.
+
+### 8.4.3 Issue misdiagnosis propagation: triage takes the issue's framing at face value (2026-07-26)
+
+**A fourth structural failure, more fundamental than the spec carrier or spec-freeze problems.** Even with a perfect spec carrier (PR or board status) and a perfect spec-amendment flow, the loop produces the wrong outcome when the spec is built on the issue's *wrong diagnosis* of what's broken.
+
+**Concrete case — mermaid misdiagnosis:**
+- An issue was filed reporting "the core visual tool doesn't implement mermaid."
+- The real problem was "the engineer tool didn't implement mermaid at all in the first place" — the issue pointed at the wrong component.
+- looper's planner read the issue at face value and wrote a spec for the core visual tool, not the engineer tool.
+- The spec was wrong because it solved the issue's *stated* problem, not the codebase's *actual* problem.
+- The issue author had no control over the loop once `looper:plan` was applied — no lever to stop, re-diagnose, or redirect the planner to the correct component.
+
+**Root cause — three layers failing in sequence:**
+
+1. **Issue-level misdiagnosis (input property).** The issue's framing is wrong before the loop starts. This is not a looper bug — any tool that takes the issue at face value inherits the misdiagnosis.
+
+2. **Triage takes the issue at face value.** looper's planner reads the issue body and writes a spec for what the issue *says*, not for what the codebase *needs*. The Coordinator (disabled in this POC) does `valid`/`out-of-scope`/`unclear` disposition — but `valid` means "actionable," not "root-cause claim is correct." The Coordinator categorizes; it does not re-diagnose. There is no "validate the issue's diagnosis against the codebase" step.
+
+3. **No correction lever once the loop is running.** Once `looper:plan` is applied, the loop owns the issue. The author can comment on the spec PR, but:
+   - Spec-freeze (§8.4.2) means post-review comments are invisible to the worker.
+   - Even if visible, the worker implements the *spec*, not re-diagnoses the *issue*. A comment saying "no, the real problem is the engineer tool" doesn't rewrite the spec — it asks the worker to deviate from its input.
+   - There is no "abort and re-triage" path. The author's only option is to close the loop and re-file, which throws away the work done.
+
+**This is upstream of the other three spec failures:**
+
+| Failure | Layer | Where it fails |
+|---------|-------|----------------|
+| Spec-freeze (§8.4.2) | Spec amendment after review invisible to worker | Spec *amendment* |
+| Review gate ships bugged code (§8.4.1) | Implementation review is diff-scoped, not behavior-scoped | Implementation *verification* |
+| Spec compliance (PR #205, §8.4.1 row 3) | Worker ignores explicit user instruction | Spec *execution* |
+| **Issue misdiagnosis propagation (this section)** | **Triage takes issue framing at face value; no root-cause validation; no author re-diagnosis lever** | **Spec *diagnosis* — upstream of all the above** |
+
+The first three are about the loop *executing the spec correctly*. This one is about the loop *building on the wrong spec in the first place*. If the spec solves the wrong problem, correct execution still produces the wrong outcome.
+
+**Implication for the next solution:**
+
+Triage must be a first-class role with codebase investigation, not just categorization. AGENTS.md §1 lists "Triage — analyze the issue *in place*, deduce sub-issues if needed, tag by category, evaluate complexity" — but "analyze" in looper means "read and categorize," not "investigate and re-diagnose." The next tool needs triage that:
+
+1. **Reproduces the reported problem against the real codebase** before writing a spec — not just reads the issue body.
+2. **Distinguishes "the issue's stated problem" from "the diagnosed root cause"** in the spec output, as an explicit field. If they differ, the spec must say so and explain why.
+3. **Surfaces the diagnosis to the author before spec writing**, with a confirmation gate — "I found the real problem is X, not Y as the issue states. Approve?" — not just "here's a spec for Y."
+4. **Gives the author a re-diagnosis trigger that re-enters triage**, not just appends a comment. This is stronger than spec-freeze amendment: it's a loop-level abort-and-replan. The author needs a lever that says "stop, the spec is solving the wrong problem," and that lever must re-enter triage, not ask the worker to deviate from its input.
+
+oc-ralph's Sculptor role and autonomous-dev-team's `blocked_by` edges point toward decomposition + dependency analysis, but neither explicitly does "the issue is wrong about what's broken." That is the gap this finding exposes.
+
+### 8.4.4 autonomous-dev-team corrected re-do: review gate works, but worktree conflict + comment filtering + premature merge are new gaps (2026-07-26)
+
+**The §8.4.2 corrected re-do ran on autonomous-dev-team (not looper) to test whether a different tool fills the gaps.** Issue [m3llm#206](https://github.com/ankaboot-source/m3llm/issues/206) was filed with the canonical prompts baked in, agentic browser capture on m3llm.cafe mandated, and real agent illustration-tool output required. The results are evidence for the Option B evaluation.
+
+**What worked (contrast with looper):**
+
+| Capability | looper (PR #205) | autonomous-dev-team (PR #214) |
+|------------|------------------|-------------------------------|
+| Real agent captures | ❌ reworded existing fakes | ✅ 32/32 real captures via OpenWebUI REST API on m3llm.cafe |
+| Canonical prompts | ❌ invented its own prompts | ✅ used all 14 prompts from `config/prompt-suggestions.json` |
+| Real illustration tool output | ❌ 108 lines of hand-crafted SVG | ✅ real `search_illustrations` tool invocation, downloaded cc-by-sa photo |
+| Name scrubbing | ❌ not done | ✅ automated cleaner with ~60 Tunisian names (fr+ar) |
+| Review gate depth | ❌ diff-scoped, missed 3 failures | ✅ behavior-scoped, caught 9 substantive findings (P1: missing turns, P2: wrong destinations/agent failures, P3: typos/stray comma) |
+| Honest blocker reporting | ❌ faked content silently | ✅ stopped on Cloudflare quota, reported blocker with detailed resume plan |
+
+**The review gate is the decisive improvement.** autonomous-dev-team's reviewer caught 9 blocking findings that looper's diff-scoped review would have shipped:
+- 3× P1: structural (missing m3llm responses, broken UX)
+- 3× P2: content (different destinations in fr/ar, agent failures captured instead of successes)
+- 3× P3: quality (typos, incomplete name scrubbing, E2E verify gap)
+
+This is the behavior-scoped review that §8.4.1 identified as missing. The review gate works as intended.
+
+**But three new gaps surfaced:**
+
+#### Gap 1 — Premature merge bypasses the review gate (human-in-the-loop failure)
+
+The review gate caught 9 bugs and moved #206 to `pending-dev` for fixes. The dev agent pushed fixes (commit `f6cc1ec`) at 16:46:42Z. But the user (baderdean) manually merged PR #214 at 16:41:34Z — **5 minutes before the fixes landed**. The fixes were stranded on the branch, not on main. A follow-up PR #215 was opened to recover them (cherry-picked, merged 20:15:58Z).
+
+**Root cause:** The review gate sets `pending-dev`, but nothing blocks a human from merging the PR in that state. The gate is advisory, not enforceable — a human can bypass it at any time. This is the same class as looper's `UNVERIFIABLE` not blocking merge (§8.4.1), but from the opposite direction: the tool blocks correctly, the human overrides incorrectly.
+
+**Recommended solution:** The merge gate must be **enforced**, not advisory. When a review fails, the PR must be marked `DO NOT MERGE` (status check, branch protection rule, or label-based gate) until the fixes land and re-review passes. A human override must be possible but recorded (who, when, why) — not silent.
+
+#### Gap 2 — Worktree conflict causes silent retry loop (tooling failure)
+
+Issue #216 (follow-up for 4 quality issues) was filed for autonomous-dev-team. The dispatcher picked it up and dispatched 3 dev sessions (18:25, 18:30, 18:45Z). All 3 exited in ~17 seconds with no PR created. The log shows:
+```
+Resuming session: c55ae91b... → no captured opencode sessionID → starting a new opencode session → Agent exited with code: 0
+```
+
+**Root cause:** The worktree `feat/aslema-real-captures` was occupied by PR #215 (the stranded-fixes follow-up). The dev agent for #216 could not create/use a worktree and exited silently. The dispatcher retried the same dead session ID 3 times (MAX_RETRIES=3), then marked #216 `stalled`. The agent never reported the worktree conflict — it exited 0 with no PR, and the dispatcher interpreted this as "no PR created, retry."
+
+**Recommended solution:**
+1. **Worktree naming must be issue-scoped, not branch-scoped.** Each issue gets its own worktree (e.g. `feat/issue-216-quality-fixes`), preventing collisions across issues.
+2. **Silent exit with no PR must be a failure, not a retry.** When a dev agent exits 0 with no PR and no blocker comment, the dispatcher should mark the issue `stalled` immediately (not retry 3 times) and post a diagnostic comment asking for manual investigation.
+3. **The dev agent must report worktree creation failures** as a blocker comment, not exit silently. "Could not create worktree: branch X already exists" is actionable; a 17-second silent exit is not.
+
+#### Gap 3 — Comment filtering ignores non-review-token comments (communication failure)
+
+When #216 stalled, a nudge comment was posted with explicit worktree instructions ("use a fresh branch name, not `feat/aslema-real-captures`"). The comment was invisible to the dev agent for two reasons:
+
+1. **The agent was crashing on startup** (Gap 2) — it never reached the comment-reading step.
+2. **Even if it had read comments, the skill filters for review tokens.** From `autonomous-mode.md` Step 5: "Read review feedback from issue comments — look for `Review findings:` comments **and** any change-request comment carrying a `BLOCKING` or `[P1]` token." General instructions without these markers are filtered out as non-actionable.
+
+**Root cause:** The dev agent reads the issue **body** unconditionally (Step 1), but reads issue **comments** only for review-feedback tokens. A human correction that doesn't use the review-token format is invisible — the same class as looper's spec-freeze (§8.4.2), but at a different layer (comment filtering vs. spec freezing).
+
+**Recommended solution:**
+1. **Human comments must be re-injected into the issue body**, not left as comments. The issue body is the dev agent's primary input; comments are secondary. When a human posts a correction, it should be edited into the issue body (as done for #216: the worktree instructions were added to the body, not just commented).
+2. **The comment-reading filter should be broader.** Comments from the issue author or repo collaborators should be read as instructions, not just review-feedback tokens. The `Review findings:`/`BLOCKING`/`[P1]` filter is appropriate for bot-generated review comments, not for human-authored corrections.
+3. **A "human amendment" token** (e.g. `HUMAN_INSTRUCTION:`) could mark comments that the dev agent must read and incorporate, distinct from review-feedback tokens.
+
+**Net assessment for Option B:**
+
+autonomous-dev-team fixes the review-gate problem (§8.4.1) — its behavior-scoped review caught 9 bugs looper would have shipped. But it introduces three new gaps that must be addressed before it can serve as the dev-factory orchestrator:
+
+| Gap | Severity | Fixable? | Fix |
+|-----|----------|----------|-----|
+| Premature merge bypasses review gate | High | Yes — branch protection / status check | Enforce `DO NOT MERGE` on review failure |
+| Worktree conflict → silent retry loop | Medium | Yes — issue-scoped worktree naming + fail-on-silent-exit | Worktree per issue, no silent retries |
+| Comment filtering ignores human corrections | Medium | Yes — broader comment reading or body-edit workflow | Read author/collaborator comments as instructions |
+
+All three are fixable in autonomous-dev-team's skill/config layer — none are structural to the tool's architecture. This is a stronger position than looper, whose gaps (GitLab, single-identity, post-deploy E2E) are structural.
+
+### 8.4.5 Waterfall model: no mid-loop course correction via issue comments (structural, 2026-07-26)
+
+**The root structural finding that unifies §8.4.2 (spec-freeze) and §8.4.3 (issue misdiagnosis).** looper's flow is strictly phase-gated (waterfall): Issue → Planner (writes spec) → Reviewer (approves spec) → Worker (implements spec) → Reviewer (reviews impl) → Merge. Each gate is a phase boundary. Once a phase starts, it runs to completion against its frozen input. **There is no mechanism for the user to interrupt or redirect a running loop by commenting on the issue.**
+
+**Concrete case — issue #210 (search_patents 403):**
+- Issue filed: "search_patents returns HTTP 403 from EPO OPS (auth failure)" — a technical framing.
+- looper's planner read the issue at face value, diagnosed 403 as auth failure, wrote a spec for OAuth2 client_credentials flow.
+- Worker implemented PR #212 ("authenticate with EPO OPS via OAuth2, load creds from env").
+- The work was **technically coherent but business-irrelevant** — the planner misunderstood the actual business need behind the issue.
+- The user fixed it manually in an interactive opencode session with correct understanding of the requirement.
+- PR #212 closed as irrelevant. Full loop wasted.
+
+**Why the user couldn't course-correct:**
+- The planner reads the issue **once at discovery**; nothing re-reads it after.
+- The worker reads the **spec PR**, not the issue.
+- The reviewer reads the **diff**, not the issue.
+- A comment on the issue mid-loop has **no event handler** — nothing interrupts, nothing re-plans, nothing stops the worker.
+- The fixer role reacts to review comments on **PRs**, but nothing reacts to comments on the **issue itself**.
+
+**Root cause — three layers:**
+1. **No issue-comment event handler.** looper discovers work by labels, not by issue activity. A comment on the issue doesn't trigger any loop action.
+2. **No re-planning mechanism.** Even if the comment were heard, there's no flow to incorporate new issue comments into an in-flight spec — the spec is frozen at review time (§8.4.2).
+3. **No worker interrupt-and-redirect.** Even if the spec were amended, there's no mechanism to stop a running worker and hand it a new spec — the worker runs to completion against its original input.
+
+**What the user needs (agile flow):** the capacity to interrupt at any time by commenting on the issue — like a chat-based dev process. If the user realizes mid-implementation that the approach is wrong, they comment on the issue, and the loop should incorporate that feedback (re-plan, adjust the spec, or stop the worker). looper cannot do this. This is the opposite of agile — it requires the issue to be perfectly complete and perfectly understood upfront, with no discovery during implementation.
+
+**This is upstream of §8.4.2 and §8.4.3:**
+
+| Failure | Layer | Root cause |
+|---------|-------|------------|
+| Spec-freeze (§8.4.2) | Spec amendment after review invisible to worker | No re-review on comment |
+| Issue misdiagnosis (§8.4.3) | Triage takes issue framing at face value | No re-diagnosis lever |
+| **Waterfall model (this section)** | **No mid-loop feedback channel at all** | **No issue-comment event handler, no re-plan, no worker interrupt** |
+
+§8.4.2 and §8.4.3 are symptoms of this structural root: the loop has no feedback channel from the issue to the running phases. Fixing them individually (re-review on comment, re-diagnosis lever) without fixing the waterfall model would just add more phase gates — still not agile.
+
+**Implication for the next solution:**
+
+The next tool must support an **agile, chat-driven loop model** where:
+1. **Issue comments are a first-class event** that can interrupt running loops — not just label changes.
+2. **Re-planning is possible mid-loop** — a comment can trigger the planner to re-investigate and produce an amended spec, which the worker picks up without restarting from scratch.
+3. **The worker can be redirected, not just stopped** — "stop" throws away work; "redirect" preserves what's valid and changes what's not.
+4. **The loop is conversational, not phase-gated** — the user should be able to converse with the loop (via issue comments) the way they would with a human developer in a chat, adjusting direction as understanding evolves.
+
+This is a fundamental workflow model difference. It points toward Option B (adopt a tool with an agile loop model) or Option D (redefine the loop to be narrower — e.g. only triage + review, not full implementation). It may also point to Option C (build from scratch with a chat-driven loop model as first-class). The boucle hexagonal design (AGENTS.md §3 Option C) should incorporate this finding: the loop model must be conversational, not waterfall.
 
 ### 8.5 Decision
 
