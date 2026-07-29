@@ -3,6 +3,7 @@ import "../styles/sections.css";
 import Layout from "../layouts/Layout.astro";
 import NewsletterSignup from "../components/NewsletterSignup.astro";
 import NewsletterModal from "../components/NewsletterModal.astro";
+import DonationCTA from "../components/DonationCTA.astro";
 ---
 
 <Layout>
@@ -52,16 +53,7 @@ import NewsletterModal from "../components/NewsletterModal.astro";
 		  owned by parent issue #1.
 		  ============================================================
 		-->
-		<section
-			aria-label="Appel à la solidarité"
-			class="bg-palestine-red text-white rounded-2xl px-8 py-10 w-full max-w-2xl mx-auto text-center font-sans"
-		>
-			<p class="eyebrow !text-white/80">Appel urgent</p>
-			<h2 class="font-display text-3xl mt-2 mb-4">Le cessez-le-feu, maintenant.</h2>
-			<p class="!text-white/90 text-base m-0">
-				Informez-vous, agissez, partagez. Chaque geste compte.
-			</p>
-		</section>
+		<DonationCTA />
 
 		<!--
 		  ============================================================
