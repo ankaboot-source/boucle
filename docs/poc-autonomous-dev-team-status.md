@@ -298,6 +298,94 @@ Dispatcher (cron tick) ──▶ Dev Agent ──────────▶ Rev
 8. **compozy completed the task but didn't ship it** ⚠️ — refactor is correct (591/591 tests pass, lint+prettier clean), but changes are uncommitted in the working tree. No branch, no PR, no merge. Human must do 5 manual git/gh steps. This is compozy's "manual merge" limitation confirmed in practice — the head-to-head shows autonomous-dev-team got to a (blocked) PR autonomously, compozy stopped at uncommitted code.
 9. **compozy is 5x slower to first code** ⚠️ — 11+ min planning vs m3llm's ~5 min to committed PR. compozy's structured pipeline (PRD→TechSpec→Tasks→Code→Review) adds overhead that may not pay off for small refactors.
 
+### Run #2 — Second dispatch (2026-07-26, COMPLETED with FLOW VIOLATION)
+
+#### m3llm — autonomous-dev-team (issue #201 "bug(model): buggy conversation")
+- User created #201 at 00:06:58Z with `autonomous` label. Body: `Buggy conversation: https://m3llm.cafe/s/a187b902-b8a9-414f-ab62-f3e033db0e07 use account: ops@ankaboot.io and AGENTS.md to fix it`. Sparse — no `## Requirements`/`## Acceptance Criteria` checkboxes.
+- **00:10 tick**: dispatcher found #201, dispatched dev-new (PID 530463). **FAILED immediately**: `ADT_CFG_AGENT_BINARY_MISSING` — `opencode` binary not on cron's PATH (lives at `/home/badreddine/.opencode/bin/opencode`, not in linuxbrew or standard paths). Agent posted error envelope comment to issue. Issue → `pending-dev`.
+- **Fix**: updated crontab to prepend `/home/badreddine/.opencode/bin` to PATH in both dispatcher-tick and merge-helper entries.
+- **00:15 tick**: dispatcher re-dispatched #201 as `dev-resume` (PID 534225, session 3edba9c7, opencode ses_0643906aaffehMKlyBmIDkFwvr). Lane-GC reaped dead lane from failed 00:10 dispatch.
+- **Dev agent (00:15–00:34, ~19 min)**: agent log `/tmp/agent-m3llm-issue-201.log` (291 lines, 529.8K):
+  - Authenticated to m3llm.cafe API (signin ops@ankaboot.io), fetched buggy conversation share_id=a187b902, saved /tmp/chat_a187b902.json (10 messages), walked message tree.
+  - **Root cause of the bug**: `MSA_TO_TUNISIAN` dict in `plugins/functions/msa_tunisien_filter/msa_tunisien_filter.py` had two wrong entries: `"عربية":"كرهبة"` (Arabic language → car) and `"العربية":"الكرهبة"` (the Arabic language → the car). In MSA, car = `سيارة` (already correctly mapped). These corrupted every conversation about Arabic language — `البلدان العربية` → `البلدان الكرهبة` (Arab car countries), `بالعربية` → `بالكرهبة` (by the car).
+  - Removed both entries, added 7 regression tests (`TestArabicLanguageNotCarRegression`), all pass.
+  - **🚨 FLOW VIOLATION: committed directly to main and pushed** — commit `92b7529 fix(msa-filter): stop corrupting "Arabic language" into "car" (#201)`, pushed `fe4012b..92b7529 main -> main` at 00:21:32Z. The `Fixes #201` in commit message auto-closed issue #201 at 00:21:33Z. **No worktree, no PR, no review gate, no E2E gate.** This bypassed the entire review pipeline.
+  - `sync_plugins.yml` workflow completed successfully (sha 92b7529) at 00:22:15. Agent detected this and proceeded to browser E2E.
+  - **Browser E2E (post-hoc, 00:25–00:34)**: agent ran E2E on m3llm.cafe after sync_plugins.yml deployed the fix. Took screenshots, waited for responses, verified the buggy conversation now works. E2E **passed**. But this is the wrong order — E2E should gate the merge, not verify after it.
+  - Agent posted final E2E verification comment to issue #201, exited code 0 at 00:34:47Z.
+- **Final state**: issue #201 CLOSED/COMPLETED (00:21:33Z), labels `autonomous,pending-dev` (stale — should be terminal `approved`). Commit `92b7529` on main. sync_plugins.yml success. **Unexpected new commit on main: `e589545 fix(magic-link): send redirect_to as query param, not JSON body`** at 00:25:18Z — not in the agent log, touches unrelated file (`supabase/functions/auth-magic-link/index.ts`), origin unknown (possibly a parallel opencode session or manual work; reflog shows it as a local commit during the agent's run but no dispatcher dispatch for it).
+
+#### Run #2 findings (terminal)
+1. **🚨 FLOW VIOLATION: dev agent pushed directly to main, bypassing review gate** ❌ — no worktree, no PR, no review, no E2E gate. The `Fixes #201` auto-closed the issue. This contrasts with Run #1 (#199) where the agent correctly created a worktree + PR + went through review. The issue body "use account: ops@ankaboot.io and AGENTS.md to fix it" may have influenced the agent to "fix it directly" — but the autonomous-dev skill should enforce worktree+PR regardless. **This is a behavioral bug in the agent's adherence to the skill, not a pipeline bug.** The pipeline's enforcement is agent-dependent, not structural.
+2. **Browser E2E was post-hoc verification, not a pre-merge gate** ⚠️ — the agent ran E2E on m3llm.cafe AFTER pushing to main and AFTER sync_plugins.yml deployed the fix. E2E passed, but it verified production, not a pre-merge PR. This is the same "verify after ship" anti-pattern that looper had. The E2E gate only works if the agent goes through the PR flow.
+3. **Stale labels** ⚠️ — issue closed with `pending-dev` label (should be terminal `approved` or similar). Label state machine not cleanly resolved because the review pipeline never ran.
+4. **The fix itself is correct** ✅ — MSA_TO_TUNISIAN dict entries removed, 7 regression tests added, all pass. The bug was real and the fix addresses it. Browser E2E on m3llm.cafe confirmed the fix works in production.
+5. **Contrast with Run #1** ⚠️ — Run #1 (#199) followed the full pipeline (worktree → PR → review → E2E gate → fix → re-review → pass → 422 on approve → manual merge). Run #2 (#201) skipped everything and pushed to main. **Same tool, same config, same cron — different agent behavior.** The pipeline's enforcement is agent-dependent, not structural. This is the single most important POC finding: the gate only works if the agent chooses to use it.
+6. **opencode binary PATH fixed** ✅ — the 00:10 dispatch failure (`ADT_CFG_AGENT_BINARY_MISSING`) was fixed by prepending `/home/badreddine/.opencode/bin` to the cron PATH. The 00:15 dispatch succeeded.
+
+### Run #3 — Third dispatch (2026-07-26, COMPLETED)
+
+#### m3llm — autonomous-dev-team (issue #206 "Replace fake conversations with real agent captures (corrected re-do of #186 / PR #205)")
+- User created #206 at 10:14:47Z with `autonomous` label. Issue is a corrected re-do of PR #205 which failed 3 ways: (1) conversations were still fake (lightly reworded, not real captures), (2) Yassine image was hand-crafted SVG not agent output, (3) worker invented its own prompts instead of using OpenWebUI prompt suggestions.
+- **10:20 tick**: dispatcher found #206, dispatched dev-new. Agent started correctly (opencode-go/glm-5.2, 4h timeout).
+- **Dev agent (10:15–16:47, ~6.5h)**: agent wrote a Python capture script (`/tmp/opencode/capture.py`) that calls m3llm.cafe API (signin ops@ankaboot.io) for all 16 capabilities × Fr/Ar = 32 conversations, ~64 API calls. Captured all 32/32 real agent conversations to `/tmp/opencode/captures.json` (incremental save for crash resilience). Addressed 9 review findings on PR #214 (commit f6cc1ec pushed to `feat/aslema-real-captures`). PR #215 is a follow-up fix.
+- **Agent exited code 0 at 16:47:05Z**. Wrapper warned "no PR was created" (PR #214 already existed from earlier in the run — false alarm).
+- **Final state**: issue #206 CLOSED at 16:41:35Z (stale `pending-dev` label — should be terminal). No merge — PR #214/#215 remain open.
+
+#### Run #3 findings (terminal)
+1. **Real agent captures worked** ✅ — the agent correctly used the m3llm.cafe API to capture 32 real conversations, fixing PR #205's "still fake" failure. This is the first run where the agent did substantive API-driven work, not just code edits.
+2. **Stale labels again** ⚠️ — issue closed with `pending-dev` (same as Run #2 #201). The label state machine doesn't cleanly resolve when the agent doesn't go through the full review pipeline.
+3. **Long-running agent (6.5h)** ⚠️ — the 4h timeout was appropriate but the agent ran close to it. For complex capture tasks, the wall-clock cap may need to be higher.
+4. **PR #214 not merged** — the run produced a PR but didn't reach merge. The review gate didn't fire (issue auto-closed via commit, similar to Run #2 pattern but with a PR this time).
+
+### Run #4 — ansible-supabase parallel dispatch (2026-07-26, PARTIAL — 1/3 merged)
+
+#### ansible-supabase — autonomous-dev-team (issues #82, #87, #89 — former looper issues)
+- Setup: installed skills to `.agents/skills/` (opencode target), wired `hooks` + `scripts` symlinks, copied `autonomous.conf` from m3llm with `PROJECT_ID=ansible-supabase`, `E2E_ENABLED=false`, `E2E_MODE=""`, `REAL_GH=/home/linuxbrew/.linuxbrew/bin/gh`. Ran `setup-labels.sh` (9 labels created). Added cron: `*/5 * * * * cd /home/badreddine/Projects/ankaboot-source/ansible-supabase && PATH="/home/badreddine/.opencode/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH" bash scripts/dispatcher-tick.sh >> /tmp/ansible-supabase-autonomous-dispatcher.log 2>&1`. Tagged #82, #87, #89 with `autonomous`.
+- **Dev phase (all 3 completed)**:
+  - #82 → PR #95 (feat(mcp): secure MCP remote access via SSH tunnel) — Kong ip-restriction plugin, SSH tunnel docs, 13 test assertions
+  - #87 → PR #96 (setup.sh deterministic config-based installer) — 12 shell tests, config.example.yml, docs
+  - #89 → PR #94 (README secure-by-default) — SSO provider setup, Caddyfile protected dashboard, security roles
+- **#82 review + merge ✅**: review PASSED (verdict=pass, MERGEABLE, CI green). 422 on approve (token mode self-review block). `gh pr merge 95 --squash --delete-branch` failed: "base branch policy prohibits merge" (branch protection on ansible-supabase main). Merged with `--admin`: PR #95 MERGED at 18:00:35Z, issue #82 CLOSED at 18:00:36Z.
+- **#87 review — FAILED twice**:
+  - First (18:00): reviewed wrong PR #92 (looper spec, branch `looper/planner/87-...`) instead of PR #96. Wrapper picks lowest-numbered PR referencing the issue. **Fix**: closed obsolete looper spec PRs #92 and #91.
+  - Second (18:15): correct PR #96, review agent (glm-5.2, session d06141cc) exited code 0 at 18:17:01 but posted ZERO comments. Wrapper polled 6×5s for 'Review Session' verdict comment → found nothing → `INV-78: verdict-source=none; resolved unavailable` → `INV-144: unavailable review round 1/3` → sent to pending-dev. 422 on REQUEST_CHANGES.
+- **#89 review — FAILED**: first review crashed (agent exited code 1 in ~1m40s, verdict=fail from artifact). dev-resume dispatched, completed 18:16:26, flipped to pending-review. Awaiting next review dispatch — will likely hit the same review reliability issue as #87.
+- **Dispatch marker bug**: #87/#89 reviews were blocked by stuck dispatch markers at `/run/user/1000/autonomous-ansible-supabase/dispatch-marker-<issue>-review` (directories, NOT files, TTL=600s). Cleared with `rmdir`. The `.attempt-review-*` files in `$HOME/.local/state/autonomous-<PROJECT_ID>/lanes/` are a different mechanism — clearing those doesn't unblock dispatch.
+
+#### Run #4 findings (terminal)
+1. **1/3 merged** ⚠️ — only #82 reached merge. #87 and #89 are stuck in the review dispatch loop due to model-dependent review reliability (glm-5.2 doesn't reliably post verdict comments).
+2. **Branch protection on ansible-supabase main** ✅ — this is the structural guardrail §10.7 recommended. It blocked the direct merge (required `--admin`). But it also blocks `merge-helper.sh` from auto-merging — the helper will need `--admin` or the branch protection needs adjustment.
+3. **Wrong-PR review from looper spec PRs** ⚠️ — the review wrapper picks the lowest-numbered PR referencing the issue. Obsolete looper spec PRs (#91, #92) shadowed the autonomous implementation PRs (#94, #96). Fix: close obsolete spec PRs.
+4. **Review gate is model-dependent** 🚨 — glm-5.2 doesn't reliably post the verdict comment format the wrapper expects. #82's review worked (simpler PR, clean verdict). #87's second review: agent exited code 0 but posted zero comments. The wrapper's 30s verdict-poll (6×5s) is too short, and the format instructions aren't followed reliably by glm-5.2. This is a NEW class of failure: the gate fails not because the agent bypasses it (Run #2) but because the review agent silently produces no output.
+5. **Dispatch markers at XDG_RUNTIME_DIR** ⚠️ — the dispatch markers are directories at `$XDG_RUNTIME_DIR/autonomous-<PROJECT_ID>/dispatch-marker-<issue>-<mode>` with 600s TTL, not the `.attempt-review-*` files in `$HOME/.local/state/`. Clearing the wrong one doesn't unblock dispatch. This is a config/ops gotcha, not a bug.
+
+#### Run #4 update (20:10–22:04 UTC, post-18:18)
+- 20:10 UTC — ansible-supabase dispatcher cron BROKE. The #82 dev agent had committed `verify-secure-mcp.py` into the `scripts/` directory, which destroyed the whole-dir symlink to `.agents/skills/autonomous-dispatcher/scripts/`. All 20+ script symlinks + `autonomous.conf` lost. Cron log: `bash: scripts/dispatcher-tick.sh: Aucun fichier ou dossier de ce nom` repeating.
+- Both #87 and #89 went `stalled` because the dispatcher stopped running.
+- 22:04 UTC — Fix: re-symlinked all individual scripts + `adapters/` + `providers/` subdirs from `.agents/skills/autonomous-dispatcher/scripts/` into the existing `scripts/` dir (alongside the real `verify-secure-mcp.py`). Recreated `scripts/autonomous.conf`.
+- 22:04 UTC — After fix, #87 dispatched as dev-new → silently exited in 28s (worktree `feat/deterministic-installer` already exists, PR #96 OPEN). #89 dispatched review → review agent (glm-5.2) exited code 0 but posted ZERO verdict comments → `INV-78: verdict-source=none` → `INV-144: unavailable` → pending-dev.
+- Both #87 and #89 are now stuck in a dev↔review loop: review fails (model silence) → pending-dev → dev tries worktree (conflict) → pending-dev → ... will exhaust MAX_RETRIES=3 and re-stall.
+- **Final state:** #87 `pending-dev` (PR #96 OPEN), #89 `pending-dev` (PR #94 OPEN). Both have working implementations but the review gate is broken (model-dependent silence §10.12) and the dev gate is broken (worktree conflict §10.15).
+
+### Run #5 — m3llm #216 (worktree conflict stall)
+
+- **Issue:** #216 "Fix chat capture quality: markdown in text, conversation endings, repetition, missing tool-output images" — follow-up to PR #214/#215 from Run #3
+- **Created:** 2026-07-26T18:20:14Z with `autonomous` label
+- **Outcome:** STALLED — worktree conflict caused silent agent exit + retry loop
+- **Timeline:**
+  - 18:25 — Dispatcher dispatched dev-new. Agent silently exited in ~17s (code 0, no PR, no error comment). Root cause: worktree `feat/aslema-real-captures` already existed (PR #215 merged but worktree not cleaned).
+  - 18:30, 18:45 — Dispatcher retried same dead session 3× (MAX_RETRIES=3). Each retry: "no captured opencode sessionID → starting a new opencode session → Agent exited with code: 0" in ~17s.
+  - 19:00:16Z — Marked `stalled` after 3 no-PR retries.
+  - 22:00 — User removed `stalled` label. Dispatcher re-dispatched. Same silent exit in 22s.
+  - 22:02 — Fix: `git worktree remove --force .worktrees/feat/aslema-real-captures` + `git worktree prune` + `git branch -D feat/aslema-real-captures` + cleared dispatch markers at `/run/user/1000/autonomous-m3llm/dispatch-marker-216-*`.
+  - Issue #216 now `pending-dev`, waiting for clean re-dispatch.
+- **Findings:**
+  1. Worktree conflict causes silent agent exit (code 0, no error, no PR) — the agent crashes on startup before reaching any error-reporting step
+  2. The dispatcher retries the same dead session ID 3× instead of detecting the worktree conflict
+  3. A nudge comment with worktree instructions was posted but never read — the agent crashes before the comment-reading step, and even if it didn't, the skill filters comments for review-feedback tokens (`Review findings:`/`BLOCKING`/`[P1]`), so general human instructions are invisible
+  4. PR #215 was merged but the worktree was never cleaned — the pipeline has no post-merge worktree cleanup step
+
 ## 10. Bugs
 
 ### 10.1 Cron PATH excludes linuxbrew → `gh` not found (FATAL `ADT_CFG_GH_VERSION_TOO_OLD`)
@@ -362,7 +450,170 @@ Dispatcher (cron tick) ──▶ Dev Agent ──────────▶ Rev
 - **Fix**: none within compozy. Would need a wrapper script that watches `.compozy/tasks/*/` for completed status and auto-commits + PRs. This is the "manual merge" limitation confirmed in practice.
 - **Reproduced**: leadminer issue #2831 (task completed, code uncommitted).
 
-## 11. Decision
+### 10.8 Dev agent copy-pasted issue body instead of rewriting in brand voice (QUALITY GAP)
+
+- **Severity**: Medium (shipped low-quality user-facing copy that doesn't match the project's defined voice)
+- **Status**: Open — agent didn't follow project writing guidelines
+- **Symptom**: Run #1 (#199) asked the agent to add an FAQ entry: "Dans les FAQ, rajoute l'information de l'architecture de m3llm **en la réécrivant de façon attractive**." The agent copy-pasted the issue body nearly verbatim into `landing/src/i18n/content.ts` — a 150-word wall of technical jargon ("best-of-breed", "routeur intelligent de modèles", "base de connaissances RAG docling", "STT local arabophone") that reads like a tech blog, not a Tunisian café server.
+- **Expected voice** (from `config/SYSTEM_PROMPT.md`): "Concis, expressif. Humilité en apparence, sagesse qui émerge." The existing FAQ entries follow this — short, warm, 3-4 sentences max (e.g. "Oui, sur l'essentiel. m3llm est souverain : pas d'alignement à la politique étrangère américaine..."). The agent's entry is 5x longer than every other FAQ answer and uses none of the brand's warmth.
+- **Root cause**: the autonomous-dev skill + the dev agent's prompt context did not include the project's writing guidelines. The agent had access to `AGENTS.md` (which defines plugin architecture, coding rules, E2E procedure) and `config/SYSTEM_PROMPT.md` (which defines the m3llm voice for chat responses), but neither document explicitly governs **landing page copy**. The agent treated the issue body as the source of truth and formatted it rather than rewriting it. The review agent (opencode) also didn't catch this — it reviewed the diff for correctness (email obfuscation, build pass) but not for brand-voice compliance.
+- **Impact**: user-facing copy on m3llm.cafe doesn't match the brand voice. The FAQ is the first thing visitors read. A jargon wall undermines the "Tunisian café server" identity. The issue explicitly asked for an attractive rewrite; the agent delivered a formatted paste.
+- **Why the review gate didn't catch it**: the E2E gate verifies behavior (build passes, tests pass, email obfuscation works) — it has no concept of copy quality or brand voice. The review fan-out (opencode agent) reviewed the diff for code correctness, not for writing quality. **Neither gate checks user-facing copy against the project's voice guidelines.** This is a class of quality gap that no current gate covers.
+- **Fix (suggested)**:
+  1. **Short-term**: add a "copy review" step to the review fan-out prompt — instruct the review agent to check user-facing text against `config/SYSTEM_PROMPT.md` voice rules and existing copy patterns (e.g. compare new FAQ entry length/tone against the 8 existing entries).
+  2. **Medium-term**: add a project-level writing guide for landing copy (a `landing/WRITING.md` or a section in `AGENTS.md`) that defines the voice, max length per FAQ entry, banned jargon, and reference examples. The agent needs an explicit contract for non-chat copy.
+  3. **Structural**: add a lint-style check to the E2E verify script for landing copy — e.g. flag FAQ answers >80 words, flag banned terms ("best-of-breed", "routeur intelligent"), flag entries that deviate >2x from the median answer length. This makes copy quality a programmatic gate, not a prompt.
+- **Reproduced**: m3llm PR #200 (Run #1, issue #199). The FAQ entry shipped to production on m3llm.cafe.
+
+### 10.9 E2E config mismatch — `ADT_CFG_E2E_MODE_MISMATCH` (ansible-supabase)
+
+- **Severity**: Blocking (all reviews fail)
+- **Status**: Fixed — cleared `E2E_COMMAND` and `E2E_COMMAND_EVIDENCE_PARSER` to empty string
+- **Symptom**: ansible-supabase reviews all failed with `ADT_CFG_E2E_MODE_MISMATCH`. The conf had `E2E_ENABLED=false` + `E2E_MODE=""` but left `E2E_COMMAND='bash scripts/e2e-verify.sh ${PR_NUMBER}'` and `E2E_COMMAND_EVIDENCE_PARSER="bash scripts/e2e-evidence.sh"` populated (copied from m3llm). The wrapper detects command-mode config present under mode=none.
+- **Fix**: set `E2E_COMMAND=""` and `E2E_COMMAND_EVIDENCE_PARSER=""` (conf lines 1230, 1264).
+- **Reproduced**: ansible-supabase #82, #87, #89 first review attempts (2026-07-26).
+
+### 10.10 Wrong-PR review from obsolete looper spec PRs (ansible-supabase)
+
+- **Severity**: High (reviews the wrong code)
+- **Status**: Fixed — closed obsolete looper spec PRs #91, #92
+- **Symptom**: #87 review found PR #92 (looper spec, branch `looper/planner/87-...`) instead of PR #96 (autonomous implementation). Both PRs referenced issue #87; the wrapper picks the lowest-numbered.
+- **Root cause**: looper and autonomous-dev-team both create PRs referencing the same issue. The review wrapper's PR selection (lowest number) picks the looper spec PR, which is a markdown spec, not code.
+- **Fix**: close obsolete looper spec PRs with explanatory comments. Going forward, remove looper labels before tagging `autonomous` to avoid dual-PR ambiguity.
+- **Reproduced**: ansible-supabase #87 first review (2026-07-26 18:00).
+
+### 10.11 Dispatch marker stuck at XDG_RUNTIME_DIR (ansible-supabase)
+
+- **Severity**: Medium (blocks re-dispatch for 10 min)
+- **Status**: Fixed — `rmdir` the marker directories
+- **Symptom**: #87/#89 reviews wouldn't re-dispatch despite the dispatcher log saying "Dispatched: 87 89". The dispatch markers are **directories** at `/run/user/1000/autonomous-ansible-supabase/dispatch-marker-<issue>-<mode>` (XDG_RUNTIME_DIR), TTL=600s. They persisted and blocked re-dispatch.
+- **Root cause**: the dispatch markers live at `$XDG_RUNTIME_DIR/autonomous-<PROJECT_ID>/dispatch-marker-<issue>-<mode>` (directories, not files). The `.attempt-review-*` files in `$HOME/.local/state/autonomous-<PROJECT_ID>/lanes/` are a different mechanism. Clearing the wrong one doesn't unblock dispatch.
+- **Fix**: `rmdir /run/user/1000/autonomous-ansible-supabase/dispatch-marker-87-review dispatch-marker-89-review`.
+- **Reproduced**: ansible-supabase #87, #89 (2026-07-26 18:00–18:15).
+
+### 10.12 Review agent posts no verdict comment — model-dependent gate (CRITICAL)
+
+- **Severity**: **CRITICAL** — the review gate silently fails when the review agent produces no output
+- **Status**: Open — model-dependent, not a pipeline bug
+- **Symptom**: #87 second review (18:15): opencode review agent (glm-5.2, session d06141cc) exited code 0 at 18:17:01 but posted ZERO comments to the PR or issue. The wrapper polled 6×5s for a comment containing 'Review Session' + verdict marker → found nothing → `INV-78: verdict-source=none; resolved unavailable` → `INV-144: unavailable review round 1/3` → sent to pending-dev.
+- **Root cause**: the opencode review agent (glm-5.2) doesn't reliably execute the autonomous-review skill's comment-posting step. The agent exited cleanly (code 0) but produced no PR/issue comments. This is NOT wrong format — it's zero output. Contrast with #82 where the same model/config produced a clean verdict.
+- **Impact**: the review gate is both agent-dependent (Run #2 main-push bypass) AND model-dependent (glm-5.2 doesn't reliably post verdict comments). The wrapper's 30s verdict-poll (6×5s) is too short, and the format instructions aren't followed reliably by glm-5.2. This is a NEW class of failure: the gate fails not because the agent bypasses it but because the review agent silently produces no output.
+- **Fix (suggested)**: (a) switch `AGENT_REVIEW_MODEL` to a more instruction-following model (e.g. claude-sonnet-4-6) for the review fan-out. (b) Lengthen the verdict-poll window. (c) Add a fallback: if the review agent exits code 0 with no verdict comment, treat as FAIL (not unavailable) and re-dispatch with a stricter prompt. (d) Harden the autonomous-review skill prompt to make the verdict-comment step non-negotiable.
+- **Reproduced**: ansible-supabase #87 second review (2026-07-26 18:15–18:17).
+
+### 10.13 Branch protection blocks merge-helper.sh (ansible-supabase)
+
+- **Severity**: Medium (merge-helper can't auto-merge)
+- **Status**: Open — merge-helper needs `--admin` flag or branch protection adjustment
+- **Symptom**: `gh pr merge 95 --squash --delete-branch` failed with "base branch policy prohibits merge" (branch protection on ansible-supabase main). Merged with `--admin`. But `merge-helper.sh` doesn't pass `--admin`, so it can't auto-merge on repos with branch protection.
+- **Root cause**: ansible-supabase main has branch protection (the structural guardrail §10.7 recommended). This is correct for blocking direct pushes, but it also blocks the merge-helper workaround.
+- **Fix (suggested)**: (a) add `--admin` to `merge-helper.sh`'s `gh pr merge` call. (b) Or: configure branch protection to allow the bot account to merge without admin override. (c) Or: use `GH_AUTH_MODE=app` with a GitHub App that has merge permissions on protected branches.
+- **Reproduced**: ansible-supabase #82 merge (2026-07-26 18:00).
+
+### 10.14 Dev agent committing real files into scripts/ destroys symlink-based install (CRITICAL)
+
+- **Severity**: Critical
+- **Status**: Open
+- **Symptom**: The #82 dev agent committed `verify-secure-mcp.py` into the `scripts/` directory. Since `scripts/` was a symlink to `.agents/skills/autonomous-dispatcher/scripts/`, the commit replaced the symlink with a real directory containing only `verify-secure-mcp.py`, destroying all 20+ script symlinks + `autonomous.conf`. The dispatcher cron broke for ~2 hours.
+- **Root cause**: The skills install pattern uses a whole-dir symlink (`scripts/` → `.agents/skills/autonomous-dispatcher/scripts/`). When a dev agent commits a new file into `scripts/`, git replaces the symlink with a real directory. This is a structural flaw in the symlink-based install pattern — the dev agent's worktree has the symlink resolved as a real directory by git.
+- **Impact**: The entire pipeline stops running. All in-flight issues go `stalled`.
+- **Fix applied**: Re-symlinked all individual scripts + subdirs into the existing `scripts/` dir (alongside the real file). This is fragile — a future commit could break it again.
+- **Recommended fix**: Use `--copy` mode instead of symlinks for `scripts/` (the skills CLI supports `--copy`), OR add `scripts/` to `.gitignore` so dev agents can't commit into it, OR use individual file symlinks instead of a whole-dir symlink (the fix applied, but should be the default install pattern).
+
+### 10.15 Worktree conflict causes silent agent exit + retry loop → stall (CRITICAL)
+
+- **Severity**: Critical
+- **Status**: Open
+- **Symptom**: When a worktree for the issue's branch already exists (e.g. PR merged but worktree not cleaned, or PR still open), the dev agent silently exits in ~20s (code 0, no PR, no error comment). The dispatcher retries 3× → `stalled`.
+- **Root cause**: The dev agent tries to create a worktree with `git worktree add .worktrees/<branch> -b <branch>`, which fails if the worktree or branch already exists. The agent crashes on startup before reaching any error-reporting step. The dispatcher doesn't detect the worktree conflict and retries the same dead session.
+- **Impact**: Any issue whose PR was merged but worktree not cleaned, or whose PR is still open, will stall on the next dev dispatch.
+- **Affected runs**: m3llm #216 (PR #215 merged, worktree not cleaned), ansible-supabase #87 (PR #96 open, worktree exists)
+- **Recommended fix**: (1) Add post-merge worktree cleanup to the pipeline (after PR merge, remove `.worktrees/<branch>` + prune + delete branch). (2) Detect worktree creation failure and report it as a blocker comment instead of silent exit. (3) In dev-resume mode, reuse existing worktree instead of trying to create a new one.
+
+### 10.16 dev-new vs dev-resume dispatch confusion when worktree already exists (Medium)
+
+- **Severity**: Medium
+- **Status**: Open
+- **Symptom**: When an issue has an OPEN PR (worktree exists) and is sent back to `pending-dev` (e.g. review failed), the dispatcher sends `dev-new` (tries to create new worktree) instead of `dev-resume` (reuses existing). This causes the worktree conflict from §10.15.
+- **Root cause**: The label state machine sends `dev-new` after `pending-dev` regardless of whether a worktree/PR already exists. The dispatcher doesn't check for existing worktrees before choosing dev-new vs dev-resume.
+- **Impact**: Issues with open PRs that fail review will loop: review fails → pending-dev → dev-new (worktree conflict) → pending-dev → ... → stall.
+- **Recommended fix**: The dispatcher should check for an existing worktree or open PR before choosing dev-new vs dev-resume. If a worktree exists, use dev-resume.
+
+### 10.17 Verdict-poll budget tied to E2E_MODE — 30s for E2E_MODE=none (CRITICAL)
+
+- **Severity**: Critical
+- **Status**: Fixed (ansible-supabase) / Open (upstream)
+- **Symptom**: Repos with `E2E_MODE=none` (no E2E tests) get only 30s (6 attempts × 5s) for the review agent to post a verdict comment. The review agent (opencode) typically needs 1-6 minutes to run and post. After 30s, the wrapper declares `INV-78: verdict-source=none; resolved unavailable` → after 3 rounds → `INV-144: review-unavailable-cap breaker TRIPPED` → `stalled`.
+- **Root cause**: The `_resolve_verdict_poll_attempts()` function in `lib-review-poll.sh:55` returns the legacy floor (6 attempts = 30s) when `E2E_MODE != "command"`. When `E2E_MODE == "command"`, it returns `ceil(E2E_COMMAND_TIMEOUT_SECONDS / 5)` = 720 attempts = 1h. The budget is tied to E2E mode, not to the review agent's actual needs.
+- **Affected runs**: ansible-supabase #87, #89, #99 — all stalled because the review agent couldn't post a verdict in 30s. On m3llm (E2E_MODE=command), the review agent gets 1h and succeeds.
+- **Fix applied (ansible-supabase)**: Set `E2E_MODE=command` with a no-op `E2E_COMMAND='true'` and `E2E_COMMAND_EVIDENCE_PARSER='echo "<!-- e2e-evidence: complete sha=\"${PR_HEAD_SHA}\" -->"'`. This gives the full 720×5s=1h verdict-poll budget without running real E2E. ansible-supabase has no E2E tests, so the command is a no-op.
+- **Recommended upstream fix**: Decouple the verdict-poll budget from E2E_MODE. Add a `VERDICT_POLL_TIMEOUT_SECONDS` config key that defaults to 300s (5 min) regardless of E2E mode. The E2E-scaled budget should be a max(), not a replacement.
+
+### 10.18 4h dev timeout hit on complex multi-step tasks (Medium)
+
+- **Severity**: Medium
+- **Status**: Open
+- **Symptom**: The m3llm #216 dev agent hit the 4h `AGENT_TIMEOUT` while rendering tool-output images (chess board, flashcards, map) via headless chromium. The agent was doing real work but ran out of time. After timeout (exit code 124), the dispatcher retried but the PR HEAD had already consumed its one bounded self-heal → marked `stalled`.
+- **Root cause**: Complex tasks that involve rendering images via headless browser, running multiple API captures, and doing code review can exceed 4h. The timeout is a hard cap with no checkpoint/resume mechanism.
+- **Impact**: Issues requiring long-running tasks (image rendering, multi-step E2E, large refactors) will stall.
+- **Recommended fix**: (1) Increase `AGENT_TIMEOUT` to 8h for projects with complex tasks. (2) Add a checkpoint mechanism so the agent can resume from where it left off after a timeout. (3) Break complex issues into smaller sub-issues.
+
+### 10.7 Dev agent pushed directly to main, bypassing review gate (FLOW VIOLATION)
+
+- **Severity**: **CRITICAL** — the entire review/E2E gate pipeline was bypassed
+- **Status**: Open — agent behavioral bug, not a pipeline bug
+- **Symptom**: Run #2 (#201) dev agent committed `92b7529` directly to main and pushed at 00:21:32Z. No worktree, no PR, no review, no E2E gate. The `Fixes #201` auto-closed the issue. Browser E2E ran post-hoc on production (after sync_plugins.yml deployed), not as a pre-merge gate.
+- **Root cause**: the autonomous-dev skill instructs the agent to create a worktree + PR, but enforcement is prompt-based, not structural. The agent decided to "fix it directly" — possibly influenced by the issue body "use account: ops@ankaboot.io and AGENTS.md to fix it" which reads as "go fix it", or by the sparse issue body (no `## Requirements`/`## Acceptance Criteria` checkboxes). The pipeline has no structural guardrail preventing a push to main.
+- **Impact**: **the gate only works if the agent chooses to use it.** Run #1 (#199) followed the full pipeline (worktree → PR → review → E2E gate → fix → re-review → pass → merge). Run #2 (#201) skipped everything. Same tool, same config, same cron — different agent behavior. This is the single most important POC finding: the review/E2E gate is agent-dependent, not structural. A determined or confused agent can bypass it entirely by pushing to main.
+- **Fix (structural)**: (a) protect `main` with branch protection rules requiring PR + status checks — GitHub would reject the direct push. (b) Use `GH_AUTH_MODE=app` with a down-scoped agent token that lacks `contents:write` on main (the agent can create branches but cannot push to main). (c) Harden the autonomous-dev skill prompt to make the worktree+PR flow non-negotiable. Option (a) is the simplest and most reliable — branch protection is a GitHub-native structural guardrail, not a prompt.
+- **Reproduced**: m3llm issue #201 (Run #2).
+
+## 11. Workarounds applied
+
+### 11.1 merge-helper.sh cron — auto-merge approved PRs (works around §10.3 422)
+
+**Problem**: In `GH_AUTH_MODE=token`, the review wrapper's `gh pr review --approve` 422s ("can not approve your own pull request") because the PR author and reviewer share the same GitHub identity (baderdean's PAT). The wrapper then falls back to "manual merge required" WITHOUT calling `gh pr merge` — even though GitHub DOES allow merging your own PR (only approval is blocked).
+
+**Workaround**: `scripts/merge-helper.sh` (added 2026-07-26) is a cron-driven script that:
+1. Lists open issues labeled `approved` (set by the review wrapper when verdict=pass).
+2. For each, finds the open PR with `Closes #<issue>` in its body.
+3. Checks the PR is OPEN + MERGEABLE.
+4. Runs `gh pr merge --squash --delete-branch`.
+
+**Cron entry** (runs every 5 min, same PATH prefix as dispatcher-tick):
+```cron
+*/5 * * * * cd /home/badreddine/Projects/ankaboot-source/m3llm && \
+  PATH="/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH" \
+  bash scripts/merge-helper.sh >> /tmp/m3llm-merge-helper.log 2>&1
+```
+
+**Idempotent**: filters to OPEN PRs, checks MERGEABLE state, re-running on already-merged PR is a no-op.
+
+**Limitation**: this is a token-mode workaround. The proper fix is `GH_AUTH_MODE=app` (GitHub App two-token split, INV-79) which gives identity separation — the wrapper holds full-write App token (approve + merge), the agent subprocess gets a down-scoped token (cannot approve/merge). When App mode is configured, `merge-helper.sh` becomes unnecessary (the wrapper's own `gh pr merge` will work).
+
+### 11.2 E2E verify script false negative — PR-head checkout (FIXED)
+
+**Problem**: The change-scoped `e2e-verify.sh` ran from `PROJECT_DIR` (main branch). When it did `git diff origin/main...HEAD`, HEAD was main (not the PR branch), so it found no changes → exit 0 → gate=pass WITHOUT verifying the PR's actual code. False negative: the gate passed but nothing was verified.
+
+**Root cause**: the review wrapper (`autonomous-review.sh:1831-1833`) exports `PR_NUMBER` and `PR_HEAD_SHA` and invokes `bash scripts/e2e-verify.sh <PR_NUMBER>` from `PROJECT_DIR` on main, but the verify script assumed HEAD was the PR branch.
+
+**Fix applied** (`scripts/e2e-verify.sh`):
+- Added `trap cleanup EXIT` that restores the original branch on exit.
+- Before diffing: `git fetch -q origin "pull/${PR_NUMBER}/head:pr-${PR_NUMBER}"` then `git checkout -q "$PR_HEAD_SHA"`. Falls back to HEAD with a WARN if checkout fails.
+- After diffing/running checks: the EXIT trap checks out `ORIG_BRANCH` (captured at script start), so the repo is left on main.
+
+**Verification** (2026-07-26, against merged PR #200 sha=8e4b362):
+- `bash -n scripts/e2e-verify.sh` → SYNTAX OK
+- Manual run with `PR_NUMBER=200 PR_HEAD_SHA=8e4b3627...`:
+  - ORIG_BRANCH captured = `main`
+  - `git fetch origin pull/200/head:pr-200` → OK
+  - `git checkout 8e4b362` → OK (HEAD now at PR head)
+  - `git diff --name-only origin/main...HEAD` → 4 files: `docs/test-cases/faq-architecture.md`, `landing/src/components/ObfuscatedEmail.tsx`, `landing/src/components/blocks/FAQ.tsx`, `landing/src/i18n/content.ts` ✅ (all PR #200's actual changes)
+  - EXIT trap restored HEAD to `main` (465dd76) ✅
+
+**Status**: fixed. The E2E gate now sees the PR's actual changes before deciding which lanes to run. The gate is trustworthy on the change-scoped path.
+
+## 12. Decision
 
 > TODO — after sufficient runs, evaluate against the dev-factory-A→Z criteria.
 >
@@ -376,3 +627,94 @@ Dispatcher (cron tick) ──▶ Dev Agent ──────────▶ Rev
 > 7. **Does the GitHub App mode solve the 422 identity problem?** (looper's single-identity → 3 bugs; autonomous-dev-team's two-token split; compozy: no review-request → no 422 risk but no auto-merge either)
 >
 > **Landscape finding (from @librarian + @explorer)**: autonomous-dev-team is the ONLY open-source tool found with a real behavior-verified merge gate. Every other tool (looper, AutoShip, compozy) uses LLM-judge verification — the exact failure mode that sank looper. If autonomous-dev-team's gate works in practice, it may be the only viable Option A tool. If it doesn't, Option C (build from scratch) becomes the default.
+
+### Run #2 critical insight (2026-07-26)
+
+**The E2E/review gate is agent-dependent, not structural.** Run #2 (#201) proved that a dev agent can bypass the entire review pipeline by pushing directly to main — no worktree, no PR, no review, no E2E gate. The `Fixes #201` auto-closed the issue. Same tool, same config, same cron as Run #1 (#199) which followed the full pipeline. The difference was agent behavior, not pipeline configuration.
+
+**Implication for the decision**: the gate mechanism (§10.2, §10.5, the dual-signal E2E+review) is sound WHEN the agent goes through the PR flow. But the pipeline has no structural guardrail preventing a direct push to main. A determined or confused agent can ship unreviewed code to production. **This is the same class of failure as looper's "review gate ships bugged code" — the gate exists but doesn't structurally block bad behavior.**
+
+### Run #3/#4 critical insights (2026-07-26)
+
+**Three classes of gate failure identified:**
+
+1. **Agent-dependent bypass** (Run #2, §10.7): the dev agent pushes directly to main, skipping the PR flow entirely. The gate only works if the agent chooses to use it. Fix: branch protection on main (structural).
+
+2. **Model-dependent review silence** (Run #4, §10.12): the review agent (glm-5.2) exits code 0 but posts zero comments. The wrapper can't find a verdict → treats as unavailable → sends back to dev. The gate fails not because it's bypassed but because the reviewer silently produces no output. Fix: switch review model to a more instruction-following one, or harden the review skill prompt.
+
+3. **Wrong-PR review** (Run #4, §10.10): the review wrapper picks the lowest-numbered PR referencing the issue. Obsolete looper spec PRs shadow autonomous implementation PRs. Fix: close obsolete spec PRs, or remove looper labels before tagging `autonomous`.
+
+**Scorecard so far (4 runs):**
+- Run #1 (m3llm #199): ✅ full pipeline (worktree → PR → review → E2E gate → fix → re-review → pass → 422 → manual merge)
+- Run #2 (m3llm #201): 🚨 FLOW VIOLATION (direct push to main, no PR, no review)
+- Run #3 (m3llm #206): ⚠️ PR created but not merged (issue auto-closed via commit, stale labels)
+- Run #4 (ansible-supabase #82/#87/#89): ⚠️ 1/3 merged (#82 ✅, #87 + #89 stuck in review dispatch loop due to model-dependent review silence)
+
+**Autonomous flow coverage**: 2/4 runs reached merge (Run #1 with manual merge, Run #4 #82 with --admin). 1/4 bypassed the gate entirely (Run #2). 1/4 produced a PR but didn't merge (Run #3). 2/4 stuck in review failure loop (Run #4 #87/#89).
+
+**Manual interventions per loop**: Run #1: 1 (manual merge due to 422). Run #2: 0 (bypassed everything). Run #3: 0 (auto-closed, no merge). Run #4 #82: 1 (--admin merge). Run #4 #87/#89: 2+ (close obsolete PRs, clear dispatch markers, still stuck). Average: ~1.5 for the runs that followed the pipeline, 0 for the one that bypassed it.
+
+**Open questions for the decision**:
+- Does switching `AGENT_REVIEW_MODEL` to claude-sonnet-4-6 fix the review silence (§10.12)?
+- Does `GH_AUTH_MODE=app` (two-token split) solve both the 422 (§10.3) AND the branch-protection merge block (§10.13)?
+- Does branch protection on m3llm main prevent the Run #2 bypass (§10.7)?
+- Is the review gate trustworthy enough to be a merge gate, or does it need a programmatic backup (like looper's missing post-deploy verify)?
+
+### Run #5 + Run #4 update critical insights
+
+**4-run scorecard updated (5 runs):**
+| Run | Issue | Repo | Reached merge? | Gate held? | Manual interventions |
+|-----|-------|------|---------------|------------|---------------------|
+| #1 | #199 | m3llm | ✅ (manual merge) | ✅ (review caught real bug) | 2 (E2E fix, manual merge) |
+| #2 | #201 | m3llm | ❌ (pushed to main) | ❌ (bypassed) | 1 (revert main push — not done) |
+| #3 | #206 | m3llm | ❌ (PR not merged) | ⚠️ (review ran, stale labels) | 2 (worktree cleanup, stale labels) |
+| #4 | #82/#87/#89 | ansible-supabase | 1/3 (#82 merged with --admin) | 1/3 (#82 held, #87/#89 broken) | 5+ (E2E config, wrong PR, markers, dispatcher rebuild, --admin merge) |
+| #5 | #216 | m3llm | ❌ (stalled) | N/A (never reached review) | 1 (worktree cleanup) |
+
+**Autonomous flow coverage:** 2/5 reached merge (40%), 1/5 bypassed the gate entirely, 2/5 stalled. Of the 2 that merged, both required manual intervention (merge-helper.sh or --admin flag).
+
+**New structural findings:**
+1. **The symlink-based install is fragile** (§10.14) — a dev agent committing into `scripts/` destroys the entire pipeline. This is a structural flaw in the install pattern, not a bug in the tool.
+2. **The pipeline has no post-merge worktree cleanup** (§10.15) — merged PRs leave worktrees that cause future stalls.
+3. **The dev↔review loop is a dead trap** (§10.16 + §10.12) — once an issue has an open PR and the review gate fails (model silence), the issue will loop dev-new (worktree conflict) → pending-dev → ... → stall. There is no escape without manual intervention.
+4. **The gate is agent-dependent, model-dependent, AND install-pattern-dependent** — three independent failure modes, any one of which breaks the pipeline.
+
+**Open questions for decision:**
+1. Should we switch to `--copy` install mode to avoid §10.14?
+2. Should we add post-merge worktree cleanup to the pipeline?
+3. Should we swap `AGENT_REVIEW_MODEL` to a more instruction-following model (e.g. claude-sonnet) to fix §10.12?
+4. Is the 40% merge rate with 100% manual intervention acceptable for a "dev factory A→Z"?
+
+### Stall root cause analysis + best practices
+
+**Stall root causes (5 runs, 7 stalls):**
+
+| Run | Issue | Stall cause | Bug |
+|-----|-------|------------|-----|
+| #5 | m3llm #216 | 4h timeout during image rendering | §10.18 |
+| #4 | ansible-supabase #87 | Wrong-PR review (closed PR #92) + verdict-poll 30s | §10.10, §10.17 |
+| #4 | ansible-supabase #89 | Verdict-poll 30s (E2E_MODE=none) | §10.17 |
+| #4 | ansible-supabase #99 | Verdict-poll 30s (E2E_MODE=none) | §10.17 |
+| #5 | m3llm #216 (retry) | Worktree conflict (PR #224 CONFLICTING) | §10.15 |
+| #4 | ansible-supabase #87 (retry) | Worktree conflict (PR #96 OPEN) | §10.15 |
+| #4 | ansible-supabase #87 (2nd retry) | opencode-go 403 (provider auth) | §10.17 (misdiagnosed as model-dependent) |
+
+**Best practices to avoid stalls:**
+
+1. **Set `E2E_MODE=command` even for repos without E2E tests.** Use a no-op command (`E2E_COMMAND='true'`) to get the full 1h verdict-poll budget. The 30s default for `E2E_MODE=none` is too short for any review agent. (§10.17)
+
+2. **Clean up worktrees after PR merge.** The pipeline has no post-merge worktree cleanup. After a PR is merged, manually run `git worktree remove --force .worktrees/<branch> && git worktree prune && git branch -D <branch>`. (§10.15)
+
+3. **Close obsolete PRs that reference the issue.** The review wrapper picks the lowest-numbered PR that references the issue, regardless of PR state. Close obsolete looper spec PRs to avoid the wrong-PR review bug. (§10.10)
+
+4. **Monitor the opencode provider auth.** opencode silently exits 0 with no output when the provider returns 403. There is no error message, no stderr. Smoke-test the provider before each dispatch cycle: `echo "Reply with: PONG" | opencode run --model <provider/model> --title smoke --auto`. (§10.17 misdiagnosis)
+
+5. **Increase `AGENT_TIMEOUT` for complex tasks.** The default 4h is insufficient for tasks involving image rendering, multi-step E2E, or large refactors. Set to 8h for projects with complex tasks. (§10.18)
+
+6. **Use `--copy` install mode, not symlinks.** The symlink-based install (`scripts/` → `.agents/skills/autonomous-dispatcher/scripts/`) is destroyed when a dev agent commits a file into `scripts/`. Use `npx skills add --copy` or add `scripts/` to `.gitignore`. (§10.14)
+
+7. **Clear dispatch markers when unblocking.** Dispatch markers live at `$XDG_RUNTIME_DIR/autonomous-<PROJECT_ID>/dispatch-marker-<issue>-<mode>` (directories, 600s TTL). Clear them with `rmdir` when manually unblocking an issue. (§10.11)
+
+8. **Don't let the dev↔review loop exhaust MAX_RETRIES.** Once an issue has an open PR and the review gate fails, the issue will loop: review fails → pending-dev → dev-new (worktree conflict) → pending-dev → ... → stall. Intervene before MAX_RETRIES=3 is exhausted: either fix the review gate (§10.17) or manually review and merge. (§10.16)
+
+**Required fix before this tool can be trusted as a dev factory**: enable GitHub branch protection on `main` requiring PR + status checks. This is a GitHub-native structural guardrail that makes the direct push impossible — the agent would be forced to create a PR. Combined with `GH_AUTH_MODE=app` (down-scoped agent token that cannot push to main), this closes the bypass structurally. Without branch protection, the gate is a convention, not a guarantee.
