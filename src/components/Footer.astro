@@ -1,0 +1,126 @@
+---
+/*
+ * Footer
+ * ------
+ * Site footer with brand block, primary links, newsletter signup,
+ * social links, and an obfuscated contact email reassembled by JS.
+ * Preserves all content from the previous inline footer in Layout.astro.
+ */
+
+import NewsletterSignup from "./NewsletterSignup.astro";
+
+const year = new Date().getFullYear();
+
+const socialLinks = [
+	{ label: "Instagram", href: "https://instagram.com/urgencepalestine" },
+	{ label: "TikTok", href: "https://tiktok.com/@urgencepalestine" },
+	{ label: "Telegram", href: "https://t.me/urgencepalestine" },
+	{ label: "Facebook", href: "https://facebook.com/urgencepalestine" },
+];
+
+// Split the email into fragments so the literal address never appears
+// contiguously in the static markup.
+const userParts = ["contact", "urgence-palestine"];
+const domainParts = ["fr"];
+const emailDisplay = `${userParts[0]}@${userParts[1]}.${domainParts[0]}`;
+---
+
+<footer class="site-footer" aria-labelledby="site-footer-title">
+	<div class="site-footer__inner">
+		<div class="site-footer__brand">
+			<p class="eyebrow site-footer__eyebrow">Urgence Palestine</p>
+			<h2 id="site-footer-title" class="site-footer__title">
+				Solidarité en action.
+			</h2>
+			<p class="site-footer__description">
+				Une plateforme d'information, d'action et de mémoire. Pour
+				que chaque voix porte et chaque geste compte.
+			</p>
+		</div>
+
+		<div class="site-footer__nav" aria-label="Liens utiles">
+			<h3 class="site-footer__nav-title">Liens</h3>
+			<ul class="site-footer__list">
+				<li><a href="/">Accueil</a></li>
+				<li><a href="/engagement">S'engager</a></li>
+				<li><a href="/symboles">Symboles</a></li>
+			</ul>
+		</div>
+
+		<div class="site-footer__newsletter">
+			<h3 class="site-footer__nav-title">Newsletter</h3>
+			<NewsletterSignup variant="inline" />
+		</div>
+	</div>
+
+	<div class="site-footer__base">
+		<div class="site-footer__base-inner">
+			<ul class="site-footer__social" aria-label="Réseaux sociaux">
+				{
+					socialLinks.map((link) => (
+						<li>
+							<a
+								href={link.href}
+								target="_blank"
+								rel="noopener"
+							>
+								{link.label}
+							</a>
+						</li>
+					))
+				}
+			</ul>
+
+			<p class="site-footer__contact">
+				<noscript>
+					<a class="site-footer__contact-noscript" href="/contact">
+						Écrivez-nous
+					</a>
+				</noscript>
+				<span
+					class="site-footer__email-root"
+					data-email-user-parts={JSON.stringify(userParts)}
+					data-email-domain-parts={JSON.stringify(domainParts)}
+					aria-label="Adresse e-mail de contact"
+				>
+					<!-- Reassembled at runtime to hide the address from scrapers. -->
+				</span>
+			</p>
+
+			<p class="site-footer__copy">
+				© {year} Urgence Palestine. Tous droits réservés.
+			</p>
+		</div>
+	</div>
+</footer>
+
+<script>
+	(function () {
+		const root = document.querySelector<HTMLElement>(
+			"[data-email-user-parts]",
+		);
+		if (!root) return;
+
+		const userParts: string[] = JSON.parse(
+			root.dataset.emailUserParts || "[]",
+		);
+		const domainParts: string[] = JSON.parse(
+			root.dataset.emailDomainParts || "[]",
+		);
+		if (!userParts.length || !domainParts.length) return;
+
+		const user = userParts.join("@");
+		const domain = domainParts.join(".");
+		const email = `${user}@${domain}`;
+
+		// Reassemble the mailto scheme at runtime so the literal "mailto:"
+		// never appears in the static markup.
+		const scheme = ["m", "a", "i", "l", "t", "o", ":"].join("");
+
+		const link = document.createElement("a");
+		link.href = scheme + email;
+		link.textContent = email;
+		link.className = "site-footer__email-link";
+		root.appendChild(link);
+	})();
+</script>
