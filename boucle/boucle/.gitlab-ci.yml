@@ -560,9 +560,6 @@ worker:
       # Build (eval needed so && in BOUCLE_BUILD_CMD is interpreted as shell operator)
       eval "$BOUCLE_BUILD_CMD"
 
-      # Deploy to preview (configurable via BOUCLE_DEPLOY_CMD)
-      PREVIEW_URL=$(eval "$BOUCLE_DEPLOY_CMD" 2>&1 | grep -oE "$BOUCLE_DEPLOY_URL_REGEX" | head -1)
-
       # Rebase onto latest master before pushing. master may have advanced
       # (other MRs merged) since this branch was created — without a rebase
       # the MR goes stale and GitLab reports it as conflicted, blocking merge.
@@ -578,8 +575,13 @@ worker:
         exit 1
       fi
 
-      # Push branch (agent already committed; we just push)
+      # Push branch FIRST (agent already committed; we just push).
+      # This persists the agent's work even if the deploy step later times out.
       git push --force-with-lease origin "$BRANCH"
+
+      # Deploy to preview (configurable via BOUCLE_DEPLOY_CMD).
+      # Happens AFTER push so the code is saved even if this step is slow or fails.
+      PREVIEW_URL=$(eval "$BOUCLE_DEPLOY_CMD" 2>&1 | grep -oE "$BOUCLE_DEPLOY_URL_REGEX" | head -1)
 
       # Build MR description with context (printf keeps YAML-valid, no multi-line string)
       # NOTE: CI checks out a detached HEAD — there is no local `master` ref.
@@ -617,7 +619,7 @@ worker:
       curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
         -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
         -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=reviewer" > /dev/null
-  timeout: 30m
+  timeout: 60m
 
 # ── Reviewer ────────────────────────────────────────────────────────────
 reviewer:
