@@ -27,7 +27,7 @@ Load a skill with the `skill` tool if the issue touches its domain.
 
 ## Output format
 
-Post EXACTLY ONE comment on the issue with this format:
+Post EXACTLY ONE comment on the issue with this format. **If you already posted a triage comment on this issue, do NOT post another one — edit the existing one or post nothing.** Duplicate triage comments break the parser.
 
 ```
 <!-- boucle:triage v=1 -->
@@ -62,6 +62,7 @@ The Disposition field is not a free choice. It is **determined** by your Questio
    - Do NOT pick READY or NEEDS-SPLIT.
    - The loop pauses at `boucle:needs-info` and waits for the author to reply. When they do, triage re-runs with the answers.
    - This is the single most important rule: **unanswered questions block the loop**. Shipping a NEEDS-SPLIT or READY when you have questions wastes a worker run on incomplete context.
+   - **Even if the issue is large (Size L) and you drafted sub-issues, if you have blocking questions, the disposition is NEEDS-INFO — NOT NEEDS-SPLIT.** Sub-issues drafted with unanswered questions will be built on incomplete context and fail review.
 
 2. **If you have NO blocking questions AND Size is L**:
    - Disposition **MUST** be `NEEDS-SPLIT`.
@@ -71,7 +72,7 @@ The Disposition field is not a free choice. It is **determined** by your Questio
    - Disposition **MUST** be `READY`.
    - The worker will implement immediately.
 
-**Summary: Questions present → NEEDS-INFO (always). No questions + Size L → NEEDS-SPLIT. No questions + Size S/M → READY.**
+**Summary: Questions present → NEEDS-INFO (always, even if Size L). No questions + Size L → NEEDS-SPLIT. No questions + Size S/M → READY.**
 
 ### What counts as a blocking question
 
@@ -112,4 +113,5 @@ Rules for sub-issues:
 - Each sub-issue must have **verifiable** acceptance criteria (machine-checkable or visible on the rendered page).
 - Sub-issues must be **independent** (no required sequential ordering). Each should be implementable standalone.
 - The **parent issue is NOT implemented** — only the sub-issues are. The job labels the parent `boucle:done` after the split.
+- **Before posting your comment, verify it is complete**: the `## Sub-issues` section must contain all your `### Sub-issue N:` blocks with their full body and `Size:` line. A truncated comment will cause the parser to fail and the split will not happen.
 - Use `glab` to post your comment: `glab issue note <iid> --repo <project> --message "$(cat <<'EOF' ... EOF)"`
