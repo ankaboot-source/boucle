@@ -155,6 +155,7 @@ dispatch:
       ACTION=$(jq -r '.object_attributes.action // empty' "$TRIGGER_PAYLOAD")
 
       SHOULD_TRIAGE=false
+      SHOULD_WORK=false
       if echo "$LABELS" | grep -q "boucle:triage"; then
         SHOULD_TRIAGE=true
       elif echo "$LABELS" | grep -q "boucle:needs-info"; then
@@ -163,9 +164,17 @@ dispatch:
           SHOULD_TRIAGE=true
         fi
       elif echo "$LABELS" | grep -q "boucle:todo"; then
-        # Body edit re-triggers triage
-        if [ "$ACTION" = "update" ]; then
-          SHOULD_TRIAGE=true
+        # If boucle:todo was just added (by triage), triage already triggered
+        # the worker — skip to avoid a duplicate worker pipeline. Detect by
+        # checking whether boucle:todo was in the previous labels (before
+        # this webhook event). If it was already there, this is a re-trigger
+        # (body edit, note, manual label toggle) → trigger worker directly.
+        PREV_LABELS=$(jq -r '.changes.labels.previous // [] | join(",")' "$TRIGGER_PAYLOAD" 2>/dev/null)
+        if echo "$PREV_LABELS" | grep -q "boucle:todo"; then
+          SHOULD_WORK=true
+        else
+          echo "boucle:todo just added (likely by triage) — worker already triggered, skipping"
+          exit 0
         fi
       elif [ -z "$LABELS" ] || [ "$ACTION" = "open" ]; then
         # New issue with no boucle label → triage
@@ -180,6 +189,12 @@ dispatch:
         if ! echo "$LABELS" | grep -q "boucle:triage"; then
           set_boucle_label "$IID" "boucle:triage"
         fi
+      elif [ "$SHOULD_WORK" = "true" ]; then
+        echo "Triggering worker for issue #$IID (boucle:todo re-trigger)"
+        curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
+          -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+          -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+        exit 0
       else
         echo "No action needed for issue #$IID (labels: $LABELS)"
         exit 0
@@ -452,6 +467,10 @@ worker:
       # Set working label
       set_boucle_label "$BOUCLE_ISSUE" "boucle:working"
 
+      # Fetch latest master so the branch is based on current master, not the
+      # stale CI clone (master may have advanced between clone and this job).
+      git fetch origin master
+
       # Create/checkout branch (stable name — iteration 2+ reuses & resets to master)
       BRANCH="boucle/$BOUCLE_ISSUE"
       if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
@@ -507,8 +526,23 @@ worker:
       # Deploy to preview (configurable via BOUCLE_DEPLOY_CMD)
       PREVIEW_URL=$(eval "$BOUCLE_DEPLOY_CMD" 2>&1 | grep -oE "$BOUCLE_DEPLOY_URL_REGEX" | head -1)
 
+      # Rebase onto latest master before pushing. master may have advanced
+      # (other MRs merged) since this branch was created — without a rebase
+      # the MR goes stale and GitLab reports it as conflicted, blocking merge.
+      # On rebase conflict: fail fast to human instead of shipping a broken MR.
+      git fetch origin master
+      if ! git rebase origin/master; then
+        echo "FAIL: rebase onto origin/master conflicted — master advanced since branch creation." >&2
+        echo "Escalating to human (boucle:human). The worker cannot auto-resolve merge conflicts." >&2
+        git rebase --abort 2>/dev/null || true
+        set_boucle_label "$BOUCLE_ISSUE" "boucle:human"
+        glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+          -f body="⚠️ Worker could not rebase onto master (conflict). Master advanced since this branch was created. Human rebase needed." > /dev/null
+        exit 1
+      fi
+
       # Push branch (agent already committed; we just push)
-      git push --force origin "$BRANCH"
+      git push --force-with-lease origin "$BRANCH"
 
       # Build MR description with context (printf keeps YAML-valid, no multi-line string)
       ITERATION="${BOUCLE_ITERATION:-1}"
