@@ -481,7 +481,12 @@ reviewer:
 
       # Find the MR for this issue
       MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?state=opened" \
-        | jq -r '.[] | select(.source_branch | startswith("boucle/'"$BOUCLE_ISSUE"'-")) | .iid' | head -1)
+        | jq -r '.[] | select(.source_branch == "boucle/'"$BOUCLE_ISSUE"'") | .iid' | head -1)
+
+      if [ -z "$MR_IID" ]; then
+        echo "FAIL: no open MR found for issue #$BOUCLE_ISSUE (branch boucle/$BOUCLE_ISSUE)" >&2
+        exit 1
+      fi
 
       MR_DATA=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID")
       PREVIEW_URL=$(echo "$MR_DATA" | jq -r '.description' | grep -oE 'https://[a-z0-9.-]+\.pages\.dev' | head -1)
