@@ -116,58 +116,69 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 						</header>
 
 						<ul class="mobilisation__cards" role="list">
-							{grouped[key].map((entry) => (
-								<li class="card">
-									<article
-										class="card__inner"
-										aria-labelledby={`entry-${entry.id}-title`}
-									>
-										{entry.data.featured_image ? (
-											<a
-												class="card__media"
-												href={`#${entry.id}`}
-												aria-hidden="true"
-												tabindex="-1"
-											>
-												<img
-													src={entry.data.featured_image}
-													alt=""
-													loading="lazy"
-													decoding="async"
-													width="540"
-													height="540"
+							{grouped[key].map((entry) => {
+								// Per-entry page URL — strip the YYYY-MM- prefix from
+								// the entry id so it mirrors the migration slug.
+								const slug = entry.id.replace(/^\d{4}-\d{2}-/, "");
+								const href = `/mobilisation/${slug}/`;
+								return (
+									<li class="card">
+										<article
+											class="card__inner"
+											aria-labelledby={`entry-${entry.id}-title`}
+										>
+											{entry.data.featured_image ? (
+												<a
+													class="card__media"
+													href={href}
+													aria-hidden="true"
+													tabindex="-1"
+												>
+													<img
+														src={entry.data.featured_image}
+														alt=""
+														loading="lazy"
+														decoding="async"
+														width="540"
+														height="540"
+													/>
+												</a>
+											) : (
+												<a
+													class="card__media card__media--placeholder"
+													href={href}
+													aria-hidden="true"
+													tabindex="-1"
 												/>
-											</a>
-										) : (
-											<div
-												class="card__media card__media--placeholder"
-												aria-hidden="true"
-											/>
-										)}
-
-										<div class="card__body">
-											<p class="card__meta">
-												<time datetime={entry.data.date.toISOString()}>
-													{dateFormatter.format(entry.data.date)}
-												</time>
-												<span aria-hidden="true"> · </span>
-												<span>{entry.data.location}</span>
-											</p>
-											<h3
-												id={`entry-${entry.id}-title`}
-												class="card__title"
-											>
-												<a href={`#${entry.id}`}>{entry.data.title}</a>
-											</h3>
-											{entry.data.description && (
-												<p class="card__description">
-													{entry.data.description}
-												</p>
 											)}
-										</div>
-									</article>
-								</li>
-							))}
+
+											<div class="card__body">
+												<p class="card__meta">
+													<time datetime={entry.data.date.toISOString()}>
+														{dateFormatter.format(entry.data.date)}
+													</time>
+													<span aria-hidden="true"> · </span>
+													<span>{entry.data.location}</span>
+												</p>
+												<h3
+													id={`entry-${entry.id}-title`}
+													class="card__title"
+												>
+													<a href={href}>{entry.data.title}</a>
+												</h3>
+												{entry.data.description && (
+													<p class="card__description">
+														{entry.data.description}
+													</p>
+												)}
+												<span class="card__cta" aria-hidden="true">
+													Voir le détail <span>→</span>
+												</span>
+											</div>
+										</article>
+									</li>
+								);
+							})}
 						</ul>
 					</section>
 				)
@@ -315,6 +326,32 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 		font-size: var(--text-sm);
 		line-height: var(--leading-relaxed);
 		color: var(--color-text-muted);
+	}
+
+	.card__cta {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2xs);
+		margin-top: auto;
+		padding-top: var(--space-2xs);
+		font-family: var(--font-body);
+		font-size: var(--text-sm);
+		font-weight: var(--weight-semibold);
+		color: var(--color-accent);
+	}
+
+	.card__cta span {
+		transition: transform var(--duration-base) var(--ease-out);
+	}
+
+	.card__inner:hover .card__cta span {
+		transform: translateX(4px);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.card__cta span {
+			transition: none;
+		}
 	}
 
 	.mobilisation__empty {
