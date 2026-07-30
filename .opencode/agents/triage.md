@@ -41,7 +41,10 @@ Post EXACTLY ONE comment on the issue with this format:
 Size: S | M | L
 
 ## Questions
-- <blocking question, or "none">
+1. <first blocking question>
+2. <second blocking question>
+
+If no blocking questions, write "none" on its own line.
 
 ## Disposition
 READY | NEEDS-INFO | NEEDS-SPLIT
