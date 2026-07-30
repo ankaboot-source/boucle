@@ -56,7 +56,7 @@ from the WordPress REST API on `urgence-palestine.com`. Total entries: 37.
 | https://www.urgence-palestine.com/face-au-plan-imperialiste-et-colonial-continuons-a-unifier-nos-resistances/ | `src/content/communiques/2026-02-09-face-au-plan-imperialiste-et-colonial-continuons-a-unifier-nos-resistances.md` |
 | https://www.urgence-palestine.com/de-gaza-a-lyon-resistance-anticolonialiste-antisioniste-et-antifasciste/ | `src/content/communiques/2026-02-26-de-gaza-a-lyon-resistance-anticolonialiste-antisioniste-et-antifasciste.md` |
 | https://www.urgence-palestine.com/mobilisez-vous-contre-la-loi-yadan/ | `src/content/communiques/2026-04-01-mobilisez-vous-contre-la-loi-yadan.md` |
-| https://www.urgence-palestine.com/rapport-les-dessous-des-exportations-militaires-francaises-vers-israel/ | `src/content/communiques/2026-04-07-rapport-les-dessous-des-exportations-militaires-francaires-vers-israel.md` |
+| https://www.urgence-palestine.com/rapport-les-dessous-des-exportations-militaires-francaises-vers-israel/ | `src/content/communiques/2026-04-07-rapport-les-dessous-des-exportations-militaires-francaises-vers-israel.md` |
 | https://www.urgence-palestine.com/17-avril-journee-internationale-de-solidarite-avec-les-prisonnier%c2%b7es-palestinien%c2%b7nes/ | `src/content/communiques/2026-04-15-17-avril-journee-internationale-de-solidarite-avec-les-prisonnier-es-palestinien-nes.md` |
 
 ## Mobilisation
@@ -132,3 +132,18 @@ matching the URL the index page emits (`/collectif/<slug>/`).
 
 - `/collectif/` — index page (lists every section + featured mobilisation étudiante)
 - `/collectif/<slug>/` — per-entry detail page (one per Markdown file)
+
+## In-house entries (no legacy URL)
+
+A few Markdown files in `src/content/<collection>/` were authored in-house
+after the migration and therefore have no corresponding legacy URL —
+they are intentionally **not** listed above. The `scripts/verify-migration.mjs`
+script (issue #10) only checks the inventory for entries that have a
+legacy URL.
+
+| New file | Collection | Note |
+| --- | --- | --- |
+| `src/content/communiques/2026-01-premier-communique.md` | communiques | _Removed in issue #8_ — was an unused scaffold placeholder, dropped to keep the index clean. |
+| `src/content/collectif/marseille.md` | collectif | Section locale « Marseille » ajoutée directement en Markdown (pas d'entrée legacy). |
+| `src/content/collectif/paris.md` | collectif | Section locale « Paris » ajoutée directement en Markdown (pas d'entrée legacy). |
+| `src/content/mobilisation/2026-02-rassemblement-republique.md` | mobilisation | Événement interne ajouté directement (pas de page legacy). |
