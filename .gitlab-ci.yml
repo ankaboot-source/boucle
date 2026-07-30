@@ -9,6 +9,7 @@ stages:
   - triage
   - work
   - review
+  - merge
   - deploy
   - verify
 
@@ -154,8 +155,16 @@ dispatch:
       # Resolve: issue opened, body edited in triage/needs-info/todo, or author reply on needs-info
       ACTION=$(jq -r '.object_attributes.action // empty' "$TRIGGER_PAYLOAD")
 
+      # Parent issue split into sub-issues — waiting for them to close.
+      # Do not re-triage or re-work; the doctor closes it when sub-issues complete.
+      if echo "$LABELS" | grep -q "boucle:split"; then
+        echo "Issue #$IID has boucle:split — waiting for sub-issues, skipping"
+        exit 0
+      fi
+
       SHOULD_TRIAGE=false
       SHOULD_WORK=false
+      SHOULD_MERGE=false
       if echo "$LABELS" | grep -q "boucle:triage"; then
         SHOULD_TRIAGE=true
       elif echo "$LABELS" | grep -q "boucle:needs-info"; then
@@ -176,6 +185,12 @@ dispatch:
           echo "boucle:todo just added (likely by triage) — worker already triggered, skipping"
           exit 0
         fi
+      elif echo "$LABELS" | grep -q "boucle:approved"; then
+        # Author approved the MR (added boucle:approved to an issue that was
+        # at boucle:approval). Trigger the merger job, which rebases the MR
+        # onto master and merges it serially (resource_group prevents
+        # concurrent merges → no conflicts between approved MRs).
+        SHOULD_MERGE=true
       elif [ -z "$LABELS" ] || [ "$ACTION" = "open" ]; then
         # New issue with no boucle label → triage
         SHOULD_TRIAGE=true
@@ -194,6 +209,12 @@ dispatch:
         curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
           -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
           -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+        exit 0
+      elif [ "$SHOULD_MERGE" = "true" ]; then
+        echo "Triggering merger for issue #$IID (boucle:approved)"
+        curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
+          -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+          -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=merger" > /dev/null
         exit 0
       else
         echo "No action needed for issue #$IID (labels: $LABELS)"
@@ -412,6 +433,14 @@ triage:
                   CREATED_IIDS="${CREATED_IIDS:+$CREATED_IIDS,}$NEW_IID"
                   SUBISSUE_COUNT=$((SUBISSUE_COUNT + 1))
                   echo "  → created #$NEW_IID"
+                  # Create a formal GitLab issue link parent↔sub-issue (relates_to).
+                  # Best-effort: links are a UI nicety; the split-parent marker
+                  # comment remains the source of truth for the close cascade.
+                  glab api --hostname $BOUCLE_FORGE_HOST -X POST \
+                    "/projects/$CI_PROJECT_ID/issues/$PARENT_IID/links" \
+                    -f target_project_id="$CI_PROJECT_ID" \
+                    -f target_issue_iid="$NEW_IID" \
+                    -f link_type=relates_to > /dev/null 2>&1 || true
                   # Trigger triage directly via trigger API (bot-created issues would
                   # hit the anti-loop guard in dispatch because ACTOR=up-bot).
                   curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
@@ -453,9 +482,11 @@ triage:
             SPLIT_MSG=$(printf 'Split into: %s\n\n<!-- boucle:split-parent v=1 iids=%s -->\nParent stays open until all sub-issues close. The loop closes this parent automatically when the last sub-issue completes.' "$(echo "$CREATED_IIDS" | sed 's/,/#, #/g')#" "$CREATED_IIDS")
             glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
               -f body="$SPLIT_MSG" > /dev/null
-            # Parent stays open (NOT marked boucle:done). It will be closed by
-            # maybe_close_parent() when the last sub-issue reaches boucle:done.
-            echo "Split parent #$IID into $SUBISSUE_COUNT sub-issue(s): $CREATED_IIDS (parent left open)"
+            # Mark the parent boucle:split so dispatch and doctor stop re-triaging it.
+            # The parent stays open and is closed by maybe_close_parent() (e2e) or
+            # the doctor's split-parent cascade when all sub-issues close.
+            set_boucle_label "$IID" "boucle:split"
+            echo "Split parent #$IID into $SUBISSUE_COUNT sub-issue(s): $CREATED_IIDS (parent marked boucle:split)"
             if [ "$PARSE_FAILURES" -gt 0 ]; then
               echo "WARN: $PARSE_FAILURES sub-issue(s) failed to create"
             fi
@@ -595,12 +626,61 @@ worker:
       if [ -f ".boucle/$BOUCLE_ISSUE/state.md" ]; then
         APPROACH=$(sed -n '/^## Approach/,/^## /p' ".boucle/$BOUCLE_ISSUE/state.md" | head -n -1 | tail -n +2 | head -20)
       fi
+
+      # ── MR title policy ────────────────────────────────────────────────
+      # Derive a meaningful title from the issue title instead of the generic
+      # "boucle: issue #N". Format: "<type>: <issue title> (#<N>)"
+      #   <type>  — conventional-commit prefix inferred from issue labels
+      #             (bug/defect→fix, feature/enhancement→feat, docs→docs,
+      #              refactor→refactor, chore→chore; default feat)
+      #   <title> — sanitized issue title (newlines stripped, whitespace
+      #             collapsed, truncated to 70 chars so it stays readable in
+      #             GitLab's MR list)
+      # Fallback: "boucle: issue #N" if the API call fails (loop must not break).
+      ISSUE_TITLE=""
+      ISSUE_LABELS=""
+      ISSUE_DATA=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" 2>/dev/null || true)
+      if [ -n "$ISSUE_DATA" ]; then
+        ISSUE_TITLE=$(echo "$ISSUE_DATA" | jq -r '.title // empty')
+        ISSUE_LABELS=$(echo "$ISSUE_DATA" | jq -r '.labels | map(. | ascii_downcase) | join(",") // empty')
+      fi
+      MR_TYPE="feat"
+      if echo "$ISSUE_LABELS" | grep -qE 'bug|defect|fix'; then
+        MR_TYPE="fix"
+      elif echo "$ISSUE_LABELS" | grep -qE 'feature|enhancement|feat'; then
+        MR_TYPE="feat"
+      elif echo "$ISSUE_LABELS" | grep -qE 'documentation|docs'; then
+        MR_TYPE="docs"
+      elif echo "$ISSUE_LABELS" | grep -qE 'refactor'; then
+        MR_TYPE="refactor"
+      elif echo "$ISSUE_LABELS" | grep -qE 'chore|maintenance|tech-debt'; then
+        MR_TYPE="chore"
+      fi
+      if [ -n "$ISSUE_TITLE" ]; then
+        # Sanitize: strip newlines/control chars, collapse whitespace, trim,
+        # strip a trailing issue-number reference if the title already has one,
+        # truncate to 70 chars at a word boundary (only strip the trailing
+        # partial word when truncation actually cut mid-word).
+        MR_TITLE_CLEAN=$(echo "$ISSUE_TITLE" \
+          | tr '\r\n\t' '   ' \
+          | sed 's/  */ /g; s/^ //; s/ $//' \
+          | sed 's/ *[(#][0-9]*[)]* *$//')
+        if [ "${#MR_TITLE_CLEAN}" -gt 70 ]; then
+          MR_TITLE_SUMMARY=$(echo "$MR_TITLE_CLEAN" | cut -c1-70 | sed 's/ [^ ]*$//')
+        else
+          MR_TITLE_SUMMARY="$MR_TITLE_CLEAN"
+        fi
+        MR_TITLE="$MR_TYPE: $MR_TITLE_SUMMARY (#$BOUCLE_ISSUE)"
+      else
+        MR_TITLE="boucle: issue #$BOUCLE_ISSUE"
+      fi
+
       MR_DESCRIPTION=$(printf '## Issue #%s — iteration %s\n\nPreview: %s\n\n### What changed\n%s\n\n### Approach\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s_' \
         "$BOUCLE_ISSUE" "$ITERATION" "$PREVIEW_URL" "${COMMIT_SUMMARY:-(no commits)}" "${APPROACH:-(not recorded)}" "$BOUCLE_ISSUE" "$COMMIT_COUNT" "$ITERATION")
 
       # Open MR with rich description
       glab mr create --source-branch "$BRANCH" --target-branch master \
-        --title "boucle: issue #$BOUCLE_ISSUE" \
+        --title "$MR_TITLE" \
         --description "$MR_DESCRIPTION" > /dev/null
 
       # Get MR IID for downstream jobs
@@ -672,7 +752,35 @@ reviewer:
 
       case "$VERDICT" in
         PASS)
-          set_boucle_label "$BOUCLE_ISSUE" "boucle:human"
+          # Assign the MR to the original issue author so they're notified
+          # that their approval is needed. The loop pauses here until the
+          # author adds the boucle:approved label (dispatch detects it and
+          # triggers the merger job, which merges serially to avoid conflicts).
+          # Resolve the reporter id (handles sub-issues: use parent author).
+          resolve_reporter_id() {
+            local iid="$1" data parent_iid parent_data reporter_id
+            data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null) || { echo ""; return; }
+            parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+            if [ -n "$parent_iid" ]; then
+              parent_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid" 2>/dev/null) || { echo ""; return; }
+              reporter_id=$(printf '%s' "$parent_data" | jq -r '.author.id // empty')
+            else
+              reporter_id=$(printf '%s' "$data" | jq -r '.author.id // empty')
+            fi
+            echo "$reporter_id"
+          }
+          AUTHOR_ID=$(resolve_reporter_id "$BOUCLE_ISSUE")
+          if [ -n "$AUTHOR_ID" ] && [ "$AUTHOR_ID" != "null" ]; then
+            # Assign the MR to the issue author (curl — glab array-param is broken)
+            curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/merge_requests/$MR_IID" \
+              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+              --data-urlencode "assignee_ids[]=$AUTHOR_ID"
+          fi
+          # Set boucle:approval (waits for author to add boucle:approved)
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:approval"
+          APPROVAL_MSG=$(printf '✅ Reviewer verdict: **PASS**. MR !%s is ready to merge.\n\nThe MR has been assigned to the original issue author for approval. To approve and merge, add the label `boucle:approved` to this issue. The merger will then rebase the MR onto master and merge it serially (avoiding conflicts with other approved MRs).' "$MR_IID")
+          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+            -f body="$APPROVAL_MSG" > /dev/null
           ;;
         FAIL)
           ITERATION="${BOUCLE_ITERATION:-1}"
@@ -698,6 +806,145 @@ reviewer:
       if [ -z "$VERDICT" ]; then
         echo "FAIL: verdict not parsable" >&2; exit 1
       fi
+  timeout: 15m
+
+# ── Merger (serial merge after author approval) ─────────────────────────
+# Triggered by dispatch when an issue moves to boucle:approved (author added
+# the label to an issue that was at boucle:approval). The resource_group
+# serializes merges across all issues — only one MR merges at a time, so
+# each merge rebases onto a master that already includes the previous merge,
+# eliminating the class of conflicts we hit when merging 4 MRs in parallel.
+# After merge, triggers e2e WITH BOUCLE_ISSUE set (fixes the design gap where
+# deploy-triggered e2e had no issue context and maybe_close_parent never ran).
+merger:
+  stage: merge
+  # Serialize all merges project-wide — one MR merges at a time.
+  resource_group: boucle-merge
+  needs:
+    - job: dispatch
+      optional: true
+  rules:
+    - if: $BOUCLE_ENABLED != "true"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "merger"
+  script:
+    - |
+      export BOUCLE_ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
+
+      # Label helper: preserve non-boucle labels when writing a boucle label
+      set_boucle_label() {
+        local iid="$1" new="$2"
+        local current
+        current=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        local merged="${current:+$current,}$new"
+        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
+      }
+
+      # Set merging label
+      set_boucle_label "$BOUCLE_ISSUE" "boucle:merging"
+
+      # Find the MR for this issue
+      MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?state=opened" \
+        | jq -r '.[] | select(.source_branch == "boucle/'"$BOUCLE_ISSUE"'") | .iid' | head -1)
+
+      if [ -z "$MR_IID" ]; then
+        echo "FAIL: no open MR found for issue #$BOUCLE_ISSUE (branch boucle/$BOUCLE_ISSUE)" >&2
+        set_boucle_label "$BOUCLE_ISSUE" "boucle:human"
+        glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+          -f body="⚠️ Merger could not find an open MR for branch boucle/$BOUCLE_ISSUE. Human intervention needed." > /dev/null
+        exit 1
+      fi
+
+      # Refresh master so we rebase onto the latest (another MR may have just
+      # merged — the resource_group guarantees we're the only merger running,
+      # but master may have advanced since this MR was created).
+      git fetch origin master
+
+      # Rebase the MR branch onto latest master. This is the key conflict-
+      # avoidance mechanism: because merges are serialized, each rebase is
+      # against a master that already includes all previously-merged MRs.
+      BRANCH="boucle/$BOUCLE_ISSUE"
+      git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
+      if ! git rebase origin/master; then
+        echo "FAIL: rebase onto origin/master conflicted — even after serial merge." >&2
+        git rebase --abort 2>/dev/null || true
+        set_boucle_label "$BOUCLE_ISSUE" "boucle:human"
+        glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+          -f body="⚠️ Merger could not rebase MR !${MR_IID} onto master (conflict). Human rebase needed." > /dev/null
+        exit 1
+      fi
+
+      # Push the rebased branch
+      git config user.email "bot@ankaboot.dev"
+      git config user.name "up-bot"
+      git remote set-url origin "https://up-bot:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${CI_PROJECT_PATH}.git"
+      git push --force-with-lease origin "$BRANCH"
+
+      # Wait for GitLab to recompute mergeability after the force-push (poll)
+      sleep 5
+      MERGE_STATUS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID" \
+        | jq -r '.detailed_merge_status // .merge_status // "unknown"')
+      for i in 1 2 3 4 5 6; do
+        if [ "$MERGE_STATUS" = "mergeable" ]; then break; fi
+        echo "MR !${MR_IID} merge status: $MERGE_STATUS — waiting 10s..."
+        sleep 10
+        MERGE_STATUS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID" \
+          | jq -r '.detailed_merge_status // .merge_status // "unknown"')
+      done
+
+      if [ "$MERGE_STATUS" != "mergeable" ]; then
+        echo "FAIL: MR !${MR_IID} not mergeable after rebase (status: $MERGE_STATUS)" >&2
+        set_boucle_label "$BOUCLE_ISSUE" "boucle:human"
+        glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+          -f body="⚠️ MR !${MR_IID} is not mergeable after rebase (status: $MERGE_STATUS). Human intervention needed." > /dev/null
+        exit 1
+      fi
+
+      # Merge the MR (squash=false to preserve commits; use merge_commit)
+      MERGE_RESULT=$(glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/merge" \
+        -f merge_when_pipeline_succeeds=false 2>&1)
+      MERGE_SHA=$(echo "$MERGE_RESULT" | jq -r '.merge_commit_sha // .sha // empty' 2>/dev/null)
+
+      if [ -z "$MERGE_SHA" ]; then
+        echo "FAIL: merge API call failed: $MERGE_RESULT" >&2
+        set_boucle_label "$BOUCLE_ISSUE" "boucle:human"
+        exit 1
+      fi
+
+      echo "Merged MR !${MR_IID} (merge_commit $MERGE_SHA) for issue #$BOUCLE_ISSUE"
+
+      # The merge pushes to master → triggers deploy → deploy triggers e2e.
+      # BUT deploy-triggered e2e has no BOUCLE_ISSUE context, so
+      # maybe_close_parent never runs. Fix: trigger e2e directly WITH
+      # BOUCLE_ISSUE set, so the issue gets boucle:done + closed + parent cascade.
+      # Wait for the deploy pipeline to finish first (production must be live
+      # before e2e can test it). Poll for the deploy pipeline to complete.
+      echo "Waiting for deploy pipeline to complete before triggering e2e..."
+      for i in $(seq 1 60); do
+        # Find the latest deploy pipeline for master
+        DEPLOY_PIPELINES=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/pipelines?ref=master&per_page=5" 2>/dev/null)
+        DEPLOY_STATUS=$(echo "$DEPLOY_PIPELINES" | jq -r '[.[] | select(.source == "push")] | first | .status // "unknown"')
+        if [ "$DEPLOY_STATUS" = "success" ] || [ "$DEPLOY_STATUS" = "failed" ] || [ "$DEPLOY_STATUS" = "canceled" ]; then
+          echo "Deploy pipeline status: $DEPLOY_STATUS"
+          break
+        fi
+        sleep 15
+      done
+
+      # Get the production URL (from the deploy's e2e trigger or fallback)
+      LIVE_URL="${BOUCLE_PRODUCTION_URL:-}"
+      if [ -z "$LIVE_URL" ]; then
+        # Fetch the deploy pipeline's e2e job variables (best-effort)
+        LIVE_URL="https://${BOUCLE_DEPLOY_PROJECT}.pages.dev"
+      fi
+
+      # Trigger e2e WITH BOUCLE_ISSUE set → enables maybe_close_parent
+      curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
+        -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+        -F "variables[BOUCLE_ROLE]=e2e" \
+        -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" \
+        -F "variables[BOUCLE_LIVE_URL]=$LIVE_URL" > /dev/null
+      echo "Triggered e2e for issue #$BOUCLE_ISSUE with LIVE_URL=$LIVE_URL"
   timeout: 15m
 
 # ── Deploy (on push to master) ─────────────────────────────────────────
@@ -793,8 +1040,20 @@ e2e:
         parent_notes=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid/notes" 2>/dev/null) || { echo "maybe_close_parent: can't fetch parent notes — skipping."; return 0; }
         sibling_iids=$(echo "$parent_notes" | jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | first | .body // empty' | grep -oE 'iids=[0-9,]+' | cut -d= -f2)
         if [ -z "$sibling_iids" ]; then
-          echo "maybe_close_parent: parent #$parent_iid has no split-parent marker — can't check siblings."
-          return 0
+          # No split-parent marker — fall back to REST issue links API.
+          # This handles parents whose sub-issues were linked via
+          # relates_to (e.g. issue #2, where the split never completed but
+          # the related issues were linked manually). Query the parent's
+          # links and collect IIDs of related issues.
+          echo "maybe_close_parent: no split-parent marker on #$parent_iid — checking REST links..."
+          local links_data
+          links_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid/links" 2>/dev/null) || links_data="[]"
+          sibling_iids=$(echo "$links_data" | jq -r '[.[] | select(.iid != null) | .iid] | join(",")')
+          if [ -z "$sibling_iids" ]; then
+            echo "maybe_close_parent: parent #$parent_iid has no split-parent marker and no REST links — can't check siblings."
+            return 0
+          fi
+          echo "maybe_close_parent: found $sibling_iids via REST links fallback"
         fi
 
         # Check each sibling: all must be closed
@@ -847,9 +1106,13 @@ e2e:
           maybe_close_parent "$BOUCLE_ISSUE"
           ;;
         FAIL)
-          # Loop closure: open a new issue in triage with the trace
+          # Loop closure: open a new issue in triage with the trace.
+          # Title includes the original issue title so the new issue is
+          # identifiable in the board without opening it.
+          E2E_ORIG_TITLE=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" 2>/dev/null | jq -r '.title // empty' | tr '\r\n\t' '   ' | sed 's/  */ /g; s/^ //; s/ $//' | cut -c1-60 | sed 's/ [^ ]*$//')
+          E2E_NEW_TITLE="fix: ${E2E_ORIG_TITLE:-issue} — E2E failure (#$BOUCLE_ISSUE)"
           glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues" \
-            -f title="E2E failure for issue #$BOUCLE_ISSUE" \
+            -f title="$E2E_NEW_TITLE" \
             -f description="E2E verification failed for issue #$BOUCLE_ISSUE.
 
       ## Trace
@@ -965,6 +1228,90 @@ doctor:
           -F "variables[BOUCLE_ISSUE]=$IID" > /dev/null
         echo "  → re-triggered triage for #$IID"
         RECOVERED=$((RECOVERED + 1))
+      done
+
+      # Also detect orphaned triages: open issues with NO boucle label that
+      # have a triage comment AND a human reply after it. This is the root
+      # cause of issue #2 being stuck: triage ran, asked NEEDS-INFO, the user
+      # replied, but the issue never got a boucle:needs-info label (e.g. the
+      # triage pipeline was interrupted before labeling). The label-based
+      # recovery above can't see these issues because they have no label
+      # to filter on. Scan all unlabeled open issues for this pattern.
+      echo "Scanning open issues without boucle labels for orphaned triages..."
+      UNLABELED_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&per_page=100" \
+        | jq -r '[.[] | select(.labels | map(startswith("boucle:")) | any | not)] | .[].iid')
+
+      for IID in $UNLABELED_ISSUES; do
+        echo "Checking #$IID (no boucle label) for orphaned triage..."
+        NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
+
+        # Does this issue have any triage comment at all?
+        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | last | .id // 0')
+        if [ "$LAST_TRIAGE_NOTE_ID" = "0" ]; then
+          # No triage comment — this is a brand-new issue that was never
+          # triaged. The dispatch job should pick it up on the next webhook.
+          # Skip to avoid re-triaging issues that are mid-dispatch.
+          continue
+        fi
+
+        # Is there a human reply after the last triage comment?
+        HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" '
+          [.[] | select(.author.username != "up-bot") | select(.id > ($tid | tonumber))]
+          | length
+        ')
+        if [ "$HUMAN_REPLY_AFTER_TRIAGE" -eq 0 ]; then
+          echo "  → #$IID: triage comment exists but no human reply — still waiting"
+          continue
+        fi
+
+        # Orphaned triage detected: triage ran, user replied, but no boucle
+        # label was set. Re-trigger triage so the agent can re-read the user's
+        # answers and route the issue correctly this time.
+        echo "  → #$IID: orphaned triage (triage comment + human reply, no boucle label) — re-triggering"
+        set_boucle_label "$IID" "boucle:triage"
+        curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
+          -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+          -F "variables[BOUCLE_ISSUE]=$IID" > /dev/null
+        echo "  → re-triggered triage for #$IID"
+        RECOVERED=$((RECOVERED + 1))
+      done
+
+      # Also check boucle:split parents: close the parent when all its
+      # sub-issues are closed. This is the fallback cascade for sub-issues
+      # closed via MR merge (Closes #N) where the deploy-triggered e2e
+      # had no BOUCLE_ISSUE context and maybe_close_parent() never ran.
+      SPLIT_PARENTS=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:split&per_page=100" \
+        | jq -r '.[].iid')
+
+      for IID in $SPLIT_PARENTS; do
+        echo "Checking #$IID (boucle:split) for parent-close cascade..."
+        NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
+        SIBLING_IIDS=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | first | .body // empty' | grep -oE 'iids=[0-9,]+' | cut -d= -f2)
+        if [ -z "$SIBLING_IIDS" ]; then
+          # No split-parent marker — fall back to REST issue links API.
+          echo "  → #$IID: no split-parent marker — checking REST links..."
+          LINKS_DATA=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/links" 2>/dev/null) || LINKS_DATA="[]"
+          SIBLING_IIDS=$(echo "$LINKS_DATA" | jq -r '[.[] | select(.iid != null) | .iid] | join(",")')
+          if [ -z "$SIBLING_IIDS" ]; then
+            echo "  → #$IID: no split-parent marker and no REST links — skipping"
+            continue
+          fi
+          echo "  → #$IID: found siblings $SIBLING_IIDS via REST links fallback"
+        fi
+        ALL_CLOSED=true
+        for SIB in $(echo "$SIBLING_IIDS" | tr ',' ' '); do
+          SIB_STATE=$(glab api --hostname "$HOST" "/projects/$PID/issues/$SIB" 2>/dev/null | jq -r '.state // "unknown"')
+          if [ "$SIB_STATE" != "closed" ]; then
+            echo "  → #$IID: sibling #$SIB is $SIB_STATE — parent stays open"
+            ALL_CLOSED=false
+            break
+          fi
+        done
+        if [ "$ALL_CLOSED" = "true" ]; then
+          echo "  → #$IID: all sub-issues closed — closing parent"
+          glab api --hostname "$HOST" -X PUT "/projects/$PID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
+          RECOVERED=$((RECOVERED + 1))
+        fi
       done
 
       echo "Doctor complete. Recovered $RECOVERED orphaned issue(s)."
