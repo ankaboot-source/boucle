@@ -17,13 +17,14 @@ variables:
   BOUCLE_FORGE_HOST: framagit.org
   BOUCLE_BUILD_CMD: "npm ci && npm run build"
   BOUCLE_BUILD_OUTPUT: "public"
-  # Deploy: swap to any deploy command. Use $BRANCH (worker preview) or master (deploy job).
+  # Deploy: swap to any deploy command. Use $$BRANCH (escaped so eval expands it at runtime with
+  # the job-local BRANCH var: "master" for deploy, "boucle/$BOUCLE_ISSUE" for worker preview).
   # Examples:
-  #   CF Pages:  "npx wrangler pages deploy $BOUCLE_BUILD_OUTPUT --project-name $BOUCLE_DEPLOY_PROJECT --branch $BRANCH"
-  #   Netlify:   "npx netlify deploy --dir $BOUCLE_BUILD_OUTPUT --alias $BRANCH"
+  #   CF Pages:  "npx wrangler pages deploy $BOUCLE_BUILD_OUTPUT --project-name $BOUCLE_DEPLOY_PROJECT --branch $$BRANCH"
+  #   Netlify:   "npx netlify deploy --dir $BOUCLE_BUILD_OUTPUT --alias $$BRANCH"
   #   Vercel:    "npx vercel deploy $BOUCLE_BUILD_OUTPUT --prod=false"
-  #   GitLab Pages: "rsync -a $BOUCLE_BUILD_OUTPUT/ /srv/pages/$BRANCH/"
-  BOUCLE_DEPLOY_CMD: "npx wrangler pages deploy $BOUCLE_BUILD_OUTPUT --project-name $BOUCLE_DEPLOY_PROJECT --branch $BRANCH"
+  #   GitLab Pages: "rsync -a $BOUCLE_BUILD_OUTPUT/ /srv/pages/$$BRANCH/"
+  BOUCLE_DEPLOY_CMD: "npx wrangler pages deploy $BOUCLE_BUILD_OUTPUT --project-name $BOUCLE_DEPLOY_PROJECT --branch $$BRANCH"
   BOUCLE_DEPLOY_PROJECT: ""
   # Regex to extract the deployed URL from the deploy command's stdout
   BOUCLE_DEPLOY_URL_REGEX: "https://[a-z0-9.-]+\\.pages\\.dev"
