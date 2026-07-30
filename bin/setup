@@ -188,7 +188,7 @@ else
   if [ -n "$BOARD_ID" ] && [ "$BOARD_ID" != "null" ]; then
     log_pass "boucle board created (ID: $BOARD_ID)"
     # Add lists for each boucle:* label
-    for label in triage needs-info todo working review human blocked done split approval approved spec-review spec-approved merging; do
+    for label in triage needs-info todo working review human blocked done split approval spec-review spec-approved merging; do
       LABEL_ID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2>/dev/null | jq -r '.[0].id')
       if [ -n "$LABEL_ID" ] && [ "$LABEL_ID" != "null" ]; then
         run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/boards/$BOARD_ID/lists -f label_id=$LABEL_ID >/dev/null"
@@ -298,8 +298,8 @@ if [ -n "$TRIGGER_TOKEN" ] && [ "$TRIGGER_TOKEN" != "null" ]; then
   if [ -n "$EXISTING_WEBHOOK" ]; then
     log_skip "webhook already exists (ID: $EXISTING_WEBHOOK)"
   else
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/hooks -f url=$WEBHOOK_URL -f issues_events=true -f note_events=true -f confidential_issues_events=false -f confidential_note_events=false -f merge_requests_events=false -f push_events=false -f pipeline_events=false -f job_events=false >/dev/null"
-    log_pass "webhook configured (Issues + Note events)"
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/hooks -f url=$WEBHOOK_URL -f issues_events=true -f note_events=true -f confidential_issues_events=false -f confidential_note_events=false -f merge_requests_events=true -f push_events=false -f pipeline_events=false -f job_events=false >/dev/null"
+    log_pass "webhook configured (Issues + Note + Merge Request events)"
   fi
 else
   log_skip "webhook (no trigger token)"
