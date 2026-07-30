@@ -125,6 +125,40 @@ dispatch:
       [ "$ACTOR" = "up-bot" ] && exit 0
 
       OBJECT_KIND=$(jq -r '.object_kind // empty' "$TRIGGER_PAYLOAD")
+
+      # ── Merge request events: native GitLab approval triggers merger ──
+      # When an author clicks "Approve" on a MR (GitLab native approval),
+      # GitLab emits a Merge Request Hook with action="approved". We extract
+      # the issue IID from the MR's source_branch (boucle/<iid>), verify the
+      # issue is at boucle:approval, and trigger the merger job directly.
+      # This replaces the custom boucle:approved label — no extra ceremony.
+      if [ "$OBJECT_KIND" = "merge_request" ]; then
+        MR_ACTION=$(jq -r '.object_attributes.action // empty' "$TRIGGER_PAYLOAD")
+        if [ "$MR_ACTION" != "approved" ]; then
+          echo "MR event action=$MR_ACTION — not an approval, skipping"
+          exit 0
+        fi
+        SOURCE_BRANCH=$(jq -r '.object_attributes.source_branch // empty' "$TRIGGER_PAYLOAD")
+        MR_IID=$(jq -r '.object_attributes.iid // empty' "$TRIGGER_PAYLOAD")
+        # Extract issue IID from branch name boucle/<iid>
+        MR_ISSUE_IID=$(printf '%s' "$SOURCE_BRANCH" | sed -n 's/^boucle\/\([0-9]\+\)$/\1/p')
+        if [ -z "$MR_ISSUE_IID" ]; then
+          echo "MR !${MR_IID} approved but source_branch '$SOURCE_BRANCH' is not a boucle branch, skipping"
+          exit 0
+        fi
+        # Verify the issue is at boucle:approval (reviewer PASS'd it)
+        MR_LABELS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID" | jq -r '.labels | join(",")')
+        if ! echo "$MR_LABELS" | grep -q "boucle:approval"; then
+          echo "Issue #$MR_ISSUE_IID not at boucle:approval (labels: $MR_LABELS) — ignoring MR approval, skipping"
+          exit 0
+        fi
+        echo "MR !${MR_IID} approved (native GitLab approval) for issue #$MR_ISSUE_IID — triggering merger"
+        curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
+          -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+          -F "variables[BOUCLE_ISSUE]=$MR_ISSUE_IID" -F "variables[BOUCLE_ROLE]=merger" > /dev/null
+        exit 0
+      fi
+
       # For note events, .object_attributes.iid is the note's DB id, not the issue IID.
       # The issue IID lives in the sibling key: .issue.iid (classic issues),
       # .work_item.iid (work items), or .epic.iid (epics).
@@ -169,7 +203,6 @@ dispatch:
 
       SHOULD_TRIAGE=false
       SHOULD_WORK=false
-      SHOULD_MERGE=false
       if echo "$LABELS" | grep -q "boucle:triage"; then
         SHOULD_TRIAGE=true
       elif echo "$LABELS" | grep -q "boucle:needs-info"; then
@@ -196,12 +229,6 @@ dispatch:
         # boucle:working (replacing all boucle: labels, including the stale
         # boucle:spec-review). We do NOT strip boucle:spec-review here.
         SHOULD_WORK=true
-      elif echo "$LABELS" | grep -q "boucle:approved"; then
-        # Author approved the MR (added boucle:approved to an issue that was
-        # at boucle:approval). Trigger the merger job, which rebases the MR
-        # onto master and merges it serially (resource_group prevents
-        # concurrent merges → no conflicts between approved MRs).
-        SHOULD_MERGE=true
       elif [ -z "$LABELS" ] || [ "$ACTION" = "open" ]; then
         # New issue with no boucle label → triage
         SHOULD_TRIAGE=true
@@ -220,12 +247,6 @@ dispatch:
         curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
           -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
           -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
-        exit 0
-      elif [ "$SHOULD_MERGE" = "true" ]; then
-        echo "Triggering merger for issue #$IID (boucle:approved)"
-        curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-          -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-          -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=merger" > /dev/null
         exit 0
       else
         echo "No action needed for issue #$IID (labels: $LABELS)"
@@ -298,6 +319,24 @@ triage:
           reporter_id=$(printf '%s' "$data" | jq -r '.author.id // empty')
         fi
         echo "$reporter_id"
+      }
+
+      # Fetch the global work-item ID for an issue (needed as parent_id for
+      # the child-items hierarchy API). Issues and work items share the same
+      # IID space since 16.0, so /work_items/:iid works for issues too.
+      # Returns empty string on failure (loop must not break).
+      get_work_item_global_id() {
+        local iid="$1" wi_data
+        wi_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/-/work_items/$iid" 2>/dev/null) || { echo ""; return; }
+        printf '%s' "$wi_data" | jq -r '.id // empty'
+      }
+
+      # List child work items of a parent. Returns JSON array (empty array on
+      # failure). Each child has .iid, .state ("opened"|"closed"), .title.
+      get_work_item_children() {
+        local parent_iid="$1" children
+        children=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/-/work_items/$parent_iid/children" 2>/dev/null) || { echo "[]"; return; }
+        printf '%s' "$children"
       }
 
       # Run the agent
@@ -376,13 +415,20 @@ triage:
           fi
           ;;
         NEEDS-SPLIT)
-          # Idempotency guard: if the parent already has a split-parent marker,
-          # the split was already done — skip to avoid duplicate sub-issues
-          # (e.g. on re-trigger after a partial failure).
+          # Idempotency guard: if the parent already has children via the
+          # work-items hierarchy API, the split was already done — skip to
+          # avoid duplicate sub-issues. Fall back to the legacy split-parent
+          # marker comment for data produced by older boucle versions.
+          CHILDREN_COUNT=$(get_work_item_children "$IID" | jq 'length' 2>/dev/null || echo 0)
+          if [ "${CHILDREN_COUNT:-0}" -gt 0 ]; then
+            echo "Parent #$IID already has $CHILDREN_COUNT child work item(s) — skipping split (idempotency guard)"
+            exit 0
+          fi
+          # Legacy fallback: check for the old split-parent marker comment
           EXISTING_SPLIT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
             | jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | length' 2>/dev/null || echo 0)
           if [ "${EXISTING_SPLIT:-0}" -gt 0 ]; then
-            echo "Parent #$IID already has a boucle:split-parent marker — skipping split (idempotency guard)"
+            echo "Parent #$IID already has a legacy boucle:split-parent marker — skipping split (idempotency guard)"
             exit 0
           fi
           # Parse sub-issues from the triage comment. Format:
@@ -473,14 +519,21 @@ triage:
                   CREATED_IIDS="${CREATED_IIDS:+$CREATED_IIDS,}$NEW_IID"
                   SUBISSUE_COUNT=$((SUBISSUE_COUNT + 1))
                   echo "  → created #$NEW_IID"
-                  # Create a formal GitLab issue link parent↔sub-issue (relates_to).
-                  # Best-effort: links are a UI nicety; the split-parent marker
-                  # comment remains the source of truth for the close cascade.
-                  glab api --hostname $BOUCLE_FORGE_HOST -X POST \
-                    "/projects/$CI_PROJECT_ID/issues/$PARENT_IID/links" \
-                    -f target_project_id="$CI_PROJECT_ID" \
-                    -f target_issue_iid="$NEW_IID" \
-                    -f link_type=relates_to > /dev/null 2>&1 || true
+                  # Set the parent via the work-items hierarchy API (child-items).
+                  # This creates the real "Éléments enfants" relationship visible
+                  # in the GitLab UI. Requires the parent's GLOBAL work-item ID
+                  # (not its project-scoped IID). Best-effort: if the PATCH fails,
+                  # the ## Parent issue body text still provides navigation.
+                  PARENT_GLOBAL_ID=$(get_work_item_global_id "$PARENT_IID")
+                  if [ -n "$PARENT_GLOBAL_ID" ] && [ "$PARENT_GLOBAL_ID" != "null" ]; then
+                    curl -s -o /dev/null -X PATCH \
+                      "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/-/work_items/$NEW_IID" \
+                      --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+                      --header "Content-Type: application/json" \
+                      --data "{\"features\":{\"hierarchy\":{\"parent_id\":$PARENT_GLOBAL_ID}}}" 2>/dev/null || true
+                  else
+                    echo "  → WARN: could not fetch parent global ID — hierarchy link not set (body text fallback active)"
+                  fi
                   # Trigger triage directly via trigger API (bot-created issues would
                   # hit the anti-loop guard in dispatch because ACTOR=up-bot).
                   curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
@@ -516,10 +569,11 @@ triage:
             glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
               -f body="Triage requested NEEDS-SPLIT but no sub-issues could be created from the triage comment. Please split this issue manually." > /dev/null
           else
-            # Post a comment listing the new sub-issues, with a machine-readable
-            # marker carrying the sibling IIDs so the parent-close cascade can
-            # find them later without parsing free-text.
-            SPLIT_MSG=$(printf 'Split into: %s\n\n<!-- boucle:split-parent v=1 iids=%s -->\nParent stays open until all sub-issues close. The loop closes this parent automatically when the last sub-issue completes.' "$(echo "$CREATED_IIDS" | sed 's/,/#, #/g')#" "$CREATED_IIDS")
+            # Post a comment listing the new sub-issues. The parent→children
+            # relationship is now tracked via the work-items hierarchy API
+            # (GET .../work_items/:iid/children), so no machine-readable marker
+            # comment is needed. The comment is kept for human readability.
+            SPLIT_MSG=$(printf 'Split into: #%s.\n\nParent stays open until all sub-issues close. The loop closes this parent automatically when the last sub-issue completes.' "$(echo "$CREATED_IIDS" | sed 's/,/#, #/g')")
             glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
               -f body="$SPLIT_MSG" > /dev/null
             # Mark the parent boucle:split so dispatch and doctor stop re-triaging it.
@@ -778,6 +832,7 @@ reviewer:
 
       MR_DATA=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID")
       PREVIEW_URL=$(echo "$MR_DATA" | jq -r '.description' | grep -oE 'https://[a-z0-9.-]+\.pages\.dev' | head -1)
+      MR_URL=$(echo "$MR_DATA" | jq -r '.web_url')
 
       export BOUCLE_PREVIEW_URL="$PREVIEW_URL"
 
@@ -794,8 +849,9 @@ reviewer:
         PASS)
           # Assign the MR to the original issue author so they're notified
           # that their approval is needed. The loop pauses here until the
-          # author adds the boucle:approved label (dispatch detects it and
-          # triggers the merger job, which merges serially to avoid conflicts).
+          # author clicks "Approve" on the MR (GitLab native approval). The
+          # merge_request webhook (action=approved) triggers the merger job,
+          # which merges serially to avoid conflicts.
           # Resolve the reporter id (handles sub-issues: use parent author).
           resolve_reporter_id() {
             local iid="$1" data parent_iid parent_data reporter_id
@@ -816,9 +872,9 @@ reviewer:
               --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
               --data-urlencode "assignee_ids[]=$AUTHOR_ID"
           fi
-          # Set boucle:approval (waits for author to add boucle:approved)
+          # Set boucle:approval (waits for author to approve the MR natively)
           set_boucle_label "$BOUCLE_ISSUE" "boucle:approval"
-          APPROVAL_MSG=$(printf '✅ Reviewer verdict: **PASS**. MR !%s is ready to merge.\n\nThe MR has been assigned to the original issue author for approval. To approve and merge, add the label `boucle:approved` to this issue. The merger will then rebase the MR onto master and merge it serially (avoiding conflicts with other approved MRs).' "$MR_IID")
+          APPROVAL_MSG=$(printf '✅ Reviewer verdict: **PASS**. MR !%s is ready to merge.\n\nThe MR has been assigned to you for approval. To approve and merge, click the **Approve** button on [MR !%s](%s). The merger will then rebase the MR onto master and merge it serially (avoiding conflicts with other approved MRs).' "$MR_IID" "$MR_IID" "$MR_URL")
           glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
             -f body="$APPROVAL_MSG" > /dev/null
           ;;
@@ -849,10 +905,10 @@ reviewer:
   timeout: 15m
 
 # ── Merger (serial merge after author approval) ─────────────────────────
-# Triggered by dispatch when an issue moves to boucle:approved (author added
-# the label to an issue that was at boucle:approval). The resource_group
-# serializes merges across all issues — only one MR merges at a time, so
-# each merge rebases onto a master that already includes the previous merge,
+# Triggered by dispatch when an author approves a MR natively (GitLab
+# merge_request webhook, action=approved). The resource_group serializes
+# merges across all issues — only one MR merges at a time, so each merge
+# rebases onto a master that already includes the previous merge,
 # eliminating the class of conflicts we hit when merging 4 MRs in parallel.
 # After merge, triggers e2e WITH BOUCLE_ISSUE set (fixes the design gap where
 # deploy-triggered e2e had no issue context and maybe_close_parent never ran).
@@ -1052,6 +1108,14 @@ e2e:
           -f state_event=close > /dev/null 2>&1 || true
       }
 
+      # List child work items of a parent. Returns JSON array (empty on failure).
+      # Each child has .iid, .state ("opened"|"closed"), .title.
+      get_work_item_children() {
+        local parent_iid="$1" children
+        children=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/-/work_items/$parent_iid/children" 2>/dev/null) || { echo "[]"; return; }
+        printf '%s' "$children"
+      }
+
       # Parent-close cascade: if this issue is a sub-issue (has a "## Parent issue"
       # section in its body), check whether ALL its sibling sub-issues are closed.
       # If so, close the parent too. No-op if the issue is not a sub-issue.
@@ -1075,39 +1139,77 @@ e2e:
           return 0
         fi
 
-        # Parse the parent's split-parent marker comment for sibling IIDs
-        local parent_notes sibling_iids
-        parent_notes=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid/notes" 2>/dev/null) || { echo "maybe_close_parent: can't fetch parent notes — skipping."; return 0; }
-        sibling_iids=$(echo "$parent_notes" | jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | first | .body // empty' | grep -oE 'iids=[0-9,]+' | cut -d= -f2)
+        # Check children via the work-items hierarchy API (source of truth).
+        # The children endpoint returns each child's .state directly, so we
+        # can check all siblings in one call. Fall back to the legacy
+        # split-parent marker comment and REST links for data produced by
+        # older boucle versions that didn't use the hierarchy API.
+        local children_data sibling_iids
+        children_data=$(get_work_item_children "$parent_iid")
+        sibling_iids=$(echo "$children_data" | jq -r '[.[].iid] | join(",")' 2>/dev/null)
         if [ -z "$sibling_iids" ]; then
-          # No split-parent marker — fall back to REST issue links API.
-          # This handles parents whose sub-issues were linked via
-          # relates_to (e.g. issue #2, where the split never completed but
-          # the related issues were linked manually). Query the parent's
-          # links and collect IIDs of related issues.
-          echo "maybe_close_parent: no split-parent marker on #$parent_iid — checking REST links..."
-          local links_data
-          links_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid/links" 2>/dev/null) || links_data="[]"
-          sibling_iids=$(echo "$links_data" | jq -r '[.[] | select(.iid != null) | .iid] | join(",")')
+          # No children via hierarchy API — fall back to legacy marker comment
+          local parent_notes
+          parent_notes=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid/notes" 2>/dev/null) || { echo "maybe_close_parent: can't fetch parent notes — skipping."; return 0; }
+          sibling_iids=$(echo "$parent_notes" | jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | first | .body // empty' | grep -oE 'iids=[0-9,]+' | cut -d= -f2)
           if [ -z "$sibling_iids" ]; then
-            echo "maybe_close_parent: parent #$parent_iid has no split-parent marker and no REST links — can't check siblings."
+            # No legacy marker either — fall back to REST issue links API
+            echo "maybe_close_parent: no children via hierarchy API and no split-parent marker on #$parent_iid — checking REST links..."
+            local links_data
+            links_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid/links" 2>/dev/null) || links_data="[]"
+            sibling_iids=$(echo "$links_data" | jq -r '[.[] | select(.iid != null) | .iid] | join(",")')
+            if [ -z "$sibling_iids" ]; then
+              echo "maybe_close_parent: parent #$parent_iid has no children, no marker, and no REST links — can't check siblings."
+              return 0
+            fi
+            echo "maybe_close_parent: found $sibling_iids via REST links fallback"
+            # REST links fallback: check each sibling state individually
+            local all_closed=true iid
+            for iid in $(echo "$sibling_iids" | tr ',' ' '); do
+              local sib_state
+              sib_state=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null | jq -r '.state // "unknown"')
+              if [ "$sib_state" != "closed" ]; then
+                echo "maybe_close_parent: sibling #$iid is $sib_state — parent #$parent_iid stays open."
+                all_closed=false
+                break
+              fi
+            done
+            if [ "$all_closed" = "true" ]; then
+              echo "maybe_close_parent: all sub-issues of #$parent_iid are closed — closing parent."
+              close_issue "$parent_iid"
+            fi
             return 0
           fi
-          echo "maybe_close_parent: found $sibling_iids via REST links fallback"
+          echo "maybe_close_parent: found $sibling_iids via legacy split-parent marker"
+          # Legacy marker fallback: check each sibling state individually
+          local all_closed=true iid
+          for iid in $(echo "$sibling_iids" | tr ',' ' '); do
+            local sib_state
+            sib_state=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null | jq -r '.state // "unknown"')
+            if [ "$sib_state" != "closed" ]; then
+              echo "maybe_close_parent: sibling #$iid is $sib_state — parent #$parent_iid stays open."
+              all_closed=false
+              break
+            fi
+          done
+          if [ "$all_closed" = "true" ]; then
+            echo "maybe_close_parent: all sub-issues of #$parent_iid are closed — closing parent."
+            close_issue "$parent_iid"
+          fi
+          return 0
         fi
 
-        # Check each sibling: all must be closed
-        local all_closed=true iid
-        for iid in $(echo "$sibling_iids" | tr ',' ' '); do
-          local sib_state
-          sib_state=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null | jq -r '.state // "unknown"')
-          if [ "$sib_state" != "closed" ]; then
-            echo "maybe_close_parent: sibling #$iid is $sib_state — parent #$parent_iid stays open."
-            all_closed=false
-            break
-          fi
-        done
-
+        # Hierarchy API path: children response includes .state directly,
+        # so we can check all siblings in one call (no per-sibling fetch).
+        local all_closed=true
+        local open_count
+        open_count=$(echo "$children_data" | jq '[.[] | select(.state != "closed")] | length' 2>/dev/null || echo 1)
+        if [ "${open_count:-1}" -gt 0 ]; then
+          local open_iids
+          open_iids=$(echo "$children_data" | jq -r '[.[] | select(.state != "closed") | .iid] | join(",")')
+          echo "maybe_close_parent: open sub-issue(s) #$open_iids — parent #$parent_iid stays open."
+          all_closed=false
+        fi
         if [ "$all_closed" = "true" ]; then
           echo "maybe_close_parent: all sub-issues of #$parent_iid are closed — closing parent."
           close_issue "$parent_iid"
@@ -1340,6 +1442,13 @@ doctor:
         RECOVERED=$((RECOVERED + 1))
       done
 
+      # List child work items of a parent via the hierarchy API.
+      get_work_item_children() {
+        local parent_iid="$1" children
+        children=$(glab api --hostname "$HOST" "/projects/$PID/-/work_items/$parent_iid/children" 2>/dev/null) || { echo "[]"; return; }
+        printf '%s' "$children"
+      }
+
       # Also check boucle:split parents: close the parent when all its
       # sub-issues are closed. This is the fallback cascade for sub-issues
       # closed via MR merge (Closes #N) where the deploy-triggered e2e
@@ -1349,32 +1458,68 @@ doctor:
 
       for IID in $SPLIT_PARENTS; do
         echo "Checking #$IID (boucle:split) for parent-close cascade..."
-        NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
-        SIBLING_IIDS=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | first | .body // empty' | grep -oE 'iids=[0-9,]+' | cut -d= -f2)
+        # Check children via the work-items hierarchy API (source of truth).
+        CHILDREN_DATA=$(get_work_item_children "$IID")
+        SIBLING_IIDS=$(echo "$CHILDREN_DATA" | jq -r '[.[].iid] | join(",")' 2>/dev/null)
         if [ -z "$SIBLING_IIDS" ]; then
-          # No split-parent marker — fall back to REST issue links API.
-          echo "  → #$IID: no split-parent marker — checking REST links..."
-          LINKS_DATA=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/links" 2>/dev/null) || LINKS_DATA="[]"
-          SIBLING_IIDS=$(echo "$LINKS_DATA" | jq -r '[.[] | select(.iid != null) | .iid] | join(",")')
+          # No children via hierarchy API — fall back to legacy marker comment
+          NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
+          SIBLING_IIDS=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | first | .body // empty' | grep -oE 'iids=[0-9,]+' | cut -d= -f2)
           if [ -z "$SIBLING_IIDS" ]; then
-            echo "  → #$IID: no split-parent marker and no REST links — skipping"
+            # No legacy marker — fall back to REST issue links API
+            echo "  → #$IID: no children via hierarchy API and no split-parent marker — checking REST links..."
+            LINKS_DATA=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/links" 2>/dev/null) || LINKS_DATA="[]"
+            SIBLING_IIDS=$(echo "$LINKS_DATA" | jq -r '[.[] | select(.iid != null) | .iid] | join(",")')
+            if [ -z "$SIBLING_IIDS" ]; then
+              echo "  → #$IID: no children, no marker, and no REST links — skipping"
+              continue
+            fi
+            echo "  → #$IID: found siblings $SIBLING_IIDS via REST links fallback"
+            # REST links fallback: check each sibling individually
+            ALL_CLOSED=true
+            for SIB in $(echo "$SIBLING_IIDS" | tr ',' ' '); do
+              SIB_STATE=$(glab api --hostname "$HOST" "/projects/$PID/issues/$SIB" 2>/dev/null | jq -r '.state // "unknown"')
+              if [ "$SIB_STATE" != "closed" ]; then
+                echo "  → #$IID: sibling #$SIB is $SIB_STATE — parent stays open"
+                ALL_CLOSED=false
+                break
+              fi
+            done
+            if [ "$ALL_CLOSED" = "true" ]; then
+              echo "  → #$IID: all sub-issues closed — closing parent"
+              glab api --hostname "$HOST" -X PUT "/projects/$PID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
+              RECOVERED=$((RECOVERED + 1))
+            fi
             continue
           fi
-          echo "  → #$IID: found siblings $SIBLING_IIDS via REST links fallback"
-        fi
-        ALL_CLOSED=true
-        for SIB in $(echo "$SIBLING_IIDS" | tr ',' ' '); do
-          SIB_STATE=$(glab api --hostname "$HOST" "/projects/$PID/issues/$SIB" 2>/dev/null | jq -r '.state // "unknown"')
-          if [ "$SIB_STATE" != "closed" ]; then
-            echo "  → #$IID: sibling #$SIB is $SIB_STATE — parent stays open"
-            ALL_CLOSED=false
-            break
+          echo "  → #$IID: found siblings $SIBLING_IIDS via legacy split-parent marker"
+          # Legacy marker fallback: check each sibling individually
+          ALL_CLOSED=true
+          for SIB in $(echo "$SIBLING_IIDS" | tr ',' ' '); do
+            SIB_STATE=$(glab api --hostname "$HOST" "/projects/$PID/issues/$SIB" 2>/dev/null | jq -r '.state // "unknown"')
+            if [ "$SIB_STATE" != "closed" ]; then
+              echo "  → #$IID: sibling #$SIB is $SIB_STATE — parent stays open"
+              ALL_CLOSED=false
+              break
+            fi
+          done
+          if [ "$ALL_CLOSED" = "true" ]; then
+            echo "  → #$IID: all sub-issues closed — closing parent"
+            glab api --hostname "$HOST" -X PUT "/projects/$PID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
+            RECOVERED=$((RECOVERED + 1))
           fi
-        done
-        if [ "$ALL_CLOSED" = "true" ]; then
+          continue
+        fi
+
+        # Hierarchy API path: children response includes .state directly
+        OPEN_COUNT=$(echo "$CHILDREN_DATA" | jq '[.[] | select(.state != "closed")] | length' 2>/dev/null || echo 1)
+        if [ "${OPEN_COUNT:-1}" -eq 0 ]; then
           echo "  → #$IID: all sub-issues closed — closing parent"
           glab api --hostname "$HOST" -X PUT "/projects/$PID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
           RECOVERED=$((RECOVERED + 1))
+        else
+          OPEN_IIDS=$(echo "$CHILDREN_DATA" | jq -r '[.[] | select(.state != "closed") | .iid] | join(",")')
+          echo "  → #$IID: open sub-issue(s) #$OPEN_IIDS — parent stays open"
         fi
       done
 
