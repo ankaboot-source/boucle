@@ -27,7 +27,7 @@ public_folder: /media
 # =============================================================================
 # Three content streams:
 #   - communiques  → Communiqués / Prises de parole
-#   - collectif    → Sections locales du Collectif
+#   - collectif    → Collectif (sections locales par ville + mobilisation étudiante)
 #   - mobilisation → Événements / Mobilisation
 #
 # The `folder` path is relative to the repository root, so it matches the
@@ -54,22 +54,39 @@ collections:
       - { name: body, label: Contenu, widget: markdown }
 
   # ---------------------------------------------------------------------------
-  # Collectif (Sections locales)
+  # Collectif — sections locales + mobilisation étudiante
   # ---------------------------------------------------------------------------
+  # One collection that holds both flavours of "Collectif" entry exposed by
+  # the legacy WordPress site (per-city local chapters + the student
+  # mobilisation hub). The `kind` discriminator lets editors pick which
+  # type they're creating; the CMS uses `city` as the entry identifier.
   - name: collectif
     label: Collectif
-    label_singular: Section locale
-    description: Fiches des sections locales du collectif (Marseille, Lyon, etc.).
+    label_singular: Entrée collectif
+    description: Fiches des sections locales (par ville) et de la mobilisation étudiante.
     folder: src/content/collectif
     create: true
     delete: true
     slug: "{{slug}}"
     identifier_field: city
     fields:
-      - { name: city, label: Ville, widget: string }
+      - { name: city, label: Ville (ou "Étudiants"), widget: string }
       - { name: title, label: Titre, widget: string, required: false }
       - { name: contact_email, label: Email de contact, widget: string, required: false }
       - { name: description, label: Description, widget: text, required: false }
+      - { name: image, label: Image (chemin /static/…), widget: image, required: false, allow_none: true }
+      - { name: instagram, label: Instagram, widget: string, required: false }
+      - { name: telegram, label: Telegram, widget: string, required: false }
+      - { name: twitter, label: Twitter/X, widget: string, required: false }
+      - { name: facebook, label: Facebook, widget: string, required: false }
+      - { name: website, label: Site web, widget: string, required: false }
+      - name: kind
+        label: Type d'entrée
+        widget: select
+        default: section-locale
+        options:
+          - { label: "Section locale (par ville)", value: section-locale }
+          - { label: "Mobilisation étudiante", value: mobilisation-etudiante }
       - { name: body, label: Présentation, widget: markdown, required: false }
 
   # ---------------------------------------------------------------------------
