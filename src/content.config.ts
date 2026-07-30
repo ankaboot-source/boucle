@@ -4,7 +4,7 @@ import { glob } from "astro/loaders";
 /**
  * Astro 5 content collections.
  *
- * Mirrors the three collections declared in `sveltia-cms.config.yml` at the
+ * Mirrors the collections declared in `sveltia-cms.config.yml` at the
  * repository root, so the same Markdown files authored through the Sveltia
  * admin UI (under `src/content/<collection>/`) can be read with
  * `getCollection()` from pages and components.
@@ -24,6 +24,18 @@ const optionalString = z.string().optional();
 /** An optional ISO-8601 date string. */
 const optionalDate = z.coerce.date().optional();
 
+/** An optional URL — must look like `http(s)://…` when present. */
+const optionalUrl = z.string().url().optional();
+
+/** A relative or absolute path to a static asset (e.g. `/collectif/foo.png`). */
+const optionalImagePath = z
+	.string()
+	.regex(/^\//, { message: "image must start with '/' (static asset path)" })
+	.optional();
+
+/** Either "section-locale" (per-city chapter) or "mobilisation-etudiante". */
+const entryKind = z.enum(["section-locale", "mobilisation-etudiante"]);
+
 // =============================================================================
 // Communiqués / Prises de parole
 // =============================================================================
@@ -37,16 +49,47 @@ const communiques = defineCollection({
 });
 
 // =============================================================================
-// Collectif (Sections locales)
+// Collectif — sections locales (per-city chapters) + mobilisation étudiante
 // =============================================================================
+//
+// One content collection to hold both flavours of "Collectif" entry that
+// the legacy WordPress site exposed under a single taxonomy:
+//
+//   - "section-locale"          → per-city local chapter (Marseille, Lyon, …)
+//   - "mobilisation-etudiante"  → student-mobilisation hub page
+//
+// The `city` field is the stable identifier for city chapters; for the
+// student-mobilisation hub we synthesise it as "Étudiants" so the schema
+// stays uniform and `getCollection("collectif")` returns a homogeneous
+// list. The optional `kind` discriminator lets the index page split the
+// list into the two tabs seen in the legacy UI.
+//
+// Frontmatter fields match the Sveltia `fields` schema for the
+// `sections-locales` collection (the only one the CMS currently manages);
+// `image` is added here so entries can carry a hero/photo asset.
 const collectif = defineCollection({
 	loader: glob({ pattern: "**/*.md", base: "./src/content/collectif" }),
 	schema: z.object({
-		// `city` doubles as the entry identifier (slug source) in Sveltia.
+		// `city` is the required identifier (slug source in Sveltia). For
+		// mobilisation étudiante the value is the literal "Étudiants".
 		city: requiredString,
 		title: optionalString,
 		contact_email: z.string().email().optional(),
 		description: optionalString,
+		// Optional hero/photo asset path, served from `static/`. The path
+		// must be root-relative so Astro's `getImage()` / `<Image>` helpers
+		// can resolve it.
+		image: optionalImagePath,
+		// Legacy contact links preserved as plain URLs. They render in the
+		// detail page and help build the inventory file.
+		instagram: optionalUrl,
+		telegram: optionalUrl,
+		twitter: optionalUrl,
+		facebook: optionalUrl,
+		website: optionalUrl,
+		// Internal discriminator — defaults to "section-locale" because
+		// every per-city file in `src/content/collectif/` is a city chapter.
+		kind: entryKind.default("section-locale"),
 		// We allow `date` for future use, even if not in the Sveltia schema.
 		date: optionalDate,
 	}),
