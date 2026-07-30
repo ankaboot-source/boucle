@@ -75,6 +75,11 @@ collections:
   # ---------------------------------------------------------------------------
   # Événements / Mobilisation
   # ---------------------------------------------------------------------------
+  # Mixes time-bound events (rassemblements) and campaign landing pages
+  # migrated from the legacy urgence-palestine.com site. The `category`
+  # enum groups the migrated entries (kit-militant, boycott, prisonniers)
+  # on the `/mobilisation/` index page. New events without a category are
+  # still valid (e.g. one-off rassemblements).
   - name: mobilisation
     label: Mobilisation
     label_singular: Événement
@@ -88,6 +93,11 @@ collections:
       - { name: date, label: Date, widget: datetime, date_format: YYYY-MM-DD, time_format: false, picker_utc: true }
       - { name: location, label: Lieu, widget: string }
       - { name: description, label: Résumé, widget: text, required: false }
+      - name: featured_image
+        label: Image à la une
+        widget: image
+        required: false
+        description: Chemin local sous /public, ex. /mobilisation/boycott/2025-visuel-boycott.png
       - name: category
         label: Catégorie
         widget: select
