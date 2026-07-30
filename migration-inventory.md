@@ -70,3 +70,65 @@ Campaign landing pages migrated from the legacy
 | https://drive.google.com/drive/folders/1QEVnz4_O9aegqadUHSvRuixKggtrI5QA | `src/content/mobilisation/2025-05-kit-militant.md` | category=`kit-militant`; entrée « méta » pointant vers le Drive + ~12 visuels/tracts ré-hébergés sous `static/mobilisation/kit-militant/`. |
 | https://www.urgence-palestine.com/boycott/prisonnier%c2%b7es/ | `src/content/mobilisation/2025-03-prisonniers-campagne.md` | category=`prisonniers`; landing page stub migrée, visuel ré-hébergé sous `static/mobilisation/prisonniers/`. |
 | https://www.urgence-palestine.com/17-avril-journee-internationale-de-solidarite-avec-les-prisonnier%c2%b7es-palestinien%c2%b7nes/ | `src/content/mobilisation/2026-04-17-avril-solidarite-prisonniers-palestiniens.md` | category=`prisonniers`; communiqué du 15 avril 2026, featured media ré-hébergé. |
+
+## Collectif (issue #11)
+
+Migrated from the legacy `/sections-locales/` page (WordPress id
+`19365995`, last modified 2026-02-26) and the legacy
+`/le-collectif/mobilisation-etudiante/` page (id `19366527`).
+
+The legacy IA exposed one Divi accordion with 24 per-city entries on
+the *Sections locales* page, plus a single page for *Mobilisation
+étudiante* whose body is just a CTA strip (the full student-mobilisation
+directory lives on https://linktr.ee/etudiant.es). Each legacy city
+entry is one Markdown file in `src/content/collectif/` keyed by slug
+matching the URL the index page emits (`/collectif/<slug>/`).
+
+| Markdown file | Legacy label | Legacy page id | Notes |
+| --- | --- | --- | --- |
+| `src/content/collectif/alencon.md` | Alençon | 19365995 (accordion) | Instagram `urgencepalestine61` |
+| `src/content/collectif/amiens.md` | Amiens | 19365995 (accordion) | Facebook `61555304947287` |
+| `src/content/collectif/chambery.md` | Chambéry | 19365995 (accordion) | Instagram `urgencepalestinechambery` |
+| `src/content/collectif/essonne-91.md` | 91 Essonne | 19365995 (accordion) | email `urgencepalestine91@gmail.com` |
+| `src/content/collectif/grenoble.md` | Grenoble | 19365995 (accordion) | email `comite-palestine38@proton.me` |
+| `src/content/collectif/hauts-de-seine-92.md` | 92 Hauts-de-Seine | 19365995 (accordion) | email `urgence.palestine92@gmail.com` |
+| `src/content/collectif/lyon.md` | Lyon | 19365995 (accordion) | email `urgencepalestinelyon@gmail.com` |
+| `src/content/collectif/mobilisation-etudiante.md` | Mobilisation étudiante | 19366527 | `kind: mobilisation-etudiante`; CTA → `linktr.ee/etudiant.es` |
+| `src/content/collectif/montpellier.md` | Montpellier | 19365995 (accordion) | site `bdsfmontpellier.org` |
+| `src/content/collectif/nantes.md` | Nantes | 19365995 (accordion) | email `upalnantes@protonmail.com` |
+| `src/content/collectif/orleans.md` | Orléans | 19365995 (accordion) | email `urgencepalestineorleans@gmail.com` |
+| `src/content/collectif/paris-13.md` | Paris 13 | 19365995 (accordion) | Instagram `urgencepalestineparis13` |
+| `src/content/collectif/paris-18.md` | Paris 18 | 19365995 (accordion) | Instagram `urgencepalestineparis18` |
+| `src/content/collectif/paris-19.md` | Paris 19 | 19365995 (accordion) | Instagram `urgencepalestineparis19` |
+| `src/content/collectif/paris-20.md` | Paris 20 | 19365995 (accordion) | email `palestine.paris20@gmail.com` |
+| `src/content/collectif/paris-banlieue.md` | Paris – Banlieue | 19365995 (accordion) | umbrella channel `t.me/urgencepalestine` |
+| `src/content/collectif/pau.md` | Pau | 19365995 (accordion) | email `paupalestine64@gmail.com` |
+| `src/content/collectif/perpignan.md` | Perpignan | 19365995 (accordion) | empty in the legacy accordion — entry kept for the IA, no contact |
+| `src/content/collectif/rennes.md` | Rennes | 19365995 (accordion) | Instagram `urgencepalestinerennes` |
+| `src/content/collectif/saint-etienne.md` | Saint-Étienne | 19365995 (accordion) | email `urgencepalestinesaintetienne@gmail.com` |
+| `src/content/collectif/seine-et-marne-77.md` | 77 Seine-et-Marne | 19365995 (accordion) | email `urgencepalestine77@gmail.com` |
+| `src/content/collectif/seine-saint-denis-93.md` | 93 Seine-Saint-Denis | 19365995 (accordion) | Instagram `urgencepalestine93` |
+| `src/content/collectif/val-de-marne-94.md` | 94 Val-de-Marne | 19365995 (accordion) | email `up94valdemarne@gmail.com` |
+| `src/content/collectif/val-doise-95.md` | 95 Val d'Oise | 19365995 (accordion) | Telegram `t.me/urgencepalestine` |
+| `src/content/collectif/yvelines-78.md` | 78 Yvelines | 19365995 (accordion) | Telegram `t.me/urgencepalestine` |
+
+**Images** (3 PNGs, all served from `static/collectif/`):
+
+| Local path | Legacy URL | Used in |
+| --- | --- | --- |
+| `static/collectif/collectif-urgence-palestine.png` | `https://www.urgence-palestine.com/wp-content/uploads/2024/02/Collectif-Urgence-Palestine.png` | index page `etudiante-card` figure; mobilisation étudiante frontmatter `image` |
+| `static/collectif/cta-creer-un-collectif.png` | `https://www.urgence-palestine.com/wp-content/uploads/2023/12/1-2.png` | index page legacy CTA grid (image-button → Google Form) |
+| `static/collectif/cta-je-mengage.png` | `https://www.urgence-palestine.com/wp-content/uploads/2024/06/Sit-Web-CTA-UP-Collectif-local1.png` | index page legacy CTA grid (image-button → Google Form) |
+
+**CTAs** (all still point at the same Google Forms the legacy site used):
+
+| Label | URL | Where |
+| --- | --- | --- |
+| Créer un collectif | `https://docs.google.com/forms/d/e/1FAIpQLScedxLah93YMCKnyNPi4TCyjz0cwp0L6prMat-D7HIXBhhVNw/viewform` | index page (top + bottom), detail page (footer) |
+| Je m'engage | `https://forms.gle/zyhXWz6KjoPJ9q7B8` → `https://docs.google.com/forms/d/e/1FAIpQLScFZ8pSTOiwgy56U-Ph5OhwZhI3-Op4-VRQpGDa2_L-7wAjGg/viewform` | index page (top + bottom), mobilisation étudiante detail page |
+| Annuaire des campus (mobilisation étudiante) | `https://linktr.ee/etudiant.es` | index mobilisation étudiante card, mobilisation étudiante detail page |
+
+**Routes**:
+
+- `/collectif/` — index page (lists every section + featured mobilisation étudiante)
+- `/collectif/<slug>/` — per-entry detail page (one per Markdown file)
