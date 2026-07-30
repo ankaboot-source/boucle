@@ -976,16 +976,18 @@ merger:
       git remote set-url origin "https://up-bot:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${CI_PROJECT_PATH}.git"
       git push --force-with-lease origin "$BRANCH"
 
-      # Wait for GitLab to recompute mergeability after the force-push (poll)
+      # Wait for GitLab to recompute mergeability after the force-push (poll).
+      # detailed_merge_status can be "checking" for several seconds after a
+      # force-push while GitLab recomputes. Poll up to ~2 min, tolerating
+      # transient glab/jq failures (set +e around the poll).
       sleep 5
-      MERGE_STATUS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID" \
-        | jq -r '.detailed_merge_status // .merge_status // "unknown"')
-      for i in 1 2 3 4 5 6; do
+      MERGE_STATUS="unknown"
+      for i in $(seq 1 12); do
+        MERGE_STATUS=$(set +e; glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID" 2>/dev/null \
+          | jq -r '.detailed_merge_status // .merge_status // "unknown"' 2>/dev/null) || MERGE_STATUS="unknown"
         if [ "$MERGE_STATUS" = "mergeable" ]; then break; fi
-        echo "MR !${MR_IID} merge status: $MERGE_STATUS — waiting 10s..."
+        echo "MR !${MR_IID} merge status: $MERGE_STATUS — waiting 10s... (attempt $i/12)"
         sleep 10
-        MERGE_STATUS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID" \
-          | jq -r '.detailed_merge_status // .merge_status // "unknown"')
       done
 
       if [ "$MERGE_STATUS" != "mergeable" ]; then
