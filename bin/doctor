@@ -14,7 +14,7 @@ FAILURES=0
 echo "boucle doctor — checking prerequisites..."
 
 # ── Labels ─────────────────────────────────────────────────────────────
-for label in triage needs-info todo working review human blocked done split approval approved merging; do
+for label in triage needs-info todo working review human blocked done split approval approved spec-review spec-approved merging; do
   if glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2>/dev/null | jq -e '.[0]' >/dev/null 2>&1; then
     pass "label boucle:$label exists"
   else
@@ -31,7 +31,7 @@ for size in s m l; do
 done
 
 # ── CI Variables ───────────────────────────────────────────────────────
-for var in BOUCLE_TOKEN BOUCLE_ENABLED CLOUDFLARE_API_TOKEN BOUCLE_TRIGGER_TOKEN; do
+for var in BOUCLE_TOKEN BOUCLE_ENABLED CLOUDFLARE_API_TOKEN BOUCLE_TRIGGER_TOKEN BOUCLE_SPEC_PROFILE; do
   if glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/$var" 2>/dev/null | jq -e '.key' >/dev/null 2>&1; then
     pass "CI variable $var exists"
   else
