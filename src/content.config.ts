@@ -55,6 +55,38 @@ const collectif = defineCollection({
 // =============================================================================
 // Événements / Mobilisation
 // =============================================================================
+//
+// The Mobilisation bucket now mixes two shapes:
+//
+//   1. **Time-bound events** (rassemblements, marches, actions on a date and
+//      at a specific place). `date` and `location` are required.
+//
+//   2. **Campaign landing pages** migrated from the legacy
+//      `urgence-palestine.com` site, scoped to one of three categories:
+//
+//        - `kit-militant` — the militant kit (affiches, tracts, stickers,
+//          pancartes), sourced from the legacy Google Drive folder;
+//        - `boycott`      — the boycott campaign landing page (visuels,
+//          flyers, downloadable tracts);
+//        - `prisonniers`  — the prisonnier·es landing page and the
+//          communiqués/actions that support Palestinian prisoners.
+//
+//      Campaign entries still need a `date` (the legacy page's last-modified
+//      date, or the action date for a communiqué) and a `location` (an
+//      explicit "En ligne" / "National" marker is fine for pages that have
+//      no single physical venue). `category` is optional in the schema so
+//      that ad-hoc events (rassemblements without a campaign grouping)
+//      stay valid; campaign entries should always set it so the
+//      `/mobilisation/` index can group them under the right heading.
+//
+// Mirrors the matching `mobilisation` collection block in
+// `sveltia-cms.config.yml`.
+const mobilisationCategory = z.enum([
+	"kit-militant",
+	"boycott",
+	"prisonniers",
+]);
+
 const mobilisation = defineCollection({
 	loader: glob({ pattern: "**/*.md", base: "./src/content/mobilisation" }),
 	schema: z.object({
@@ -62,6 +94,10 @@ const mobilisation = defineCollection({
 		date: z.coerce.date(),
 		location: requiredString,
 		description: optionalString,
+		// Local path under /public/, e.g. `/mobilisation/boycott/2025-visuel-boycott.png`.
+		// Used by the /mobilisation index page as the card thumbnail. Optional,
+		// but recommended for campaign entries so the index isn't text-only.
+		featured_image: optionalString,
 		// Optional category — defaults to `evenement` so existing entries
 		// that omit it keep validating unchanged.
 		category: z
