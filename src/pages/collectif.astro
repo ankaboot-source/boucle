@@ -1,0 +1,892 @@
+---
+/*
+ * /collectif — Collectif Urgence Palestine index.
+ *
+ * Lists every entry in the `collectif` content collection, grouped into two
+ * tabs to mirror the legacy WordPress IA:
+ *   1. Sections locales — per-city local chapters (one card per city).
+ *   2. Mobilisation étudiante — student-mobilisation hub.
+ *
+ * Each card links to the entry's detail page (`/collectif/<slug>/`).
+ * The page also surfaces the legacy "Créer un collectif" CTA, which points
+ * to the same Google Form the legacy site used.
+ */
+import Layout from "../layouts/Layout.astro";
+import { getCollection, render } from "astro:content";
+
+const entries = await getCollection("collectif");
+
+// Split into the two flavours exposed by the `kind` discriminator.
+const sections = entries
+	.filter((entry) => (entry.data.kind ?? "section-locale") === "section-locale")
+	.sort((a, b) => a.data.city.localeCompare(b.data.city, "fr"));
+
+const mobilisation = entries
+	.filter((entry) => entry.data.kind === "mobilisation-etudiante")
+	.sort((a, b) => a.data.city.localeCompare(b.data.city, "fr"));
+
+// Pre-render each mobilisation étudiante entry's <Content /> so the
+// index doesn't need to call `render()` per-card at request time.
+// (Section-locale cards on the index only show the frontmatter summary,
+// so we don't need to pre-render their bodies here.)
+const mobilisationWithBody = await Promise.all(
+	mobilisation.map(async (entry) => {
+		const { Content } = await render(entry);
+		return { entry, Content };
+	}),
+);
+
+// CTA destinations — keep in sync with the legacy site.
+const CREER_UN_COLLECTIF_URL =
+	"https://docs.google.com/forms/d/e/1FAIpQLScedxLah93YMCKnyNPi4TCyjz0cwp0L6prMat-D7HIXBhhVNw/viewform";
+const JE_MENGAGE_URL =
+	"https://forms.gle/zyhXWz6KjoPJ9q7B8";
+const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
+---
+
+<Layout
+	title="Collectif — Urgence Palestine"
+	description="Sections locales et mobilisation étudiante du Collectif Urgence Palestine."
+>
+	<main id="main" class="collectif">
+		<!--
+		  ====================================================================
+		  Page header
+		  ====================================================================
+		-->
+		<header class="collectif__header">
+			<p class="eyebrow">Le collectif</p>
+			<h1 class="collectif__title">S'organiser, près de chez soi.</h1>
+			<p class="collectif__lede">
+				Le Collectif Urgence Palestine s'appuie sur des <strong>sections
+				locales</strong> dans une trentaine de villes et sur un réseau de
+				<strong>mobilisation étudiante</strong> sur les campus. Retrouve
+				ci-dessous les coordonnées pour rejoindre la section la plus
+				près de chez toi — ou lance la tienne.
+			</p>
+		</header>
+
+		<!--
+		  ====================================================================
+		  CTA banner — mirrors the legacy CTA strip ("Créer un collectif"
+		  + "Je m'engage" image cards) but uses clean text links.
+		  ====================================================================
+		-->
+		<section class="cta-strip" aria-labelledby="cta-strip-title">
+			<h2 id="cta-strip-title" class="visually-hidden">Rejoindre le collectif</h2>
+
+			<article class="cta-card cta-card--primary">
+				<p class="cta-card__eyebrow">Pas encore de section près de chez toi&nbsp;?</p>
+				<h3 class="cta-card__title">Créer un collectif local</h3>
+				<p class="cta-card__body">
+					Remplis le formulaire du collectif national, on te recontacte
+					pour t'aider à lancer une section dans ta ville.
+				</p>
+				<a
+					class="cta-card__btn"
+					href={CREER_UN_COLLECTIF_URL}
+					rel="noopener external"
+					target="_blank"
+				>
+					Créer un collectif
+					<span aria-hidden="true" class="cta-card__arrow">→</span>
+				</a>
+			</article>
+
+			<article class="cta-card cta-card--secondary">
+				<p class="cta-card__eyebrow">Étudiante, étudiant&nbsp;?</p>
+				<h3 class="cta-card__title">Je m'engage</h3>
+				<p class="cta-card__body">
+					Rejoins la mobilisation étudiante en solidarité avec la
+					Palestine, sur ton campus ou via l'annuaire national.
+				</p>
+				<a
+					class="cta-card__btn"
+					href={JE_MENGAGE_URL}
+					rel="noopener external"
+					target="_blank"
+				>
+					Je m'engage
+					<span aria-hidden="true" class="cta-card__arrow">→</span>
+				</a>
+			</article>
+		</section>
+
+		<!--
+		  ====================================================================
+		  Sections locales — per-city cards
+		  ====================================================================
+		-->
+		<section class="locales" aria-labelledby="locales-title">
+			<header class="section-head">
+				<p class="eyebrow">Sections locales</p>
+				<h2 id="locales-title">{sections.length} villes, un même combat.</h2>
+				<p class="section-head__lede">
+					Clique sur une ville pour voir les coordonnées complètes
+					(réseaux, courriels, rendez-vous).
+				</p>
+			</header>
+
+			<ul class="locales__grid" role="list">
+				{
+					sections.map((entry) => {
+						const d = entry.data;
+						const slug = entry.id;
+						const channels: string[] = [];
+						if (d.contact_email) channels.push("email");
+						if (d.instagram) channels.push("Instagram");
+						if (d.telegram) channels.push("Telegram");
+						if (d.twitter) channels.push("X");
+						if (d.facebook) channels.push("Facebook");
+						if (d.website) channels.push("site web");
+						return (
+							<li class="locale-card">
+								<a class="locale-card__link" href={`/collectif/${slug}/`}>
+									<h3 class="locale-card__city">{d.city}</h3>
+									{d.description && (
+										<p class="locale-card__desc">{d.description}</p>
+									)}
+									{channels.length > 0 && (
+										<p class="locale-card__channels" aria-label="Moyens de contact">
+											{channels.map((label) => (
+												<span class="locale-card__chip">{label}</span>
+											))}
+										</p>
+									)}
+									<span class="locale-card__cta" aria-hidden="true">
+										Voir la fiche <span>→</span>
+									</span>
+								</a>
+							</li>
+						);
+					})
+				}
+			</ul>
+		</section>
+
+		<!--
+		  ====================================================================
+		  Mobilisation étudiante — featured card(s) with the legacy Linktree
+		  ====================================================================
+		-->
+		{
+			mobilisationWithBody.length > 0 && (
+				<section class="etudiantes" aria-labelledby="etudiantes-title">
+					<header class="section-head">
+						<p class="eyebrow">Mobilisation étudiante</p>
+						<h2 id="etudiantes-title">Sur les campus, en lien avec le national.</h2>
+						<p class="section-head__lede">
+							La coordination étudiante du collectif relaie les appels
+							et anime les mobilisations sur les campus universitaires
+							et grandes écoles.
+						</p>
+					</header>
+
+					<div class="etudiantes__list">
+						{mobilisationWithBody.map(({ entry, Content }) => {
+							const d = entry.data;
+							return (
+								<article class="etudiante-card">
+									{d.image && (
+										<figure class="etudiante-card__figure">
+											<img
+												src={d.image}
+												alt=""
+												loading="lazy"
+												decoding="async"
+											/>
+										</figure>
+									)}
+									<div class="etudiante-card__body">
+										<h3 class="etudiante-card__title">{d.title ?? d.city}</h3>
+										{d.description && (
+											<p class="etudiante-card__desc">{d.description}</p>
+										)}
+										<div class="etudiante-card__prose">
+											<Content />
+										</div>
+										<div class="etudiante-card__actions">
+											<a
+												class="etudiante-card__btn etudiante-card__btn--primary"
+												href={MOBILISATION_ETUDIANTE_URL}
+												rel="noopener external"
+												target="_blank"
+											>
+												Annuaire des campus
+												<span aria-hidden="true">→</span>
+											</a>
+											<a
+												class="etudiante-card__btn etudiante-card__btn--ghost"
+												href={JE_MENGAGE_URL}
+												rel="noopener external"
+												target="_blank"
+											>
+												Je m'engage
+											</a>
+										</div>
+									</div>
+								</article>
+							);
+						})}
+					</div>
+				</section>
+			)
+		}
+
+		<!--
+		  ====================================================================
+		  Bottom CTA — repeat the "Créer un collectif" call-out so the link
+		  is reachable from anywhere on the page.
+		  ====================================================================
+		-->
+		<aside class="footer-cta" aria-labelledby="footer-cta-title">
+			<h2 id="footer-cta-title">Ta ville n'est pas dans la liste&nbsp;?</h2>
+			<p>
+				Lance une section locale, ou rejoins la coordination étudiante
+				si tu es sur un campus. On t'accompagne.
+			</p>
+			<div class="footer-cta__actions">
+				<a
+					class="btn btn--primary"
+					href={CREER_UN_COLLECTIF_URL}
+					rel="noopener external"
+					target="_blank"
+				>
+					Créer un collectif
+				</a>
+				<a
+					class="btn btn--ghost"
+					href={JE_MENGAGE_URL}
+					rel="noopener external"
+					target="_blank"
+				>
+					Je m'engage
+				</a>
+			</div>
+		</aside>
+
+		<!--
+		  ====================================================================
+		  Legacy CTA images — the two image-buttons that the legacy site
+		  displayed at the bottom of the Sections Locales and Mobilisation
+		  étudiante pages. They link to the same Google Forms the text
+		  buttons above point at; the visual version is kept here for
+		  fidelity to the original design.
+		  ====================================================================
+		-->
+		<section class="legacy-ctas" aria-labelledby="legacy-ctas-title">
+			<h2 id="legacy-ctas-title" class="legacy-ctas__title">
+				Les visuels officiels du collectif
+			</h2>
+			<p class="legacy-ctas__lede">
+				Tu peux aussi relayer ces visuels sur tes réseaux&nbsp;: ils
+				renvoient aux mêmes formulaires que les boutons ci-dessus.
+			</p>
+			<ul class="legacy-ctas__grid" role="list">
+				<li class="legacy-cta">
+					<a
+						class="legacy-cta__link"
+						href={CREER_UN_COLLECTIF_URL}
+						rel="noopener external"
+						target="_blank"
+						aria-label="Créer un collectif — ouvre le formulaire Google dans un nouvel onglet"
+					>
+						<img
+							class="legacy-cta__image"
+							src="/collectif/cta-creer-un-collectif.png"
+							alt="Visuel officiel « Créer un collectif »"
+							loading="lazy"
+							decoding="async"
+							width="640"
+							height="200"
+						/>
+					</a>
+				</li>
+				<li class="legacy-cta">
+					<a
+						class="legacy-cta__link"
+						href={JE_MENGAGE_URL}
+						rel="noopener external"
+						target="_blank"
+						aria-label="Je m'engage — ouvre le formulaire Google dans un nouvel onglet"
+					>
+						<img
+							class="legacy-cta__image"
+							src="/collectif/cta-je-mengage.png"
+							alt="Visuel officiel « Je m'engage »"
+							loading="lazy"
+							decoding="async"
+							width="640"
+							height="200"
+						/>
+					</a>
+				</li>
+			</ul>
+		</section>
+	</main>
+</Layout>
+
+<style>
+	.visually-hidden {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
+
+	.eyebrow {
+		font-family: var(--font-body);
+		font-size: var(--text-xs);
+		font-weight: var(--weight-bold);
+		letter-spacing: var(--tracking-mega);
+		text-transform: uppercase;
+		color: var(--color-accent);
+		margin: 0;
+	}
+
+	/* ---------- Page wrapper ---------- */
+	.collectif {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2xl);
+		padding-block: var(--space-xl) var(--space-3xl);
+	}
+
+	/* ---------- Header ---------- */
+	.collectif__header {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-s);
+		width: min(100% - 2 * var(--space-s), var(--container-base));
+		margin-inline: auto;
+	}
+
+	.collectif__title {
+		font-family: var(--font-heading);
+		font-size: var(--text-3xl);
+		line-height: var(--leading-tight);
+		letter-spacing: var(--tracking-tight);
+		margin: 0;
+	}
+
+	.collectif__lede {
+		font-size: var(--text-lg);
+		line-height: var(--leading-relaxed);
+		color: var(--color-text-muted);
+		margin: 0;
+		max-width: 60ch;
+	}
+
+	/* ---------- CTA strip (top) ---------- */
+	.cta-strip {
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: var(--space-m);
+		width: min(100% - 2 * var(--space-s), var(--container-wide));
+		margin-inline: auto;
+	}
+
+	@media (min-width: 48rem) {
+		.cta-strip {
+			grid-template-columns: 1fr 1fr;
+		}
+	}
+
+	.cta-card {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-xs);
+		padding: var(--space-l);
+		border-radius: var(--radius-l);
+		border: 1.5px solid var(--color-border);
+		background: var(--color-bg-soft);
+		position: relative;
+		overflow: hidden;
+	}
+
+	.cta-card::after {
+		content: "";
+		position: absolute;
+		top: 0;
+		left: 0;
+		height: 4px;
+		width: 100%;
+	}
+
+	.cta-card--primary {
+		background: var(--color-ink);
+		color: var(--color-ink-on-dark);
+		border-color: var(--color-ink);
+	}
+
+	.cta-card--primary::after {
+		background: var(--color-flag-red);
+	}
+
+	.cta-card--secondary {
+		background: var(--color-paper);
+		color: var(--color-ink);
+		border-color: var(--color-ink);
+	}
+
+	.cta-card--secondary::after {
+		background: var(--color-flag-green);
+	}
+
+	.cta-card__eyebrow {
+		font-family: var(--font-body);
+		font-size: var(--text-xs);
+		font-weight: var(--weight-semibold);
+		letter-spacing: var(--tracking-mega);
+		text-transform: uppercase;
+		opacity: 0.7;
+		margin: 0;
+	}
+
+	.cta-card--primary .cta-card__eyebrow {
+		color: var(--color-flag-red);
+		opacity: 1;
+	}
+
+	.cta-card__title {
+		font-family: var(--font-heading);
+		font-size: var(--text-2xl);
+		line-height: var(--leading-snug);
+		letter-spacing: var(--tracking-tight);
+		margin: 0;
+	}
+
+	.cta-card__body {
+		font-size: var(--text-base);
+		line-height: var(--leading-relaxed);
+		opacity: 0.85;
+		margin: 0;
+		max-width: 38ch;
+	}
+
+	.cta-card--secondary .cta-card__body {
+		opacity: 1;
+		color: var(--color-text-muted);
+	}
+
+	.cta-card__btn {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2xs);
+		margin-top: var(--space-2xs);
+		font-family: var(--font-body);
+		font-size: var(--text-base);
+		font-weight: var(--weight-semibold);
+		text-decoration: none;
+		min-height: 44px;
+		padding: 0 var(--space-s);
+		border-radius: var(--radius-pill);
+		align-self: flex-start;
+		transition:
+			background-color var(--duration-base) var(--ease-out),
+			color var(--duration-base) var(--ease-out),
+			transform var(--duration-fast) var(--ease-out);
+	}
+
+	.cta-card--primary .cta-card__btn {
+		background: var(--color-flag-red);
+		color: var(--color-flag-white);
+	}
+
+	.cta-card--primary .cta-card__btn:hover {
+		background: var(--color-flag-red-deep);
+		transform: translateY(-1px);
+	}
+
+	.cta-card--secondary .cta-card__btn {
+		background: var(--color-ink);
+		color: var(--color-ink-on-dark);
+	}
+
+	.cta-card--secondary .cta-card__btn:hover {
+		background: var(--color-flag-green);
+		transform: translateY(-1px);
+	}
+
+	.cta-card__arrow {
+		font-family: var(--font-body);
+		transition: transform var(--duration-base) var(--ease-out);
+	}
+
+	.cta-card__btn:hover .cta-card__arrow {
+		transform: translateX(4px);
+	}
+
+	/* ---------- Section heads (locales, étudiantes) ---------- */
+	.section-head__lede {
+		font-size: var(--text-base);
+		line-height: var(--leading-relaxed);
+		color: var(--color-text-muted);
+		max-width: 60ch;
+		margin: var(--space-2xs) 0 0;
+	}
+
+	/* ---------- Sections locales grid ---------- */
+	.locales,
+	.etudiantes,
+	.footer-cta,
+	.legacy-ctas {
+		width: min(100% - 2 * var(--space-s), var(--container-wide));
+		margin-inline: auto;
+	}
+
+	.locales__grid {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: var(--space-s);
+	}
+
+	@media (min-width: 40rem) {
+		.locales__grid {
+			grid-template-columns: repeat(2, 1fr);
+		}
+	}
+
+	@media (min-width: 64rem) {
+		.locales__grid {
+			grid-template-columns: repeat(3, 1fr);
+		}
+	}
+
+	.locale-card {
+		display: flex;
+	}
+
+	.locale-card__link {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2xs);
+		width: 100%;
+		padding: var(--space-m);
+		background: var(--color-bg-soft);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-m);
+		text-decoration: none;
+		color: var(--color-ink);
+		transition:
+			border-color var(--duration-base) var(--ease-out),
+			transform var(--duration-base) var(--ease-out),
+			background-color var(--duration-base) var(--ease-out);
+	}
+
+	.locale-card__link:hover {
+		border-color: var(--color-ink);
+		background: var(--color-paper);
+		transform: translateY(-2px);
+	}
+
+	.locale-card__link:focus-visible {
+		outline: 2px solid var(--color-accent);
+		outline-offset: 3px;
+	}
+
+	.locale-card__city {
+		font-family: var(--font-heading);
+		font-size: var(--text-xl);
+		line-height: var(--leading-snug);
+		letter-spacing: var(--tracking-tight);
+		margin: 0;
+	}
+
+	.locale-card__desc {
+		font-size: var(--text-sm);
+		line-height: var(--leading-relaxed);
+		color: var(--color-text-muted);
+		margin: 0;
+	}
+
+	.locale-card__channels {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-3xs);
+		margin: var(--space-2xs) 0 0;
+	}
+
+	.locale-card__chip {
+		font-family: var(--font-body);
+		font-size: var(--text-xs);
+		font-weight: var(--weight-medium);
+		letter-spacing: 0.02em;
+		padding: 0.15rem var(--space-2xs);
+		background: var(--color-paper);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-pill);
+		color: var(--color-text-soft);
+	}
+
+	.locale-card__cta {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2xs);
+		margin-top: auto;
+		padding-top: var(--space-2xs);
+		font-family: var(--font-body);
+		font-size: var(--text-sm);
+		font-weight: var(--weight-semibold);
+		color: var(--color-accent);
+	}
+
+	.locale-card__cta span {
+		transition: transform var(--duration-base) var(--ease-out);
+	}
+
+	.locale-card__link:hover .locale-card__cta span {
+		transform: translateX(4px);
+	}
+
+	/* ---------- Mobilisation étudiante ---------- */
+	.etudiantes__list {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-l);
+	}
+
+	.etudiante-card {
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: var(--space-m);
+		padding: var(--space-l);
+		background: var(--color-ink);
+		color: var(--color-ink-on-dark);
+		border-radius: var(--radius-l);
+		overflow: hidden;
+	}
+
+	@media (min-width: 64rem) {
+		.etudiante-card {
+			grid-template-columns: 1fr 1.4fr;
+			align-items: center;
+			gap: var(--space-xl);
+		}
+	}
+
+	.etudiante-card__figure {
+		margin: 0;
+		display: flex;
+		justify-content: center;
+		align-items: center;
+	}
+
+	.etudiante-card__figure img {
+		width: 100%;
+		max-width: 28rem;
+		height: auto;
+		border-radius: var(--radius-m);
+		background: var(--color-paper);
+	}
+
+	.etudiante-card__body {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-s);
+	}
+
+	.etudiante-card__title {
+		font-family: var(--font-heading);
+		font-size: var(--text-2xl);
+		line-height: var(--leading-tight);
+		letter-spacing: var(--tracking-tight);
+		margin: 0;
+	}
+
+	.etudiante-card__desc {
+		font-size: var(--text-lg);
+		line-height: var(--leading-relaxed);
+		color: oklch(85% 0 0);
+		margin: 0;
+	}
+
+	.etudiante-card__prose {
+		font-size: var(--text-base);
+		line-height: var(--leading-relaxed);
+		color: oklch(85% 0 0);
+	}
+
+	.etudiante-card__prose :global(p) {
+		margin: 0 0 var(--space-2xs);
+	}
+
+	.etudiante-card__prose :global(ul) {
+		margin: 0 0 var(--space-2xs);
+		padding-left: 1.2em;
+	}
+
+	.etudiante-card__actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-2xs);
+		margin-top: var(--space-2xs);
+	}
+
+	.etudiante-card__btn {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2xs);
+		font-family: var(--font-body);
+		font-size: var(--text-base);
+		font-weight: var(--weight-semibold);
+		text-decoration: none;
+		min-height: 44px;
+		padding: 0 var(--space-m);
+		border-radius: var(--radius-pill);
+		border: 1.5px solid transparent;
+		transition:
+			background-color var(--duration-base) var(--ease-out),
+			color var(--duration-base) var(--ease-out),
+			transform var(--duration-fast) var(--ease-out);
+	}
+
+	.etudiante-card__btn--primary {
+		background: var(--color-flag-red);
+		color: var(--color-flag-white);
+	}
+
+	.etudiante-card__btn--primary:hover {
+		background: var(--color-flag-red-deep);
+		transform: translateY(-1px);
+	}
+
+	.etudiante-card__btn--ghost {
+		background: transparent;
+		color: var(--color-ink-on-dark);
+		border-color: var(--color-ink-on-dark);
+	}
+
+	.etudiante-card__btn--ghost:hover {
+		background: var(--color-ink-on-dark);
+		color: var(--color-ink);
+	}
+
+	/* ---------- Bottom CTA ---------- */
+	.footer-cta {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: var(--space-s);
+		padding: var(--space-l);
+		background: var(--color-bg-soft);
+		border: 1.5px solid var(--color-ink);
+		border-radius: var(--radius-l);
+	}
+
+	.footer-cta h2 {
+		font-family: var(--font-heading);
+		font-size: var(--text-2xl);
+		line-height: var(--leading-snug);
+		letter-spacing: var(--tracking-tight);
+		margin: 0;
+	}
+
+	.footer-cta p {
+		font-size: var(--text-lg);
+		line-height: var(--leading-relaxed);
+		color: var(--color-text-muted);
+		margin: 0;
+		max-width: 50ch;
+	}
+
+	.footer-cta__actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-2xs);
+	}
+
+	/* ---------- Legacy CTA images ---------- */
+	.legacy-ctas {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-s);
+		padding-top: var(--space-l);
+		border-top: 1px solid var(--color-border);
+	}
+
+	.legacy-ctas__title {
+		font-family: var(--font-heading);
+		font-size: var(--text-xl);
+		line-height: var(--leading-snug);
+		letter-spacing: var(--tracking-tight);
+		margin: 0;
+	}
+
+	.legacy-ctas__lede {
+		font-size: var(--text-base);
+		line-height: var(--leading-relaxed);
+		color: var(--color-text-muted);
+		margin: 0;
+		max-width: 60ch;
+	}
+
+	.legacy-ctas__grid {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: var(--space-s);
+	}
+
+	@media (min-width: 48rem) {
+		.legacy-ctas__grid {
+			grid-template-columns: repeat(2, 1fr);
+		}
+	}
+
+	.legacy-cta {
+		display: flex;
+	}
+
+	.legacy-cta__link {
+		display: block;
+		width: 100%;
+		border-radius: var(--radius-m);
+		overflow: hidden;
+		border: 1px solid var(--color-border);
+		background: var(--color-bg-soft);
+		transition:
+			transform var(--duration-base) var(--ease-out),
+			border-color var(--duration-base) var(--ease-out),
+			box-shadow var(--duration-base) var(--ease-out);
+	}
+
+	.legacy-cta__link:hover {
+		transform: translateY(-2px);
+		border-color: var(--color-ink);
+		box-shadow: var(--shadow-lift);
+	}
+
+	.legacy-cta__link:focus-visible {
+		outline: 2px solid var(--color-accent);
+		outline-offset: 3px;
+	}
+
+	.legacy-cta__image {
+		display: block;
+		width: 100%;
+		height: auto;
+	}
+
+	/* ---------- Reduced motion ---------- */
+	@media (prefers-reduced-motion: reduce) {
+		.cta-card__arrow,
+		.locale-card__cta span,
+		.cta-card__btn,
+		.locale-card__link,
+		.etudiante-card__btn,
+		.legacy-cta__link {
+			transition: none;
+		}
+	}
+</style>
