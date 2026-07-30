@@ -7,11 +7,16 @@
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
-    "build:symbols": "node scripts/build-symbols.mjs"
+    "build:symbols": "node scripts/build-symbols.mjs",
+    "migrate": "node scripts/migrate.mjs",
+    "verify:migration": "node scripts/verify-migration.mjs"
   },
   "dependencies": {
     "@astrojs/tailwind": "^6.0.2",
     "astro": "^5.6.1",
     "tailwindcss": "^3.4.19"
+  },
+  "devDependencies": {
+    "turndown": "^7.2.0"
   }
 }
