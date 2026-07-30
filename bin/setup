@@ -119,6 +119,16 @@ else
   log_pass "BOUCLE_ENABLED set"
 fi
 
+# BOUCLE_SPEC_PROFILE — controls the spec-validation gate between triage and worker.
+# Values: product (gate Size M/L, S passes), off (no gate), strict (gate all sizes).
+EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_SPEC_PROFILE" 2>/dev/null | jq -r '.key // empty' 2>/dev/null || true)
+if [ -n "$EXISTING" ]; then
+  log_skip "BOUCLE_SPEC_PROFILE already exists"
+else
+  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_SPEC_PROFILE -f value=product -f masked=false -f protected=false >/dev/null"
+  log_pass "BOUCLE_SPEC_PROFILE set"
+fi
+
 # OPENCODE_AUTH (file type) — requires auth.json to exist locally
 if [ -f "$OPENCODE_AUTH_PATH" ]; then
   EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/OPENCODE_AUTH" 2>/dev/null | jq -r '.key // empty')
@@ -141,8 +151,8 @@ echo ""
 # ── 2. Labels ─────────────────────────────────────────────────────────
 echo "=== Labels ==="
 
-# boucle:* labels (12)
-for label in triage needs-info todo working review human blocked done split approval approved merging; do
+# boucle:* labels (14)
+for label in triage needs-info todo working review human blocked done split approval approved spec-review spec-approved merging; do
   EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2>/dev/null | jq -r '.[0].name // empty')
   if [ -n "$EXISTING" ]; then
     log_skip "boucle:$label already exists"
@@ -178,7 +188,7 @@ else
   if [ -n "$BOARD_ID" ] && [ "$BOARD_ID" != "null" ]; then
     log_pass "boucle board created (ID: $BOARD_ID)"
     # Add lists for each boucle:* label
-    for label in triage needs-info todo working review human blocked done split approval approved merging; do
+    for label in triage needs-info todo working review human blocked done split approval approved spec-review spec-approved merging; do
       LABEL_ID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2>/dev/null | jq -r '.[0].id')
       if [ -n "$LABEL_ID" ] && [ "$LABEL_ID" != "null" ]; then
         run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/boards/$BOARD_ID/lists -f label_id=$LABEL_ID >/dev/null"
