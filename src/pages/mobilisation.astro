@@ -1,0 +1,324 @@
+---
+/*
+ * /mobilisation route.
+ * ---------------------------------------------------------------------------
+ * Index page for the Mobilisation bucket. Lists every entry in the
+ * `mobilisation` content collection, grouped by `category`
+ * (kit-militant, boycott, prisonniers). Entries without a category
+ * (one-off events like a rassemblement) are listed under "Événements"
+ * at the bottom.
+ *
+ * Each card renders the featured image from a local path under
+ * /mobilisation/ so nothing hot-links back to the legacy CDN. If the
+ * image is missing the card still renders with a neutral placeholder
+ * so the layout doesn't break.
+ *
+ * The page re-uses <Layout> from the master chrome — no page-specific
+ * <head> metadata overrides.
+ */
+import "../styles/sections.css";
+import Layout from "../layouts/Layout.astro";
+import { getCollection } from "astro:content";
+
+const entries = (await getCollection("mobilisation"))
+	// Sort newest first so the index reads chronologically.
+	.sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+
+type GroupKey = "kit-militant" | "boycott" | "prisonniers" | "evenements";
+
+const groupMeta: Record<GroupKey, { label: string; tagline: string }> = {
+	"kit-militant": {
+		label: "Kit militant",
+		tagline:
+			"Affiches, tracts, pancartes, stickers et formulaires prêts à imprimer pour les actions de terrain.",
+	},
+	boycott: {
+		label: "Boycott",
+		tagline:
+			"Arguments, visuels et tracts pour interpeller les marques complices de l'occupation israélienne.",
+	},
+	prisonniers: {
+		label: "Prisonnier·es",
+		tagline:
+			"Ressources, visuels et dossiers pour soutenir les prisonniers politiques palestiniens et exiger leur libération.",
+	},
+	evenements: {
+		label: "Événements",
+		tagline:
+			"Rassemblements, marches et actions ponctuelles organisés par les sections locales.",
+	},
+};
+
+const order: GroupKey[] = [
+	"kit-militant",
+	"boycott",
+	"prisonniers",
+	"evenements",
+];
+
+// Two-digit prefix used as the eyebrow above each section heading
+// (01, 02, 03, 04). Pre-computed once so the template stays readable.
+const sectionIndex = (key: GroupKey) =>
+	String(order.indexOf(key) + 1).padStart(2, "0");
+
+const grouped: Record<GroupKey, typeof entries> = {
+	"kit-militant": [],
+	boycott: [],
+	prisonniers: [],
+	evenements: [],
+};
+
+for (const entry of entries) {
+	// The schema default is "evenement" (singular); map it to the
+	// "evenements" group key used by the index layout below.
+	const cat = entry.data.category ?? "evenement";
+	const key = (cat === "evenement" ? "evenements" : cat) as GroupKey;
+	grouped[key].push(entry);
+}
+
+const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
+	day: "numeric",
+	month: "long",
+	year: "numeric",
+});
+---
+
+<Layout
+	title="Mobilisation — Urgence Palestine"
+	description="Campagnes, tracts, événements et ressources pour faire vivre la solidarité avec la Palestine sur le terrain."
+>
+	<main id="main" class="mobilisation">
+		<header class="mobilisation__hero">
+			<p class="eyebrow">Mobilisation</p>
+			<h1 class="display">
+				Agir<br />sur tous les fronts.
+			</h1>
+			<p class="mobilisation__lede">
+				Trois campagnes de fond — kit militant, boycott,
+				prisonnier·es — et les événements locaux des sections. Tout
+				est imprimable, diffusable, relaiable.
+			</p>
+		</header>
+
+		{
+			order.map((key) =>
+				grouped[key].length === 0 ? null : (
+					<section
+						class="mobilisation__group"
+						aria-labelledby={`group-${key}`}
+					>
+						<header class="section-head">
+							<p class="eyebrow">{sectionIndex(key)}</p>
+							<h2 id={`group-${key}`}>{groupMeta[key].label}</h2>
+							<p class="mobilisation__group-tagline">
+								{groupMeta[key].tagline}
+							</p>
+						</header>
+
+						<ul class="mobilisation__cards" role="list">
+							{grouped[key].map((entry) => (
+								<li class="card">
+									<article
+										class="card__inner"
+										aria-labelledby={`entry-${entry.id}-title`}
+									>
+										{entry.data.featured_image ? (
+											<a
+												class="card__media"
+												href={`#${entry.id}`}
+												aria-hidden="true"
+												tabindex="-1"
+											>
+												<img
+													src={entry.data.featured_image}
+													alt=""
+													loading="lazy"
+													decoding="async"
+													width="540"
+													height="540"
+												/>
+											</a>
+										) : (
+											<div
+												class="card__media card__media--placeholder"
+												aria-hidden="true"
+											/>
+										)}
+
+										<div class="card__body">
+											<p class="card__meta">
+												<time datetime={entry.data.date.toISOString()}>
+													{dateFormatter.format(entry.data.date)}
+												</time>
+												<span aria-hidden="true"> · </span>
+												<span>{entry.data.location}</span>
+											</p>
+											<h3
+												id={`entry-${entry.id}-title`}
+												class="card__title"
+											>
+												<a href={`#${entry.id}`}>{entry.data.title}</a>
+											</h3>
+											{entry.data.description && (
+												<p class="card__description">
+													{entry.data.description}
+												</p>
+											)}
+										</div>
+									</article>
+								</li>
+							))}
+						</ul>
+					</section>
+				)
+			)
+		}
+
+		{
+			entries.length === 0 && (
+				<p class="mobilisation__empty">
+					Aucun contenu de mobilisation pour le moment. Revenez bientôt.
+				</p>
+			)
+		}
+	</main>
+</Layout>
+
+<style>
+	.mobilisation {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2xl);
+		padding-block: var(--space-xl) var(--space-3xl);
+		width: min(100% - 2 * var(--space-s), var(--container-wide));
+		margin-inline: auto;
+	}
+
+	.mobilisation__hero {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-m);
+		max-width: 56rem;
+	}
+
+	.mobilisation__lede {
+		font-size: var(--text-lg);
+		color: var(--color-text-muted);
+		max-width: 60ch;
+		margin: 0;
+	}
+
+	.mobilisation__group {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-l);
+	}
+
+	.mobilisation__group-tagline {
+		max-width: 60ch;
+		color: var(--color-text-muted);
+		font-size: var(--text-base);
+		margin: 0;
+	}
+
+	.mobilisation__cards {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
+		gap: var(--space-l);
+	}
+
+	.card {
+		display: flex;
+	}
+
+	.card__inner {
+		display: flex;
+		flex-direction: column;
+		width: 100%;
+		background: var(--color-bg-soft);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-m);
+		overflow: hidden;
+		transition:
+			transform var(--duration-base) var(--ease-out),
+			border-color var(--duration-base) var(--ease-out),
+			box-shadow var(--duration-base) var(--ease-out);
+	}
+
+	.card__inner:hover,
+	.card__inner:focus-within {
+		transform: translateY(-2px);
+		border-color: color-mix(in oklch, var(--color-accent) 35%, var(--color-border));
+		box-shadow: var(--shadow-lift);
+	}
+
+	.card__media {
+		display: block;
+		aspect-ratio: 1 / 1;
+		background: var(--color-paper-edge);
+		overflow: hidden;
+	}
+
+	.card__media img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+
+	.card__media--placeholder {
+		background:
+			repeating-linear-gradient(
+				45deg,
+				var(--color-paper-edge) 0 12px,
+				var(--color-paper-soft) 12px 24px
+			);
+	}
+
+	.card__body {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2xs);
+		padding: var(--space-m);
+	}
+
+	.card__meta {
+		margin: 0;
+		font-size: var(--text-xs);
+		letter-spacing: var(--tracking-wide);
+		text-transform: uppercase;
+		color: var(--color-text-muted);
+		font-weight: var(--weight-semibold);
+	}
+
+	.card__title {
+		margin: 0;
+		font-size: var(--text-lg);
+		line-height: var(--leading-snug);
+	}
+
+	.card__title a {
+		color: var(--color-text);
+		text-decoration: none;
+	}
+
+	.card__title a:hover,
+	.card__title a:focus-visible {
+		color: var(--color-accent);
+	}
+
+	.card__description {
+		margin: 0;
+		font-size: var(--text-sm);
+		line-height: var(--leading-relaxed);
+		color: var(--color-text-muted);
+	}
+
+	.mobilisation__empty {
+		font-size: var(--text-base);
+		color: var(--color-text-muted);
+	}
+</style>
