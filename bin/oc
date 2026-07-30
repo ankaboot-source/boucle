@@ -90,13 +90,13 @@ PROMPT=$(build_prompt "$ROLE")
 
 if [ "$DRY_RUN" = "true" ]; then
   echo "[boucle] DRY RUN — agent output goes to log only, nothing pushed"
-  opencode run --agent "$AGENT" --auto "$PROMPT" 2>&1 || true
+  opencode run --agent "$AGENT" --auto --log-level WARN "$PROMPT" 2>&1 || true
   # In dry run, we don't assert side effects
   exit 0
 fi
 
 AGENT_EXIT=0
-opencode run --agent "$AGENT" --auto "$PROMPT" || AGENT_EXIT=$?
+opencode run --agent "$AGENT" --auto --log-level WARN "$PROMPT" || AGENT_EXIT=$?
 
 # ── 6. Restore scrubbed secrets ───────────────────────────────────────
 if [ -n "$SCRUBBED_CF_TOKEN" ]; then

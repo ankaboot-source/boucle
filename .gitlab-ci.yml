@@ -45,10 +45,14 @@ default:
   tags: [tooling]
   before_script:
     - |
-      set -x
+      # Trace commands only when CI_DEBUG_TRACE is set (GitLab's native debug flag).
+      # Default: silent — keeps logs readable and avoids dumping JSON/code in trace output.
+      [[ "${CI_DEBUG_TRACE:-false}" == "true" ]] && set -x
       export PATH="$HOME/.local/bin:$PATH"
       export GITLAB_TOKEN="$BOUCLE_TOKEN"
       export GITLAB_HOST="$BOUCLE_FORGE_HOST"
+      # Silence glab update notifier (spams stderr on every call otherwise).
+      export GLAB_NO_UPDATE_NOTIFIER=true
 
       # ── curl + jq (slim image / shell host may lack both) ──────────
       if ! command -v curl &>/dev/null || ! command -v jq &>/dev/null || ! command -v git &>/dev/null; then
