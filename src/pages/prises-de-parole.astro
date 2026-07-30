@@ -1,0 +1,339 @@
+---
+/*
+ * /prises-de-parole — Prises de parole index.
+ *
+ * Lists every entry in the `communiques` content collection, sorted
+ * newest first. Each card links to the per-entry page at
+ * `/prises-de-parole/<slug>/` and renders the first inline image from
+ * the Markdown body as a thumbnail (or a neutral placeholder when the
+ * entry has no images).
+ *
+ * Slug strategy: Astro's `glob()` loader assigns each Markdown file
+ * an `id` equal to its filename (minus the `.md` extension). The
+ * migration script writes each file as `YYYY-MM-DD-<slug>.md`, so we
+ * strip the `YYYY-MM-DD-` prefix to keep the URL identical to the
+ * legacy WordPress slug (`/prises-de-parole/<legacy-slug>/`).
+ */
+import Layout from "../layouts/Layout.astro";
+import { getCollection } from "astro:content";
+
+type Entry = Awaited<ReturnType<typeof getCollection<"communiques">>>[number];
+
+const entries: Entry[] = (await getCollection("communiques"))
+	// Sort newest first so the index reads chronologically.
+	.sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+
+// Strip the `YYYY-MM-DD-` date prefix from `entry.id` so the URL
+// mirrors the legacy WordPress slug.
+const entrySlug = (entry: Entry): string =>
+	entry.id.replace(/^\d{4}-\d{2}-\d{2}-/, "");
+
+// Pull the first inline image reference from a communiqué's body so
+// the index can render a thumbnail. Returns `null` when the body has
+// no images, in which case the card falls back to a neutral
+// placeholder.
+const firstImage = (entry: Entry): string | null => {
+	const m = (entry.body ?? "").match(/!\[.*?\]\((\/[^)\s]+)\)/);
+	return m ? m[1] : null;
+};
+
+const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
+	day: "numeric",
+	month: "long",
+	year: "numeric",
+});
+
+const totalLabel = `${entries.length} prise${entries.length > 1 ? "s" : ""} de parole`;
+---
+
+<Layout
+	title="Prises de parole — Urgence Palestine"
+	description="Communiqués et analyses politiques du Collectif Urgence Palestine : prises de position officielles, communiqués de presse et analyses de la situation en Palestine."
+>
+	<main id="main" class="prises-de-parole">
+		<!--
+		  ====================================================================
+		  Page header
+		  ====================================================================
+		-->
+		<header class="prises-de-parole__header">
+			<p class="eyebrow">Prises de parole</p>
+			<h1 class="prises-de-parole__title">
+				Communiqués &amp; analyses politiques.
+			</h1>
+			<p class="prises-de-parole__lede">
+				Les <strong>prises de position officielles</strong> du Collectif
+				Urgence Palestine&nbsp;: communiqués de presse, analyses
+				politiques et déclarations publiques. <span class="prises-de-parole__count">{totalLabel}</span>
+			</p>
+		</header>
+
+		<!--
+		  ====================================================================
+		  Entry list — each card links to the per-entry page and surfaces
+		  the first inline image of the Markdown body as a thumbnail.
+		  ====================================================================
+		-->
+		<ul class="prises-de-parole__list" role="list">
+			{
+				entries.map((entry) => {
+					const slug = entrySlug(entry);
+					const thumb = firstImage(entry);
+					return (
+						<li class="entry-card">
+							<a class="entry-card__link" href={`/prises-de-parole/${slug}/`}>
+								<div class="entry-card__media">
+									{thumb ? (
+										<img
+											class="entry-card__image"
+											src={thumb}
+											alt=""
+											loading="lazy"
+											decoding="async"
+											width="540"
+											height="540"
+										/>
+									) : (
+										<div
+											class="entry-card__placeholder"
+											aria-hidden="true"
+										/>
+									)}
+								</div>
+								<div class="entry-card__body">
+									<p class="entry-card__meta">
+										<time datetime={entry.data.date.toISOString()}>
+											{dateFormatter.format(entry.data.date)}
+										</time>
+									</p>
+									<h2 class="entry-card__title">{entry.data.title}</h2>
+									{entry.data.description && (
+										<p class="entry-card__description">
+											{entry.data.description}
+										</p>
+									)}
+									<span class="entry-card__cta" aria-hidden="true">
+										Lire <span>→</span>
+									</span>
+								</div>
+							</a>
+						</li>
+					);
+				})
+			}
+		</ul>
+
+		{
+			entries.length === 0 && (
+				<p class="prises-de-parole__empty">
+					Aucun communiqué pour l'instant. Revenez bientôt.
+				</p>
+			)
+		}
+	</main>
+</Layout>
+
+<style>
+	.eyebrow {
+		font-family: var(--font-body);
+		font-size: var(--text-xs);
+		font-weight: var(--weight-bold);
+		letter-spacing: var(--tracking-mega);
+		text-transform: uppercase;
+		color: var(--color-accent);
+		margin: 0;
+	}
+
+	/* ---------- Page wrapper ---------- */
+	.prises-de-parole {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2xl);
+		padding-block: var(--space-xl) var(--space-3xl);
+		width: min(100% - 2 * var(--space-s), var(--container-wide));
+		margin-inline: auto;
+	}
+
+	/* ---------- Header ---------- */
+	.prises-de-parole__header {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-s);
+		max-width: 60rem;
+	}
+
+	.prises-de-parole__title {
+		font-family: var(--font-heading);
+		font-size: var(--text-4xl);
+		line-height: var(--leading-tight);
+		letter-spacing: var(--tracking-tight);
+		margin: 0;
+	}
+
+	.prises-de-parole__lede {
+		font-size: var(--text-lg);
+		line-height: var(--leading-relaxed);
+		color: var(--color-text-muted);
+		margin: 0;
+		max-width: 60ch;
+	}
+
+	.prises-de-parole__count {
+		font-weight: var(--weight-semibold);
+		color: var(--color-ink);
+	}
+
+	/* ---------- Card grid ---------- */
+	.prises-de-parole__list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: var(--space-l);
+	}
+
+	@media (min-width: 40rem) {
+		.prises-de-parole__list {
+			grid-template-columns: repeat(2, 1fr);
+		}
+	}
+
+	@media (min-width: 64rem) {
+		.prises-de-parole__list {
+			grid-template-columns: repeat(3, 1fr);
+		}
+	}
+
+	/* ---------- Card ---------- */
+	.entry-card {
+		display: flex;
+	}
+
+	.entry-card__link {
+		display: flex;
+		flex-direction: column;
+		width: 100%;
+		background: var(--color-bg-soft);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-m);
+		overflow: hidden;
+		text-decoration: none;
+		color: var(--color-ink);
+		transition:
+			transform var(--duration-base) var(--ease-out),
+			border-color var(--duration-base) var(--ease-out),
+			box-shadow var(--duration-base) var(--ease-out);
+	}
+
+	.entry-card__link:hover,
+	.entry-card__link:focus-visible {
+		transform: translateY(-2px);
+		border-color: var(--color-ink);
+		box-shadow: var(--shadow-lift);
+	}
+
+	.entry-card__link:focus-visible {
+		outline: 2px solid var(--color-accent);
+		outline-offset: 3px;
+	}
+
+	.entry-card__media {
+		aspect-ratio: 16 / 9;
+		background: var(--color-paper-edge);
+		overflow: hidden;
+	}
+
+	.entry-card__image {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+
+	.entry-card__placeholder {
+		width: 100%;
+		height: 100%;
+		background: repeating-linear-gradient(
+			45deg,
+			var(--color-paper-edge) 0 12px,
+			var(--color-paper-soft) 12px 24px
+		);
+	}
+
+	.entry-card__body {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2xs);
+		padding: var(--space-m);
+		flex: 1;
+	}
+
+	.entry-card__meta {
+		margin: 0;
+		font-size: var(--text-xs);
+		letter-spacing: var(--tracking-wide);
+		text-transform: uppercase;
+		color: var(--color-text-muted);
+		font-weight: var(--weight-semibold);
+	}
+
+	.entry-card__title {
+		font-family: var(--font-heading);
+		font-size: var(--text-lg);
+		line-height: var(--leading-snug);
+		letter-spacing: var(--tracking-tight);
+		margin: 0;
+		/* Clamp to 3 lines so the grid stays even even with long titles. */
+		display: -webkit-box;
+		-webkit-line-clamp: 3;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+
+	.entry-card__description {
+		font-size: var(--text-sm);
+		line-height: var(--leading-relaxed);
+		color: var(--color-text-muted);
+		margin: 0;
+		/* Clamp to 3 lines so the grid stays even. */
+		display: -webkit-box;
+		-webkit-line-clamp: 3;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+
+	.entry-card__cta {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2xs);
+		margin-top: auto;
+		padding-top: var(--space-2xs);
+		font-family: var(--font-body);
+		font-size: var(--text-sm);
+		font-weight: var(--weight-semibold);
+		color: var(--color-accent);
+	}
+
+	.entry-card__cta span {
+		transition: transform var(--duration-base) var(--ease-out);
+	}
+
+	.entry-card__link:hover .entry-card__cta span {
+		transform: translateX(4px);
+	}
+
+	/* ---------- Empty state ---------- */
+	.prises-de-parole__empty {
+		font-size: var(--text-base);
+		color: var(--color-text-muted);
+	}
+
+	/* ---------- Reduced motion ---------- */
+	@media (prefers-reduced-motion: reduce) {
+		.entry-card__link,
+		.entry-card__cta span {
+			transition: none;
+		}
+	}
+</style>
