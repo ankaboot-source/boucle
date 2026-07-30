@@ -26,9 +26,9 @@ public_folder: /media
 # Collections
 # =============================================================================
 # Three content streams:
-#   - communiques      → Communiqués / Prises de parole
-#   - sections-locales → Sections locales (Collectif)
-#   - mobilisation     → Événements / Mobilisation
+#   - communiques  → Communiqués / Prises de parole
+#   - collectif    → Sections locales du Collectif
+#   - mobilisation → Événements / Mobilisation
 #
 # The `folder` path is relative to the repository root, so it matches the
 # `src/content/<name>/` path used by Astro's `glob()` loader in
@@ -54,13 +54,13 @@ collections:
       - { name: body, label: Contenu, widget: markdown }
 
   # ---------------------------------------------------------------------------
-  # Sections locales (Collectif)
+  # Collectif (Sections locales)
   # ---------------------------------------------------------------------------
-  - name: sections-locales
-    label: Sections locales
+  - name: collectif
+    label: Collectif
     label_singular: Section locale
     description: Fiches des sections locales du collectif (Marseille, Lyon, etc.).
-    folder: src/content/sections-locales
+    folder: src/content/collectif
     create: true
     delete: true
     slug: "{{slug}}"
@@ -88,4 +88,14 @@ collections:
       - { name: date, label: Date, widget: datetime, date_format: YYYY-MM-DD, time_format: false, picker_utc: true }
       - { name: location, label: Lieu, widget: string }
       - { name: description, label: Résumé, widget: text, required: false }
+      - name: category
+        label: Catégorie
+        widget: select
+        required: false
+        default: evenement
+        options:
+          - { label: Événement, value: evenement }
+          - { label: Kit militant, value: kit-militant }
+          - { label: Boycott, value: boycott }
+          - { label: Prisonniers, value: prisonniers }
       - { name: body, label: Détails, widget: markdown }
