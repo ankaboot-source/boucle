@@ -69,7 +69,9 @@ The Disposition field is not a free choice. It is **determined** by your Questio
 
 3. **If you have NO blocking questions AND Size is S or M**:
    - Disposition **MUST** be `READY`.
-   - The worker will implement immediately.
+   - For Size S the worker will implement immediately.
+   - For Size M (and in `BOUCLE_SPEC_PROFILE=strict` mode, also Size S), the loop pauses at `boucle:spec-review` and waits for the author to validate the acceptance criteria (by adding `boucle:spec-approved`) before the worker starts. The gate is applied by the CI job after triage based on size + profile — triage does not decide this.
+   - Because the author will review the spec before any code is written, your acceptance criteria are the contract they will sign off on. Make them especially clear, complete, and verifiable (machine-checkable or visible on the rendered page). Cover scope, edge cases, and any non-obvious UX/visual decisions.
 
 **Summary: Questions present → NEEDS-INFO (always). No questions + Size L → NEEDS-SPLIT. No questions + Size S/M → READY.**
 
