@@ -30,3 +30,4 @@ pnpm-debug.log*
 
 # boucle state files (per-issue work state, not for version control)
 .boucle/
+.wrangler/

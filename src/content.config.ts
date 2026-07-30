@@ -37,10 +37,10 @@ const communiques = defineCollection({
 });
 
 // =============================================================================
-// Sections locales (Collectif)
+// Collectif (Sections locales)
 // =============================================================================
-const sectionsLocales = defineCollection({
-	loader: glob({ pattern: "**/*.md", base: "./src/content/sections-locales" }),
+const collectif = defineCollection({
+	loader: glob({ pattern: "**/*.md", base: "./src/content/collectif" }),
 	schema: z.object({
 		// `city` doubles as the entry identifier (slug source) in Sveltia.
 		city: requiredString,
@@ -62,11 +62,16 @@ const mobilisation = defineCollection({
 		date: z.coerce.date(),
 		location: requiredString,
 		description: optionalString,
+		// Optional category — defaults to `evenement` so existing entries
+		// that omit it keep validating unchanged.
+		category: z
+			.enum(["evenement", "kit-militant", "boycott", "prisonniers"])
+			.default("evenement"),
 	}),
 });
 
 export const collections = {
 	communiques,
-	"sections-locales": sectionsLocales,
+	collectif,
 	mobilisation,
 };
