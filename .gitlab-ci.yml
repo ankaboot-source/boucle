@@ -190,6 +190,12 @@ dispatch:
           echo "boucle:todo just added (likely by triage) — worker already triggered, skipping"
           exit 0
         fi
+      elif echo "$LABELS" | grep -q "boucle:spec-approved"; then
+        # Author approved the spec (added boucle:spec-approved to an issue that
+        # was at boucle:spec-review). Trigger the worker — it will relabel to
+        # boucle:working (replacing all boucle: labels, including the stale
+        # boucle:spec-review). We do NOT strip boucle:spec-review here.
+        SHOULD_WORK=true
       elif echo "$LABELS" | grep -q "boucle:approved"; then
         # Author approved the MR (added boucle:approved to an issue that was
         # at boucle:approval). Trigger the merger job, which rebases the MR
@@ -316,11 +322,40 @@ triage:
           if [ "$SIZE" = "L" ]; then
             set_boucle_label "$IID" "boucle:human,size:l"
           else
-            set_boucle_label "$IID" "boucle:todo,size:$(echo $SIZE | tr '[:upper:]' '[:lower:]')"
-            # Chain to worker
-            curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-              -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-              -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+            # Spec-validation gate (configurable via BOUCLE_SPEC_PROFILE).
+            # Default "product" gates M, skips S. "off" never gates (legacy).
+            # "strict" gates all sizes. An unknown profile falls back to "product".
+            SPEC_PROFILE="${BOUCLE_SPEC_PROFILE:-product}"
+            SHOULD_GATE=false
+            case "$SPEC_PROFILE" in
+              off) SHOULD_GATE=false ;;
+              strict) SHOULD_GATE=true ;;
+              product) [ "$SIZE" = "M" ] && SHOULD_GATE=true ;;
+              *) echo "WARN: unknown BOUCLE_SPEC_PROFILE '$SPEC_PROFILE' — treating as product"
+                 [ "$SIZE" = "M" ] && SHOULD_GATE=true ;;
+            esac
+            if [ "$SHOULD_GATE" = "true" ]; then
+              # Pause for author to validate the spec (acceptance criteria) before
+              # the worker runs. Assign to the reporter (handles sub-issues via
+              # the parent's author — resolve_reporter_id defined above) and post
+              # a comment with clear next-action instructions. Do NOT trigger worker.
+              set_boucle_label "$IID" "boucle:spec-review"
+              AUTHOR_ID=$(resolve_reporter_id "$IID")
+              if [ -n "$AUTHOR_ID" ] && [ "$AUTHOR_ID" != "null" ]; then
+                curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$IID" \
+                  --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+                  --data-urlencode "assignee_ids[]=$AUTHOR_ID"
+              fi
+              SPEC_MSG=$(printf 'Review the acceptance criteria above. If they match what you want, add the label `boucle:spec-approved` to this issue to start implementation. If not, reply with corrections.')
+              glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+                -f body="$SPEC_MSG" > /dev/null
+            else
+              set_boucle_label "$IID" "boucle:todo,size:$(echo $SIZE | tr '[:upper:]' '[:lower:]')"
+              # Chain to worker
+              curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
+                -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+                -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+            fi
           fi
           ;;
         NEEDS-INFO)
@@ -1191,6 +1226,30 @@ doctor:
           RECOVERED=$((RECOVERED + 1))
         else
           echo "  → #$IID: no human reply after triage — still waiting for reporter"
+        fi
+      done
+
+      # Recover orphaned boucle:spec-review issues: the author added
+      # boucle:spec-approved but the dispatch pipeline was canceled/orphaned
+      # before it could trigger the worker. Issue still has boucle:spec-review
+      # (dispatch didn't run to strip it) alongside boucle:spec-approved.
+      # Worker relabels to boucle:working on start, which clears both.
+      SPEC_REVIEW_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:spec-review&per_page=100" \
+        | jq -r '.[].iid')
+
+      for IID in $SPEC_REVIEW_ISSUES; do
+        echo "Checking #$IID (boucle:spec-review) for spec approval..."
+        LABELS=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID" | jq -r '.labels | join(",")')
+        if echo "$LABELS" | grep -q "boucle:spec-approved"; then
+          echo "  → #$IID has boucle:spec-approved — orphaned spec gate, re-triggering worker"
+          set_boucle_label "$IID" "boucle:todo"
+          curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
+            -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+            -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+          echo "  → re-triggered worker for #$IID"
+          RECOVERED=$((RECOVERED + 1))
+        else
+          echo "  → #$IID: still waiting for author to add boucle:spec-approved"
         fi
       done
 
