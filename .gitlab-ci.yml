@@ -868,3 +868,104 @@ e2e:
         echo "FAIL: e2e verdict not parsable" >&2; exit 1
       fi
   timeout: 20m
+
+# ── Doctor (scheduled recovery) ──────────────────────────────────────────
+# Runs on a schedule (every 10 min). Detects orphaned triages: issues with
+# boucle:needs-info label that have a human reply after the last triage
+# comment. Re-triggers triage for them. Also detects stuck boucle:triage
+# issues with no active pipeline (canceled before dispatch ran).
+doctor:
+  stage: verify
+  rules:
+    - if: $BOUCLE_ENABLED != "true"
+      when: never
+    # Only run on scheduled pipelines (not webhook/trigger pipelines)
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  script:
+    - |
+      HOST="$BOUCLE_FORGE_HOST"
+      PID="$CI_PROJECT_ID"
+      RECOVERED=0
+
+      # Fetch all open issues with boucle:needs-info label
+      NEEDS_INFO_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:needs-info&per_page=100" \
+        | jq -r '.[].iid')
+
+      for IID in $NEEDS_INFO_ISSUES; do
+        echo "Checking #$IID (boucle:needs-info)..."
+
+        # Fetch notes for the issue (GitLab returns newest-first)
+        NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
+
+        # Find the last triage comment (has <!-- boucle:triage marker)
+        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | last | .id // 0')
+
+        # Find the last human (non-bot) note after the triage comment
+        # A human reply means the reporter answered the blocking questions.
+        # If that reply exists but the issue still has boucle:needs-info, the
+        # triage pipeline was canceled/orphaned — re-trigger it.
+        HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" '
+          [.[] | select(.author.username != "up-bot") | select(.id > ($tid | tonumber))]
+          | length
+        ')
+
+        if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ]; then
+          echo "  → #$IID has a human reply after last triage comment — orphaned triage detected"
+          # Re-trigger: set boucle:triage label (preserve non-boucle labels)
+          CURRENT=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+          MERGED="${CURRENT:+$CURRENT,}boucle:triage"
+          glab api --hostname "$HOST" -X PUT "/projects/$PID/issues/$IID" -f labels="$MERGED" > /dev/null
+          # Trigger triage pipeline
+          curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
+            -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+            -F "variables[BOUCLE_ISSUE]=$IID" > /dev/null
+          echo "  → re-triggered triage for #$IID"
+          RECOVERED=$((RECOVERED + 1))
+        else
+          echo "  → #$IID: no human reply after triage — still waiting for reporter"
+        fi
+      done
+
+      # Also check for stuck boucle:triage issues (triage label set but no
+      # active pipeline running for them — e.g. pipeline was canceled).
+      # These have boucle:triage but no matching running/created pipeline.
+      TRIAGE_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:triage&per_page=100" \
+        | jq -r '.[].iid')
+
+      for IID in $TRIAGE_ISSUES; do
+        echo "Checking #$IID (boucle:triage) for stuck pipeline..."
+        # Check if there's a running/created pipeline for this issue.
+        # We can't easily map pipelines to issues, so check if the triage
+        # label has been stuck for >15 min (no triage comment posted recently).
+        NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
+        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | last | .id // 0')
+
+        # If there's a recent triage comment (within last 15 min), skip —
+        # triage may still be running. Only re-trigger if no triage comment
+        # exists at all, or the last one is older than 15 min.
+        LAST_TRIAGE_TIME=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" '
+          [.[] | select(.id == ($tid | tonumber))] | first | .created_at // empty
+        ' 2>/dev/null)
+
+        if [ -n "$LAST_TRIAGE_TIME" ]; then
+          # Parse ISO timestamp and compare to now-15min
+          LAST_EPOCH=$(date -d "$LAST_TRIAGE_TIME" +%s 2>/dev/null || echo 0)
+          NOW_EPOCH=$(date +%s)
+          AGE=$((NOW_EPOCH - LAST_EPOCH))
+          if [ "$AGE" -lt 900 ]; then
+            echo "  → #$IID: last triage comment is ${AGE}s old (< 15 min) — still in progress, skipping"
+            continue
+          fi
+        fi
+
+        # No recent triage comment — re-trigger
+        echo "  → #$IID: boucle:triage with no recent triage comment — re-triggering"
+        curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
+          -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+          -F "variables[BOUCLE_ISSUE]=$IID" > /dev/null
+        echo "  → re-triggered triage for #$IID"
+        RECOVERED=$((RECOVERED + 1))
+      done
+
+      echo "Doctor complete. Recovered $RECOVERED orphaned issue(s)."
+  timeout: 5m
