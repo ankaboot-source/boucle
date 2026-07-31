@@ -179,13 +179,27 @@ dispatch:
         fi
       fi
 
-      # Label helper: preserve non-boucle labels when writing a boucle label
+      # Label helper: preserve non-boucle labels when writing a boucle label.
+      # The jq filter uses startswith("boucle:") which catches BOTH the detail
+      # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
+      # starts with "boucle:"), so we strip all boucle-managed labels when
+      # writing a new pair. Caller passes detail as $2 and gross as $3.
       set_boucle_label() {
-        local iid="$1" new="$2"
+        local iid="$1" new="$2" gross="$3"
         local current
         current=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
-        local merged="${current:+$current,}$new"
+        local merged="${current:+$current,}$new,$gross"
         glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
+        # When the issue moves to the bot side, assign it to the bot user so
+        # the board reflects who owns the next action and humans aren't spammed.
+        # BOUCLE_BOT_ID is the GitLab user ID of the bot (set via bin/setup).
+        # Best-effort: skip silently if unset (backward compat with setups
+        # that haven't run bin/setup --bot-id yet).
+        if [ "$gross" = "boucle::status::bot" ] && [ -n "${BOUCLE_BOT_ID:-}" ]; then
+          curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
+            --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+            --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || true
+        fi
       }
 
       # Get current labels
@@ -223,12 +237,16 @@ dispatch:
           echo "boucle:todo just added (likely by triage) — worker already triggered, skipping"
           exit 0
         fi
-      elif echo "$LABELS" | grep -q "boucle:spec-approved"; then
-        # Author approved the spec (added boucle:spec-approved to an issue that
-        # was at boucle:spec-review). Trigger the worker — it will relabel to
-        # boucle:working (replacing all boucle: labels, including the stale
-        # boucle:spec-review). We do NOT strip boucle:spec-review here.
-        SHOULD_WORK=true
+      elif echo "$LABELS" | grep -q "boucle:spec-review"; then
+        # Author approved the spec (added a non-bot note to an issue that
+        # was at boucle:spec-review). The boucle:spec-approved label was
+        # removed — authors now approve by replying instead. Trigger the
+        # worker — it will relabel to boucle:working (replacing all boucle:
+        # labels, including the stale boucle:spec-review). We do NOT strip
+        # boucle:spec-review here.
+        if [ "$OBJECT_KIND" = "note" ] && [ "$ACTOR" != "up-bot" ]; then
+          SHOULD_WORK=true
+        fi
       elif [ -z "$LABELS" ] || [ "$ACTION" = "open" ]; then
         # New issue with no boucle label → triage
         SHOULD_TRIAGE=true
@@ -238,9 +256,9 @@ dispatch:
         echo "Triggering triage for issue #$IID"
         # Chain to triage job by writing to a file that downstream jobs read
         echo "$IID" > .boucle-issue
-        # Apply boucle:triage label if not present (preserving any non-boucle labels)
+        # Apply boucle:triage + boucle::status::bot if not present (preserving any non-boucle labels)
         if ! echo "$LABELS" | grep -q "boucle:triage"; then
-          set_boucle_label "$IID" "boucle:triage"
+          set_boucle_label "$IID" "boucle:triage" "boucle::status::bot"
         fi
       elif [ "$SHOULD_WORK" = "true" ]; then
         echo "Triggering worker for issue #$IID (boucle:todo re-trigger)"
@@ -290,13 +308,27 @@ triage:
       fi
       export BOUCLE_ISSUE="$IID"
 
-      # Label helper: preserve non-boucle labels when writing a boucle label
+      # Label helper: preserve non-boucle labels when writing a boucle label.
+      # The jq filter uses startswith("boucle:") which catches BOTH the detail
+      # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
+      # starts with "boucle:"), so we strip all boucle-managed labels when
+      # writing a new pair. Caller passes detail as $2 and gross as $3.
       set_boucle_label() {
-        local iid="$1" new="$2"
+        local iid="$1" new="$2" gross="$3"
         local current
         current=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
-        local merged="${current:+$current,}$new"
+        local merged="${current:+$current,}$new,$gross"
         glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
+        # When the issue moves to the bot side, assign it to the bot user so
+        # the board reflects who owns the next action and humans aren't spammed.
+        # BOUCLE_BOT_ID is the GitLab user ID of the bot (set via bin/setup).
+        # Best-effort: skip silently if unset (backward compat with setups
+        # that haven't run bin/setup --bot-id yet).
+        if [ "$gross" = "boucle::status::bot" ] && [ -n "${BOUCLE_BOT_ID:-}" ]; then
+          curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
+            --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+            --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || true
+        fi
       }
 
       # Resolve the human reporter to notify on NEEDS-INFO. For a sub-issue
@@ -375,7 +407,7 @@ triage:
       case "$DISPOSITION" in
         READY)
           if [ "$SIZE" = "L" ]; then
-            set_boucle_label "$IID" "boucle:human,size:l"
+            set_boucle_label "$IID" "boucle:human,size:l" "boucle::status::human"
           else
             # Spec-validation gate (configurable via BOUCLE_SPEC_PROFILE).
             # Default "product" gates M, skips S. "off" never gates (legacy).
@@ -394,18 +426,18 @@ triage:
               # the worker runs. Assign to the reporter (handles sub-issues via
               # the parent's author — resolve_reporter_id defined above) and post
               # a comment with clear next-action instructions. Do NOT trigger worker.
-              set_boucle_label "$IID" "boucle:spec-review"
+              set_boucle_label "$IID" "boucle:spec-review" "boucle::status::human"
               AUTHOR_ID=$(resolve_reporter_id "$IID")
               if [ -n "$AUTHOR_ID" ] && [ "$AUTHOR_ID" != "null" ]; then
                 curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$IID" \
                   --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
                   --data-urlencode "assignee_ids[]=$AUTHOR_ID"
               fi
-              SPEC_MSG=$(printf 'Review the acceptance criteria above. If they match what you want, add the label `boucle:spec-approved` to this issue to start implementation. If not, reply with corrections.')
+              SPEC_MSG=$(printf 'Review the acceptance criteria above. If they match what you want, reply to this issue to start implementation. If not, reply with corrections.')
               glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
                 -f body="$SPEC_MSG" > /dev/null
             else
-              set_boucle_label "$IID" "boucle:todo,size:$(echo $SIZE | tr '[:upper:]' '[:lower:]')"
+              set_boucle_label "$IID" "boucle:todo,size:$(echo $SIZE | tr '[:upper:]' '[:lower:]')" "boucle::status::bot"
               # Chain to worker
               curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
                 -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
@@ -414,7 +446,7 @@ triage:
           fi
           ;;
         NEEDS-INFO)
-          set_boucle_label "$IID" "boucle:needs-info"
+          set_boucle_label "$IID" "boucle:needs-info" "boucle::status::human"
           # Assign the issue to its reporter (author) so they're notified
           # and know to answer the blocking questions. For a sub-issue
           # created by the bot via NEEDS-SPLIT, the author is up-bot — so
@@ -467,7 +499,7 @@ triage:
           # Skip if still no parseable sub-issues after searching all comments
           if [ -z "$SUBISSUES_SECTION" ] || ! echo "$SUBISSUES_SECTION" | grep -qE '^### Sub-issue [0-9]+[[:space:]]*:'; then
             echo "NEEDS-SPLIT but no parseable sub-issues — falling back to boucle:human"
-            set_boucle_label "$IID" "boucle:human"
+            set_boucle_label "$IID" "boucle:human" "boucle::status::human"
             glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
               -f body="Triage requested NEEDS-SPLIT but no parseable sub-issues were found in the triage comment. Please split this issue manually." > /dev/null
             exit 0
@@ -529,12 +561,19 @@ triage:
                 CREATED_JSON=$(glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues" \
                   -f title="$CUR_TITLE" \
                   -f description="$SUB_BODY" \
-                  -f labels="boucle:triage,size:$SUB_SIZE_LOWER" 2>/dev/null) || CREATED_JSON=""
+                  -f labels="boucle:triage,boucle::status::bot,size:$SUB_SIZE_LOWER" 2>/dev/null) || CREATED_JSON=""
                 NEW_IID=$(echo "$CREATED_JSON" | jq -r '.iid // empty' 2>/dev/null || true)
                 if [ -n "$NEW_IID" ] && [ "$NEW_IID" != "null" ]; then
                   CREATED_IIDS="${CREATED_IIDS:+$CREATED_IIDS,}$NEW_IID"
                   SUBISSUE_COUNT=$((SUBISSUE_COUNT + 1))
                   echo "  → created #$NEW_IID"
+                  # Assign the sub-issue to the bot (it's on the bot side from
+                  # creation). Best-effort: skip silently if BOUCLE_BOT_ID unset.
+                  if [ -n "${BOUCLE_BOT_ID:-}" ]; then
+                    curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$NEW_IID" \
+                      --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+                      --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || true
+                  fi
                   # Set the parent via the work-items hierarchy API (child-items).
                   # This creates the real "Éléments enfants" relationship visible
                   # in the GitLab UI. Requires the parent's GLOBAL work-item ID
@@ -586,7 +625,7 @@ triage:
 
           if [ "$SUBISSUE_COUNT" -eq 0 ]; then
             echo "NEEDS-SPLIT but zero sub-issues created — falling back to boucle:human"
-            set_boucle_label "$IID" "boucle:human"
+            set_boucle_label "$IID" "boucle:human" "boucle::status::human"
             glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
               -f body="Triage requested NEEDS-SPLIT but no sub-issues could be created from the triage comment. Please split this issue manually." > /dev/null
           else
@@ -600,7 +639,7 @@ triage:
             # Mark the parent boucle:split so dispatch and doctor stop re-triaging it.
             # The parent stays open and is closed by maybe_close_parent() (e2e) or
             # the doctor's split-parent cascade when all sub-issues close.
-            set_boucle_label "$IID" "boucle:split"
+            set_boucle_label "$IID" "boucle:split" "boucle::status::bot"
             echo "Split parent #$IID into $SUBISSUE_COUNT sub-issue(s): $CREATED_IIDS (parent marked boucle:split)"
             if [ "$PARSE_FAILURES" -gt 0 ]; then
               echo "WARN: $PARSE_FAILURES sub-issue(s) failed to create"
@@ -610,7 +649,7 @@ triage:
           ;;
         *)
           echo "Unparsable disposition: $DISPOSITION → routing to human"
-          set_boucle_label "$IID" "boucle:human"
+          set_boucle_label "$IID" "boucle:human" "boucle::status::human"
           ;;
       esac
 
@@ -638,17 +677,31 @@ worker:
       ITERATION="${BOUCLE_ITERATION:-1}"
       export BOUCLE_ITERATION
 
-      # Label helper: preserve non-boucle labels when writing a boucle label
+      # Label helper: preserve non-boucle labels when writing a boucle label.
+      # The jq filter uses startswith("boucle:") which catches BOTH the detail
+      # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
+      # starts with "boucle:"), so we strip all boucle-managed labels when
+      # writing a new pair. Caller passes detail as $2 and gross as $3.
       set_boucle_label() {
-        local iid="$1" new="$2"
+        local iid="$1" new="$2" gross="$3"
         local current
         current=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
-        local merged="${current:+$current,}$new"
+        local merged="${current:+$current,}$new,$gross"
         glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
+        # When the issue moves to the bot side, assign it to the bot user so
+        # the board reflects who owns the next action and humans aren't spammed.
+        # BOUCLE_BOT_ID is the GitLab user ID of the bot (set via bin/setup).
+        # Best-effort: skip silently if unset (backward compat with setups
+        # that haven't run bin/setup --bot-id yet).
+        if [ "$gross" = "boucle::status::bot" ] && [ -n "${BOUCLE_BOT_ID:-}" ]; then
+          curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
+            --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+            --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || true
+        fi
       }
 
       # Set working label
-      set_boucle_label "$BOUCLE_ISSUE" "boucle:working"
+      set_boucle_label "$BOUCLE_ISSUE" "boucle:working" "boucle::status::bot"
 
       # Fetch latest master so the branch is based on current master, not the
       # stale CI clone (master may have advanced between clone and this job).
@@ -717,7 +770,7 @@ worker:
         echo "FAIL: rebase onto origin/master conflicted — master advanced since branch creation." >&2
         echo "Escalating to human (boucle:human). The worker cannot auto-resolve merge conflicts." >&2
         git rebase --abort 2>/dev/null || true
-        set_boucle_label "$BOUCLE_ISSUE" "boucle:human"
+        set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
         glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
           -f body="⚠️ Worker could not rebase onto master (conflict). Master advanced since this branch was created. Human rebase needed." > /dev/null
         exit 1
@@ -810,7 +863,7 @@ worker:
       fi
 
       # Set review label
-      set_boucle_label "$BOUCLE_ISSUE" "boucle:review"
+      set_boucle_label "$BOUCLE_ISSUE" "boucle:review" "boucle::status::bot"
 
       # Chain to reviewer
       curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
@@ -833,13 +886,27 @@ reviewer:
     - |
       export BOUCLE_ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
 
-      # Label helper: preserve non-boucle labels when writing a boucle label
+      # Label helper: preserve non-boucle labels when writing a boucle label.
+      # The jq filter uses startswith("boucle:") which catches BOTH the detail
+      # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
+      # starts with "boucle:"), so we strip all boucle-managed labels when
+      # writing a new pair. Caller passes detail as $2 and gross as $3.
       set_boucle_label() {
-        local iid="$1" new="$2"
+        local iid="$1" new="$2" gross="$3"
         local current
         current=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
-        local merged="${current:+$current,}$new"
+        local merged="${current:+$current,}$new,$gross"
         glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
+        # When the issue moves to the bot side, assign it to the bot user so
+        # the board reflects who owns the next action and humans aren't spammed.
+        # BOUCLE_BOT_ID is the GitLab user ID of the bot (set via bin/setup).
+        # Best-effort: skip silently if unset (backward compat with setups
+        # that haven't run bin/setup --bot-id yet).
+        if [ "$gross" = "boucle::status::bot" ] && [ -n "${BOUCLE_BOT_ID:-}" ]; then
+          curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
+            --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+            --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || true
+        fi
       }
 
       # Find the MR for this issue
@@ -894,7 +961,7 @@ reviewer:
               --data-urlencode "assignee_ids[]=$AUTHOR_ID"
           fi
           # Set boucle:approval (waits for author to approve the MR natively)
-          set_boucle_label "$BOUCLE_ISSUE" "boucle:approval"
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:approval" "boucle::status::human"
           APPROVAL_MSG=$(printf '✅ Reviewer verdict: **PASS**. MR !%s is ready to merge.\n\nThe MR has been assigned to you for approval. To approve and merge, click the **Approve** button on [MR !%s](%s). The merger will then rebase the MR onto master and merge it serially (avoiding conflicts with other approved MRs).' "$MR_IID" "$MR_IID" "$MR_URL")
           glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
             -f body="$APPROVAL_MSG" > /dev/null
@@ -902,18 +969,19 @@ reviewer:
         FAIL)
           ITERATION="${BOUCLE_ITERATION:-1}"
           if [ "$ITERATION" -lt 3 ]; then
-            set_boucle_label "$BOUCLE_ISSUE" "boucle:todo"
+            set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
             # Chain back to worker with incremented iteration
             curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
               -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
               -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=worker" \
               -F "variables[BOUCLE_ITERATION]=$((ITERATION+1))" > /dev/null
           else
-            set_boucle_label "$BOUCLE_ISSUE" "boucle:blocked"
+            # 3rd reviewer FAIL: fused into boucle:human (was boucle:blocked, deleted)
+            set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
           fi
           ;;
         UNCERTAIN|*)
-          set_boucle_label "$BOUCLE_ISSUE" "boucle:human"
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
           glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
             -f body="Verdict unparsable or uncertain. Human review needed." > /dev/null
           ;;
@@ -948,17 +1016,31 @@ merger:
     - |
       export BOUCLE_ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
 
-      # Label helper: preserve non-boucle labels when writing a boucle label
+      # Label helper: preserve non-boucle labels when writing a boucle label.
+      # The jq filter uses startswith("boucle:") which catches BOTH the detail
+      # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
+      # starts with "boucle:"), so we strip all boucle-managed labels when
+      # writing a new pair. Caller passes detail as $2 and gross as $3.
       set_boucle_label() {
-        local iid="$1" new="$2"
+        local iid="$1" new="$2" gross="$3"
         local current
         current=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
-        local merged="${current:+$current,}$new"
+        local merged="${current:+$current,}$new,$gross"
         glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
+        # When the issue moves to the bot side, assign it to the bot user so
+        # the board reflects who owns the next action and humans aren't spammed.
+        # BOUCLE_BOT_ID is the GitLab user ID of the bot (set via bin/setup).
+        # Best-effort: skip silently if unset (backward compat with setups
+        # that haven't run bin/setup --bot-id yet).
+        if [ "$gross" = "boucle::status::bot" ] && [ -n "${BOUCLE_BOT_ID:-}" ]; then
+          curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
+            --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+            --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || true
+        fi
       }
 
       # Set merging label
-      set_boucle_label "$BOUCLE_ISSUE" "boucle:merging"
+      set_boucle_label "$BOUCLE_ISSUE" "boucle:merging" "boucle::status::bot"
 
       # Find the MR for this issue
       MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?state=opened" \
@@ -966,7 +1048,7 @@ merger:
 
       if [ -z "$MR_IID" ]; then
         echo "FAIL: no open MR found for issue #$BOUCLE_ISSUE (branch boucle/$BOUCLE_ISSUE)" >&2
-        set_boucle_label "$BOUCLE_ISSUE" "boucle:human"
+        set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
         glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
           -f body="⚠️ Merger could not find an open MR for branch boucle/$BOUCLE_ISSUE. Human intervention needed." > /dev/null
         exit 1
@@ -985,7 +1067,7 @@ merger:
       if ! git rebase origin/master; then
         echo "FAIL: rebase onto origin/master conflicted — even after serial merge." >&2
         git rebase --abort 2>/dev/null || true
-        set_boucle_label "$BOUCLE_ISSUE" "boucle:human"
+        set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
         glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
           -f body="⚠️ Merger could not rebase MR !${MR_IID} onto master (conflict). Human rebase needed." > /dev/null
         exit 1
@@ -1013,7 +1095,7 @@ merger:
 
       if [ "$MERGE_STATUS" != "mergeable" ]; then
         echo "FAIL: MR !${MR_IID} not mergeable after rebase (status: $MERGE_STATUS)" >&2
-        set_boucle_label "$BOUCLE_ISSUE" "boucle:human"
+        set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
         glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
           -f body="⚠️ MR !${MR_IID} is not mergeable after rebase (status: $MERGE_STATUS). Human intervention needed." > /dev/null
         exit 1
@@ -1026,7 +1108,7 @@ merger:
 
       if [ -z "$MERGE_SHA" ]; then
         echo "FAIL: merge API call failed: $MERGE_RESULT" >&2
-        set_boucle_label "$BOUCLE_ISSUE" "boucle:human"
+        set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
         exit 1
       fi
 
@@ -1115,13 +1197,27 @@ e2e:
       export BOUCLE_LIVE_URL="$LIVE_URL"
       echo "E2E testing URL: $LIVE_URL"
 
-      # Label helper: preserve non-boucle labels when writing a boucle label
+      # Label helper: preserve non-boucle labels when writing a boucle label.
+      # The jq filter uses startswith("boucle:") which catches BOTH the detail
+      # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
+      # starts with "boucle:"), so we strip all boucle-managed labels when
+      # writing a new pair. Caller passes detail as $2 and gross as $3.
       set_boucle_label() {
-        local iid="$1" new="$2"
+        local iid="$1" new="$2" gross="$3"
         local current
         current=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
-        local merged="${current:+$current,}$new"
+        local merged="${current:+$current,}$new,$gross"
         glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
+        # When the issue moves to the bot side, assign it to the bot user so
+        # the board reflects who owns the next action and humans aren't spammed.
+        # BOUCLE_BOT_ID is the GitLab user ID of the bot (set via bin/setup).
+        # Best-effort: skip silently if unset (backward compat with setups
+        # that haven't run bin/setup --bot-id yet).
+        if [ "$gross" = "boucle::status::bot" ] && [ -n "${BOUCLE_BOT_ID:-}" ]; then
+          curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
+            --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+            --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || true
+        fi
       }
 
       # Close a GitLab issue (boucle:done is a board label, not a close state)
@@ -1266,7 +1362,7 @@ e2e:
 
       case "$VERDICT" in
         PASS)
-          set_boucle_label "$BOUCLE_ISSUE" "boucle:done"
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
           # boucle:done is a board label, not a GitLab close state — close the issue too
           close_issue "$BOUCLE_ISSUE"
           # If this issue is a sub-issue, check whether all siblings are closed
@@ -1279,7 +1375,7 @@ e2e:
           # identifiable in the board without opening it.
           E2E_ORIG_TITLE=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" 2>/dev/null | jq -r '.title // empty' | tr '\r\n\t' '   ' | sed 's/  */ /g; s/^ //; s/ $//' | cut -c1-60 | sed 's/ [^ ]*$//')
           E2E_NEW_TITLE="fix: ${E2E_ORIG_TITLE:-issue} — E2E failure (#$BOUCLE_ISSUE)"
-          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues" \
+          E2E_NEW_JSON=$(glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues" \
             -f title="$E2E_NEW_TITLE" \
             -f description="E2E verification failed for issue #$BOUCLE_ISSUE.
 
@@ -1288,10 +1384,17 @@ e2e:
 
       ## Live URL
       $LIVE_URL" \
-            -f labels="boucle:triage" > /dev/null
+            -f labels="boucle:triage,boucle::status::bot" 2>/dev/null) || E2E_NEW_JSON=""
+          # Assign the new follow-up issue to the bot (it's on the bot side).
+          E2E_NEW_IID=$(printf '%s' "$E2E_NEW_JSON" | jq -r '.iid // empty' 2>/dev/null || true)
+          if [ -n "$E2E_NEW_IID" ] && [ "$E2E_NEW_IID" != "null" ] && [ -n "${BOUCLE_BOT_ID:-}" ]; then
+            curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$E2E_NEW_IID" \
+              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+              --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || true
+          fi
           ;;
         UNCERTAIN|*)
-          set_boucle_label "$BOUCLE_ISSUE" "boucle:human"
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
           ;;
       esac
 
@@ -1318,6 +1421,24 @@ doctor:
       PID="$CI_PROJECT_ID"
       RECOVERED=0
 
+      # Label helper: preserve non-boucle labels when writing a boucle label.
+      # Same definition as the other jobs — included here so the doctor can
+      # call it (it calls set_boucle_label below for spec-review and orphan
+      # recovery). Also assigns the issue to the bot when moving to the bot
+      # side, matching the behavior of the rest of the loop.
+      set_boucle_label() {
+        local iid="$1" new="$2" gross="$3"
+        local current
+        current=$(glab api --hostname "$HOST" "/projects/$PID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        local merged="${current:+$current,}$new,$gross"
+        glab api --hostname "$HOST" -X PUT "/projects/$PID/issues/$iid" -f labels="$merged" > /dev/null
+        if [ "$gross" = "boucle::status::bot" ] && [ -n "${BOUCLE_BOT_ID:-}" ]; then
+          curl -s -o /dev/null -X PUT "https://$HOST/api/v4/projects/$PID/issues/$iid" \
+            --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+            --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || true
+        fi
+      }
+
       # Fetch all open issues with boucle:needs-info label
       NEEDS_INFO_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:needs-info&per_page=100" \
         | jq -r '.[].iid')
@@ -1343,9 +1464,7 @@ doctor:
         if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ]; then
           echo "  → #$IID has a human reply after last triage comment — orphaned triage detected"
           # Re-trigger: set boucle:triage label (preserve non-boucle labels)
-          CURRENT=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
-          MERGED="${CURRENT:+$CURRENT,}boucle:triage"
-          glab api --hostname "$HOST" -X PUT "/projects/$PID/issues/$IID" -f labels="$MERGED" > /dev/null
+          set_boucle_label "$IID" "boucle:triage" "boucle::status::bot"
           # Trigger triage pipeline
           curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
             -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
@@ -1357,27 +1476,34 @@ doctor:
         fi
       done
 
-      # Recover orphaned boucle:spec-review issues: the author added
-      # boucle:spec-approved but the dispatch pipeline was canceled/orphaned
-      # before it could trigger the worker. Issue still has boucle:spec-review
-      # (dispatch didn't run to strip it) alongside boucle:spec-approved.
-      # Worker relabels to boucle:working on start, which clears both.
+      # Recover orphaned boucle:spec-review issues: the author replied
+      # (any non-bot note after the last triage comment) but the dispatch
+      # pipeline was canceled/orphaned before it could trigger the worker.
+      # Issue still has boucle:spec-review (dispatch didn't run to strip it).
+      # Worker relabels to boucle:working on start, which clears it.
       SPEC_REVIEW_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:spec-review&per_page=100" \
         | jq -r '.[].iid')
 
       for IID in $SPEC_REVIEW_ISSUES; do
         echo "Checking #$IID (boucle:spec-review) for spec approval..."
-        LABELS=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID" | jq -r '.labels | join(",")')
-        if echo "$LABELS" | grep -q "boucle:spec-approved"; then
-          echo "  → #$IID has boucle:spec-approved — orphaned spec gate, re-triggering worker"
-          set_boucle_label "$IID" "boucle:todo"
+        NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
+        # Find the last triage comment (same as needs-info recovery above)
+        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | last | .id // 0')
+        # Detect any non-bot note after the last triage comment
+        HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" '
+          [.[] | select(.author.username != "up-bot") | select(.id > ($tid | tonumber))]
+          | length
+        ')
+        if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ]; then
+          echo "  → #$IID has author reply after spec-review — orphaned spec gate, re-triggering worker"
+          set_boucle_label "$IID" "boucle:todo" "boucle::status::bot"
           curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
             -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
             -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
           echo "  → re-triggered worker for #$IID"
           RECOVERED=$((RECOVERED + 1))
         else
-          echo "  → #$IID: still waiting for author to add boucle:spec-approved"
+          echo "  → #$IID: still waiting for author to reply"
         fi
       done
 
@@ -1460,7 +1586,7 @@ doctor:
         # label was set. Re-trigger triage so the agent can re-read the user's
         # answers and route the issue correctly this time.
         echo "  → #$IID: orphaned triage (triage comment + human reply, no boucle label) — re-triggering"
-        set_boucle_label "$IID" "boucle:triage"
+        set_boucle_label "$IID" "boucle:triage" "boucle::status::bot"
         curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
           -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
           -F "variables[BOUCLE_ISSUE]=$IID" > /dev/null
