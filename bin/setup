@@ -11,6 +11,7 @@ HOST="framagit.org"
 BOT_ID=""
 BOT_TOKEN=""
 CF_TOKEN=""
+RUNNER_TAG=""
 OPENCODE_AUTH_PATH="${OPENCODE_AUTH_PATH:-$HOME/.local/share/opencode/auth.json}"
 SKIP_CF=false
 DRY_RUN=false
@@ -22,6 +23,7 @@ while [[ $# -gt 0 ]]; do
     --bot-id) BOT_ID="$2"; shift 2 ;;
     --bot-token) BOT_TOKEN="$2"; shift 2 ;;
     --cf-token) CF_TOKEN="$2"; shift 2 ;;
+    --runner-tag) RUNNER_TAG="$2"; shift 2 ;;
     --auth-path) OPENCODE_AUTH_PATH="$2"; shift 2 ;;
     --skip-cf) SKIP_CF=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
@@ -33,7 +35,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --host <forge-host>      GitLab host (default: framagit.org)"
       echo "  --bot-id <id>            Bot user ID (for adding as project member)"
       echo "  --bot-token <pat>        Bot PAT (used as BOUCLE_TOKEN CI variable)"
-      echo "  --cf-token <token>        Cloudflare API token (for Pages project)"
+      echo "  --cf-token <token>       Cloudflare API token (for Pages project)"
+      echo "  --runner-tag <tag>       Runner tag to use in .gitlab-ci.yml (default: boucle)"
       echo "  --auth-path <path>        Path to opencode auth.json (default: ~/.local/share/opencode/auth.json)"
       echo "  --skip-cf                Skip Cloudflare Pages project creation"
       echo "  --dry-run                 Print what would be done, don't execute"
@@ -80,6 +83,24 @@ run() {
     eval "$@"
   fi
 }
+
+# ── 0. Runner tag ─────────────────────────────────────────────────────
+echo "=== Runner tag ==="
+# The default tag in .gitlab-ci.yml is "boucle" (a portable placeholder).
+# If --runner-tag is provided, rewrite it to match the project's runner.
+# This is a local file edit (not a CI variable) because GitLab CI does not
+# support variable interpolation in the `tags:` field.
+GITLAB_CI="${GITLAB_CI:-.gitlab-ci.yml}"
+if [ -n "$RUNNER_TAG" ]; then
+  if [ -f "$GITLAB_CI" ] && grep -q "tags: \[boucle\]" "$GITLAB_CI"; then
+    run "sed -i \"s/tags: \[boucle\]/tags: [$RUNNER_TAG]/g\" \"$GITLAB_CI\""
+    log_pass "runner tag set to '$RUNNER_TAG' in $GITLAB_CI"
+  else
+    log_skip "runner tag (no 'tags: [boucle]' placeholder found in $GITLAB_CI — already configured?)"
+  fi
+else
+  log_skip "runner tag (no --runner-tag provided; .gitlab-ci.yml keeps default 'boucle')"
+fi
 
 # ── 1. CI Variables ───────────────────────────────────────────────────
 echo "=== CI Variables ==="
@@ -407,8 +428,13 @@ fi
 echo "Day 0 setup complete."
 echo ""
 echo "Next steps:"
-echo "  1. Ensure a GitLab runner tagged 'data' is available for this project."
-echo "     Register one on your build machine (docker executor) or enable a shared runner with the 'data' tag."
+echo "  1. Ensure a GitLab runner with your tag is available for this project."
+if [ -n "$RUNNER_TAG" ]; then
+  echo "     Tag '$RUNNER_TAG' was configured via --runner-tag."
+else
+  echo "     Default tag is 'boucle' — re-run with --runner-tag <your-tag> to change it."
+fi
+echo "     Register one on your build machine (docker executor) or enable a shared runner with the tag."
 echo "  2. Apply the loop template to the target repo:"
 echo "     cp -r boucle/boucle/bin <target-repo>/"
 echo "     cp -r boucle/boucle/.opencode <target-repo>/"

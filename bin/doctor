@@ -8,6 +8,7 @@ PROJECT_ID="${BOUCLE_PROJECT_ID:?BOUCLE_PROJECT_ID must be set}"
 HOST="${BOUCLE_FORGE_HOST:-framagit.org}"
 
 pass() { echo "  ✓ $1"; }
+warn() { echo "  ⚠ $1" >&2; }
 fail() { echo "  ✗ $1" >&2; FAILURES=$((FAILURES+1)); }
 FAILURES=0
 
@@ -70,11 +71,17 @@ else
 fi
 
 # ── Runner online ──────────────────────────────────────────────────────
-RUNNER_TAG="${BOUCLE_RUNNER_TAG:-data}"
-if glab api --hostname "$HOST" "/projects/$PROJECT_ID/runners" 2>/dev/null | jq -e ".[] | select(.status==\"online\" and (.tag_list | contains([\"$RUNNER_TAG\"])))" >/dev/null 2>&1; then
-  pass "runner with tag '$RUNNER_TAG' online"
+# The runner tag is project-specific infrastructure — boucle must not
+# hardcode it. Require BOUCLE_RUNNER_TAG to be set (via CI variable or
+# env); skip the check with a warning if unset rather than guessing.
+if [ -z "${BOUCLE_RUNNER_TAG:-}" ]; then
+  warn "BOUCLE_RUNNER_TAG unset — skipping runner-online check (set it to your project's runner tag)"
 else
-  fail "no runner with tag '$RUNNER_TAG' online"
+  if glab api --hostname "$HOST" "/projects/$PROJECT_ID/runners" 2>/dev/null | jq -e ".[] | select(.status==\"online\" and (.tag_list | contains([\"$BOUCLE_RUNNER_TAG\"])))" >/dev/null 2>&1; then
+    pass "runner with tag '$BOUCLE_RUNNER_TAG' online"
+  else
+    fail "no runner with tag '$BOUCLE_RUNNER_TAG' online"
+  fi
 fi
 
 # ── Agents parse ───────────────────────────────────────────────────────
