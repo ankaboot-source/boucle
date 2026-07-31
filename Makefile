@@ -8,8 +8,10 @@ SHELL := /usr/bin/env bash
 SHFMT_FLAGS := -i 2 -bn -ci -sr
 BATS := bats
 
-# Shell scripts in the repo: *.sh files + extensionless scripts in bin/
-SRC_SH := $(shell git ls-files '*.sh' '*.bash' 2>/dev/null)
+# Shell scripts in the repo: *.sh files + extensionless scripts in bin/.
+# Exclude .opencode/ — those scripts are upstream-vendored (synced by bin/update);
+# reformatting them creates churn that the next update overwrites.
+SRC_SH := $(shell git ls-files '*.sh' '*.bash' ':!:.opencode' 2>/dev/null)
 BIN_SH := $(shell git ls-files 'bin/*' 2>/dev/null | grep -v '\.cjs$$' || true)
 ALL_SH := $(strip $(SRC_SH) $(BIN_SH))
 

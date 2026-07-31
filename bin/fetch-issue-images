@@ -27,17 +27,17 @@ PROJECT_ID="${CI_PROJECT_ID:?CI_PROJECT_ID must be set}"
 
 mkdir -p "$IMG_DIR"
 # Clean slate per run (re-download fresh each time)
-rm -f "$IMG_DIR"/* "$ENV_FILE" 2>/dev/null || true
+rm -f "$IMG_DIR"/* "$ENV_FILE" 2> /dev/null || true
 
 # Collect all markdown text from the issue description + all note bodies
 ALL_TEXT=$(mktemp)
 trap 'rm -f "$ALL_TEXT"' EXIT
 
 {
-  glab api --hostname "$HOST" "/projects/$PROJECT_ID/issues/$ISSUE" 2>/dev/null \
-    | jq -r '.description // empty' 2>/dev/null || true
-  glab api --hostname "$HOST" "/projects/$PROJECT_ID/issues/$ISSUE/notes" 2>/dev/null \
-    | jq -r '.[].body // empty' 2>/dev/null || true
+  glab api --hostname "$HOST" "/projects/$PROJECT_ID/issues/$ISSUE" 2> /dev/null \
+    | jq -r '.description // empty' 2> /dev/null || true
+  glab api --hostname "$HOST" "/projects/$PROJECT_ID/issues/$ISSUE/notes" 2> /dev/null \
+    | jq -r '.[].body // empty' 2> /dev/null || true
 } > "$ALL_TEXT"
 
 # Extract GitLab upload paths with image extensions.
@@ -86,8 +86,8 @@ for path in "${UPLOAD_PATHS[@]}"; do
   # --max-filesize aborts if body exceeds the limit (curl exit 63).
   # Fallback: check actual size after download (handles chunked encoding).
   if curl -sL --max-filesize "$per_file_cap" \
-       -H "PRIVATE-TOKEN: $TOKEN" \
-       -o "$outpath" "$url" 2>/dev/null; then
+    -H "PRIVATE-TOKEN: $TOKEN" \
+    -o "$outpath" "$url" 2> /dev/null; then
     actual_size=$(wc -c < "$outpath")
     if [ "$actual_size" -eq 0 ]; then
       rm -f "$outpath"

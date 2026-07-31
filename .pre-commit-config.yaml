@@ -3,6 +3,11 @@
 # Install:  prek install   (or: pre-commit install)
 # Run all:  prek run --all-files   (or: pre-commit run --all-files)
 
+# Scope: boucle is a portable dev-loop harness that ships to consumer repos.
+# The harness lives in bin/, scripts/, test/, Makefile, .gitlab-ci.yml, and
+# this config. Everything else (src/ content, docs/, .opencode/ vendored
+# skills) is either upstream-synced or project content — not ours to reformat.
+# EXCLUDE re-anchors the hooks onto harness files only.
 repos:
   # ── Hygiene (pre-commit-hooks; prek auto-replaces with builtin Rust impl) ──
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -11,9 +16,12 @@ repos:
       - id: check-merge-conflict
       - id: check-executables-have-shebangs
       - id: check-shebang-scripts-are-executable
+        exclude: ^\.opencode/
       - id: end-of-file-fixer
+        exclude: ^(src/|docs/|\.opencode/|\.boucle-version$)
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
+        exclude: ^(src/|docs/|\.opencode/)
       - id: mixed-line-ending
         args: [--fix=lf]
       - id: check-added-large-files
@@ -23,19 +31,29 @@ repos:
       - id: check-case-conflict
       - id: detect-private-key
 
-  # ── shellcheck (static analysis) ──
-  - repo: https://github.com/koalaman/shellcheck-precommit
-    rev: v0.11.0
+  # ── shellcheck (static analysis, local system binary) ──
+  # Local hook: the koalaman/shellcheck-precommit hook pulls a Docker image,
+  # which fails in CI/hosts without a daemon. We use the system binary
+  # (brew install shellcheck) via the Makefile's lint target instead.
+  # Exclude .opencode/ — upstream-vendored scripts synced by bin/update.
+  - repo: local
     hooks:
       - id: shellcheck
-        args: ["--severity=warning", "-x"]
+        name: shellcheck (system)
+        entry: bash -c 'shellcheck -x --severity=warning "$@"' --
+        language: system
+        types: [shell]
+        exclude: ^\.opencode/
 
   # ── shfmt (formatting) ──
+  # Exclude .opencode/ — reformatting vendored scripts creates churn that
+  # the next bin/update overwrites.
   - repo: https://github.com/scop/pre-commit-shfmt
     rev: v3.13.1-1
     hooks:
       - id: shfmt
         args: ["-i", "2", "-bn", "-ci", "-sr"]
+        exclude: ^\.opencode/
 
   # ── bats unit tests (local hook, pre-push so commits stay fast) ──
   - repo: local
