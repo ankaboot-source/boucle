@@ -374,7 +374,7 @@ triage:
         wi_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/-/work_items/$iid" 2>/dev/null) || { echo ""; return; }
         # Only accept a JSON object that actually has an .id field; anything
         # else (403 error object, empty, non-JSON) is treated as a miss.
-        out=$(printf '%s' "$wi_data" | jq -r 'if (type == "object" and has("id")) then .id else empty end' 2>/dev/null) || true
+        out=$(printf '%s' "$wi_data" | jq -r 'if (type == "object" and has("id")) then .id else empty end' 2>/dev/null)
         printf '%s' "$out"
       }
 
@@ -392,7 +392,7 @@ triage:
         # Only pass through genuine arrays; coerce anything else (403 error
         # object, empty, non-JSON) to []. Capture jq output so empty input
         # (jq emits nothing, exits 0) still yields [].
-        out=$(printf '%s' "$children" | jq -c 'if type == "array" then . else [] end' 2>/dev/null) || true
+        out=$(printf '%s' "$children" | jq -c 'if type == "array" then . else [] end' 2>/dev/null)
         printf '%s' "${out:-[]}"
       }
 
@@ -1070,12 +1070,15 @@ merger:
       # Refresh master so we rebase onto the latest (another MR may have just
       # merged — the resource_group guarantees we're the only merger running,
       # but master may have advanced since this MR was created).
-      git fetch origin master
+      # Also fetch the MR branch itself — CI clones with --depth=1 and only the
+      # ref that triggered the pipeline (master for merger role), so the MR
+      # branch ref is NOT present in the local clone by default.
+      BRANCH="boucle/$BOUCLE_ISSUE"
+      git fetch origin master "$BRANCH"
 
       # Rebase the MR branch onto latest master. This is the key conflict-
       # avoidance mechanism: because merges are serialized, each rebase is
       # against a master that already includes all previously-merged MRs.
-      BRANCH="boucle/$BOUCLE_ISSUE"
       git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
       if ! git rebase origin/master; then
         echo "FAIL: rebase onto origin/master conflicted — even after serial merge." >&2
@@ -1247,7 +1250,7 @@ e2e:
       get_work_item_children() {
         local parent_iid="$1" children out
         children=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/-/work_items/$parent_iid/children" 2>/dev/null) || { echo "[]"; return; }
-        out=$(printf '%s' "$children" | jq -c 'if type == "array" then . else [] end' 2>/dev/null) || true
+        out=$(printf '%s' "$children" | jq -c 'if type == "array" then . else [] end' 2>/dev/null)
         printf '%s' "${out:-[]}"
       }
 
@@ -1613,7 +1616,7 @@ doctor:
       get_work_item_children() {
         local parent_iid="$1" children out
         children=$(glab api --hostname "$HOST" "/projects/$PID/-/work_items/$parent_iid/children" 2>/dev/null) || { echo "[]"; return; }
-        out=$(printf '%s' "$children" | jq -c 'if type == "array" then . else [] end' 2>/dev/null) || true
+        out=$(printf '%s' "$children" | jq -c 'if type == "array" then . else [] end' 2>/dev/null)
         printf '%s' "${out:-[]}"
       }
 
