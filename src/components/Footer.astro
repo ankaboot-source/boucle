@@ -5,17 +5,47 @@
  * Site footer with brand block, primary links, newsletter signup,
  * social links, and an obfuscated contact email reassembled by JS.
  * Preserves all content from the previous inline footer in Layout.astro.
+ *
+ * Social entries render as inline SVG icons (≥ 24 px) accompanied by a
+ * visually-hidden accessible label, so the link remains meaningful for
+ * assistive tech while the visible footprint stays compact and uniform.
  */
 
 import NewsletterSignup from "./NewsletterSignup.astro";
 
 const year = new Date().getFullYear();
 
-const socialLinks = [
-	{ label: "Instagram", href: "https://instagram.com/urgencepalestine" },
-	{ label: "TikTok", href: "https://tiktok.com/@urgencepalestine" },
-	{ label: "Telegram", href: "https://t.me/urgencepalestine" },
-	{ label: "Facebook", href: "https://facebook.com/urgencepalestine" },
+type SocialLink = {
+	label: string;
+	href: string;
+	/**
+	 * SVG path data rendered at 24×24, using `currentColor` so the icon
+	 * inherits the link's text colour and re-tints on hover/focus.
+	 */
+	icon: string;
+};
+
+const socialLinks: SocialLink[] = [
+	{
+		label: "Instagram",
+		href: "https://instagram.com/urgencepalestine",
+		icon: "M12 2.2c3.2 0 3.6 0 4.8.1 1.2.1 1.8.3 2.2.4.6.2 1 .5 1.4.9.4.4.7.8.9 1.4.2.4.4 1 .4 2.2.1 1.2.1 1.6.1 4.8s0 3.6-.1 4.8c-.1 1.2-.3 1.8-.4 2.2-.2.6-.5 1-.9 1.4-.4.4-.8.7-1.4.9-.4.2-1 .4-2.2.4-1.2.1-1.6.1-4.8.1s-3.6 0-4.8-.1c-1.2-.1-1.8-.3-2.2-.4-.6-.2-1-.5-1.4-.9-.4-.4-.7-.8-.9-1.4-.2-.4-.4-1-.4-2.2C2.2 15.6 2.2 15.2 2.2 12s0-3.6.1-4.8c.1-1.2.3-1.8.4-2.2.2-.6.5-1 .9-1.4.4-.4.8-.7 1.4-.9.4-.2 1-.4 2.2-.4C8.4 2.2 8.8 2.2 12 2.2zm0 1.8c-3.1 0-3.5 0-4.7.1-1.1 0-1.7.2-2.1.4-.5.2-.9.4-1.3.8-.4.4-.6.8-.8 1.3-.2.4-.3 1-.4 2.1C2.6 8.5 2.6 8.9 2.6 12s0 3.5.1 4.7c0 1.1.2 1.7.4 2.1.2.5.4.9.8 1.3.4.4.8.6 1.3.8.4.2 1 .3 2.1.4 1.2.1 1.6.1 4.7.1s3.5 0 4.7-.1c1.1 0 1.7-.2 2.1-.4.5-.2.9-.4 1.3-.8.4-.4.6-.8.8-1.3.2-.4.3-1 .4-2.1.1-1.2.1-1.6.1-4.7s0-3.5-.1-4.7c0-1.1-.2-1.7-.4-2.1-.2-.5-.4-.9-.8-1.3-.4-.4-.8-.6-1.3-.8-.4-.2-1-.3-2.1-.4-1.2-.1-1.6-.1-4.7-.1zm0 3.1a4.9 4.9 0 1 1 0 9.8 4.9 4.9 0 0 1 0-9.8zm0 1.8a3.1 3.1 0 1 0 0 6.2 3.1 3.1 0 0 0 0-6.2zm5.1-2a1.2 1.2 0 1 1 0 2.3 1.2 1.2 0 0 1 0-2.3z",
+	},
+	{
+		label: "TikTok",
+		href: "https://tiktok.com/@urgencepalestine",
+		icon: "M14.5 2h-3v13.4a2.6 2.6 0 1 1-2.6-2.6c.3 0 .5 0 .8.1V9.7a5.6 5.6 0 0 0-.8-.1 5.8 5.8 0 1 0 5.8 5.8V8.3a7.7 7.7 0 0 0 4.3 1.3V6.6a4.7 4.7 0 0 1-4.5-4.6z",
+	},
+	{
+		label: "Telegram",
+		href: "https://t.me/urgencepalestine",
+		icon: "M21.5 4.3 18.3 19a1.6 1.6 0 0 1-2.5 1L11 16.3l-2.4 2.3a.9.9 0 0 1-1.4-.4l-.7-3.6 8-7.2c.3-.3 0-.5-.5-.2L5 12l-3.4-1.1A1 1 0 0 1 1.3 9.5L20 3.4a.9.9 0 0 1 1.3.9z",
+	},
+	{
+		label: "Facebook",
+		href: "https://facebook.com/urgencepalestine",
+		icon: "M13.5 22v-8.2h2.8l.4-3.2h-3.2V8.6c0-.9.3-1.6 1.6-1.6h1.7V4.1c-.3 0-1.3-.1-2.5-.1-2.5 0-4.2 1.5-4.2 4.3v2.3H7.3v3.2h2.8V22h3.4z",
+	},
 ];
 
 // Split the email into fragments so the literal address never appears
@@ -55,16 +85,32 @@ const emailDisplay = `${userParts[0]}@${userParts[1]}.${domainParts[0]}`;
 
 	<div class="site-footer__base">
 		<div class="site-footer__base-inner">
+			<!--
+			  Social row sits first, both in DOM and visually, so it captures
+			  the eye before the legal copy underneath.
+			-->
 			<ul class="site-footer__social" aria-label="Réseaux sociaux">
 				{
 					socialLinks.map((link) => (
-						<li>
+						<li class="site-footer__social-item">
 							<a
+								class="site-footer__social-link"
 								href={link.href}
 								target="_blank"
 								rel="noopener"
 							>
-								{link.label}
+								<svg
+									class="site-footer__social-icon"
+									width="24"
+									height="24"
+									viewBox="0 0 24 24"
+									fill="currentColor"
+									aria-hidden="true"
+									focusable="false"
+								>
+									<path d={link.icon} />
+								</svg>
+								<span class="visually-hidden">{link.label}</span>
 							</a>
 						</li>
 					))
@@ -124,3 +170,87 @@ const emailDisplay = `${userParts[0]}@${userParts[1]}.${domainParts[0]}`;
 		root.appendChild(link);
 	})();
 </script>
+
+<style>
+	/*
+	 * Footer styles.
+	 *
+	 * Layout-specific rules for the footer live next to the rest of the
+	 * site stylesheet (see `.site-footer*` in `src/styles/sections.css`).
+	 * This block only carries the rules that belong to the social-icon
+	 * row and the visually-hidden helper used for the accessible label.
+	 */
+
+	.visually-hidden {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
+
+	/* Social row — placed before `.site-footer__copy` in DOM and in flex
+	   order so it appears first visually. */
+	.site-footer__base-inner {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-s);
+	}
+
+	.site-footer__social {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-xs);
+	}
+
+	.site-footer__social-item {
+		display: inline-flex;
+	}
+
+	.site-footer__social-link {
+		--footer-social-size: 24px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: var(--footer-social-size);
+		height: var(--footer-social-size);
+		color: var(--color-ink-on-dark);
+		border-radius: var(--radius-pill);
+		text-decoration: none;
+		transition:
+			color var(--duration-base) var(--ease-out),
+			background-color var(--duration-base) var(--ease-out),
+			transform var(--duration-fast) var(--ease-out);
+	}
+
+	.site-footer__social-link:hover {
+		color: var(--color-flag-red);
+		transform: translateY(-1px);
+	}
+
+	.site-footer__social-link:focus-visible {
+		outline: 2px solid var(--color-flag-white);
+		outline-offset: 3px;
+		color: var(--color-flag-red);
+	}
+
+	.site-footer__social-icon {
+		display: block;
+		width: var(--footer-social-size);
+		height: var(--footer-social-size);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.site-footer__social-link {
+			transition: none;
+		}
+	}
+</style>
