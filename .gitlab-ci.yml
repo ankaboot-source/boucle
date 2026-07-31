@@ -245,10 +245,25 @@ dispatch:
               -F "variables[BOUCLE_ISSUE]=$MR_ISSUE_IID" -F "variables[BOUCLE_ROLE]=reviewer" > /dev/null
             exit 0
             ;;
-          open|merge)
+          merge)
+            # A boucle/<iid> MR was merged directly (human clicked Merge in the
+            # GitLab UI, bypassing the approval circuit → merger job). The
+            # push to master already triggered deploy → smoke e2e (no issue
+            # context). Catch up: trigger the catchup job to close the issue
+            # + cascade the parent, so it doesn't stay stuck at boucle:approval.
+            # MR_ISSUE_IID was extracted from the branch name above (line 173);
+            # non-boucle branches already exited at line 174-176.
+            echo "MR !${MR_IID} merged directly (action=merge) for issue #$MR_ISSUE_IID — triggering catchup"
+            curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
+              -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+              -F "variables[BOUCLE_ISSUE]=$MR_ISSUE_IID" \
+              -F "variables[BOUCLE_ROLE]=catchup" > /dev/null
+            exit 0
+            ;;
+          open)
             # open: the worker creates the MR and chains to reviewer itself —
-            # no dispatch action needed. merge: the merger job handles it.
-            echo "MR !${MR_IID} action=$MR_ACTION — handled by worker/merger, skipping"
+            # no dispatch action needed.
+            echo "MR !${MR_IID} action=$MR_ACTION — handled by worker, skipping"
             exit 0
             ;;
           *)
@@ -617,6 +632,76 @@ triage:
               SPEC_MSG=$(printf 'Review the **TL;DR** above. If it matches what you want:\n- React with 👍 ✅ ☑️ ✔️ 🆗 or 👌 on this comment to approve, OR\n- Reply to this issue with any comment.\nIf not, reply with corrections.')
               glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
                 -f body="$SPEC_MSG" > /dev/null
+
+              # ── Aperçu visuel (opt-in, exceptionnel) ────────────────────────
+              # Ne s'exécute QUE si l'agent a écrit RENDER_REQUEST + preview.html.
+              # Défaut: skip total, zéro coût Chromium. Échec isolé: ne bloque
+              # jamais la boucle (note fallback postée, exit code inchangé).
+              PREVIEW_HTML="$CI_PROJECT_DIR/.boucle/$IID/preview.html"
+              RENDER_REQUEST_FILE="$CI_PROJECT_DIR/.boucle/$IID/RENDER_REQUEST"
+
+              if [ -s "$RENDER_REQUEST_FILE" ] && [ -s "$PREVIEW_HTML" ]; then
+                echo "[boucle] RENDER_REQUEST found — attempting visual preview"
+
+                # 1. Résoudre le note_id du commentaire de triage (fetch séparé
+                #    pour ne pas perturber le parse existant du commentaire).
+                TRIAGE_NOTE_ID=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
+                  "/projects/$CI_PROJECT_ID/issues/$IID/notes" 2>/dev/null \
+                  | jq -r '[.[] | select(.body | contains("<!-- boucle:triage") and contains("## Disposition"))]
+                      | sort_by(.created_at) | last | .id' 2>/dev/null || echo "")
+
+                if [ -z "$TRIAGE_NOTE_ID" ]; then
+                  echo "[boucle] WARN: triage comment not found — cannot embed preview"
+                else
+                  # 2. Installer Chromium + puppeteer-core (uniquement maintenant, /tmp).
+                  if npm install --prefix /tmp puppeteer-core @sparticuz/chromium >/dev/null 2>&1; then
+                    # 3. Rendre preview.html → preview.png (1280x800, fullPage).
+                    #    NODE_PATH=/tmp/node_modules pour que le script (bin/)
+                    #    résolve les modules installés dans /tmp.
+                    PREVIEW_PNG="$CI_PROJECT_DIR/.boucle/$IID/preview.png"
+                    if NODE_PATH=/tmp/node_modules node "$CI_PROJECT_DIR/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2>/dev/null; then
+                      # 4. Uploader le PNG via l'API uploads GitLab.
+                      UPLOAD_RESP=$(curl -s --request POST \
+                        --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+                        --form "file=@$PREVIEW_PNG" \
+                        "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/uploads" 2>/dev/null)
+                      IMG_URL=$(echo "$UPLOAD_RESP" | jq -r '.markdown // empty' 2>/dev/null)
+
+                      if [ -n "$IMG_URL" ]; then
+                        # 5. Fetch du commentaire existant, append section Aperçu, PUT.
+                        EXISTING_BODY=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
+                          "/projects/$CI_PROJECT_ID/issues/$IID/notes/$TRIAGE_NOTE_ID" 2>/dev/null \
+                          | jq -r '.body' 2>/dev/null)
+                        NEW_BODY=$(printf '%s\n\n## Aperçu\n%s\n' "$EXISTING_BODY" "$IMG_URL")
+                        if glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT \
+                          "/projects/$CI_PROJECT_ID/issues/$IID/notes/$TRIAGE_NOTE_ID" \
+                          -f body="$NEW_BODY" >/dev/null 2>&1; then
+                          # 6. Idempotence: supprimer RENDER_REQUEST (pas de re-render au retry).
+                          rm -f "$RENDER_REQUEST_FILE"
+                          echo "[boucle] Visual preview embedded in triage comment #$TRIAGE_NOTE_ID"
+                        else
+                          echo "[boucle] WARN: PUT notes failed — RENDER_REQUEST kept for retry"
+                        fi
+                      else
+                        echo "[boucle] WARN: PNG upload failed — posting fallback note"
+                        glab api --hostname "$BOUCLE_FORGE_HOST" -X POST \
+                          "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+                          -f body="Aperçu indisponible (échec upload) — validez sur le TL;DR." >/dev/null 2>&1
+                      fi
+                    else
+                      echo "[boucle] WARN: Chromium render failed — posting fallback note"
+                      glab api --hostname "$BOUCLE_FORGE_HOST" -X POST \
+                        "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+                        -f body="Aperçu indisponible (échec rendu) — validez sur le TL;DR." >/dev/null 2>&1
+                    fi
+                  else
+                    echo "[boucle] WARN: Chromium install failed — posting fallback note"
+                    glab api --hostname "$BOUCLE_FORGE_HOST" -X POST \
+                      "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+                      -f body="Aperçu indisponible (Chromium indisponible) — validez sur le TL;DR." >/dev/null 2>&1
+                  fi
+                fi
+              fi
             else
               set_boucle_label "$IID" "boucle:todo,size:$(echo $SIZE | tr '[:upper:]' '[:lower:]')" "boucle::status::bot"
               # Chain to worker
