@@ -127,6 +127,14 @@ default:
         rm -f /tmp/oc.tar.gz
       fi
 
+      # ── codebase-memory-mcp (codebase knowledge graph for agents) ──
+      # Static binary — no node needed. Agents query it via MCP for code
+      # discovery (search_graph, trace_path, get_code_snippet, etc.).
+      if ! command -v codebase-memory-mcp &>/dev/null; then
+        echo "Installing codebase-memory-mcp..."
+        curl -fsSL "https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh" | bash 2>/dev/null || true
+      fi
+
       # ── wrangler (only if deploy uses it) ──────────────────────────
       if echo "$BOUCLE_DEPLOY_CMD" | grep -q "wrangler" && ! command -v wrangler &>/dev/null; then
         echo "Installing wrangler..."
@@ -146,7 +154,16 @@ default:
       glab version 2>/dev/null | head -1 || echo "glab: MISSING"
       opencode --version 2>/dev/null || echo "opencode: MISSING"
       echo "$BOUCLE_DEPLOY_CMD" | grep -q wrangler && { wrangler --version 2>/dev/null || echo "wrangler: MISSING"; } || echo "wrangler: not needed (deploy doesn't use it)"
+      codebase-memory-mcp --version 2>/dev/null || echo "codebase-memory-mcp: MISSING"
       echo "==================="
+
+      # ── Index repo for codebase-memory-mcp (agents query the graph) ──
+      # Fast (<30s for this repo size). Agents call search_graph /
+      # trace_path / get_code_snippet instead of grep/glob for code discovery.
+      if command -v codebase-memory-mcp &>/dev/null; then
+        echo "Indexing repo for codebase-memory-mcp..."
+        codebase-memory-mcp cli index_repository --repo_path "${CI_PROJECT_DIR:-$(pwd)}" --json >/dev/null 2>&1 || true
+      fi
 
 # ── Quality gate (lint + unit tests) ─────────────────────────────────────
 # Runs shellcheck + shfmt + bats on push/MR pipelines only. Never runs on
