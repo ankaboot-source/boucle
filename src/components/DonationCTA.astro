@@ -35,9 +35,9 @@
 		margin-inline: auto;
 		padding: clamp(var(--space-xl), 5vw, var(--space-3xl))
 			clamp(var(--space-l), 5vw, var(--space-2xl));
-		background: var(--color-flag-red);
+		background: var(--color-flag-black);
 		color: var(--color-flag-white);
-		border-radius: var(--radius-l);
+		border-radius: var(--radius-sharp);
 		overflow: hidden;
 		position: relative;
 	}
@@ -91,28 +91,30 @@
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		min-height: 56px;
+		min-height: 44px;
 		padding: 0 var(--space-l);
-		font-family: var(--font-body);
+		font-family: var(--font-heading);
 		font-size: var(--text-base);
 		font-weight: var(--weight-bold);
-		letter-spacing: 0.01em;
-		color: var(--color-flag-black);
-		background: var(--color-flag-white);
-		border: 2px solid var(--color-flag-white);
-		border-radius: var(--radius-pill);
+		text-transform: uppercase;
+		letter-spacing: var(--tracking-wide);
+		color: var(--color-flag-white);
+		background: var(--color-flag-red);
+		border: 2px solid var(--color-flag-red);
+		border-radius: var(--radius-sharp);
 		text-decoration: none;
 		cursor: pointer;
 		transition:
 			background-color var(--duration-base) var(--ease-out),
 			color var(--duration-base) var(--ease-out),
+			border-color var(--duration-base) var(--ease-out),
 			transform var(--duration-fast) var(--ease-out);
 	}
 
 	.donation-cta__button:hover {
-		background: transparent;
-		color: var(--color-flag-white);
-		transform: translateY(-2px);
+		background: var(--color-flag-red-deep);
+		border-color: var(--color-flag-red-deep);
+		transform: translateY(-1px);
 	}
 
 	@media (min-width: 48rem) {
