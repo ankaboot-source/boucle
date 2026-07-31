@@ -2514,6 +2514,44 @@ doctor:
         RECOVERED=$((RECOVERED + 1))
       done
 
+      # ── Recover boucle:human issues with approved+mergeable MRs ────────
+      # The reviewer agent may escalate to boucle:human after 3 failed
+      # verdict attempts (agent step budget exhausted). But if a human has
+      # manually approved the MR, the loop should still merge it — the
+      # work is done, it just needs the merger to run. Scan boucle:human
+      # issues for an open MR that is both approved and mergeable, and
+      # trigger the merger for those.
+      echo "Scanning boucle:human issues for approved+mergeable MRs..."
+      HUMAN_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:human&per_page=100" \
+        | jq -r '.[].iid')
+
+      for IID in $HUMAN_ISSUES; do
+        echo "Checking #$IID (boucle:human) for approved MR..."
+        # Find an open MR for this issue (branch boucle/$IID)
+        MR_DATA=$(glab api --hostname "$HOST" "/projects/$PID/merge_requests?state=opened" \
+          | jq -c --arg branch "boucle/$IID" '[.[] | select(.source_branch == $branch)] | first // empty' 2>/dev/null)
+        if [ -z "$MR_DATA" ] || [ "$MR_DATA" = "null" ]; then
+          echo "  → #$IID: no open MR — skipping"
+          continue
+        fi
+        MR_IID=$(echo "$MR_DATA" | jq -r '.iid')
+        MR_MERGE_STATUS=$(echo "$MR_DATA" | jq -r '.detailed_merge_status // .merge_status // "unknown"')
+        # Check approvals on the MR
+        APPROVALS=$(glab api --hostname "$HOST" "/projects/$PID/merge_requests/$MR_IID/approvals" 2>/dev/null)
+        APPROVED_COUNT=$(echo "$APPROVALS" | jq -r '[.approved_by[].user.username] | length' 2>/dev/null || echo 0)
+        if [ "$MR_MERGE_STATUS" = "mergeable" ] && [ "$APPROVED_COUNT" -gt 0 ]; then
+          echo "  → #$IID: MR !$MR_IID is approved ($APPROVED_COUNT) + mergeable — triggering merger"
+          set_boucle_label "$IID" "boucle:merging" "boucle::status::bot"
+          curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
+            -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+            -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=merger" > /dev/null
+          echo "  → triggered merger for #$IID"
+          RECOVERED=$((RECOVERED + 1))
+        else
+          echo "  → #$IID: MR !$MR_IID status=$MR_MERGE_STATUS, approvals=$APPROVED_COUNT — not ready, skipping"
+        fi
+      done
+
       # Also check boucle:split parents: close the parent when all its
       # sub-issues are closed. This is the fallback cascade for sub-issues
       # closed via MR merge (Closes #N) where the deploy-triggered e2e
