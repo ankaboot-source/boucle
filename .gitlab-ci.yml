@@ -2219,6 +2219,20 @@ doctor:
           continue
         fi
 
+        # Check if a MR for this issue was already merged (branch boucle/$IID).
+        # If so, the issue should be closed + boucle:done, NOT re-triggered.
+        # This happens when a human merged the MR manually (bypassing the
+        # merger job), leaving the issue stuck at working/review forever.
+        MR_STATE=$(glab api --hostname "$HOST" "/projects/$PID/merge_requests?source_branch=boucle/$IID&state=merged" 2>/dev/null \
+          | jq -r '.[0].state // empty')
+        if [ "$MR_STATE" = "merged" ]; then
+          echo "  → #$IID ($ROLE): MR already merged — closing issue + boucle:done"
+          set_boucle_label "$IID" "boucle:done" "boucle::status::done"
+          glab api --hostname "$HOST" -X PUT "/projects/$PID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
+          RECOVERED=$((RECOVERED + 1))
+          continue
+        fi
+
         # Time heuristic: check the issue's updated_at. If it was updated
         # within the last 15 min, a pipeline may have just started — skip.
         # We intentionally do NOT check for an active role pipeline: GitLab's
