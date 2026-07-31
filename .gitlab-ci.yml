@@ -132,8 +132,20 @@ dispatch:
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE
       when: never
     - if: $CI_PIPELINE_SOURCE == "trigger"
+  # Anti-accumulation: a no-op dispatch (bot event, MR action that chains
+  # via API, unhandled event) exits 0 without writing .boucle-issue, then the
+  # EXIT trap flips it to exit 1. allow_failure keeps the pipeline green while
+  # still skipping downstream triage (needs: [dispatch] without optional).
+  allow_failure: true
   script:
     - |
+      # Anti-accumulation: if dispatch exits 0 without writing .boucle-issue,
+      # fail instead so downstream triage (needs: [dispatch] without optional)
+      # is skipped. This prevents no-op webhook pipelines (bot events, MR
+      # actions that chain via API, unhandled events) from consuming the
+      # tooling runner while triage bootstraps only to find no work to do.
+      trap 'if [ $? -eq 0 ] && [ ! -f .boucle-issue ]; then exit 1; fi' EXIT
+
       ACTOR=$(jq -r '.user.username // empty' "$TRIGGER_PAYLOAD")
       [ "$ACTOR" = "up-bot" ] && exit 0
 
@@ -442,7 +454,6 @@ triage:
   # resource_group omitted — BOUCLE_ISSUE not available at pipeline eval time for triage
   needs:
     - job: dispatch
-      optional: true
   rules:
     - if: $BOUCLE_ENABLED != "true"
       when: never
