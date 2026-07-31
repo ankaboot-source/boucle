@@ -735,6 +735,13 @@ triage:
       # Run the agent. Use `|| rc=$?` to suppress set -e so the script
       # continues to comment parsing even if the agent exits non-zero
       # (step limit, crash, etc.).
+      # Record the newest triage note ID BEFORE running the agent, so we can
+      # distinguish a NEW triage comment (posted by this run) from OLD ones.
+      # Without this, a run where the agent doesn't post a new comment would
+      # re-parse the OLD triage comment and re-apply its disposition, causing
+      # a label bounce with no new question asked.
+      PRE_RUN_TRIAGE_ID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+        | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## Disposition"))] | first | .id // 0')
       rc=0
       ./bin/oc triage || rc=$?
       if [ "$rc" -ne 0 ]; then
@@ -743,10 +750,13 @@ triage:
 
       # Parse the triage comment for Disposition and Size
       # GitLab notes API returns notes newest-first, so `first` = newest.
-      # The agent sometimes posts duplicate/truncated comments; pick the newest
-      # that has a complete body (with a Disposition line).
+      # Only consider triage comments NEWER than the one present before this
+      # run (PRE_RUN_TRIAGE_ID). If the agent didn't post a new comment, this
+      # returns empty, which we handle below by leaving the issue at
+      # boucle:triage instead of re-applying the OLD disposition.
       COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-        | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## Disposition"))] | first | .body')
+        | jq -r --argjson pre "$PRE_RUN_TRIAGE_ID" \
+          '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## Disposition")) | select(.id > $pre)] | first | .body // ""')
 
       # Parse Disposition and Size from their SECTIONS only, not the whole body.
       # Scoping prevents false matches: e.g. "already" in an acceptance criterion
@@ -777,8 +787,11 @@ triage:
             glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
               -f body="$DRAFTED_COMMENT" > /dev/null 2>&1 || true
             # Re-fetch and re-parse the now-posted comment.
+            # Same PRE_RUN_TRIAGE_ID filter: only consider comments newer than
+            # the pre-run one (the just-posted fallback comment qualifies).
             COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-              | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## Disposition"))] | first | .body')
+              | jq -r --argjson pre "$PRE_RUN_TRIAGE_ID" \
+                '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## Disposition")) | select(.id > $pre)] | first | .body // ""')
             DISPOSITION=$(echo "$COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
             SIZE=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
             if [ -n "$DISPOSITION" ]; then
@@ -788,6 +801,17 @@ triage:
             fi
           fi
         fi
+      fi
+
+      # If no NEW triage comment was posted by this run (agent crashed, hit
+      # step limit, or decided no new triage was needed), leave the issue at
+      # boucle:triage and exit without changing labels. Re-applying the OLD
+      # disposition would bounce the label (e.g. triage→needs-info) with no
+      # new question asked — the exact "retour à une review humaine alors
+      # qu'aucune question n'est posée" symptom.
+      if [ -z "$DISPOSITION" ]; then
+        echo "[boucle] No new triage comment posted by this run — leaving issue #$IID at boucle:triage, no label change."
+        exit 0
       fi
 
       # Route based on disposition
