@@ -141,6 +141,7 @@ dispatch:
   # pipeline will show as "failed" on no-op webhook events — that's
   # expected and harmless: it just means "nothing to do".
   script:
+    - ./bin/update
     - |
       # Anti-accumulation: if dispatch exits 0 without writing .boucle-issue,
       # fail instead so downstream triage (needs: [dispatch] without optional)
