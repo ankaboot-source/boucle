@@ -54,6 +54,14 @@ else
   fail "master not protected or merge access too broad"
 fi
 
+# Check bot push permission (required for self-update auto-commit)
+PUSH_LEVEL=$(echo "$PROTECTION" | jq -r '.push_access_levels[0].access_level // empty' 2>/dev/null)
+if [ "$PUSH_LEVEL" = "30" ] || [ "$PUSH_LEVEL" = "40" ]; then
+  pass "bot can push to master (push_access_level=$PUSH_LEVEL)"
+else
+  fail "bot cannot push to master (push_access_level=${PUSH_LEVEL:-none}, need 30+ for self-update)"
+fi
+
 # ── Trigger token valid ────────────────────────────────────────────────
 if glab api --hostname "$HOST" "/projects/$PROJECT_ID/triggers" 2>/dev/null | jq -e '.[0].token' >/dev/null 2>&1; then
   pass "trigger token exists"
@@ -98,6 +106,31 @@ if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
   fi
 else
   fail "CLOUDFLARE_API_TOKEN not in env (run in CI, not locally)"
+fi
+
+# ── Self-update prerequisites ───────────────────────────────────────────
+if [ -f ".boucle-version" ]; then
+  pass ".boucle-version exists"
+else
+  fail ".boucle-version missing (will be created on first bin/update run)"
+fi
+
+if [ -x "bin/update" ]; then
+  pass "bin/update exists and is executable"
+elif [ -f "bin/update" ]; then
+  fail "bin/update exists but is not executable (run: chmod +x bin/update)"
+else
+  fail "bin/update missing"
+fi
+
+# Check BOUCLE_UPDATE_MODE (optional — absent = release default, which is valid)
+MODE=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_UPDATE_MODE" 2>/dev/null | jq -r '.value // empty' 2>/dev/null || echo "")
+if [ -z "$MODE" ]; then
+  pass "BOUCLE_UPDATE_MODE not set (defaults to release)"
+elif [ "$MODE" = "release" ] || [ "$MODE" = "dev" ]; then
+  pass "BOUCLE_UPDATE_MODE=$MODE"
+else
+  fail "BOUCLE_UPDATE_MODE='$MODE' invalid (expected release|dev or unset)"
 fi
 
 echo ""
