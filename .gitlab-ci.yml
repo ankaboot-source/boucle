@@ -686,6 +686,42 @@ triage:
       DISPOSITION=$(echo "$COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
       SIZE=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
 
+      # ── Log-scraping fallback (step-limit recovery) ──────────────────
+      # If the agent drafted a triage comment but ran out of steps before
+      # posting it (DISPOSITION empty), scrape the drafted comment from the
+      # agent's stdout log and post it ourselves. The agent's post-early
+      # prompt rule should prevent this, but this catches the residual case.
+      if [ -z "$DISPOSITION" ]; then
+        AGENT_LOG="$CI_PROJECT_DIR/.boucle/$IID/agent-output.log"
+        if [ -f "$AGENT_LOG" ]; then
+          # Extract the drafted triage comment: from the boucle:triage marker
+          # to the end of the fenced block. The agent prints the full comment
+          # (often inside a ``` fence) in its stdout when it can't call glab.
+          DRAFTED_COMMENT=$(awk '
+            /<!-- boucle:triage v=1 -->/ { found=1 }
+            found { print; if (/^## Disposition/) { disp=1 } }
+            disp && /^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$/ { exit }
+          ' "$AGENT_LOG" 2>/dev/null || echo "")
+          if [ -n "$DRAFTED_COMMENT" ] && echo "$DRAFTED_COMMENT" | grep -qiE '^## Disposition'; then
+            echo "[boucle] Recovering drafted triage comment from agent log (step-limit fallback)."
+            # Strip leading/trailing ``` fences if the agent wrapped the comment.
+            DRAFTED_COMMENT=$(echo "$DRAFTED_COMMENT" | sed '/^```$/d')
+            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+              -f body="$DRAFTED_COMMENT" > /dev/null 2>&1 || true
+            # Re-fetch and re-parse the now-posted comment.
+            COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+              | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## Disposition"))] | first | .body')
+            DISPOSITION=$(echo "$COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
+            SIZE=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
+            if [ -n "$DISPOSITION" ]; then
+              echo "[boucle] Step-limit fallback succeeded: recovered disposition=$DISPOSITION size=${SIZE:-?}."
+            else
+              echo "[boucle] Step-limit fallback failed: drafted comment had no parsable Disposition."
+            fi
+          fi
+        fi
+      fi
+
       # Route based on disposition
       case "$DISPOSITION" in
         READY)
@@ -1442,6 +1478,40 @@ reviewer:
         | jq -r --arg sha "$MR_HEAD" '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer") and contains("sha=\($sha)"))] | first | .body // empty')
 
       VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+
+      # ── Log-scraping fallback (step-limit recovery) ──────────────────
+      # If the agent drafted a verdict but ran out of steps before posting it
+      # (VERDICT empty), scrape the drafted verdict from the agent's stdout log
+      # and post it ourselves. The agent's post-early prompt rule should
+      # prevent this, but this catches the residual case.
+      if [ -z "$VERDICT" ]; then
+        AGENT_LOG="$CI_PROJECT_DIR/.boucle/$BOUCLE_ISSUE/agent-output.log"
+        if [ -f "$AGENT_LOG" ]; then
+          # Extract the drafted verdict comment: from the boucle:verdict marker
+          # (matching this MR's head SHA) to the VERDICT line. The agent prints
+          # the full comment in its stdout when it can't call glab.
+          DRAFTED_VERDICT=$(awk -v sha="$MR_HEAD" '
+            $0 ~ "<!-- boucle:verdict v=1 role=reviewer sha=" sha " -->" { found=1 }
+            found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
+          ' "$AGENT_LOG" 2>/dev/null || echo "")
+          if [ -n "$DRAFTED_VERDICT" ] && echo "$DRAFTED_VERDICT" | grep -qiE 'VERDICT: (PASS|FAIL|UNCERTAIN)'; then
+            echo "[boucle] Recovering drafted reviewer verdict from agent log (step-limit fallback)."
+            # Strip leading/trailing ``` fences if the agent wrapped the comment.
+            DRAFTED_VERDICT=$(echo "$DRAFTED_VERDICT" | sed '/^```$/d')
+            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes" \
+              -f body="$DRAFTED_VERDICT" > /dev/null 2>&1 || true
+            # Re-fetch and re-parse the now-posted verdict.
+            COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
+              | jq -r --arg sha "$MR_HEAD" '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer") and contains("sha=\($sha)"))] | first | .body // empty')
+            VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+            if [ -n "$VERDICT" ]; then
+              echo "[boucle] Step-limit fallback succeeded: recovered verdict=$VERDICT."
+            else
+              echo "[boucle] Step-limit fallback failed: drafted verdict had no parsable VERDICT line."
+            fi
+          fi
+        fi
+      fi
 
       case "$VERDICT" in
         PASS)
