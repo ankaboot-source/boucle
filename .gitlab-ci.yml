@@ -1121,9 +1121,12 @@ merger:
         exit 1
       fi
 
-      # Merge the MR (squash=false to preserve commits; use merge_commit)
+      # Merge the MR (squash=false to preserve commits; use merge_commit).
+      # glab may return non-zero even when the merge succeeds server-side
+      # (e.g. 409/405 on an already-merged MR, or transient API errors), so
+      # tolerate the exit code and verify via MERGE_SHA below instead.
       MERGE_RESULT=$(glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/merge" \
-        -f merge_when_pipeline_succeeds=false 2>&1)
+        -f merge_when_pipeline_succeeds=false 2>&1 || true)
       MERGE_SHA=$(echo "$MERGE_RESULT" | jq -r '.merge_commit_sha // .sha // empty' 2>/dev/null)
 
       if [ -z "$MERGE_SHA" ]; then
