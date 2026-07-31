@@ -5,6 +5,7 @@
 # Runner: shared shell executor (Atchoum) — before_script bootstraps tools
 
 stages:
+  - check
   - dispatch
   - triage
   - work
@@ -34,6 +35,21 @@ variables:
   # Defaults: 10 MiB per image, 50 MiB total. Images over either cap are skipped.
   BOUCLE_IMAGE_MAX_BYTES: "10485760"
   BOUCLE_IMAGE_TOTAL_MAX_BYTES: "52428800"
+  # Concurrency: max issues allowed in boucle:working state simultaneously.
+  # 0 = unlimited (GitLab runner tag + resource_group are the only limits).
+  # When set, triage won't trigger a new worker if the cap is reached — the
+  # issue stays at boucle:todo and the doctor re-triggers it when a slot frees.
+  BOUCLE_MAX_PARALLEL_ISSUES: "0"
+  # Iteration cap: max worker re-runs per issue (rebase conflicts, empty MRs,
+  # reviewer FAIL). Default 3. Override per-project if you want more/fewer retries.
+  BOUCLE_MAX_ITERATIONS: "3"
+  # Doctor staleness threshold (seconds): how long before a boucle:working or
+  # boucle:review issue is considered stuck and re-triggered. Default 300 (5 min).
+  # Lower = faster recovery but more false-positive re-triggers.
+  BOUCLE_STALENESS_THRESHOLD: "300"
+  # Disable Chromium visual preview in triage (saves ~120 MiB per triage job).
+  # true = skip preview rendering entirely. false = default (agent opt-in via RENDER_REQUEST).
+  BOUCLE_PREVIEW_DISABLE: "false"
   # File-type CI variable: $OPENCODE_AUTH holds a path to the auth.json temp file
 
 # ── Default: use node:22-slim (has node, npm, curl — much smaller than node:22) ─
@@ -116,6 +132,51 @@ default:
       opencode --version 2>/dev/null || echo "opencode: MISSING"
       echo "$BOUCLE_DEPLOY_CMD" | grep -q wrangler && { wrangler --version 2>/dev/null || echo "wrangler: MISSING"; } || echo "wrangler: not needed (deploy doesn't use it)"
       echo "==================="
+
+# ── Quality gate (lint + unit tests) ─────────────────────────────────────
+# Runs shellcheck + shfmt + bats on push/MR pipelines only. Never runs on
+# webhook triggers (the autonomous loop) or schedules — those are the dev-loop
+# pipeline and the doctor sweep, which don't touch the harness source.
+# Uses the default node:22-slim image and installs its own tools (shellcheck,
+# shfmt, bats) so it's self-contained and doesn't depend on the shell executor.
+check:
+  stage: check
+  # Run on any available runner (including the shared docker runner) so a
+  # busy data runner never blocks the quality gate. The job is lightweight.
+  tags: []
+  rules:
+    - if: $BOUCLE_ENABLED != "true"
+      when: never
+    # Skip on webhook/trigger pipelines (the autonomous loop) and schedules.
+    - if: $CI_PIPELINE_SOURCE == "trigger"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    # Run on pushes and MRs to master.
+    - if: $CI_COMMIT_BRANCH == "master"
+    - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq curl git make
+    # shellcheck (static binary, pinned)
+    - |
+      SC_VER="v0.11.0"
+      curl -sSL "https://github.com/koalaman/shellcheck/releases/download/${SC_VER}/shellcheck-${SC_VER}.linux.x86_64.tar.xz" \
+        | tar -xJ -C /tmp
+      install -m 0755 "/tmp/shellcheck-${SC_VER}/shellcheck" /usr/local/bin/shellcheck
+    # shfmt (static binary, pinned)
+    - |
+      SHFMT_VER="v3.13.1"
+      curl -sSL -o /usr/local/bin/shfmt "https://github.com/mvdan/sh/releases/download/${SHFMT_VER}/shfmt_${SHFMT_VER}_linux_amd64"
+      chmod +x /usr/local/bin/shfmt
+    # bats-core (from source, pinned tag)
+    - |
+      git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats
+      /tmp/bats/install.sh /usr/local
+    - shellcheck --version
+    - shfmt --version
+    - bats --version
+  script:
+    - make check
 
 # ── Dispatcher ──────────────────────────────────────────────────────────
 dispatch:
@@ -641,7 +702,7 @@ triage:
               PREVIEW_HTML="$CI_PROJECT_DIR/.boucle/$IID/preview.html"
               RENDER_REQUEST_FILE="$CI_PROJECT_DIR/.boucle/$IID/RENDER_REQUEST"
 
-              if [ -s "$RENDER_REQUEST_FILE" ] && [ -s "$PREVIEW_HTML" ]; then
+              if [ "${BOUCLE_PREVIEW_DISABLE:-false}" != "true" ] && [ -s "$RENDER_REQUEST_FILE" ] && [ -s "$PREVIEW_HTML" ]; then
                 echo "[boucle] RENDER_REQUEST found — attempting visual preview"
 
                 # 1. Résoudre le note_id du commentaire de triage (fetch séparé
@@ -715,10 +776,28 @@ triage:
               fi
             else
               set_boucle_label "$IID" "boucle:todo,size:$(echo $SIZE | tr '[:upper:]' '[:lower:]')" "boucle::status::bot"
-              # Chain to worker
-              curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-                -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-                -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+              # Concurrency cap: defer worker trigger if too many issues are already working.
+              MAX_PARALLEL="${BOUCLE_MAX_PARALLEL_ISSUES:-0}"
+              WORKING_COUNT=0
+              if [ "$MAX_PARALLEL" -gt 0 ] 2>/dev/null; then
+                WORKING_COUNT=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues?state=opened&labels=boucle:working&per_page=100" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
+                if [ "$WORKING_COUNT" -ge "$MAX_PARALLEL" ]; then
+                  echo "[boucle] Max parallel issues ($MAX_PARALLEL) reached — $WORKING_COUNT already working. Deferring #$IID (stays at boucle:todo, doctor will re-trigger when a slot frees)."
+                  glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+                    -f body="⏳ Worker deferred — $WORKING_COUNT issues already in progress (cap: $MAX_PARALLEL). Will start automatically when a slot frees up." > /dev/null 2>&1 || true
+                  # Do NOT chain to worker — leave at boucle:todo. Doctor recovers it.
+                else
+                  # Chain to worker
+                  curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
+                    -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+                    -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+                fi
+              else
+                # Chain to worker (cap disabled)
+                curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
+                  -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+                  -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+              fi
             fi
           fi
           ;;
@@ -1084,20 +1163,21 @@ worker:
         echo "FAIL: rebase onto origin/master conflicted — master advanced since branch creation." >&2
         git rebase --abort 2>/dev/null || true
         ITERATION="${BOUCLE_ITERATION:-1}"
-        if [ "$ITERATION" -lt 3 ]; then
-          echo "Re-triggering worker (iteration $((ITERATION+1))) — next run resets branch to origin/master, no rebase needed." >&2
+        MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
+        if [ "$ITERATION" -lt "$MAX_ITER" ]; then
+          echo "Re-triggering worker (iteration $((ITERATION+1))/$MAX_ITER) — next run resets branch to origin/master, no rebase needed." >&2
           set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
           glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-            -f body="🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh master (iteration $((ITERATION+1))/3)." > /dev/null
+            -f body="🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh master (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null
           curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
             -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
             -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=worker" \
             -F "variables[BOUCLE_ITERATION]=$((ITERATION+1))" > /dev/null
         else
-          echo "Escalating to human (boucle:human) — iteration cap (3) reached after repeated rebase conflicts." >&2
+          echo "Escalating to human (boucle:human) — iteration cap ($MAX_ITER) reached after repeated rebase conflicts." >&2
           set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
           glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-            -f body="⚠️ Worker could not rebase onto master (conflict) after 3 attempts. Master keeps advancing. Human intervention needed." > /dev/null
+            -f body="⚠️ Worker could not rebase onto master (conflict) after $MAX_ITER attempts. Master keeps advancing. Human intervention needed." > /dev/null
         fi
         exit 1
       fi
@@ -1218,7 +1298,10 @@ worker:
       curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
         -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
         -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=reviewer" > /dev/null
-  timeout: 60m
+  # Worker wall-clock cap. 30 min default — a stuck worker shouldn't hog the
+  # data runner for an hour. The doctor re-triggers if the job times out and
+  # the issue is still at boucle:working. Increase to 60m for heavy issues.
+  timeout: 30m
 
 # ── Reviewer ────────────────────────────────────────────────────────────
 reviewer:
@@ -1277,11 +1360,12 @@ reviewer:
       MR_HEAD=$(echo "$MR_DATA" | jq -r '.diff_refs.head_sha // empty')
       if [ -n "$MR_BASE" ] && [ "$MR_BASE" = "$MR_HEAD" ]; then
         ITERATION="${BOUCLE_ITERATION:-1}"
-        echo "FAIL: worker shipped zero commits (MR !${MR_IID} empty — base_sha == head_sha). Re-triggering worker (iteration $((ITERATION+1))/3)." >&2
+        MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
+        echo "FAIL: worker shipped zero commits (MR !${MR_IID} empty — base_sha == head_sha). Re-triggering worker (iteration $((ITERATION+1))/$MAX_ITER)." >&2
         set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
         glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-          -f body="🔄 Worker shipped zero commits (MR !${MR_IID} has empty diff). Re-running the worker (iteration $((ITERATION+1))/3)." > /dev/null
-        if [ "$ITERATION" -lt 3 ]; then
+          -f body="🔄 Worker shipped zero commits (MR !${MR_IID} has empty diff). Re-running the worker (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null
+        if [ "$ITERATION" -lt "$MAX_ITER" ]; then
           curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
             -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
             -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=worker" \
@@ -1289,7 +1373,7 @@ reviewer:
         else
           set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
           glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-            -f body="⚠️ Worker shipped zero commits after 3 attempts. Human intervention needed." > /dev/null
+            -f body="⚠️ Worker shipped zero commits after $MAX_ITER attempts. Human intervention needed." > /dev/null
         fi
         exit 1
       fi
@@ -1340,7 +1424,8 @@ reviewer:
           ;;
         FAIL)
           ITERATION="${BOUCLE_ITERATION:-1}"
-          if [ "$ITERATION" -lt 3 ]; then
+          MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
+          if [ "$ITERATION" -lt "$MAX_ITER" ]; then
             set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
             # Chain back to worker with incremented iteration
             curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
@@ -1348,7 +1433,8 @@ reviewer:
               -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=worker" \
               -F "variables[BOUCLE_ITERATION]=$((ITERATION+1))" > /dev/null
           else
-            # 3rd reviewer FAIL: fused into boucle:human (was boucle:blocked, deleted)
+            # Final reviewer FAIL after $MAX_ITER attempts: fused into boucle:human
+            # (was boucle:blocked, deleted). Configurable via BOUCLE_MAX_ITERATIONS.
             set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
           fi
           ;;
@@ -2259,13 +2345,37 @@ doctor:
       # or boucle:review with no active pipeline. The dispatch job does NOT
       # re-route these labels (it only handles triage/todo/needs-info/spec-
       # review), so without this recovery the issue hangs forever. Re-trigger
-      # the appropriate role if the label has been stuck for >15 min with no
-      # matching role pipeline currently running.
+      # the appropriate role if the label has been stale (configurable via
+      # BOUCLE_STALENESS_THRESHOLD, default 300s/5min) with no matching role
+      # pipeline currently running.
       echo "Scanning for stuck boucle:working / boucle:review issues..."
       STUCK_WORKING=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:working&per_page=100" \
         | jq -r '.[].iid')
       STUCK_REVIEW=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:review&per_page=100" \
         | jq -r '.[].iid')
+
+      # Deferred todo issues: re-trigger when a worker slot frees up.
+      # Only applies when BOUCLE_MAX_PARALLEL_ISSUES is set (> 0).
+      MAX_PARALLEL="${BOUCLE_MAX_PARALLEL_ISSUES:-0}"
+      if [ "$MAX_PARALLEL" -gt 0 ] 2>/dev/null; then
+        WORKING_COUNT=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:working&per_page=100" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
+        if [ "$WORKING_COUNT" -lt "$MAX_PARALLEL" ]; then
+          TODO_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:todo&per_page=100" | jq -r '.[].iid')
+          for IID in $TODO_ISSUES; do
+            # Re-check working count each iteration (a previous trigger may have flipped it)
+            WORKING_COUNT=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:working&per_page=100" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
+            if [ "$WORKING_COUNT" -ge "$MAX_PARALLEL" ]; then
+              echo "  → slots full again ($WORKING_COUNT/$MAX_PARALLEL) — stopping todo recovery"
+              break
+            fi
+            echo "  → #$IID (boucle:todo): slot available ($WORKING_COUNT/$MAX_PARALLEL) — triggering worker"
+            curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
+              -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+              -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+            RECOVERED=$((RECOVERED + 1))
+          done
+        fi
+      fi
 
       for IID in $STUCK_WORKING $STUCK_REVIEW; do
         # Determine which role to re-trigger based on the label.
@@ -2304,8 +2414,9 @@ doctor:
         UPDATED_EPOCH=$(date -d "$UPDATED_AT" +%s 2>/dev/null || echo 0)
         NOW_EPOCH=$(date +%s)
         AGE=$((NOW_EPOCH - UPDATED_EPOCH))
-        if [ "$AGE" -lt 900 ]; then
-          echo "  → #$IID ($ROLE): issue updated ${AGE}s ago (< 15 min) — may still be processing, skipping"
+        STALENESS="${BOUCLE_STALENESS_THRESHOLD:-300}"
+        if [ "$AGE" -lt "$STALENESS" ]; then
+          echo "  → #$IID ($ROLE): issue updated ${AGE}s ago (< ${STALENESS}s) — may still be processing, skipping"
           continue
         fi
 
