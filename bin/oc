@@ -137,10 +137,46 @@ get_peak_rss_kb() {
 # Print the structured metrics line to stderr.
 print_metrics_line() {
   local elapsed db_size peak_rss
-  elapsed=$(($(date +%s) - START_EPOCH))
-  db_size=$(stat -c %s "$OPENCODE_DB" 2> /dev/null || stat -f %z "$OPENCODE_DB" 2> /dev/null || echo 0)
+  elapsed=$(( $(date +%s) - START_EPOCH ))
+  db_size=$(stat -c %s "$OPENCODE_DB" 2>/dev/null || stat -f %z "$OPENCODE_DB" 2>/dev/null || echo 0)
   peak_rss=$(get_peak_rss_kb)
   echo "[boucle:metrics] role=$ROLE agent=$AGENT iteration=$ITERATION wall_clock=${elapsed}s peak_rss=${peak_rss}kb db_size=${db_size}b" >&2
+}
+
+# Retry wrapper for opencode invocations. Retries transient failures
+# (any non-zero exit except 130=SIGINT) with exponential backoff and
+# ±50% jitter. Caps individual delay at 60s.
+# Usage: run_with_retry -- <cmd> [args...]
+# Sets global AGENT_EXIT to the final attempt's exit code.
+# Always returns 0; caller checks AGENT_EXIT.
+run_with_retry() {
+  [ "${1:-}" = "--" ] && shift
+  local max_retries="${BOUCLE_LLM_MAX_RETRIES:-3}"
+  local base_delay="${BOUCLE_LLM_RETRY_BASE_DELAY:-5}"
+  local total=$((max_retries + 1))
+  local attempt=1
+  local rc=0
+  while [ "$attempt" -le "$total" ]; do
+    # `|| rc=$?` suppresses set -e on failure so we can inspect the code.
+    "$@" || rc=$?
+    if [ "$rc" -eq 0 ] || [ "$rc" -eq 130 ]; then
+      AGENT_EXIT=$rc
+      return 0
+    fi
+    if [ "$attempt" -eq "$total" ]; then
+      break
+    fi
+    local delay
+    delay=$(awk -v b="$base_delay" -v a="$((attempt - 1))" 'BEGIN {
+      srand(); d = b * (2 ^ a); if (d > 60) d = 60
+      j = 0.5 + rand(); printf "%d", int(d * j)
+    }')
+    echo "[boucle:retry] attempt ${attempt}/${total} after ${delay}s (exit code: ${rc})" >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+  done
+  AGENT_EXIT=$rc
+  return 0
 }
 
 # ── 1. Isolate opencode DB (required, not optional) ───────────────────
@@ -214,8 +250,12 @@ if [ "$DRY_RUN" = "true" ]; then
   # Start RSS sampler; /usr/bin/time wrapper is skipped in dry-run to keep
   # output untouched. Sampler will be stopped below.
   start_rss_sampler 2> /dev/null || true
+  # Bash env-prefix on a function: sets the var in run_with_retry's
+  # environment, which propagates through to the opencode child.
+  # 2>&1 merges opencode's stderr into our stdout for the dry-run log.
+  # Final exit is captured into AGENT_EXIT but ignored.
   OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
-    opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" 2>&1 || true
+    run_with_retry -- opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" 2>&1 || true
   # Stop the RSS sampler so it stops writing to the tmp file.
   if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2> /dev/null; then
     kill "$RSS_SAMPLER_PID" 2> /dev/null || true
@@ -235,13 +275,13 @@ VARIANT_ARGS=()
 # passes it through to the opencode child. Exit code still propagates.
 if [ "$HAVE_GNU_TIME" = "1" ] && [ -n "$METRICS_TMP" ]; then
   OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
-    /usr/bin/time -v -o "$METRICS_TMP" \
-    opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" || AGENT_EXIT=$?
+    run_with_retry -- /usr/bin/time -v -o "$METRICS_TMP" \
+      opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT"
 else
   # Fall back to /proc poller if /usr/bin/time is missing.
   start_rss_sampler 2> /dev/null || true
   OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
-    opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" || AGENT_EXIT=$?
+    run_with_retry -- opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT"
   if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2> /dev/null; then
     kill "$RSS_SAMPLER_PID" 2> /dev/null || true
     wait "$RSS_SAMPLER_PID" 2> /dev/null || true
