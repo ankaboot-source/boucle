@@ -570,8 +570,13 @@ triage:
               CUR_BODY=""
               CUR_SIZE_RAW=""
             else
-              # Append line to body (printf to keep it on one logical line for YAML)
-              CUR_BODY=$(printf '%s%s\n' "$CUR_BODY" "$line")
+              # Append line to body. Direct assignment (not command
+              # substitution) preserves the trailing newline: $(...) strips
+              # trailing newlines, which would collapse the whole body to a
+              # single line and make the mid-line checkbox guard false-positive
+              # on "Acceptance criteria:- [ ] ..." (colon is non-space before
+              # "- [ ]"). $'\n' keeps the newline literal.
+              CUR_BODY="${CUR_BODY}${line}"$'\n'
               # Capture Size: line
               if [[ "$line" =~ ^Size:[[:space:]]*([SML]) ]]; then
                 CUR_SIZE_RAW="${BASH_REMATCH[1]}"
