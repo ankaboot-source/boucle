@@ -30,6 +30,10 @@ variables:
   BOUCLE_DEPLOY_URL_REGEX: "https://[a-z0-9.-]+\\.pages\\.dev"
   # Production URL (for e2e fallback when deploy doesn't pass a live URL)
   BOUCLE_PRODUCTION_URL: ""
+  # Image attachment policy: max size per image (bytes) and total per issue (bytes).
+  # Defaults: 10 MiB per image, 50 MiB total. Images over either cap are skipped.
+  BOUCLE_IMAGE_MAX_BYTES: "10485760"
+  BOUCLE_IMAGE_TOTAL_MAX_BYTES: "52428800"
   # File-type CI variable: $OPENCODE_AUTH holds a path to the auth.json temp file
 
 # ── Default: use node:22-slim (has node, npm, curl — much smaller than node:22) ─
@@ -409,6 +413,10 @@ triage:
         printf '%s' "${out:-[]}"
       }
 
+      # Download images attached to the issue (capped per BOUCLE_IMAGE_*_BYTES).
+      # Makes them available to the triage agent via BOUCLE_ISSUE_ATTACHMENTS.
+      ./bin/fetch-issue-images || echo "[boucle] WARN: image fetch failed — continuing without images"
+
       # Run the agent
       ./bin/oc triage
 
@@ -775,6 +783,10 @@ worker:
       nothing
       EOF
       fi
+
+      # Download images attached to the issue (capped per BOUCLE_IMAGE_*_BYTES).
+      # Makes them available to the worker agent via BOUCLE_ISSUE_ATTACHMENTS.
+      ./bin/fetch-issue-images || echo "[boucle] WARN: image fetch failed — continuing without images"
 
       # Run the agent (agent commits its own work)
       ./bin/oc worker
