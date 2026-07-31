@@ -18,16 +18,43 @@ DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --project) PROJECT="$2"; shift 2 ;;
-    --host) HOST="$2"; shift 2 ;;
-    --bot-id) BOT_ID="$2"; shift 2 ;;
-    --bot-token) BOT_TOKEN="$2"; shift 2 ;;
-    --cf-token) CF_TOKEN="$2"; shift 2 ;;
-    --runner-tag) RUNNER_TAG="$2"; shift 2 ;;
-    --auth-path) OPENCODE_AUTH_PATH="$2"; shift 2 ;;
-    --skip-cf) SKIP_CF=true; shift ;;
-    --dry-run) DRY_RUN=true; shift ;;
-    -h|--help)
+    --project)
+      PROJECT="$2"
+      shift 2
+      ;;
+    --host)
+      HOST="$2"
+      shift 2
+      ;;
+    --bot-id)
+      BOT_ID="$2"
+      shift 2
+      ;;
+    --bot-token)
+      BOT_TOKEN="$2"
+      shift 2
+      ;;
+    --cf-token)
+      CF_TOKEN="$2"
+      shift 2
+      ;;
+    --runner-tag)
+      RUNNER_TAG="$2"
+      shift 2
+      ;;
+    --auth-path)
+      OPENCODE_AUTH_PATH="$2"
+      shift 2
+      ;;
+    --skip-cf)
+      SKIP_CF=true
+      shift
+      ;;
+    --dry-run)
+      DRY_RUN=true
+      shift
+      ;;
+    -h | --help)
       echo "Usage: bin/setup --project <id-or-path> --host <forge-host> [options]"
       echo ""
       echo "Options:"
@@ -42,18 +69,35 @@ while [[ $# -gt 0 ]]; do
       echo "  --dry-run                 Print what would be done, don't execute"
       exit 0
       ;;
-    *) echo "Unknown arg: $1" >&2; exit 1 ;;
+    *)
+      echo "Unknown arg: $1" >&2
+      exit 1
+      ;;
   esac
 done
 
 # Validate required args
-[ -z "$PROJECT" ] && { echo "Error: --project is required" >&2; exit 1; }
+[ -z "$PROJECT" ] && {
+  echo "Error: --project is required" >&2
+  exit 1
+}
 
 # ── Helpers ───────────────────────────────────────────────────────────
-PASS=0; FAIL=0; SKIP=0
-log_pass() { echo "  ✓ $1"; PASS=$((PASS+1)); }
-log_fail() { echo "  ✗ $1" >&2; FAIL=$((FAIL+1)); }
-log_skip() { echo "  - $1 (skipped)"; SKIP=$((SKIP+1)); }
+PASS=0
+FAIL=0
+SKIP=0
+log_pass() {
+  echo "  ✓ $1"
+  PASS=$((PASS + 1))
+}
+log_fail() {
+  echo "  ✗ $1" >&2
+  FAIL=$((FAIL + 1))
+}
+log_skip() {
+  echo "  - $1 (skipped)"
+  SKIP=$((SKIP + 1))
+}
 
 # Resolve project ID (if path given, look up ID)
 resolve_project_id() {
@@ -62,7 +106,7 @@ resolve_project_id() {
   else
     # URL-encode the path
     ENCODED=$(echo "$PROJECT" | sed 's/\//%2F/g')
-    glab api --hostname "$HOST" "/projects/$ENCODED" 2>/dev/null | jq -r '.id'
+    glab api --hostname "$HOST" "/projects/$ENCODED" 2> /dev/null | jq -r '.id'
   fi
 }
 
@@ -71,7 +115,10 @@ echo "Project: $PROJECT on $HOST"
 echo ""
 
 PROJECT_ID=$(resolve_project_id)
-[ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "null" ] && { echo "Error: could not resolve project ID" >&2; exit 1; }
+[ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "null" ] && {
+  echo "Error: could not resolve project ID" >&2
+  exit 1
+}
 echo "Project ID: $PROJECT_ID"
 echo ""
 
@@ -80,6 +127,7 @@ run() {
   if [ "$DRY_RUN" = "true" ]; then
     echo "  [dry-run] $*"
   else
+    # shellcheck disable=SC2294 # intentional: re-exec the caller's command string
     eval "$@"
   fi
 }
@@ -107,7 +155,7 @@ echo "=== CI Variables ==="
 
 # BOUCLE_TOKEN (from --bot-token)
 if [ -n "$BOT_TOKEN" ]; then
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_TOKEN" 2>/dev/null | jq -r '.key // empty')
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_TOKEN" 2> /dev/null | jq -r '.key // empty')
   if [ -n "$EXISTING" ]; then
     log_skip "BOUCLE_TOKEN already exists"
   else
@@ -120,7 +168,7 @@ fi
 
 # CLOUDFLARE_API_TOKEN (from --cf-token)
 if [ -n "$CF_TOKEN" ]; then
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/CLOUDFLARE_API_TOKEN" 2>/dev/null | jq -r '.key // empty')
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/CLOUDFLARE_API_TOKEN" 2> /dev/null | jq -r '.key // empty')
   if [ -n "$EXISTING" ]; then
     log_skip "CLOUDFLARE_API_TOKEN already exists"
   else
@@ -132,7 +180,7 @@ else
 fi
 
 # BOUCLE_ENABLED
-EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_ENABLED" 2>/dev/null | jq -r '.key // empty')
+EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_ENABLED" 2> /dev/null | jq -r '.key // empty')
 if [ -n "$EXISTING" ]; then
   log_skip "BOUCLE_ENABLED already exists"
 else
@@ -142,7 +190,7 @@ fi
 
 # BOUCLE_SPEC_PROFILE — controls the spec-validation gate between triage and worker.
 # Values: product (gate Size M/L, S passes), off (no gate), strict (gate all sizes).
-EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_SPEC_PROFILE" 2>/dev/null | jq -r '.key // empty' 2>/dev/null || true)
+EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_SPEC_PROFILE" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
 if [ -n "$EXISTING" ]; then
   log_skip "BOUCLE_SPEC_PROFILE already exists"
 else
@@ -153,7 +201,7 @@ fi
 # BOUCLE_UPDATE_MODE — controls self-update behavior.
 # Values: release (default, fetch latest tag) | dev (fetch latest commit on main).
 # If unset, bin/update defaults to release.
-EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_UPDATE_MODE" 2>/dev/null | jq -r '.key // empty' 2>/dev/null || true)
+EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_UPDATE_MODE" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
 if [ -n "$EXISTING" ]; then
   log_skip "BOUCLE_UPDATE_MODE already exists"
 else
@@ -163,7 +211,7 @@ fi
 
 # OPENCODE_AUTH (file type) — requires auth.json to exist locally
 if [ -f "$OPENCODE_AUTH_PATH" ]; then
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/OPENCODE_AUTH" 2>/dev/null | jq -r '.key // empty')
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/OPENCODE_AUTH" 2> /dev/null | jq -r '.key // empty')
   if [ -n "$EXISTING" ]; then
     log_skip "OPENCODE_AUTH already exists"
   else
@@ -184,8 +232,9 @@ echo ""
 echo "=== Labels ==="
 
 # boucle:* labels (14)
+# shellcheck disable=SC1010 # 'done' is a label name, not the loop keyword
 for label in triage needs-info todo working review human blocked done split approval approved spec-review spec-approved merging; do
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2>/dev/null | jq -r '.[0].name // empty')
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2> /dev/null | jq -r '.[0].name // empty')
   if [ -n "$EXISTING" ]; then
     log_skip "boucle:$label already exists"
   else
@@ -196,7 +245,7 @@ done
 
 # size:* labels (3)
 for size in s m l; do
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=size:$size" 2>/dev/null | jq -r '.[0].name // empty')
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=size:$size" 2> /dev/null | jq -r '.[0].name // empty')
   if [ -n "$EXISTING" ]; then
     log_skip "size:$size already exists"
   else
@@ -211,7 +260,7 @@ echo ""
 echo "=== Issue Board ==="
 
 # Check if boucle board already exists
-BOARD_ID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/boards" 2>/dev/null | jq -r '.[] | select(.name=="boucle") | .id' | head -1)
+BOARD_ID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/boards" 2> /dev/null | jq -r '.[] | select(.name=="boucle") | .id' | head -1)
 if [ -n "$BOARD_ID" ] && [ "$BOARD_ID" != "null" ]; then
   log_skip "boucle board already exists (ID: $BOARD_ID)"
 else
@@ -220,8 +269,9 @@ else
   if [ -n "$BOARD_ID" ] && [ "$BOARD_ID" != "null" ]; then
     log_pass "boucle board created (ID: $BOARD_ID)"
     # Add lists for each boucle:* label
+    # shellcheck disable=SC1010 # 'done' is a label name, not the loop keyword
     for label in triage needs-info todo working review human blocked done split approval spec-review spec-approved merging; do
-      LABEL_ID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2>/dev/null | jq -r '.[0].id')
+      LABEL_ID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2> /dev/null | jq -r '.[0].id')
       if [ -n "$LABEL_ID" ] && [ "$LABEL_ID" != "null" ]; then
         run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/boards/$BOARD_ID/lists -f label_id=$LABEL_ID >/dev/null"
         log_pass "  list boucle:$label added"
@@ -238,15 +288,15 @@ echo ""
 echo "=== Branch Protection ==="
 
 # Get default branch
-DEFAULT_BRANCH=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID" 2>/dev/null | jq -r '.default_branch')
+DEFAULT_BRANCH=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID" 2> /dev/null | jq -r '.default_branch')
 if [ -z "$DEFAULT_BRANCH" ] || [ "$DEFAULT_BRANCH" = "null" ]; then
   log_fail "could not determine default branch"
   DEFAULT_BRANCH="master"
 fi
 
 # Check if branch is already protected
-PROTECTION=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/protected_branches/$DEFAULT_BRANCH" 2>/dev/null)
-if [ -n "$PROTECTION" ] && echo "$PROTECTION" | jq -e '.name' >/dev/null 2>&1; then
+PROTECTION=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/protected_branches/$DEFAULT_BRANCH" 2> /dev/null)
+if [ -n "$PROTECTION" ] && echo "$PROTECTION" | jq -e '.name' > /dev/null 2>&1; then
   # Already protected — verify both merge and push access levels
   MERGE_LEVEL=$(echo "$PROTECTION" | jq -r '.merge_access_levels[0].access_level // empty')
   PUSH_LEVEL=$(echo "$PROTECTION" | jq -r '.push_access_levels[0].access_level // empty')
@@ -277,7 +327,7 @@ echo "=== Bot Member ==="
 
 if [ -n "$BOT_ID" ]; then
   # Check if bot is already a member
-  EXISTING_MEMBER=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/members/$BOT_ID" 2>/dev/null | jq -r '.access_level // empty')
+  EXISTING_MEMBER=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/members/$BOT_ID" 2> /dev/null | jq -r '.access_level // empty')
   if [ -n "$EXISTING_MEMBER" ]; then
     if [ "$EXISTING_MEMBER" = "30" ]; then
       log_skip "bot (ID: $BOT_ID) already Developer"
@@ -300,7 +350,7 @@ echo "=== Trigger Token ==="
 
 # Check if trigger token already exists
 TRIGGER_TOKEN=""
-EXISTING_TRIGGERS=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/triggers" 2>/dev/null)
+EXISTING_TRIGGERS=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/triggers" 2> /dev/null)
 BOUCLE_TRIGGER=$(echo "$EXISTING_TRIGGERS" | jq -r '.[] | select(.description=="boucle-loop") | .token' | head -1)
 if [ -n "$BOUCLE_TRIGGER" ]; then
   TRIGGER_TOKEN="$BOUCLE_TRIGGER"
@@ -317,7 +367,7 @@ fi
 
 # Store trigger token as CI variable
 if [ -n "$TRIGGER_TOKEN" ] && [ "$TRIGGER_TOKEN" != "null" ]; then
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_TRIGGER_TOKEN" 2>/dev/null | jq -r '.key // empty')
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_TRIGGER_TOKEN" 2> /dev/null | jq -r '.key // empty')
   if [ -n "$EXISTING" ]; then
     log_skip "BOUCLE_TRIGGER_TOKEN CI variable already exists"
   else
@@ -333,9 +383,9 @@ echo "=== Webhook ==="
 
 if [ -n "$TRIGGER_TOKEN" ] && [ "$TRIGGER_TOKEN" != "null" ]; then
   WEBHOOK_URL="https://$HOST/api/v4/projects/$PROJECT_ID/trigger/pipeline?token=$TRIGGER_TOKEN&ref=$DEFAULT_BRANCH"
-  
+
   # Check if webhook already exists
-  EXISTING_WEBHOOK=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/hooks" 2>/dev/null | jq -r '.[] | select(.url | contains("trigger/pipeline")) | .id' | head -1)
+  EXISTING_WEBHOOK=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/hooks" 2> /dev/null | jq -r '.[] | select(.url | contains("trigger/pipeline")) | .id' | head -1)
   if [ -n "$EXISTING_WEBHOOK" ]; then
     log_skip "webhook already exists (ID: $EXISTING_WEBHOOK)"
   else
@@ -359,7 +409,7 @@ elif [ -n "$CF_TOKEN" ]; then
   # Override via env var or --cf-project <name> if the default is wrong.
   CF_PROJECT_NAME="${CF_PROJECT_NAME:-$(echo "$PROJECT" | sed 's|.*/||' | sed 's/\.[a-z]*$//')}"
   # Check if project already exists
-  if npx wrangler pages project list 2>/dev/null | grep -q "$CF_PROJECT_NAME"; then
+  if npx wrangler pages project list 2> /dev/null | grep -q "$CF_PROJECT_NAME"; then
     log_skip "CF Pages project already exists"
   else
     run "npx wrangler pages project create $CF_PROJECT_NAME --production-branch $DEFAULT_BRANCH >/dev/null 2>&1"
@@ -373,7 +423,7 @@ elif [ -n "$CF_TOKEN" ]; then
   # so the pipeline's deploy/worker jobs know which project to deploy to.
   # Without this, BOUCLE_DEPLOY_CMD expands to an empty --project-name and
   # both the deploy job and worker preview deploy fail silently.
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_DEPLOY_PROJECT" 2>/dev/null | jq -r '.key // empty')
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_DEPLOY_PROJECT" 2> /dev/null | jq -r '.key // empty')
   if [ -n "$EXISTING" ]; then
     log_skip "BOUCLE_DEPLOY_PROJECT already exists"
   else
@@ -391,13 +441,13 @@ echo "=== Initial .boucle-version ==="
 
 # Fetch current upstream version (dev mode: main commit SHA — always works,
 # even before the operator starts tagging releases).
-UPSTREAM_VERSION=$(curl -fsSL "https://api.github.com/repos/ankaboot-source/boucle/commits/main" 2>/dev/null | jq -r '.sha // empty' 2>/dev/null || echo "")
+UPSTREAM_VERSION=$(curl -fsSL "https://api.github.com/repos/ankaboot-source/boucle/commits/main" 2> /dev/null | jq -r '.sha // empty' 2> /dev/null || echo "")
 
 if [ -z "$UPSTREAM_VERSION" ]; then
   log_fail "could not fetch upstream version from GitHub API"
 else
   # Check if .boucle-version already exists in the repo
-  EXISTING_FILE=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/repository/files/.boucle-version?ref=$DEFAULT_BRANCH" 2>/dev/null | jq -r '.file_path // empty' 2>/dev/null || true)
+  EXISTING_FILE=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/repository/files/.boucle-version?ref=$DEFAULT_BRANCH" 2> /dev/null | jq -r '.file_path // empty' 2> /dev/null || true)
   if [ -n "$EXISTING_FILE" ]; then
     log_skip ".boucle-version already exists in repo"
   else

@@ -43,21 +43,21 @@ setup() {
 # stdout/stderr/exit-code behavior without triggering the script body.
 
 @test "pass prints a green check on stdout" {
-  run bash -c "FAILURES=0; source <(grep -E '^(pass|warn|fail)\(\) \{' bin/doctor); pass 'hello'"
+  run bash -c "FAILURES=0; source <(awk 'BEGIN{p=0} /^(pass|warn|fail)\(\) \{/{p=1; print; next} p==1 && /^\}/{print; p=0; next} p==1{print}' bin/doctor); pass 'hello'"
   assert_success
   assert_output --partial "hello"
   assert_output --partial "✓"
 }
 
 @test "warn prints a warning to stderr" {
-  run bash -c "FAILURES=0; source <(grep -E '^(pass|warn|fail)\(\) \{' bin/doctor); warn 'careful'"
+  run bash -c "FAILURES=0; source <(awk 'BEGIN{p=0} /^(pass|warn|fail)\(\) \{/{p=1; print; next} p==1 && /^\}/{print; p=0; next} p==1{print}' bin/doctor); warn 'careful'"
   assert_success
   assert_output --partial "careful"
   assert_output --partial "⚠"
 }
 
 @test "fail prints an X and increments FAILURES" {
-  run bash -c "FAILURES=0; source <(grep -E '^(pass|warn|fail)\(\) \{' bin/doctor); fail 'broken'"
+  run bash -c "FAILURES=0; source <(awk 'BEGIN{p=0} /^(pass|warn|fail)\(\) \{/{p=1; print; next} p==1 && /^\}/{print; p=0; next} p==1{print}' bin/doctor); fail 'broken'"
   assert_success
   assert_output --partial "broken"
   assert_output --partial "✗"

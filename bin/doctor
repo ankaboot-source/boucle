@@ -9,14 +9,18 @@ HOST="${BOUCLE_FORGE_HOST:-framagit.org}"
 
 pass() { echo "  ✓ $1"; }
 warn() { echo "  ⚠ $1" >&2; }
-fail() { echo "  ✗ $1" >&2; FAILURES=$((FAILURES+1)); }
+fail() {
+  echo "  ✗ $1" >&2
+  FAILURES=$((FAILURES + 1))
+}
 FAILURES=0
 
 echo "boucle doctor — checking prerequisites..."
 
 # ── Labels ─────────────────────────────────────────────────────────────
+# shellcheck disable=SC1010 # 'done' is a label name, not the loop keyword
 for label in triage needs-info todo working review human blocked done split approval spec-review spec-approved merging; do
-  if glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2>/dev/null | jq -e '.[0]' >/dev/null 2>&1; then
+  if glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2> /dev/null | jq -e '.[0]' > /dev/null 2>&1; then
     pass "label boucle:$label exists"
   else
     fail "label boucle:$label missing"
@@ -24,7 +28,7 @@ for label in triage needs-info todo working review human blocked done split appr
 done
 
 for size in s m l; do
-  if glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=size:$size" 2>/dev/null | jq -e '.[0]' >/dev/null 2>&1; then
+  if glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=size:$size" 2> /dev/null | jq -e '.[0]' > /dev/null 2>&1; then
     pass "label size:$size exists"
   else
     fail "label size:$size missing"
@@ -33,7 +37,7 @@ done
 
 # ── CI Variables ───────────────────────────────────────────────────────
 for var in BOUCLE_TOKEN BOUCLE_ENABLED CLOUDFLARE_API_TOKEN BOUCLE_TRIGGER_TOKEN BOUCLE_SPEC_PROFILE; do
-  if glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/$var" 2>/dev/null | jq -e '.key' >/dev/null 2>&1; then
+  if glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/$var" 2> /dev/null | jq -e '.key' > /dev/null 2>&1; then
     pass "CI variable $var exists"
   else
     fail "CI variable $var missing"
@@ -41,22 +45,22 @@ for var in BOUCLE_TOKEN BOUCLE_ENABLED CLOUDFLARE_API_TOKEN BOUCLE_TRIGGER_TOKEN
 done
 
 # ── OPENCODE_AUTH (file type) ─────────────────────────────────────────
-if glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/OPENCODE_AUTH" 2>/dev/null | jq -e '.variable_type == "file"' >/dev/null 2>&1; then
+if glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/OPENCODE_AUTH" 2> /dev/null | jq -e '.variable_type == "file"' > /dev/null 2>&1; then
   pass "OPENCODE_AUTH is file type"
 else
   fail "OPENCODE_AUTH missing or not file type"
 fi
 
 # ── Branch protection ──────────────────────────────────────────────────
-PROTECTION=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/protected_branches/master" 2>/dev/null || echo "")
-if echo "$PROTECTION" | jq -e '.merge_access_levels[0].access_level == 40' >/dev/null 2>&1; then
+PROTECTION=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/protected_branches/master" 2> /dev/null || echo "")
+if echo "$PROTECTION" | jq -e '.merge_access_levels[0].access_level == 40' > /dev/null 2>&1; then
   pass "master protected, merge=Maintainer only"
 else
   fail "master not protected or merge access too broad"
 fi
 
 # Check bot push permission (required for self-update auto-commit)
-PUSH_LEVEL=$(echo "$PROTECTION" | jq -r '.push_access_levels[0].access_level // empty' 2>/dev/null)
+PUSH_LEVEL=$(echo "$PROTECTION" | jq -r '.push_access_levels[0].access_level // empty' 2> /dev/null)
 if [ "$PUSH_LEVEL" = "30" ] || [ "$PUSH_LEVEL" = "40" ]; then
   pass "bot can push to master (push_access_level=$PUSH_LEVEL)"
 else
@@ -64,7 +68,7 @@ else
 fi
 
 # ── Trigger token valid ────────────────────────────────────────────────
-if glab api --hostname "$HOST" "/projects/$PROJECT_ID/triggers" 2>/dev/null | jq -e '.[0].token' >/dev/null 2>&1; then
+if glab api --hostname "$HOST" "/projects/$PROJECT_ID/triggers" 2> /dev/null | jq -e '.[0].token' > /dev/null 2>&1; then
   pass "trigger token exists"
 else
   fail "no trigger token found"
@@ -77,7 +81,7 @@ fi
 if [ -z "${BOUCLE_RUNNER_TAG:-}" ]; then
   warn "BOUCLE_RUNNER_TAG unset — skipping runner-online check (set it to your project's runner tag)"
 else
-  if glab api --hostname "$HOST" "/projects/$PROJECT_ID/runners" 2>/dev/null | jq -e ".[] | select(.status==\"online\" and (.tag_list | contains([\"$BOUCLE_RUNNER_TAG\"])))" >/dev/null 2>&1; then
+  if glab api --hostname "$HOST" "/projects/$PROJECT_ID/runners" 2> /dev/null | jq -e ".[] | select(.status==\"online\" and (.tag_list | contains([\"$BOUCLE_RUNNER_TAG\"])))" > /dev/null 2>&1; then
     pass "runner with tag '$BOUCLE_RUNNER_TAG' online"
   else
     fail "no runner with tag '$BOUCLE_RUNNER_TAG' online"
@@ -94,7 +98,7 @@ for role in triage worker reviewer e2e; do
 done
 
 # ── opencode reachable ─────────────────────────────────────────────────
-if command -v opencode &>/dev/null; then
+if command -v opencode &> /dev/null; then
   pass "opencode in PATH"
 else
   fail "opencode not in PATH"
@@ -103,7 +107,7 @@ fi
 # ── CLOUDFLARE_API_TOKEN can deploy ────────────────────────────────────
 if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
   if [ -n "${BOUCLE_DEPLOY_PROJECT:-}" ]; then
-    if npx wrangler pages project list 2>/dev/null | grep -q "$BOUCLE_DEPLOY_PROJECT"; then
+    if npx wrangler pages project list 2> /dev/null | grep -q "$BOUCLE_DEPLOY_PROJECT"; then
       pass "CF Pages project '$BOUCLE_DEPLOY_PROJECT' exists"
     else
       fail "CF Pages project '$BOUCLE_DEPLOY_PROJECT' not found"
@@ -131,7 +135,7 @@ else
 fi
 
 # Check BOUCLE_UPDATE_MODE (optional — absent = release default, which is valid)
-MODE=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_UPDATE_MODE" 2>/dev/null | jq -r '.value // empty' 2>/dev/null || echo "")
+MODE=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_UPDATE_MODE" 2> /dev/null | jq -r '.value // empty' 2> /dev/null || echo "")
 if [ -z "$MODE" ]; then
   pass "BOUCLE_UPDATE_MODE not set (defaults to release)"
 elif [ "$MODE" = "release" ] || [ "$MODE" = "dev" ]; then

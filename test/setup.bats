@@ -50,21 +50,21 @@ setup() {
 # the PASS/FAIL/SKIP counters, which we initialize in the subshell).
 
 @test "log_pass prints a check and increments counter" {
-  run bash -c "PASS=0; FAIL=0; SKIP=0; source <(grep -E '^(log_pass|log_fail|log_skip)\(\) \{' bin/setup); log_pass 'created label'"
+  run bash -c "PASS=0; FAIL=0; SKIP=0; source <(awk 'BEGIN{p=0} /^(log_pass|log_fail|log_skip)\(\) \{/{p=1; print; next} p==1 && /^\}/{print; p=0; next} p==1{print}' bin/setup); log_pass 'created label'"
   assert_success
   assert_output --partial "created label"
   assert_output --partial "✓"
 }
 
 @test "log_fail prints an X to stderr" {
-  run bash -c "PASS=0; FAIL=0; SKIP=0; source <(grep -E '^(log_pass|log_fail|log_skip)\(\) \{' bin/setup); log_fail 'something broke'"
+  run bash -c "PASS=0; FAIL=0; SKIP=0; source <(awk 'BEGIN{p=0} /^(log_pass|log_fail|log_skip)\(\) \{/{p=1; print; next} p==1 && /^\}/{print; p=0; next} p==1{print}' bin/setup); log_fail 'something broke'"
   assert_success
   assert_output --partial "something broke"
   assert_output --partial "✗"
 }
 
 @test "log_skip prints a skip indicator" {
-  run bash -c "PASS=0; FAIL=0; SKIP=0; source <(grep -E '^(log_pass|log_fail|log_skip)\(\) \{' bin/setup); log_skip 'optional'"
+  run bash -c "PASS=0; FAIL=0; SKIP=0; source <(awk 'BEGIN{p=0} /^(log_pass|log_fail|log_skip)\(\) \{/{p=1; print; next} p==1 && /^\}/{print; p=0; next} p==1{print}' bin/setup); log_skip 'optional'"
   assert_success
   assert_output --partial "optional"
   assert_output --partial "skipped"
