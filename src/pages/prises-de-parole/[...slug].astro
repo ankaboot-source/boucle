@@ -289,4 +289,52 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 		flex-wrap: wrap;
 		gap: var(--space-2xs);
 	}
+
+	/*
+	 * .entry__footer-actions .btn — local override on the base .btn to
+	 * align with the CTA charter (Variant A). Hard-edged red rectangle
+	 * for primary, inverted ink rectangle for ghost so both reads stay
+	 * high-contrast against the soft surface of the footer card.
+	 */
+	.entry__footer-actions .btn {
+		min-height: 44px;
+		padding: var(--space-s) var(--space-l);
+		font-family: var(--font-heading);
+		font-size: var(--text-base);
+		font-weight: var(--weight-bold);
+		letter-spacing: var(--tracking-wide);
+		text-transform: uppercase;
+		border-radius: var(--radius-sharp);
+		border-width: 0;
+	}
+
+	.entry__footer-actions .btn--primary {
+		background: var(--color-flag-red);
+		color: var(--color-flag-white);
+	}
+
+	.entry__footer-actions .btn--primary:hover {
+		background: var(--color-flag-red-deep);
+		color: var(--color-flag-white);
+	}
+
+	.entry__footer-actions .btn--primary:focus-visible {
+		outline: 2px solid var(--color-flag-white);
+		outline-offset: 3px;
+	}
+
+	.entry__footer-actions .btn--ghost {
+		background: var(--color-ink);
+		color: var(--color-ink-on-dark);
+	}
+
+	.entry__footer-actions .btn--ghost:hover {
+		background: var(--color-ink-soft);
+		color: var(--color-ink-on-dark);
+	}
+
+	.entry__footer-actions .btn--ghost:focus-visible {
+		outline: 2px solid var(--color-flag-red);
+		outline-offset: 3px;
+	}
 </style>
