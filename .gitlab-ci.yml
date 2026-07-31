@@ -1167,7 +1167,7 @@ merger:
         -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
         -F "variables[BOUCLE_ROLE]=e2e" \
         -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" \
-        -F "variables[BOUCLE_LIVE_URL]=$LIVE_URL" > /dev/null
+        -F "variables[BOUCLE_LIVE_URL]=$LIVE_URL" > /dev/null 2>&1 || true
       echo "Triggered e2e for issue #$BOUCLE_ISSUE with LIVE_URL=$LIVE_URL"
   timeout: 15m
 
@@ -1382,13 +1382,20 @@ e2e:
       # agent exit code is not authoritative.
       ./bin/oc e2e || true
 
+      # Disable errexit for the post-agent section: the verdict parsing and
+      # label/close calls below are all best-effort. GitLab Runner runs - |
+      # blocks with `set -eo pipefail`, so a non-zero from grep (no match),
+      # glab (API error), or jq (bad JSON) would kill the script before the
+      # case statement can route to PASS/FAIL/UNCERTAIN. We handle errors
+      # explicitly per-command instead.
+      set +e
       # Parse verdict from agent output (bin/oc logs to stdout)
       # If BOUCLE_ISSUE is set, parse from issue comment; otherwise from agent stdout.
       # Tolerate glab/jq non-zero exit (glab may warn about version updates on
       # stderr; jq may error on unexpected JSON). An empty COMMENT → empty VERDICT
       # → UNCERTAIN branch, which is safe.
-      COMMENT=$(set +e; glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" 2>/dev/null \
-        | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | first | .body // empty' 2>/dev/null) || true
+      COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" 2>/dev/null \
+        | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | first | .body // empty' 2>/dev/null)
       VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
 
       case "$VERDICT" in
