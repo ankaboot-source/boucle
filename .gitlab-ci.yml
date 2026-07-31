@@ -30,6 +30,10 @@ variables:
   BOUCLE_DEPLOY_URL_REGEX: "https://[a-z0-9.-]+\\.pages\\.dev"
   # Production URL (for e2e fallback when deploy doesn't pass a live URL)
   BOUCLE_PRODUCTION_URL: ""
+  # Image attachment policy: max size per image (bytes) and total per issue (bytes).
+  # Defaults: 10 MiB per image, 50 MiB total. Images over either cap are skipped.
+  BOUCLE_IMAGE_MAX_BYTES: "10485760"
+  BOUCLE_IMAGE_TOTAL_MAX_BYTES: "52428800"
   # File-type CI variable: $OPENCODE_AUTH holds a path to the auth.json temp file
 
 # ── Default: use node:22-slim (has node, npm, curl — much smaller than node:22) ─
@@ -171,7 +175,7 @@ dispatch:
       # For note events, .object_attributes.iid is the note's DB id, not the issue IID.
       # The issue IID lives in the sibling key: .issue.iid (classic issues),
       # .work_item.iid (work items), or .epic.iid (epics).
-      if [ "$OBJECT_KIND" = "note" ]; then
+      if [ "$OBJECT_KIND" = "note" ] || [ "$OBJECT_KIND" = "emoji" ]; then
         IID=$(jq -r '.issue.iid // .work_item.iid // .epic.iid // empty' "$TRIGGER_PAYLOAD")
       else
         IID=$(jq -r '.object_attributes.iid // .issue.iid // empty' "$TRIGGER_PAYLOAD")
@@ -224,6 +228,10 @@ dispatch:
         exit 0
       fi
 
+      # Emoji reactions that count as spec approval (GitLab internal alpha codes).
+      # Skin-tone modifiers are ignored — GitLab stores the base name regardless.
+      BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup|white_check_mark|ballot_box_with_check|heavy_check_mark|ok|ok_hand"
+
       SHOULD_TRIAGE=false
       SHOULD_WORK=false
       if echo "$LABELS" | grep -q "boucle:triage"; then
@@ -255,6 +263,15 @@ dispatch:
         # boucle:spec-review here.
         if [ "$OBJECT_KIND" = "note" ] && [ "$ACTOR" != "up-bot" ]; then
           SHOULD_WORK=true
+        elif [ "$OBJECT_KIND" = "emoji" ] && [ "$ACTOR" != "up-bot" ]; then
+          EMOJI_NAME=$(jq -r '.object_attributes.name // empty' "$TRIGGER_PAYLOAD")
+          EMOJI_ACTION=$(jq -r '.object_attributes.action // empty' "$TRIGGER_PAYLOAD")
+          AWARDABLE_TYPE=$(jq -r '.object_attributes.awardable_type // empty' "$TRIGGER_PAYLOAD")
+          if [ "$EMOJI_ACTION" = "award" ] \
+             && [ "$AWARDABLE_TYPE" = "Note" ] \
+             && echo "$EMOJI_NAME" | grep -Eq "^($BOUCLE_SPEC_APPROVAL_EMOJIS)$"; then
+            SHOULD_WORK=true
+          fi
         fi
       elif [ -z "$LABELS" ] || [ "$ACTION" = "open" ]; then
         # New issue with no boucle label → triage
@@ -396,6 +413,10 @@ triage:
         printf '%s' "${out:-[]}"
       }
 
+      # Download images attached to the issue (capped per BOUCLE_IMAGE_*_BYTES).
+      # Makes them available to the triage agent via BOUCLE_ISSUE_ATTACHMENTS.
+      ./bin/fetch-issue-images || echo "[boucle] WARN: image fetch failed — continuing without images"
+
       # Run the agent
       ./bin/oc triage
 
@@ -442,7 +463,7 @@ triage:
                   --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
                   --data-urlencode "assignee_ids[]=$AUTHOR_ID"
               fi
-              SPEC_MSG=$(printf 'Review the acceptance criteria above. If they match what you want, reply to this issue to start implementation. If not, reply with corrections.')
+              SPEC_MSG=$(printf 'Review the acceptance criteria above. If they match what you want:\n- React with 👍 ✅ ☑️ ✔️ 🆗 or 👌 on this comment to approve, OR\n- Reply to this issue with any comment.\nIf not, reply with corrections.')
               glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
                 -f body="$SPEC_MSG" > /dev/null
             else
@@ -645,6 +666,13 @@ triage:
             SPLIT_MSG=$(printf 'Split into: #%s.\n\nParent stays open until all sub-issues close. The loop closes this parent automatically when the last sub-issue completes.' "$(echo "$CREATED_IIDS" | sed 's/,/#, #/g')")
             glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
               -f body="$SPLIT_MSG" > /dev/null
+            # Post a machine-readable marker comment as a fallback for
+            # maybe_close_parent() when the work-items hierarchy API is
+            # unavailable (e.g. work_item_rest_api feature flag disabled on
+            # self-managed GitLab like Framagit). The marker is parsed by
+            # maybe_close_parent's legacy fallback path.
+            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+              -f body="<!-- boucle:split-parent iids=$CREATED_IIDS -->" > /dev/null 2>&1 || true
             # Mark the parent boucle:split so dispatch and doctor stop re-triaging it.
             # The parent stays open and is closed by maybe_close_parent() (e2e) or
             # the doctor's split-parent cascade when all sub-issues close.
@@ -755,6 +783,10 @@ worker:
       nothing
       EOF
       fi
+
+      # Download images attached to the issue (capped per BOUCLE_IMAGE_*_BYTES).
+      # Makes them available to the worker agent via BOUCLE_ISSUE_ATTACHMENTS.
+      ./bin/fetch-issue-images || echo "[boucle] WARN: image fetch failed — continuing without images"
 
       # Run the agent (agent commits its own work)
       ./bin/oc worker
@@ -1076,6 +1108,13 @@ merger:
       BRANCH="boucle/$BOUCLE_ISSUE"
       git fetch origin master "$BRANCH"
 
+      # Set git identity BEFORE the rebase — git rebase rewrites commits and
+      # needs a committer identity. On a fresh docker executor there is no
+      # global git config, so the rebase fails with "Committer identity unknown".
+      git config user.email "bot@ankaboot.dev"
+      git config user.name "up-bot"
+      git remote set-url origin "https://up-bot:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${CI_PROJECT_PATH}.git"
+
       # Rebase the MR branch onto latest master. This is the key conflict-
       # avoidance mechanism: because merges are serialized, each rebase is
       # against a master that already includes all previously-merged MRs.
@@ -1090,9 +1129,6 @@ merger:
       fi
 
       # Push the rebased branch
-      git config user.email "bot@ankaboot.dev"
-      git config user.name "up-bot"
-      git remote set-url origin "https://up-bot:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${CI_PROJECT_PATH}.git"
       git push --force-with-lease origin "$BRANCH"
 
       # Wait for GitLab to recompute mergeability after the force-push (poll).
@@ -1117,9 +1153,12 @@ merger:
         exit 1
       fi
 
-      # Merge the MR (squash=false to preserve commits; use merge_commit)
+      # Merge the MR (squash=false to preserve commits; use merge_commit).
+      # glab may return non-zero even when the merge succeeds server-side
+      # (e.g. 409/405 on an already-merged MR, or transient API errors), so
+      # tolerate the exit code and verify via MERGE_SHA below instead.
       MERGE_RESULT=$(glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/merge" \
-        -f merge_when_pipeline_succeeds=false 2>&1)
+        -f merge_when_pipeline_succeeds=false 2>&1 || true)
       MERGE_SHA=$(echo "$MERGE_RESULT" | jq -r '.merge_commit_sha // .sha // empty' 2>/dev/null)
 
       if [ -z "$MERGE_SHA" ]; then
@@ -1160,7 +1199,7 @@ merger:
         -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
         -F "variables[BOUCLE_ROLE]=e2e" \
         -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" \
-        -F "variables[BOUCLE_LIVE_URL]=$LIVE_URL" > /dev/null
+        -F "variables[BOUCLE_LIVE_URL]=$LIVE_URL" > /dev/null 2>&1 || true
       echo "Triggered e2e for issue #$BOUCLE_ISSUE with LIVE_URL=$LIVE_URL"
   timeout: 15m
 
@@ -1218,12 +1257,13 @@ e2e:
       # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
       # starts with "boucle:"), so we strip all boucle-managed labels when
       # writing a new pair. Caller passes detail as $2 and gross as $3.
+      # Tolerate glab non-zero exit (version warnings, transient API errors).
       set_boucle_label() {
         local iid="$1" new="$2" gross="$3"
         local current
-        current=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        current=$(set +e; glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")' 2>/dev/null) || true
         local merged="${current:+$current,}$new,$gross"
-        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
+        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null 2>&1 || true
         # When the issue moves to the bot side, assign it to the bot user so
         # the board reflects who owns the next action and humans aren't spammed.
         # BOUCLE_BOT_ID is the GitLab user ID of the bot (set via bin/setup).
@@ -1367,13 +1407,27 @@ e2e:
         fi
       fi
 
-      # Run the agent on the live URL
-      ./bin/oc e2e
+      # Run the agent on the live URL.
+      # Tolerate non-zero exit: the agent may post a valid verdict (PASS/FAIL)
+      # yet exit non-zero (e.g. opencode cleanup, glab "new version" warning on
+      # stderr). We verify the verdict from the issue comment below, so the
+      # agent exit code is not authoritative.
+      ./bin/oc e2e || true
 
+      # Disable errexit for the post-agent section: the verdict parsing and
+      # label/close calls below are all best-effort. GitLab Runner runs - |
+      # blocks with `set -eo pipefail`, so a non-zero from grep (no match),
+      # glab (API error), or jq (bad JSON) would kill the script before the
+      # case statement can route to PASS/FAIL/UNCERTAIN. We handle errors
+      # explicitly per-command instead.
+      set +e
       # Parse verdict from agent output (bin/oc logs to stdout)
-      # If BOUCLE_ISSUE is set, parse from issue comment; otherwise from agent stdout
-      COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-        | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | first | .body')
+      # If BOUCLE_ISSUE is set, parse from issue comment; otherwise from agent stdout.
+      # Tolerate glab/jq non-zero exit (glab may warn about version updates on
+      # stderr; jq may error on unexpected JSON). An empty COMMENT → empty VERDICT
+      # → UNCERTAIN branch, which is safe.
+      COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" 2>/dev/null \
+        | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | first | .body // empty' 2>/dev/null)
       VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
 
       case "$VERDICT" in
@@ -1436,6 +1490,9 @@ doctor:
       HOST="$BOUCLE_FORGE_HOST"
       PID="$CI_PROJECT_ID"
       RECOVERED=0
+      # Emoji reactions that count as spec approval (GitLab internal alpha codes).
+      # Must mirror the dispatch job's constant — each CI job runs its own shell.
+      BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup|white_check_mark|ballot_box_with_check|heavy_check_mark|ok|ok_hand"
 
       # Label helper: preserve non-boucle labels when writing a boucle label.
       # Same definition as the other jobs — included here so the doctor can
@@ -1510,8 +1567,22 @@ doctor:
           [.[] | select(.author.username != "up-bot") | select(.id > ($tid | tonumber))]
           | length
         ')
-        if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ]; then
-          echo "  → #$IID has author reply after spec-review — orphaned spec gate, re-triggering worker"
+        # Check for an approval emoji on the triage comment (polls the
+        # award_emoji API — recovers even if the emoji webhook was missed).
+        EMOJI_APPROVAL_FOUND=false
+        if [ "$LAST_TRIAGE_NOTE_ID" != "0" ] && [ -n "$LAST_TRIAGE_NOTE_ID" ]; then
+          AWARDS=$(glab api --hostname "$HOST" \
+            "/projects/$PID/issues/$IID/notes/$LAST_TRIAGE_NOTE_ID/award_emoji" 2>/dev/null)
+          if echo "$AWARDS" | jq -e --arg emojis "$BOUCLE_SPEC_APPROVAL_EMOJIS" '
+            [.[] | select(.user.username != "up-bot") | .name]
+            | map(select(. as $n | ($emojis | split("|")) | index($n)))
+            | length > 0
+          ' >/dev/null 2>&1; then
+            EMOJI_APPROVAL_FOUND=true
+          fi
+        fi
+        if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ] || [ "$EMOJI_APPROVAL_FOUND" = true ]; then
+          echo "  → #$IID approved (reply=$HUMAN_REPLY_AFTER_TRIAGE, emoji=$EMOJI_APPROVAL_FOUND) — re-triggering worker"
           set_boucle_label "$IID" "boucle:todo" "boucle::status::bot"
           curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
             -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
@@ -1519,7 +1590,7 @@ doctor:
           echo "  → re-triggered worker for #$IID"
           RECOVERED=$((RECOVERED + 1))
         else
-          echo "  → #$IID: still waiting for author to reply"
+          echo "  → #$IID: still waiting for author reply or approval emoji"
         fi
       done
 

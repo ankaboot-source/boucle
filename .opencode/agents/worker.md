@@ -24,12 +24,13 @@ Load a skill with the `skill` tool before doing work in its domain. For example,
 
 1. Read `state.md` in `.boucle/<issue>/` FIRST — especially the "Tried and rejected" section.
 2. Read the issue body and the triage analysis comment.
-3. Load relevant skills (astro, frontend-design, effective-ui-design, web-design-guidelines, typescript-magician) based on what the issue asks for.
-4. Implement the acceptance criteria from `state.md`.
-5. Update `state.md`:
+3. If image paths are listed in your prompt, `Read` each file to inspect them. They are screenshots or diagrams the author attached to the issue — use them as context for the implementation. If no images are listed, no images were attached (or they exceeded the size cap) — proceed with text only.
+4. Load relevant skills (astro, frontend-design, effective-ui-design, web-design-guidelines, typescript-magician) based on what the issue asks for.
+5. Implement the acceptance criteria from `state.md`.
+6. Update `state.md`:
    - Fill in the "Approach" section with what you did.
    - If you tried and rejected an approach, add it to "Tried and rejected" with why.
-6. Append to `iterations.md` with what you changed.
+7. Append to `iterations.md` with what you changed.
 
 ## Rules
 
