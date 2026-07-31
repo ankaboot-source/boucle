@@ -37,14 +37,40 @@ const optionalImagePath = z
 const entryKind = z.enum(["section-locale", "mobilisation-etudiante"]);
 
 // =============================================================================
-// Communiqués / Prises de parole
+// Prises de parole (anciennement « communiqués »)
 // =============================================================================
-const communiques = defineCollection({
-	loader: glob({ pattern: "**/*.md", base: "./src/content/communiques" }),
+//
+// Single bucket that mixes three textual flavours of the collectif's
+// public voice:
+//
+//   - `communique`            → communiqué de presse (default);
+//   - `analyse`               → analyse politique signée (par un·e
+//                                membre ou un·e contributeur·ice
+//                                externe, ex. Ramy Shaath);
+//   - `appel-a-mobilisation`  → appel à rassemblement / mobilisation
+//                                publique lié à un événement.
+//
+// The `category` field is optional with a default of `communique` so
+// older entries that pre-date the taxonomy keep validating unchanged.
+// The matching Sveltia block in `sveltia-cms.config.yml` lists the
+// same three options — keep them in sync.
+const priseCategory = z.enum([
+	"communique",
+	"analyse",
+	"appel-a-mobilisation",
+]);
+
+const prisesDeParole = defineCollection({
+	loader: glob({ pattern: "**/*.md", base: "./src/content/prises-de-parole" }),
 	schema: z.object({
 		title: requiredString,
 		date: z.coerce.date(),
 		description: optionalString,
+		// Editorial taxonomy — defaults to "communique" for legacy
+		// entries that pre-date the field. The home page and the
+		// takes-de-parole index render a coloured badge derived from
+		// this enum (see `categoryLabel`).
+		category: priseCategory.default("communique"),
 	}),
 });
 
@@ -150,7 +176,7 @@ const mobilisation = defineCollection({
 });
 
 export const collections = {
-	communiques,
+	prisesDeParole,
 	collectif,
 	mobilisation,
 };
