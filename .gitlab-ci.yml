@@ -1176,13 +1176,18 @@ worker:
       MR_DESCRIPTION=$(printf '## Issue #%s — iteration %s\n\nPreview: %s\n\n### What changed\n%s\n\n### Approach\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s_' \
         "$BOUCLE_ISSUE" "$ITERATION" "$PREVIEW_URL" "${COMMIT_SUMMARY:-(no commits)}" "${APPROACH:-(not recorded)}" "$BOUCLE_ISSUE" "$COMMIT_COUNT" "$ITERATION")
 
-      # Open MR with rich description
-      glab mr create --source-branch "$BRANCH" --target-branch master \
-        --title "$MR_TITLE" \
-        --description "$MR_DESCRIPTION" > /dev/null
-
-      # Get MR IID for downstream jobs
-      MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?source_branch=$BRANCH" | jq -r '.[0].iid')
+      # Check if a MR already exists for this branch (worker re-run / iteration 2+).
+      # If so, reuse it instead of failing on a 409 from glab mr create.
+      MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?source_branch=$BRANCH&state=opened" 2>/dev/null | jq -r '.[0].iid // empty')
+      if [ -z "$MR_IID" ]; then
+        # Open MR with rich description
+        glab mr create --source-branch "$BRANCH" --target-branch master \
+          --title "$MR_TITLE" \
+          --description "$MR_DESCRIPTION" > /dev/null
+        MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?source_branch=$BRANCH" | jq -r '.[0].iid')
+      else
+        echo "MR !$MR_IID already exists for $BRANCH — reusing (worker iteration $ITERATION)"
+      fi
 
       # Assign the MR to the original issue author at creation time so they're
       # notified of the review even if the reviewer never runs (e.g. preview URL
