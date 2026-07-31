@@ -68,14 +68,15 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	min-height: 48px;
+	min-height: 44px;
 	padding: 0 var(--space-m);
-	font-family: var(--font-body);
+	font-family: var(--font-heading);
 	font-size: var(--text-base);
-	font-weight: var(--weight-semibold);
-	letter-spacing: 0.01em;
-	border-radius: var(--radius-pill);
-	border: 1.5px solid transparent;
+	font-weight: var(--weight-bold);
+	letter-spacing: var(--tracking-wide);
+	text-transform: uppercase;
+	border-radius: var(--radius-sharp);
+	border: 2px solid transparent;
 	text-decoration: none;
 	cursor: pointer;
 	transition:
@@ -90,24 +91,23 @@
 }
 
 .btn--primary {
-	background: var(--color-ink);
-	color: var(--color-ink-on-dark);
-}
-
-.btn--primary:hover {
 	background: var(--color-flag-red);
 	color: var(--color-flag-white);
 }
 
+.btn--primary:hover {
+	background: var(--color-flag-red-deep);
+}
+
 .btn--ghost {
 	background: transparent;
-	color: var(--color-ink);
-	border-color: var(--color-ink);
+	color: var(--color-flag-red);
+	border-color: var(--color-flag-red);
 }
 
 .btn--ghost:hover {
-	background: var(--color-ink);
-	color: var(--color-ink-on-dark);
+	background: var(--color-flag-red);
+	color: var(--color-flag-white);
 }
 
 /* ---------- Flag stripe (4 horizontal bands) ---------- */
