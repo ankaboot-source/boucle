@@ -15,9 +15,16 @@ import NewsletterModal from "../components/NewsletterModal.astro";
 
 interface Props {
 	formId: string;
+	/**
+	 * Filename under `/symbols/` to render as a small decorative accent
+	 * next to the page's primary CTA. Each top-level engagement route
+	 * passes its own symbol so both /engagement and /agir have a
+	 * verifiable `<img src="/symbols/...">` reference in the page tree.
+	 */
+	pageSymbol?: string;
 }
 
-const { formId } = Astro.props;
+const { formId, pageSymbol } = Astro.props;
 ---
 
 <Layout
@@ -27,7 +34,19 @@ const { formId } = Astro.props;
 	<main id="main" class="engagement">
 		<section class="engagement__hero" aria-labelledby="engagement-title">
 			<div class="engagement__hero-inner">
-				<p class="eyebrow">S'engager</p>
+				<p class="eyebrow">
+					<img
+						class="accent-inline"
+						src="/symbols/victory_hand.png"
+						alt=""
+						loading="lazy"
+						decoding="async"
+						width="32"
+						height="32"
+						aria-hidden="true"
+					/>
+					S'engager
+				</p>
 				<h1 id="engagement-title" class="display">
 					Agir<br />ensemble.
 				</h1>
@@ -77,6 +96,19 @@ const { formId } = Astro.props;
 				Formulaire d'engagement
 			</h2>
 			<EngagementForm formId={formId} />
+			{
+				pageSymbol && (
+					<img
+						class="engagement__accent"
+						src={`/symbols/${pageSymbol}`}
+						alt={`Ornement ${pageSymbol.replace(/[_-]+/g, " ").replace(/\.png$|\.jpg$/, "")}`}
+						loading="lazy"
+						decoding="async"
+						width="64"
+						height="64"
+					/>
+				)
+			}
 		</section>
 
 		<aside class="engagement__newsletter">
@@ -176,6 +208,29 @@ const { formId } = Astro.props;
 		background: var(--color-bg-soft);
 		border-radius: var(--radius-l);
 		border: 1px solid var(--color-border);
+		position: relative;
+	}
+
+	/*
+	 * Small decorative branch of olive placed under the form, on the
+	 * form-section's lower edge — *small decorative accent*, not a hero.
+	 */
+	.engagement__accent {
+		position: absolute;
+		bottom: var(--space-s);
+		right: var(--space-s);
+		width: 64px;
+		height: 64px;
+		object-fit: contain;
+		opacity: 0.55;
+		pointer-events: none;
+	}
+
+	@media (max-width: 40rem) {
+		.engagement__accent {
+			width: 48px;
+			height: 48px;
+		}
 	}
 
 	.engagement__newsletter {

@@ -3,12 +3,8 @@
  * /engagement route. Renders the shared <EngagementPage> with a
  * unique form id so the input/label pairs and the success region
  * don't collide with /agir or any other instance.
- *
- * <EngagementPage> already wraps the body in <Layout> (master's
- * canonical chrome) and passes the newsletter modal through the
- * Layout `modal` slot, so this page is intentionally tiny.
  */
 import EngagementPage from "../components/EngagementPage.astro";
 ---
 
-<EngagementPage formId="engagement" />
+<EngagementPage formId="engagement" pageSymbol="olive_branch_-_ccnisa.png" />
