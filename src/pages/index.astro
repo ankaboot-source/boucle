@@ -28,21 +28,18 @@ import GeneralCTA from "../components/GeneralCTA.astro";
 				</p>
 				<div class="hero__cta">
 					<a class="btn btn--primary" href="/engagement">Agir maintenant</a>
-					<a class="btn btn--ghost" href="/symboles">Découvrir nos symboles</a>
+					<img
+						class="hero__symbol"
+						src="/symbols/keffiyeh_-_ancala_nusantara.png"
+						alt="Keffieh, foulard palestinien, symbole d'identité"
+						width="64"
+						height="64"
+						loading="eager"
+						fetchpriority="high"
+						decoding="async"
+					/>
 				</div>
 			</div>
-
-			<figure class="hero__symbol" aria-label="Symbole de la clef antique palestinienne">
-				<img
-					src="/symbols/antique-key.webp"
-					alt="Clef ancienne palestinienne, symbole du retour"
-					width="512"
-					height="512"
-					loading="eager"
-					fetchpriority="high"
-					decoding="async"
-				/>
-			</figure>
 		</section>
 
 		<!--
@@ -68,6 +65,21 @@ import GeneralCTA from "../components/GeneralCTA.astro";
 		-->
 		<DonationCTA />
 
+		<!-- Decorative olive branch above the flag stripe. -->
+		<p class="section-head__lede section-head__lede--centered" aria-hidden="false">
+			<img
+				class="accent-inline"
+				src="/symbols/olive_branch_-_ccnisa.png"
+				alt="Branche d'olivier, symbole de la Palestine"
+				loading="lazy"
+				decoding="async"
+				width="48"
+				height="48"
+			/>
+			Aucune image ne représente mieux la Palestine que l'olivier&nbsp;:
+			arbre millénaire, source d'huile et de lien.
+		</p>
+
 		<!--
 		  ============================================================
 		  Flag stripe: a horizontal Palestinian flag that doubles as a
@@ -88,7 +100,19 @@ import GeneralCTA from "../components/GeneralCTA.astro";
 		-->
 		<section class="pillars" aria-labelledby="pillars-title">
 			<header class="section-head">
-				<p class="eyebrow">Notre identité</p>
+				<p class="eyebrow">
+					<img
+						class="accent-inline"
+						src="/symbols/vecteezy_red-simple-watercolor-flower_27102639.png"
+						alt=""
+						loading="lazy"
+						decoding="async"
+						width="32"
+						height="32"
+						aria-hidden="true"
+					/>
+					Notre identité
+				</p>
 				<h2 id="pillars-title">Trois piliers, un message clair.</h2>
 			</header>
 
@@ -109,15 +133,6 @@ import GeneralCTA from "../components/GeneralCTA.astro";
 						The Bold Font pour les titres, Poppins pour le reste.
 						Contraste assumé entre un display géométrique et un
 						sans-serif moderne.
-					</p>
-				</li>
-				<li class="pillar">
-					<p class="pillar__index">03</p>
-					<h3>Neuf symboles, dessinés à la main</h3>
-					<p>
-						Clef antique, grenade, huile d'olive, keffieh, souimanga,
-						coquelicot, Al-Quds, Al-Aqsa, orange. Une grammaire
-						visuelle pour parler de Palestine.
 					</p>
 				</li>
 			</ol>

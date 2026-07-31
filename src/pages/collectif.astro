@@ -55,12 +55,24 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		  ====================================================================
 		-->
 		<header class="collectif__header">
-			<p class="eyebrow">Le collectif</p>
+			<p class="eyebrow">
+				<img
+					class="accent-inline"
+					src="/symbols/35374425-dome-rocher-jerusalem-aquarelle.jpg"
+					alt=""
+					loading="lazy"
+					decoding="async"
+					width="32"
+					height="32"
+					aria-hidden="true"
+				/>
+				Le collectif
+			</p>
 			<h1 class="collectif__title">S'organiser, près de chez soi.</h1>
 			<p class="collectif__lede">
 				Le Collectif Urgence Palestine s'appuie sur des <strong>sections
 				locales</strong> dans une trentaine de villes et sur un réseau de
-				<strong>mobilisation étudiante</strong> sur les campus. Retrouve
+				<strong>mobilisation étudiante</strong> sur les campuses. Retrouve
 				ci-dessous les coordonnées pour rejoindre la section la plus
 				près de chez toi — ou lance la tienne.
 			</p>
@@ -88,6 +100,16 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 					rel="noopener external"
 					target="_blank"
 				>
+					<img
+						class="cta-card__icon"
+						src="/symbols/victory_hand.png"
+						alt=""
+						loading="lazy"
+						decoding="async"
+						width="32"
+						height="32"
+						aria-hidden="true"
+					/>
 					Créer un collectif
 					<span aria-hidden="true" class="cta-card__arrow">→</span>
 				</a>
@@ -516,6 +538,13 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 	.cta-card__arrow {
 		font-family: var(--font-body);
 		transition: transform var(--duration-base) var(--ease-out);
+	}
+
+	.cta-card__icon {
+		width: 32px;
+		height: 32px;
+		object-fit: contain;
+		filter: brightness(0) invert(1);
 	}
 
 	.cta-card__btn:hover .cta-card__arrow {

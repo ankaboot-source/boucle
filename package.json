@@ -7,7 +7,6 @@
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
-    "build:symbols": "node scripts/build-symbols.mjs",
     "migrate": "node scripts/migrate.mjs",
     "verify:migration": "node scripts/verify-migration.mjs"
   },
