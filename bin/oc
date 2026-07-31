@@ -30,25 +30,25 @@ DRY_RUN="${BOUCLE_DRY_RUN:-false}"
 VARIANT=""
 OUTPUT_TOKEN_MAX=""
 case "$ROLE" in
-triage)
-	AGENT="triage"
-	VARIANT="low"
-	OUTPUT_TOKEN_MAX="1200"
-	;;
-worker) AGENT="worker" ;;
-reviewer)
-	AGENT="reviewer"
-	VARIANT="low"
-	OUTPUT_TOKEN_MAX="4000"
-	;;
-e2e)
-	AGENT="e2e"
-	OUTPUT_TOKEN_MAX="4000"
-	;;
-*)
-	echo "Unknown role: $ROLE" >&2
-	exit 1
-	;;
+  triage)
+    AGENT="triage"
+    VARIANT="low"
+    OUTPUT_TOKEN_MAX="1200"
+    ;;
+  worker) AGENT="worker" ;;
+  reviewer)
+    AGENT="reviewer"
+    VARIANT="low"
+    OUTPUT_TOKEN_MAX="4000"
+    ;;
+  e2e)
+    AGENT="e2e"
+    OUTPUT_TOKEN_MAX="4000"
+    ;;
+  *)
+    echo "Unknown role: $ROLE" >&2
+    exit 1
+    ;;
 esac
 
 # ── Paths ──────────────────────────────────────────────────────────────
@@ -65,17 +65,17 @@ OPENCODE_DB="$CI_PROJECT_DIR/.opencode-$CI_JOB_ID.db"
 # Measurements are best-effort: any failure falls back to "unavailable"
 # and the script still completes normally.
 START_EPOCH=$(date +%s)
-METRICS_TMP="$(mktemp -t boucle-metrics.XXXXXX 2>/dev/null || echo "")"
-RSS_SAMPLER_TMP="$(mktemp -t boucle-rss.XXXXXX 2>/dev/null || echo "")"
+METRICS_TMP="$(mktemp -t boucle-metrics.XXXXXX 2> /dev/null || echo "")"
+RSS_SAMPLER_TMP="$(mktemp -t boucle-rss.XXXXXX 2> /dev/null || echo "")"
 RSS_SAMPLER_PID=""
 
 cleanup_metrics() {
-	if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2>/dev/null; then
-		kill "$RSS_SAMPLER_PID" 2>/dev/null || true
-		wait "$RSS_SAMPLER_PID" 2>/dev/null || true
-	fi
-	[ -n "$METRICS_TMP" ] && [ -f "$METRICS_TMP" ] && rm -f "$METRICS_TMP" || true
-	[ -n "$RSS_SAMPLER_TMP" ] && [ -f "$RSS_SAMPLER_TMP" ] && rm -f "$RSS_SAMPLER_TMP" || true
+  if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2> /dev/null; then
+    kill "$RSS_SAMPLER_PID" 2> /dev/null || true
+    wait "$RSS_SAMPLER_PID" 2> /dev/null || true
+  fi
+  [ -n "$METRICS_TMP" ] && [ -f "$METRICS_TMP" ] && rm -f "$METRICS_TMP" || true
+  [ -n "$RSS_SAMPLER_TMP" ] && [ -f "$RSS_SAMPLER_TMP" ] && rm -f "$RSS_SAMPLER_TMP" || true
 }
 trap cleanup_metrics EXIT
 
@@ -83,64 +83,64 @@ trap cleanup_metrics EXIT
 # output file. We prefer it over /proc polling when available.
 HAVE_GNU_TIME=0
 if [ -x /usr/bin/time ]; then
-	HAVE_GNU_TIME=1
+  HAVE_GNU_TIME=1
 fi
 
 # Start a /proc VmRSS poller as a background subshell. Tracks the max RSS
 # (kB) seen for any "opencode run" process and writes it to $RSS_SAMPLER_TMP.
 # Returns 0 if started, 1 if /proc/$$ is unavailable.
 start_rss_sampler() {
-	if [ -z "$RSS_SAMPLER_TMP" ] || [ ! -r /proc/self/status ]; then
-		return 1
-	fi
-	(
-		max_kb=0
-		while true; do
-			pids=$(pgrep -f "opencode run" 2>/dev/null || true)
-			cur=0
-			for pid in $pids; do
-				# Aggregate RSS across all matching PIDs (parent + children).
-				rss=$(awk '/^VmRSS:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo 0)
-				cur=$((cur + rss))
-			done
-			if [ "$cur" -gt "$max_kb" ]; then
-				max_kb=$cur
-				echo "$max_kb" >"$RSS_SAMPLER_TMP"
-			fi
-			sleep 2
-		done
-	) &
-	RSS_SAMPLER_PID=$!
-	return 0
+  if [ -z "$RSS_SAMPLER_TMP" ] || [ ! -r /proc/self/status ]; then
+    return 1
+  fi
+  (
+    max_kb=0
+    while true; do
+      pids=$(pgrep -f "opencode run" 2> /dev/null || true)
+      cur=0
+      for pid in $pids; do
+        # Aggregate RSS across all matching PIDs (parent + children).
+        rss=$(awk '/^VmRSS:/ {print $2}' "/proc/$pid/status" 2> /dev/null || echo 0)
+        cur=$((cur + rss))
+      done
+      if [ "$cur" -gt "$max_kb" ]; then
+        max_kb=$cur
+        echo "$max_kb" > "$RSS_SAMPLER_TMP"
+      fi
+      sleep 2
+    done
+  ) &
+  RSS_SAMPLER_PID=$!
+  return 0
 }
 
 # Read peak RSS (kB) from whichever source produced data.
 # Echoes a value, or "unavailable".
 get_peak_rss_kb() {
-	if [ "$HAVE_GNU_TIME" = "1" ] && [ -n "$METRICS_TMP" ] && [ -s "$METRICS_TMP" ]; then
-		val=$(awk '/Maximum resident set size/ {print $NF}' "$METRICS_TMP" 2>/dev/null || true)
-		if [ -n "$val" ] && [ "$val" -gt 0 ] 2>/dev/null; then
-			echo "$val"
-			return 0
-		fi
-	fi
-	if [ -n "$RSS_SAMPLER_TMP" ] && [ -s "$RSS_SAMPLER_TMP" ]; then
-		val=$(cat "$RSS_SAMPLER_TMP" 2>/dev/null || true)
-		if [ -n "$val" ] && [ "$val" -gt 0 ] 2>/dev/null; then
-			echo "$val"
-			return 0
-		fi
-	fi
-	echo "unavailable"
+  if [ "$HAVE_GNU_TIME" = "1" ] && [ -n "$METRICS_TMP" ] && [ -s "$METRICS_TMP" ]; then
+    val=$(awk '/Maximum resident set size/ {print $NF}' "$METRICS_TMP" 2> /dev/null || true)
+    if [ -n "$val" ] && [ "$val" -gt 0 ] 2> /dev/null; then
+      echo "$val"
+      return 0
+    fi
+  fi
+  if [ -n "$RSS_SAMPLER_TMP" ] && [ -s "$RSS_SAMPLER_TMP" ]; then
+    val=$(cat "$RSS_SAMPLER_TMP" 2> /dev/null || true)
+    if [ -n "$val" ] && [ "$val" -gt 0 ] 2> /dev/null; then
+      echo "$val"
+      return 0
+    fi
+  fi
+  echo "unavailable"
 }
 
 # Print the structured metrics line to stderr.
 print_metrics_line() {
-	local elapsed db_size peak_rss
-	elapsed=$(($(date +%s) - START_EPOCH))
-	db_size=$(stat -c %s "$OPENCODE_DB" 2>/dev/null || stat -f %z "$OPENCODE_DB" 2>/dev/null || echo 0)
-	peak_rss=$(get_peak_rss_kb)
-	echo "[boucle:metrics] role=$ROLE agent=$AGENT iteration=$ITERATION wall_clock=${elapsed}s peak_rss=${peak_rss}kb db_size=${db_size}b" >&2
+  local elapsed db_size peak_rss
+  elapsed=$(($(date +%s) - START_EPOCH))
+  db_size=$(stat -c %s "$OPENCODE_DB" 2> /dev/null || stat -f %z "$OPENCODE_DB" 2> /dev/null || echo 0)
+  peak_rss=$(get_peak_rss_kb)
+  echo "[boucle:metrics] role=$ROLE agent=$AGENT iteration=$ITERATION wall_clock=${elapsed}s peak_rss=${peak_rss}kb db_size=${db_size}b" >&2
 }
 
 # Retry wrapper for opencode invocations. Retries transient failures
@@ -150,33 +150,33 @@ print_metrics_line() {
 # Sets global AGENT_EXIT to the final attempt's exit code.
 # Always returns 0; caller checks AGENT_EXIT.
 run_with_retry() {
-	[ "${1:-}" = "--" ] && shift
-	local max_retries="${BOUCLE_LLM_MAX_RETRIES:-3}"
-	local base_delay="${BOUCLE_LLM_RETRY_BASE_DELAY:-5}"
-	local total=$((max_retries + 1))
-	local attempt=1
-	local rc=0
-	while [ "$attempt" -le "$total" ]; do
-		# `|| rc=$?` suppresses set -e on failure so we can inspect the code.
-		"$@" || rc=$?
-		if [ "$rc" -eq 0 ] || [ "$rc" -eq 130 ]; then
-			AGENT_EXIT=$rc
-			return 0
-		fi
-		if [ "$attempt" -eq "$total" ]; then
-			break
-		fi
-		local delay
-		delay=$(awk -v b="$base_delay" -v a="$((attempt - 1))" 'BEGIN {
+  [ "${1:-}" = "--" ] && shift
+  local max_retries="${BOUCLE_LLM_MAX_RETRIES:-3}"
+  local base_delay="${BOUCLE_LLM_RETRY_BASE_DELAY:-5}"
+  local total=$((max_retries + 1))
+  local attempt=1
+  local rc=0
+  while [ "$attempt" -le "$total" ]; do
+    # `|| rc=$?` suppresses set -e on failure so we can inspect the code.
+    "$@" || rc=$?
+    if [ "$rc" -eq 0 ] || [ "$rc" -eq 130 ]; then
+      AGENT_EXIT=$rc
+      return 0
+    fi
+    if [ "$attempt" -eq "$total" ]; then
+      break
+    fi
+    local delay
+    delay=$(awk -v b="$base_delay" -v a="$((attempt - 1))" 'BEGIN {
       srand(); d = b * (2 ^ a); if (d > 60) d = 60
       j = 0.5 + rand(); printf "%d", int(d * j)
     }')
-		echo "[boucle:retry] attempt ${attempt}/${total} after ${delay}s (exit code: ${rc})" >&2
-		sleep "$delay"
-		attempt=$((attempt + 1))
-	done
-	AGENT_EXIT=$rc
-	return 0
+    echo "[boucle:retry] attempt ${attempt}/${total} after ${delay}s (exit code: ${rc})" >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+  done
+  AGENT_EXIT=$rc
+  return 0
 }
 
 # ── 1. Isolate opencode DB (required, not optional) ───────────────────
@@ -185,8 +185,8 @@ export OPENCODE_DB
 # ── 2. Scrub deploy secrets before invoking agent ─────────────────────
 SCRUBBED_CF_TOKEN=""
 if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
-	SCRUBBED_CF_TOKEN="$CLOUDFLARE_API_TOKEN"
-	unset CLOUDFLARE_API_TOKEN
+  SCRUBBED_CF_TOKEN="$CLOUDFLARE_API_TOKEN"
+  unset CLOUDFLARE_API_TOKEN
 fi
 
 # ── 3. Prepare state directory ────────────────────────────────────────
@@ -197,8 +197,8 @@ mkdir -p "$STATE_DIR"
 # BOUCLE_ISSUE_ATTACHMENTS="path1 path2 ...". Empty string = no images.
 ATTACHMENTS_ENV="$STATE_DIR/.attachments.env"
 if [ -f "$ATTACHMENTS_ENV" ]; then
-	# shellcheck disable=SC1090
-	source "$ATTACHMENTS_ENV"
+  # shellcheck disable=SC1090
+  source "$ATTACHMENTS_ENV"
 fi
 BOUCLE_ISSUE_ATTACHMENTS="${BOUCLE_ISSUE_ATTACHMENTS:-}"
 
@@ -206,17 +206,17 @@ BOUCLE_ISSUE_ATTACHMENTS="${BOUCLE_ISSUE_ATTACHMENTS:-}"
 # Role instructions live in .opencode/agents/<role>.md (system prompt).
 # The user prompt below only adds issue-specific context to avoid duplication.
 build_prompt() {
-	local role="$1"
-	local prompt=""
+  local role="$1"
+  local prompt=""
 
-	case "$role" in
-	triage)
-		# Inject the issue body (fetched by CI as BOUCLE_ISSUE_BODY) so the
-		# agent does not waste steps calling glab issue view / gh issue view
-		# (minimax-m3 burned 4+ steps on failed fetches before posting).
-		local body="${BOUCLE_ISSUE_BODY:-}"
-		if [ -n "$body" ]; then
-			prompt="Analyze issue #${ISSUE}.
+  case "$role" in
+    triage)
+      # Inject the issue body (fetched by CI as BOUCLE_ISSUE_BODY) so the
+      # agent does not waste steps calling glab issue view / gh issue view
+      # (minimax-m3 burned 4+ steps on failed fetches before posting).
+      local body="${BOUCLE_ISSUE_BODY:-}"
+      if [ -n "$body" ]; then
+        prompt="Analyze issue #${ISSUE}.
 
 Issue body (already fetched — do NOT call glab issue view or gh issue view):
 ---
@@ -224,34 +224,34 @@ ${body}
 ---
 
 Post your analysis as a comment with the boucle:triage marker. Use: glab issue note ${ISSUE} --repo ${CI_PROJECT_PATH:-up/urgence-palestine.fr} --message \"\$(cat <<'EOF' ... EOF)\""
-		else
-			prompt="Analyze issue #${ISSUE}. Post your analysis as a comment with the boucle:triage marker."
-		fi
-		;;
-	worker)
-		prompt="Implement issue #${ISSUE}. Read state.md first. Commit your changes with [skip ci]."
-		;;
-	reviewer)
-		prompt="Review the MR for issue #${ISSUE}. Test the deployed preview at \$BOUCLE_PREVIEW_URL. Post your verdict with the boucle:verdict marker."
-		;;
-	e2e)
-		prompt="Verify issue #${ISSUE} on the live URL \$BOUCLE_LIVE_URL. Post your verdict with the boucle:verdict marker."
-		;;
-	*)
-		echo "Unknown role: $role" >&2
-		exit 1
-		;;
-	esac
+      else
+        prompt="Analyze issue #${ISSUE}. Post your analysis as a comment with the boucle:triage marker."
+      fi
+      ;;
+    worker)
+      prompt="Implement issue #${ISSUE}. Read state.md first. Commit your changes with [skip ci]."
+      ;;
+    reviewer)
+      prompt="Review the MR for issue #${ISSUE}. Test the deployed preview at \$BOUCLE_PREVIEW_URL. Post your verdict with the boucle:verdict marker."
+      ;;
+    e2e)
+      prompt="Verify issue #${ISSUE} on the live URL \$BOUCLE_LIVE_URL. Post your verdict with the boucle:verdict marker."
+      ;;
+    *)
+      echo "Unknown role: $role" >&2
+      exit 1
+      ;;
+  esac
 
-	echo "$prompt"
+  echo "$prompt"
 
-	# Append image attachment paths (if any) so the agent knows to Read them.
-	# bin/fetch-issue-images downloads issue images to .boucle/$ISSUE/images/.
-	if [ -n "${BOUCLE_ISSUE_ATTACHMENTS:-}" ]; then
-		echo ""
-		echo "Issue images are available at these local paths. Read each with the Read tool to inspect them:"
-		echo "$BOUCLE_ISSUE_ATTACHMENTS"
-	fi
+  # Append image attachment paths (if any) so the agent knows to Read them.
+  # bin/fetch-issue-images downloads issue images to .boucle/$ISSUE/images/.
+  if [ -n "${BOUCLE_ISSUE_ATTACHMENTS:-}" ]; then
+    echo ""
+    echo "Issue images are available at these local paths. Read each with the Read tool to inspect them:"
+    echo "$BOUCLE_ISSUE_ATTACHMENTS"
+  fi
 }
 
 # ── 5. Run the agent ──────────────────────────────────────────────────
@@ -264,33 +264,33 @@ PROMPT=$(build_prompt "$ROLE")
 # sets a global AGENT_EXIT — piping would run it in a subshell and lose that
 # variable. Redirect+cat preserves exit-code propagation with no race.
 AGENT_LOG="$STATE_DIR/agent-output.log"
-: >"$AGENT_LOG"
+: > "$AGENT_LOG"
 
 if [ "$DRY_RUN" = "true" ]; then
-	echo "[boucle] DRY RUN — agent output goes to log only, nothing pushed"
-	# Token economy: --variant low for bounded roles, OUTPUT_TOKEN_MAX caps response size.
-	VARIANT_ARGS=()
-	[ -n "$VARIANT" ] && VARIANT_ARGS+=(--variant "$VARIANT")
-	# Start RSS sampler; /usr/bin/time wrapper is skipped in dry-run to keep
-	# output untouched. Sampler will be stopped below.
-	start_rss_sampler 2>/dev/null || true
-	# Bash env-prefix on a function: sets the var in run_with_retry's
-	# environment, which propagates through to the opencode child.
-	# Agent stdout+stderr → $AGENT_LOG (for CI log-scraping fallback), then
-	# echoed to the job log. AGENT_EXIT is set by run_with_retry in this
-	# shell (no pipe → no subshell → global propagates). Final exit ignored.
-	OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
-		run_with_retry -- opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" >"$AGENT_LOG" 2>&1 || true
-	cat "$AGENT_LOG"
-	# Stop the RSS sampler so it stops writing to the tmp file.
-	if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2>/dev/null; then
-		kill "$RSS_SAMPLER_PID" 2>/dev/null || true
-		wait "$RSS_SAMPLER_PID" 2>/dev/null || true
-	fi
-	RSS_SAMPLER_PID=""
-	print_metrics_line
-	# In dry run, we don't assert side effects
-	exit 0
+  echo "[boucle] DRY RUN — agent output goes to log only, nothing pushed"
+  # Token economy: --variant low for bounded roles, OUTPUT_TOKEN_MAX caps response size.
+  VARIANT_ARGS=()
+  [ -n "$VARIANT" ] && VARIANT_ARGS+=(--variant "$VARIANT")
+  # Start RSS sampler; /usr/bin/time wrapper is skipped in dry-run to keep
+  # output untouched. Sampler will be stopped below.
+  start_rss_sampler 2> /dev/null || true
+  # Bash env-prefix on a function: sets the var in run_with_retry's
+  # environment, which propagates through to the opencode child.
+  # Agent stdout+stderr → $AGENT_LOG (for CI log-scraping fallback), then
+  # echoed to the job log. AGENT_EXIT is set by run_with_retry in this
+  # shell (no pipe → no subshell → global propagates). Final exit ignored.
+  OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
+    run_with_retry -- opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" > "$AGENT_LOG" 2>&1 || true
+  cat "$AGENT_LOG"
+  # Stop the RSS sampler so it stops writing to the tmp file.
+  if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2> /dev/null; then
+    kill "$RSS_SAMPLER_PID" 2> /dev/null || true
+    wait "$RSS_SAMPLER_PID" 2> /dev/null || true
+  fi
+  RSS_SAMPLER_PID=""
+  print_metrics_line
+  # In dry run, we don't assert side effects
+  exit 0
 fi
 
 AGENT_EXIT=0
@@ -303,36 +303,36 @@ VARIANT_ARGS=()
 # Agent stdout+stderr → $AGENT_LOG (for CI log-scraping fallback), then
 # echoed to the job log for human debugging.
 if [ "$HAVE_GNU_TIME" = "1" ] && [ -n "$METRICS_TMP" ]; then
-	OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
-		run_with_retry -- /usr/bin/time -v -o "$METRICS_TMP" \
-		opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" >"$AGENT_LOG" 2>&1
+  OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
+    run_with_retry -- /usr/bin/time -v -o "$METRICS_TMP" \
+    opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" > "$AGENT_LOG" 2>&1
 else
-	# Fall back to /proc poller if /usr/bin/time is missing.
-	start_rss_sampler 2>/dev/null || true
-	OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
-		run_with_retry -- opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" >"$AGENT_LOG" 2>&1
-	if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2>/dev/null; then
-		kill "$RSS_SAMPLER_PID" 2>/dev/null || true
-		wait "$RSS_SAMPLER_PID" 2>/dev/null || true
-	fi
-	RSS_SAMPLER_PID=""
+  # Fall back to /proc poller if /usr/bin/time is missing.
+  start_rss_sampler 2> /dev/null || true
+  OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
+    run_with_retry -- opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" > "$AGENT_LOG" 2>&1
+  if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2> /dev/null; then
+    kill "$RSS_SAMPLER_PID" 2> /dev/null || true
+    wait "$RSS_SAMPLER_PID" 2> /dev/null || true
+  fi
+  RSS_SAMPLER_PID=""
 fi
 cat "$AGENT_LOG"
 print_metrics_line
 
 # ── 6. Restore scrubbed secrets ───────────────────────────────────────
 if [ -n "$SCRUBBED_CF_TOKEN" ]; then
-	export CLOUDFLARE_API_TOKEN="$SCRUBBED_CF_TOKEN"
+  export CLOUDFLARE_API_TOKEN="$SCRUBBED_CF_TOKEN"
 fi
 
 # ── 7. Append to iterations.md ────────────────────────────────────────
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 FILES_TOUCHED=""
-if [ -d "$CI_PROJECT_DIR" ] && command -v git &>/dev/null; then
-	FILES_TOUCHED=$(cd "$CI_PROJECT_DIR" && git diff --name-only HEAD 2>/dev/null | tr '\n' ', ' || echo "none")
+if [ -d "$CI_PROJECT_DIR" ] && command -v git &> /dev/null; then
+  FILES_TOUCHED=$(cd "$CI_PROJECT_DIR" && git diff --name-only HEAD 2> /dev/null | tr '\n' ', ' || echo "none")
 fi
 
-cat >>"$ITERATIONS_FILE" <<EOF
+cat >> "$ITERATIONS_FILE" << EOF
 
 ## $TIMESTAMP — $ROLE (agent=$AGENT) — iteration $ITERATION
 - Result: <see agent output>
