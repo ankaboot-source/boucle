@@ -2329,7 +2329,7 @@ doctor:
         NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
 
         # Find the last triage comment (has <!-- boucle:triage marker)
-        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | last | .id // 0')
+        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
 
         # Find the last human (non-bot) note after the triage comment
         # A human reply means the reporter answered the blocking questions.
@@ -2367,7 +2367,7 @@ doctor:
         echo "Checking #$IID (boucle:spec-review) for spec approval..."
         NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
         # Find the last triage comment (same as needs-info recovery above)
-        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | last | .id // 0')
+        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
         # Detect any non-bot note after the last triage comment
         HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" '
           [.[] | select(.author.username != "up-bot") | select(.id > ($tid | tonumber))]
@@ -2419,7 +2419,7 @@ doctor:
         # We can't easily map pipelines to issues, so check if the triage
         # label has been stuck for >15 min (no triage comment posted recently).
         NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
-        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | last | .id // 0')
+        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
 
         # If there's a recent triage comment (within last 15 min), skip —
         # triage may still be running. Only re-trigger if no triage comment
@@ -2464,7 +2464,7 @@ doctor:
         NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
 
         # Does this issue have any triage comment at all?
-        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | last | .id // 0')
+        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
         if [ "$LAST_TRIAGE_NOTE_ID" = "0" ]; then
           # No triage comment — this is a brand-new issue that was never
           # triaged. The dispatch job should pick it up on the next webhook.
