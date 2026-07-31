@@ -326,6 +326,48 @@ dispatch:
       # Skin-tone modifiers are ignored — GitLab stores the base name regardless.
       BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup|white_check_mark|ballot_box_with_check|heavy_check_mark|ok|ok_hand"
 
+      # Detect if the bot was just assigned to this issue (update action with
+      # an assignee change). This lets a human trigger boucle by assigning the
+      # issue to the bot, without needing to add a boucle: label. The ACTOR
+      # guard above already filters bot-originated events, so this only fires
+      # when a HUMAN assigns the bot — no loop risk.
+      BOT_JUST_ASSIGNED=false
+      if [ "$OBJECT_KIND" = "issue" ] && [ "$ACTION" = "update" ]; then
+        if [ -n "${BOUCLE_BOT_ID:-}" ] && [[ "$BOUCLE_BOT_ID" =~ ^[0-9]+$ ]]; then
+          BOT_IN_CURRENT=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.current // [] | map(.id | tostring) | index($bid) != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
+          BOT_IN_PREVIOUS=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.previous // [] | map(.id | tostring) | index($bid) != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
+        else
+          # Fallback: detect by bot username "up-bot" when BOUCLE_BOT_ID is unset
+          BOT_IN_CURRENT=$(jq -r '.changes.assignees.current // [] | map(.username) | index("up-bot") != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
+          BOT_IN_PREVIOUS=$(jq -r '.changes.assignees.previous // [] | map(.username) | index("up-bot") != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
+        fi
+        if [ "$BOT_IN_CURRENT" = "true" ] && [ "$BOT_IN_PREVIOUS" != "true" ]; then
+          BOT_JUST_ASSIGNED=true
+          echo "Issue #$IID: bot was just assigned — will trigger triage"
+        fi
+      fi
+
+      # If the bot was just assigned by a human, trigger triage — unless the
+      # loop is already actively processing or has finished this issue. Active
+      # states (working/review/approval/merging) and terminal states (done/split)
+      # are skipped to avoid disrupting in-progress work. This takes precedence
+      # over label-based routing so assigning the bot works from ANY idle state
+      # (boucle:human, boucle:needs-info without reply, unlabeled, etc.).
+      if [ "$BOT_JUST_ASSIGNED" = "true" ]; then
+        if echo "$LABELS" | grep -qE 'boucle:(working|review|approval|merging|done)'; then
+          echo "Issue #$IID: bot assigned but issue is at an active/terminal boucle state ($LABELS) — skipping"
+          exit 0
+        fi
+        echo "Issue #$IID: bot assigned by human — triggering triage"
+        echo "$IID" > .boucle-issue
+        if ! echo "$LABELS" | grep -q "boucle:triage"; then
+          set_boucle_label "$IID" "boucle:triage" "boucle::status::bot"
+        fi
+        # Skip the label-based routing below — triage is already triggered.
+        # The triage job (needs: dispatch, optional) picks up .boucle-issue.
+        exit 0
+      fi
+
       SHOULD_TRIAGE=false
       SHOULD_WORK=false
       if echo "$LABELS" | grep -q "boucle:triage"; then
