@@ -50,11 +50,11 @@ variables:
   # Disable Chromium visual preview in triage (saves ~120 MiB per triage job).
   # true = skip preview rendering entirely. false = default (agent opt-in via RENDER_REQUEST).
   BOUCLE_PREVIEW_DISABLE: "false"
-  # File-type CI variable: $OPENCODE_AUTH holds a path to the auth.json temp file
+  # File-type CI variable: $PI_AUTH holds a path to the auth.json temp file
 
 # ── Default: use node:22-slim (has node, npm, curl — much smaller than node:22) ─
 # The shared runner is a docker executor. node:22-slim is ~250MB vs ~1GB.
-# before_script installs glab + opencode + wrangler (not in the image).
+# before_script installs glab + pi + wrangler (not in the image).
 default:
   image: node:22-slim
   # Route to the project's dedicated runner. It's a shell executor (ignores
@@ -85,7 +85,7 @@ default:
         apt-get update -qq && apt-get install -y -qq curl jq git
       fi
 
-      # ── node + npm (needed for wrangler/build/preview — NOT for opencode) ──
+      # ── node + npm (needed for wrangler/build/preview — and for pi) ──
       # Persists across runs on shell executor — only downloads once.
       # Only install if something actually needs node.
       _NEED_NODE=0
@@ -94,7 +94,7 @@ default:
       [ "${BOUCLE_PREVIEW_DISABLE:-false}" != "true" ] && _NEED_NODE=1
       if [ "$_NEED_NODE" = "1" ] && { ! command -v node &>/dev/null || ! command -v npm &>/dev/null; }; then
         echo "Installing Node.js (shell executor has no image support)..."
-        NODE_VER="v22.11.0"
+        NODE_VER="v22.19.0"
         mkdir -p "$HOME/.local"
         curl -sL "https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-linux-x64.tar.xz" -o /tmp/node.tar.xz
         tar xf /tmp/node.tar.xz -C "$HOME/.local" --strip-components=1
@@ -113,23 +113,20 @@ default:
         chmod +x "$HOME/.local/bin/glab"
       fi
 
-      # ── opencode (standalone binary from GitHub releases — no node needed) ──
-      # opencode is a Bun-compiled self-contained ELF; the npm package
-      # (opencode-ai) is just a wrapper that requires node. Installing the
-      # binary directly via curl skips node entirely on the agent path.
-      if ! command -v opencode &>/dev/null; then
-        echo "Installing opencode (standalone binary)..."
-        OC_VER="${OPENCODE_VERSION:-1.18.10}"
-        mkdir -p "$HOME/.local/bin"
-        curl -sL "https://github.com/anomalyco/opencode/releases/download/v${OC_VER}/opencode-linux-x64-musl.tar.gz" -o /tmp/oc.tar.gz
-        tar xzf /tmp/oc.tar.gz -C /tmp
-        mv /tmp/opencode "$HOME/.local/bin/opencode" && chmod +x "$HOME/.local/bin/opencode"
-        rm -f /tmp/oc.tar.gz
+      # ── pi coding agent (npm install — pi needs node >=22.19) ──────
+      # pi is a Node-based CLI: @earendil-works/pi-coding-agent is the runtime
+      # and pi-agent-mode ships the custom agents in .pi/agents/.
+      if ! command -v pi &>/dev/null; then
+        echo "Installing pi coding agent + pi-agent-mode..."
+        PI_VER="${PI_VERSION:-latest}"
+        npm install -g --ignore-scripts @earendil-works/pi-coding-agent@$PI_VER pi-agent-mode
       fi
 
-      # ── codebase-memory-mcp (codebase knowledge graph for agents) ──
-      # Static binary — no node needed. Agents query it via MCP for code
-      # discovery (search_graph, trace_path, get_code_snippet, etc.).
+      # ── codebase-memory-mcp (codebase knowledge graph) ──
+      # Static binary — no node needed. codebase-memory-mcp: installed for repo indexing only (pi has no MCP support)
+      # Agents query it via CLI (`codebase-memory-mcp cli ...`) for code
+      # discovery (search_graph, trace_path, get_code_snippet, etc.) — pi
+      # does not load it as an MCP server.
       if ! command -v codebase-memory-mcp &>/dev/null; then
         echo "Installing codebase-memory-mcp..."
         curl -fsSL "https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh" | bash 2>/dev/null || true
@@ -141,10 +138,11 @@ default:
         npm install -g wrangler 2>/dev/null || true
       fi
 
-      # ── opencode auth (file-type CI variable → expected path) ──────
-      if [ -n "${OPENCODE_AUTH:-}" ] && [ -f "$OPENCODE_AUTH" ]; then
-        mkdir -p "$HOME/.local/share/opencode"
-        cp "$OPENCODE_AUTH" "$HOME/.local/share/opencode/auth.json"
+      # ── pi auth (file-type CI variable → expected path) ──────
+      if [ -n "${PI_AUTH:-}" ] && [ -f "$PI_AUTH" ]; then
+        mkdir -p "$HOME/.pi/agent" && chmod 700 "$HOME/.pi/agent"
+        cp "$PI_AUTH" "$HOME/.pi/agent/auth.json"
+        chmod 600 "$HOME/.pi/agent/auth.json"
       fi
 
       # ── Verify ────────────────────────────────────────────────────
@@ -152,7 +150,7 @@ default:
       node --version 2>/dev/null || echo "node: MISSING"
       npm --version 2>/dev/null || echo "npm: MISSING"
       glab version 2>/dev/null | head -1 || echo "glab: MISSING"
-      opencode --version 2>/dev/null || echo "opencode: MISSING"
+      pi --version 2>/dev/null || echo "pi: MISSING"
       echo "$BOUCLE_DEPLOY_CMD" | grep -q wrangler && { wrangler --version 2>/dev/null || echo "wrangler: MISSING"; } || echo "wrangler: not needed (deploy doesn't use it)"
       codebase-memory-mcp --version 2>/dev/null || echo "codebase-memory-mcp: MISSING"
       echo "==================="
@@ -735,6 +733,13 @@ triage:
       # Run the agent. Use `|| rc=$?` to suppress set -e so the script
       # continues to comment parsing even if the agent exits non-zero
       # (step limit, crash, etc.).
+      # Record the newest triage note ID BEFORE running the agent, so we can
+      # distinguish a NEW triage comment (posted by this run) from OLD ones.
+      # Without this, a run where the agent doesn't post a new comment would
+      # re-parse the OLD triage comment and re-apply its disposition, causing
+      # a label bounce with no new question asked.
+      PRE_RUN_TRIAGE_ID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+        | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## Disposition"))] | first | .id // 0')
       rc=0
       ./bin/oc triage || rc=$?
       if [ "$rc" -ne 0 ]; then
@@ -743,10 +748,13 @@ triage:
 
       # Parse the triage comment for Disposition and Size
       # GitLab notes API returns notes newest-first, so `first` = newest.
-      # The agent sometimes posts duplicate/truncated comments; pick the newest
-      # that has a complete body (with a Disposition line).
+      # Only consider triage comments NEWER than the one present before this
+      # run (PRE_RUN_TRIAGE_ID). If the agent didn't post a new comment, this
+      # returns empty, which we handle below by leaving the issue at
+      # boucle:triage instead of re-applying the OLD disposition.
       COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-        | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## Disposition"))] | first | .body')
+        | jq -r --argjson pre "$PRE_RUN_TRIAGE_ID" \
+          '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## Disposition")) | select(.id > $pre)] | first | .body // ""')
 
       # Parse Disposition and Size from their SECTIONS only, not the whole body.
       # Scoping prevents false matches: e.g. "already" in an acceptance criterion
@@ -777,8 +785,11 @@ triage:
             glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
               -f body="$DRAFTED_COMMENT" > /dev/null 2>&1 || true
             # Re-fetch and re-parse the now-posted comment.
+            # Same PRE_RUN_TRIAGE_ID filter: only consider comments newer than
+            # the pre-run one (the just-posted fallback comment qualifies).
             COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-              | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## Disposition"))] | first | .body')
+              | jq -r --argjson pre "$PRE_RUN_TRIAGE_ID" \
+                '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## Disposition")) | select(.id > $pre)] | first | .body // ""')
             DISPOSITION=$(echo "$COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
             SIZE=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
             if [ -n "$DISPOSITION" ]; then
@@ -788,6 +799,17 @@ triage:
             fi
           fi
         fi
+      fi
+
+      # If no NEW triage comment was posted by this run (agent crashed, hit
+      # step limit, or decided no new triage was needed), leave the issue at
+      # boucle:triage and exit without changing labels. Re-applying the OLD
+      # disposition would bounce the label (e.g. triage→needs-info) with no
+      # new question asked — the exact "retour à une review humaine alors
+      # qu'aucune question n'est posée" symptom.
+      if [ -z "$DISPOSITION" ]; then
+        echo "[boucle] No new triage comment posted by this run — leaving issue #$IID at boucle:triage, no label change."
+        exit 0
       fi
 
       # Route based on disposition
@@ -2332,7 +2354,7 @@ e2e:
 
       # Run the agent on the live URL.
       # Tolerate non-zero exit: the agent may post a valid verdict (PASS/FAIL)
-      # yet exit non-zero (e.g. opencode cleanup, glab "new version" warning on
+      # yet exit non-zero (e.g. pi cleanup, glab "new version" warning on
       # stderr). We verify the verdict from the issue comment below, so the
       # agent exit code is not authoritative.
       ./bin/oc e2e || true

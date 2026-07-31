@@ -12,7 +12,7 @@ BOT_ID=""
 BOT_TOKEN=""
 CF_TOKEN=""
 RUNNER_TAG=""
-OPENCODE_AUTH_PATH="${OPENCODE_AUTH_PATH:-$HOME/.local/share/opencode/auth.json}"
+PI_AUTH_PATH="${PI_AUTH_PATH:-$HOME/.pi/agent/auth.json}"
 SKIP_CF=false
 DRY_RUN=false
 
@@ -43,7 +43,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --auth-path)
-      OPENCODE_AUTH_PATH="$2"
+      PI_AUTH_PATH="$2"
       shift 2
       ;;
     --skip-cf)
@@ -64,7 +64,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --bot-token <pat>        Bot PAT (used as BOUCLE_TOKEN CI variable)"
       echo "  --cf-token <token>       Cloudflare API token (for Pages project)"
       echo "  --runner-tag <tag>       Runner tag to use in .gitlab-ci.yml (default: boucle)"
-      echo "  --auth-path <path>        Path to opencode auth.json (default: ~/.local/share/opencode/auth.json)"
+      echo "  --auth-path <path>        Path to pi auth.json (default: ~/.pi/agent/auth.json)"
       echo "  --skip-cf                Skip Cloudflare Pages project creation"
       echo "  --dry-run                 Print what would be done, don't execute"
       exit 0
@@ -209,21 +209,21 @@ else
   log_pass "BOUCLE_UPDATE_MODE set to release"
 fi
 
-# OPENCODE_AUTH (file type) — requires auth.json to exist locally
-if [ -f "$OPENCODE_AUTH_PATH" ]; then
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/OPENCODE_AUTH" 2> /dev/null | jq -r '.key // empty')
+# PI_AUTH (file type) — requires auth.json to exist locally
+if [ -f "$PI_AUTH_PATH" ]; then
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/PI_AUTH" 2> /dev/null | jq -r '.key // empty')
   if [ -n "$EXISTING" ]; then
-    log_skip "OPENCODE_AUTH already exists"
+    log_skip "PI_AUTH already exists"
   else
     # Copy auth.json to temp file for @file syntax
     TMP_AUTH=$(mktemp)
-    cp "$OPENCODE_AUTH_PATH" "$TMP_AUTH"
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables --field key=OPENCODE_AUTH --field value=@$TMP_AUTH --field variable_type=file >/dev/null"
+    cp "$PI_AUTH_PATH" "$TMP_AUTH"
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables --field key=PI_AUTH --field value=@$TMP_AUTH --field variable_type=file >/dev/null"
     rm -f "$TMP_AUTH"
-    log_pass "OPENCODE_AUTH set (file type)"
+    log_pass "PI_AUTH set (file type)"
   fi
 else
-  log_fail "OPENCODE_AUTH — auth.json not found at $OPENCODE_AUTH_PATH"
+  log_fail "PI_AUTH — auth.json not found at $PI_AUTH_PATH"
 fi
 
 echo ""
@@ -487,7 +487,7 @@ fi
 echo "     Register one on your build machine (docker executor) or enable a shared runner with the tag."
 echo "  2. Apply the loop template to the target repo:"
 echo "     cp -r boucle/boucle/bin <target-repo>/"
-echo "     cp -r boucle/boucle/.opencode <target-repo>/"
+echo "     cp -r boucle/boucle/.pi <target-repo>/"
 echo "     cp boucle/boucle/.gitlab-ci.yml <target-repo>/"
 echo "     cp boucle/boucle/LOOP.md <target-repo>/"
 echo "  3. Run bin/doctor in CI to verify all prerequisites are met."
