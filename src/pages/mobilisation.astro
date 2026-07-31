@@ -89,7 +89,19 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 >
 	<main id="main" class="mobilisation">
 		<header class="mobilisation__hero">
-			<p class="eyebrow">Mobilisation</p>
+			<p class="eyebrow">
+				<img
+					class="accent-inline"
+					src="/symbols/slignshot_-_ancala_nusantara.png"
+					alt=""
+					loading="lazy"
+					decoding="async"
+					width="32"
+					height="32"
+					aria-hidden="true"
+				/>
+				Mobilisation
+			</p>
 			<h1 class="display">
 				Agir<br />sur tous les fronts.
 			</h1>
@@ -108,7 +120,21 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 						aria-labelledby={`group-${key}`}
 					>
 						<header class="section-head">
-							<p class="eyebrow">{sectionIndex(key)}</p>
+							<p class="eyebrow">
+								{key === "kit-militant" && (
+									<img
+										class="accent-inline"
+										src="/symbols/red_riangle.png"
+										alt=""
+										loading="lazy"
+										decoding="async"
+										width="28"
+										height="28"
+										aria-hidden="true"
+									/>
+								)}
+								{sectionIndex(key)}
+							</p>
 							<h2 id={`group-${key}`}>{groupMeta[key].label}</h2>
 							<p class="mobilisation__group-tagline">
 								{groupMeta[key].tagline}

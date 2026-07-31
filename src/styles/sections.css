@@ -62,6 +62,45 @@
 	filter: drop-shadow(0 24px 40px rgba(15, 15, 15, 0.18));
 }
 
+/*
+ * When `.hero__symbol` is applied directly to a small decorative <img>
+ * (next to the primary CTA, see src/pages/index.astro), size it as a
+ * 64×64 accent — *small decorative accent*, never a hero illustration.
+ */
+img.hero__symbol {
+	width: 64px;
+	height: 64px;
+	max-width: 64px;
+	object-fit: contain;
+	filter: none;
+	align-self: center;
+}
+
+/*
+ * `.accent-inline` — a 32-48 px decorative image nestled inside a line of
+ * text (eyebrow, lede, etc.). Sized so it never dominates the line.
+ */
+.accent-inline {
+	display: inline-block;
+	width: 32px;
+	height: 32px;
+	object-fit: contain;
+	vertical-align: middle;
+	margin-inline-end: var(--space-2xs);
+}
+
+/* Section-head lede variant for tiny centered captions. */
+.section-head__lede--centered {
+	margin-inline: auto;
+	text-align: center;
+	max-width: 56ch;
+}
+
+.section-head__lede--centered .accent-inline {
+	width: 48px;
+	height: 48px;
+}
+
 /* ---------- Buttons (homepage) ---------- */
 
 .btn {
@@ -188,61 +227,6 @@
 }
 
 .pillar p {
-	color: var(--color-text-muted);
-	margin: 0;
-}
-
-/* ---------- Symbol gallery (used on the symbols page) ---------- */
-
-.symbols {
-	width: min(100% - 2 * var(--space-s), var(--container-wide));
-	margin-inline: auto;
-	display: flex;
-	flex-direction: column;
-	gap: var(--space-xl);
-}
-
-.symbols__grid {
-	list-style: none;
-	margin: 0;
-	padding: 0;
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-	gap: var(--space-l);
-}
-
-.symbol-card {
-	display: flex;
-	flex-direction: column;
-	gap: var(--space-2xs);
-	text-align: center;
-	padding: var(--space-m);
-	background: var(--color-bg-soft);
-	border-radius: var(--radius-m);
-	border: 1px solid var(--color-border);
-	transition: transform var(--duration-base) var(--ease-out);
-}
-
-.symbol-card:hover {
-	transform: translateY(-2px);
-}
-
-.symbol-card__image {
-	width: 100%;
-	aspect-ratio: 1 / 1;
-	object-fit: contain;
-}
-
-.symbol-card__label {
-	font-family: var(--font-body);
-	font-size: var(--text-sm);
-	font-weight: var(--weight-semibold);
-	color: var(--color-text);
-	margin: 0;
-}
-
-.symbol-card__caption {
-	font-size: var(--text-xs);
 	color: var(--color-text-muted);
 	margin: 0;
 }
