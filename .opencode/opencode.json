@@ -10,6 +10,20 @@
     "max_lines": 1000,
     "max_bytes": 25600
   },
+  "watcher": {
+    "ignore": [
+      "node_modules/**",
+      "dist/**",
+      "build/**",
+      ".next/**",
+      ".svelte-kit/**",
+      "coverage/**",
+      ".git/**",
+      "target/**",
+      "__pycache__/**",
+      ".venv/**"
+    ]
+  },
   "provider": {
     "ollama-cloud": {
       "options": {
