@@ -1478,6 +1478,9 @@ doctor:
       HOST="$BOUCLE_FORGE_HOST"
       PID="$CI_PROJECT_ID"
       RECOVERED=0
+      # Emoji reactions that count as spec approval (GitLab internal alpha codes).
+      # Must mirror the dispatch job's constant — each CI job runs its own shell.
+      BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup|white_check_mark|ballot_box_with_check|heavy_check_mark|ok|ok_hand"
 
       # Label helper: preserve non-boucle labels when writing a boucle label.
       # Same definition as the other jobs — included here so the doctor can
