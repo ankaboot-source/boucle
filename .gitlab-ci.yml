@@ -90,6 +90,7 @@ default:
       if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then
         echo "Installing Node.js (shell executor has no image support)..."
         NODE_VER="v22.11.0"
+        mkdir -p "$HOME/.local"
         curl -sL "https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-linux-x64.tar.xz" -o /tmp/node.tar.xz
         tar xf /tmp/node.tar.xz -C "$HOME/.local" --strip-components=1
         rm -f /tmp/node.tar.xz
