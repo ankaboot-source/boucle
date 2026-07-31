@@ -211,7 +211,22 @@ build_prompt() {
 
   case "$role" in
     triage)
-      prompt="Analyze issue #${ISSUE}. Post your analysis as a comment with the boucle:triage marker."
+      # Inject the issue body (fetched by CI as BOUCLE_ISSUE_BODY) so the
+      # agent does not waste steps calling glab issue view / gh issue view
+      # (minimax-m3 burned 4+ steps on failed fetches before posting).
+      local body="${BOUCLE_ISSUE_BODY:-}"
+      if [ -n "$body" ]; then
+        prompt="Analyze issue #${ISSUE}.
+
+Issue body (already fetched — do NOT call glab issue view or gh issue view):
+---
+${body}
+---
+
+Post your analysis as a comment with the boucle:triage marker. Use: glab issue note ${ISSUE} --repo ${CI_PROJECT_PATH:-up/urgence-palestine.fr} --message \"\$(cat <<'EOF' ... EOF)\""
+      else
+        prompt="Analyze issue #${ISSUE}. Post your analysis as a comment with the boucle:triage marker."
+      fi
       ;;
     worker)
       prompt="Implement issue #${ISSUE}. Read state.md first. Commit your changes with [skip ci]."
