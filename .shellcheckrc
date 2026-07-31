@@ -1,0 +1,18 @@
+# .shellcheckrc — shellcheck config for boucle
+# All scripts are bash; treat them as such even without .sh extension.
+shell=bash
+
+# Follow source statements relative to the checked script.
+source-path=SCRIPTDIR
+
+# Don't fail on sourcing files outside the project tree.
+external-sources=true
+
+# Opt-in checks.
+enable=check-unassigned-uppercase,require-variable-braces
+
+# Disable noisy checks that don't apply here.
+# SC1090/SC1091: can't follow source — common for system files and dynamic paths.
+# SC2155: declare-and-assign masks return code — boucle uses `local x=$(...)` intentionally in places.
+# SC2034: unused variable — false positives for exported vars.
+disable=SC1090,SC1091,SC2034

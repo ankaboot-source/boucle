@@ -8,7 +8,8 @@
     "preview": "astro preview",
     "astro": "astro",
     "migrate": "node scripts/migrate.mjs",
-    "verify:migration": "node scripts/verify-migration.mjs"
+    "verify:migration": "node scripts/verify-migration.mjs",
+    "test": "make test"
   },
   "dependencies": {
     "@astrojs/tailwind": "^6.0.2",

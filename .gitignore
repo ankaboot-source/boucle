@@ -31,3 +31,7 @@ pnpm-debug.log*
 # boucle state files (per-issue work state, not for version control)
 .boucle/
 .wrangler/
+
+# bats test artifacts
+test/report.xml
+test/.bats.*
