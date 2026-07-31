@@ -24,7 +24,7 @@ type Entry = Awaited<
 
 type Category = "communique" | "analyse" | "appel-a-mobilisation";
 
-const entries: Entry[] = (await getCollection("prises-de-parole"))
+const entries: Entry[] = (await getCollection("prisesDeParole"))
 	// Sort newest first so the index reads chronologically.
 	.sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
 
