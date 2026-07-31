@@ -220,6 +220,8 @@ dispatch:
   script:
     - ./bin/update
     - |
+      # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
+      set +o pipefail
       # Anti-accumulation: if dispatch exits 0 without writing .boucle-issue,
       # fail instead so downstream triage (needs: [dispatch] without optional)
       # is skipped. This prevents no-op webhook pipelines (bot events, MR
@@ -562,6 +564,8 @@ triage:
     BOUCLE_ITERATION: 1
   script:
     - |
+      # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
+      set +o pipefail
       # Guard: if dispatch skipped (bot note event, anti-loop), no .boucle-issue artifact
       if [ ! -f .boucle-issue ]; then
         # Recovery path: allow manual triage trigger via BOUCLE_ISSUE variable
@@ -1057,6 +1061,8 @@ worker:
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "worker"
   script:
     - |
+      # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
+      set +o pipefail
       export BOUCLE_ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
       ITERATION="${BOUCLE_ITERATION:-1}"
       export BOUCLE_ITERATION
@@ -1350,6 +1356,8 @@ reviewer:
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "reviewer"
   script:
     - |
+      # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
+      set +o pipefail
       export BOUCLE_ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
 
       # Label helper: preserve non-boucle labels when writing a boucle label.
@@ -1540,6 +1548,8 @@ merger:
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "merger"
   script:
     - |
+      # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
+      set +o pipefail
       export BOUCLE_ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
 
       # Label helper: preserve non-boucle labels when writing a boucle label.
@@ -1716,6 +1726,8 @@ catchup:
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "catchup"
   script:
     - |
+      # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
+      set +o pipefail
       export BOUCLE_ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
 
       # ── Helpers (local copies — matches the per-job pattern used by  ──
@@ -1921,6 +1933,8 @@ deploy:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
   script:
     - |
+      # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
+      set +o pipefail
       eval "$BOUCLE_BUILD_CMD"
       # Deploy to production (configurable via BOUCLE_DEPLOY_CMD, force master branch)
       BRANCH=master
@@ -1955,6 +1969,8 @@ e2e:
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "e2e"
   script:
     - |
+      # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
+      set +o pipefail
       export BOUCLE_ISSUE="${BOUCLE_ISSUE:-}"
       # Use deployment URL passed from deploy job (production domain may not have DNS yet)
       LIVE_URL="${BOUCLE_LIVE_URL:-$BOUCLE_PRODUCTION_URL}"
@@ -2196,6 +2212,8 @@ doctor:
     - if: $CI_PIPELINE_SOURCE == "schedule"
   script:
     - |
+      # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
+      set +o pipefail
       HOST="$BOUCLE_FORGE_HOST"
       PID="$CI_PROJECT_ID"
       RECOVERED=0
