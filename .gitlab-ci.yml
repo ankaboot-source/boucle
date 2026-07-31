@@ -1374,8 +1374,12 @@ e2e:
         fi
       fi
 
-      # Run the agent on the live URL
-      ./bin/oc e2e
+      # Run the agent on the live URL.
+      # Tolerate non-zero exit: the agent may post a valid verdict (PASS/FAIL)
+      # yet exit non-zero (e.g. opencode cleanup, glab "new version" warning on
+      # stderr). We verify the verdict from the issue comment below, so the
+      # agent exit code is not authoritative.
+      ./bin/oc e2e || true
 
       # Parse verdict from agent output (bin/oc logs to stdout)
       # If BOUCLE_ISSUE is set, parse from issue comment; otherwise from agent stdout
