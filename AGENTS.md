@@ -2,6 +2,34 @@
 
 Instructions for AI agents working on the **boucle** project.
 
+<!-- codebase-memory-mcp:start -->
+## Codebase Knowledge Graph (codebase-memory-mcp)
+
+This project uses codebase-memory-mcp to maintain a knowledge graph of the codebase.
+ALWAYS prefer MCP graph tools over grep/glob/file-search for code discovery.
+
+The graph is built once (by CI or locally) and auto-syncs on changes. If `search_graph`
+returns no results, run `index_repository` with the repo path, then retry.
+
+### Priority Order
+1. `search_graph` — find functions, classes, routes, variables by pattern
+2. `trace_path` — trace who calls a function or what it calls
+3. `get_code_snippet` — read specific function/class source code
+4. `query_graph` — run Cypher queries for complex patterns
+5. `get_architecture` — high-level project summary
+
+### When to fall back to grep/glob
+- Searching for string literals, error messages, config values
+- Searching non-code files (Dockerfiles, shell scripts, configs)
+- When MCP tools return insufficient results
+
+### Examples
+- Find a page component: `search_graph(name_pattern=".*PrisesDeParole.*")`
+- Who calls a helper: `trace_path(function_name="getCategory", direction="inbound")`
+- Read source: `get_code_snippet(qualified_name="src/pages/prises-de-parole.astro")`
+- Architecture overview: `get_architecture(aspects=["all"])`
+<!-- codebase-memory-mcp:end -->
+
 ## Bug resolution workflow
 
 The upstream-first bug fix workflow is defined in
