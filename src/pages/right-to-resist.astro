@@ -1,0 +1,548 @@
+---
+/*
+ * /right-to-resist — Right to Resist index.
+ * ---------------------------------------------------------------------------
+ * Index page for the Mobilisation bucket, reachable at /right-to-resist/.
+ *
+ * Renders:
+ *   1. A row of 3 "featured" cards — one per Mobilisation category
+ *      (kit-militant, boycott, prisonniers) — each picked as the
+ *      latest entry of that category by `date` desc. These act as the
+ *      top-of-page call to action for each campaign stream.
+ *   2. The full mobilisation collection (including `category: "evenement"`
+ *      entries) in antichronological order, matching the previous
+ *      /mobilisation/ index layout.
+ *
+ * Slug strategy: each Markdown entry id is `YYYY-MM-<slug>`, so we strip
+ * the `YYYY-MM-` prefix to derive the legacy WordPress-style URL slug
+ * used in `/mobilisation/<slug>/` (unchanged from the previous route).
+ */
+import Layout from "../layouts/Layout.astro";
+import { getCollection } from "astro:content";
+
+const entries = (await getCollection("mobilisation"))
+	// Sort newest first so the index reads chronologically.
+	.sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+
+type FeaturedKey = "kit-militant" | "boycott" | "prisonniers";
+
+const featuredMeta: Record<FeaturedKey, { tag: string; tagline: string }> = {
+	"kit-militant": {
+		tag: "Kit militant",
+		tagline: "Affiches, tracts, pancartes & stickers prêts à imprimer.",
+	},
+	boycott: {
+		tag: "Boycott",
+		tagline: "Visuels et arguments pour interpeller les marques complices.",
+	},
+	prisonniers: {
+		tag: "Prisonnier·es",
+		tagline: "Ressources pour soutenir les prisonniers politiques palestiniens.",
+	},
+};
+
+const featuredOrder: FeaturedKey[] = ["kit-militant", "boycott", "prisonniers"];
+
+// Pick the most recent entry per featured category, defaulting to
+// `null` if the category has no entry (so the slot simply collapses
+// rather than crashing the page).
+const featuredByKey = new Map<FeaturedKey, (typeof entries)[number]>();
+for (const key of featuredOrder) {
+	const latest = entries.find((e) => (e.data.category ?? "evenement") === key);
+	if (latest) {
+		featuredByKey.set(key, latest);
+	}
+}
+
+const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
+	day: "numeric",
+	month: "long",
+	year: "numeric",
+});
+---
+
+<Layout
+	title="Right to Resist — Urgence Palestine"
+	description="Droit à la résistance : kit militant, boycott et soutien aux prisonniers politiques palestiniens. Ressources, visuels et actions concrètes du collectif Urgence Palestine."
+>
+	<main id="main" class="right-to-resist">
+		<header class="right-to-resist__header">
+			<p class="eyebrow">
+				<img
+					class="accent-inline"
+					src="/symbols/slignshot_-_ancala_nusantara.png"
+					alt=""
+					loading="lazy"
+					decoding="async"
+					width="32"
+					height="32"
+					aria-hidden="true"
+				/>
+				Right to Resist
+			</p>
+			<h1 class="display">Right to Resist</h1>
+			<p class="right-to-resist__lede">
+				Trois campagnes de fond et les événements locaux des sections&nbsp;:
+				kit militant, boycott, soutien aux prisonnier·es politiques
+				palestinien·nes. Tout est imprimable, diffusable, relaiable.
+			</p>
+		</header>
+
+		<!--
+		  ====================================================================
+		  Featured strip — one card per campaign category (kit-militant,
+		  boycott, prisonniers), always anchored at the most recent entry.
+		  ====================================================================
+		-->
+		<section
+			class="right-to-resist__featured"
+			aria-labelledby="featured-title"
+		>
+			<h2 id="featured-title" class="right-to-resist__section-title">
+				Campagnes à la une
+			</h2>
+			<ul class="right-to-resist__featured-list" role="list">
+				{
+					featuredOrder.flatMap((key) => {
+						const latest = featuredByKey.get(key);
+						if (!latest) return [];
+						// Per-entry URL mirrors the legacy slug pattern:
+						//   /mobilisation/<entry-id-without-YYYY-MM-prefix>/
+						const slug = latest.id.replace(/^\d{4}-\d{2}-/, "");
+						const href = `/mobilisation/${slug}/`;
+						return (
+							<li class="featured-card">
+								<a class="featured-card__link" href={href}>
+									<div class="featured-card__media">
+										{latest.data.featured_image ? (
+											<img
+												class="featured-card__image"
+												src={latest.data.featured_image}
+												alt=""
+												loading="lazy"
+												decoding="async"
+												width="540"
+												height="540"
+											/>
+										) : (
+											<div
+												class="featured-card__placeholder"
+												aria-hidden="true"
+											/>
+										)}
+									</div>
+									<div class="featured-card__body">
+										<p class="featured-card__tag">
+											{featuredMeta[key].tag}
+										</p>
+										<h3 class="featured-card__title">
+											{latest.data.title}
+										</h3>
+										{latest.data.description && (
+											<p class="featured-card__description">
+												{latest.data.description}
+											</p>
+										)}
+										<p class="featured-card__meta">
+											<time datetime={latest.data.date.toISOString()}>
+												{dateFormatter.format(latest.data.date)}
+											</time>
+										</p>
+									</div>
+								</a>
+							</li>
+						);
+					})
+				}
+			</ul>
+		</section>
+
+		<!--
+		  ====================================================================
+		  Full list — every entry of the mobilisation collection, in
+		  antichronological order. Matches the previous /mobilisation/
+		  index layout.
+		  ====================================================================
+		-->
+		<section
+			class="right-to-resist__list-section"
+			aria-labelledby="all-entries-title"
+		>
+			<h2 id="all-entries-title" class="right-to-resist__section-title">
+				Toutes les actions
+			</h2>
+			<ul class="right-to-resist__cards" role="list">
+				{
+					entries.map((entry) => {
+						const slug = entry.id.replace(/^\d{4}-\d{2}-/, "");
+						const href = `/mobilisation/${slug}/`;
+						return (
+							<li class="card">
+								<article class="card__inner">
+									{entry.data.featured_image ? (
+										<a class="card__media" href={href} aria-hidden="true" tabindex="-1">
+											<img
+												src={entry.data.featured_image}
+												alt=""
+												loading="lazy"
+												decoding="async"
+												width="540"
+												height="540"
+											/>
+										</a>
+									) : (
+										<a
+											class="card__media card__media--placeholder"
+											href={href}
+											aria-hidden="true"
+											tabindex="-1"
+										/>
+									)}
+									<div class="card__body">
+										<p class="card__meta">
+											<time datetime={entry.data.date.toISOString()}>
+												{dateFormatter.format(entry.data.date)}
+											</time>
+											<span aria-hidden="true"> · </span>
+											<span>{entry.data.location}</span>
+										</p>
+										<h3 class="card__title">
+											<a href={href}>{entry.data.title}</a>
+										</h3>
+										{entry.data.description && (
+											<p class="card__description">
+												{entry.data.description}
+											</p>
+										)}
+										<span class="card__cta" aria-hidden="true">
+											Voir le détail <span>→</span>
+										</span>
+									</div>
+								</article>
+							</li>
+						);
+					})
+				}
+			</ul>
+
+			{
+				entries.length === 0 && (
+					<p class="right-to-resist__empty">
+						Aucun contenu de mobilisation pour le moment. Revenez bientôt.
+					</p>
+				)
+			}
+		</section>
+	</main>
+</Layout>
+
+<style>
+	.eyebrow {
+		font-family: var(--font-body);
+		font-size: var(--text-xs);
+		font-weight: var(--weight-bold);
+		letter-spacing: var(--tracking-mega);
+		text-transform: uppercase;
+		color: var(--color-accent);
+		margin: 0;
+	}
+
+	/* ---------- Page wrapper ---------- */
+	.right-to-resist {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2xl);
+		padding-block: var(--space-xl) var(--space-3xl);
+		width: min(100% - 2 * var(--space-s), var(--container-wide));
+		margin-inline: auto;
+	}
+
+	.right-to-resist__header {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-m);
+		max-width: 56rem;
+	}
+
+	.right-to-resist__lede {
+		font-size: var(--text-lg);
+		color: var(--color-text-muted);
+		max-width: 60ch;
+		margin: 0;
+	}
+
+	.right-to-resist__section-title {
+		font-family: var(--font-heading);
+		font-size: var(--text-2xl);
+		line-height: var(--leading-tight);
+		letter-spacing: var(--tracking-tight);
+		margin: 0 0 var(--space-l);
+	}
+
+	/* ---------- Featured strip ---------- */
+	.right-to-resist__featured,
+	.right-to-resist__list-section {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-l);
+	}
+
+	.right-to-resist__featured-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: var(--space-l);
+	}
+
+	@media (min-width: 40rem) {
+		.right-to-resist__featured-list {
+			grid-template-columns: repeat(3, 1fr);
+		}
+	}
+
+	.featured-card {
+		display: flex;
+	}
+
+	.featured-card__link {
+		display: flex;
+		flex-direction: column;
+		width: 100%;
+		background: var(--color-bg-soft);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-m);
+		overflow: hidden;
+		text-decoration: none;
+		color: var(--color-ink);
+		transition:
+			transform var(--duration-base) var(--ease-out),
+			border-color var(--duration-base) var(--ease-out),
+			box-shadow var(--duration-base) var(--ease-out);
+	}
+
+	.featured-card__link:hover,
+	.featured-card__link:focus-visible {
+		transform: translateY(-2px);
+		border-color: var(--color-ink);
+		box-shadow: var(--shadow-lift);
+	}
+
+	.featured-card__link:focus-visible {
+		outline: 2px solid var(--color-accent);
+		outline-offset: 3px;
+	}
+
+	.featured-card__media {
+		aspect-ratio: 4 / 3;
+		background: var(--color-paper-edge);
+		overflow: hidden;
+	}
+
+	.featured-card__image {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+
+	.featured-card__placeholder {
+		width: 100%;
+		height: 100%;
+		background: repeating-linear-gradient(
+			45deg,
+			var(--color-paper-edge) 0 12px,
+			var(--color-paper-soft) 12px 24px
+		);
+	}
+
+	.featured-card__body {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2xs);
+		padding: var(--space-m);
+		flex: 1;
+	}
+
+	.featured-card__tag {
+		display: inline-flex;
+		align-self: flex-start;
+		padding: 0.2em 0.7em;
+		background: var(--color-ink);
+		color: var(--color-ink-on-dark);
+		border-radius: var(--radius-pill);
+		font-family: var(--font-body);
+		font-size: var(--text-xs);
+		font-weight: var(--weight-bold);
+		letter-spacing: var(--tracking-mega);
+		text-transform: uppercase;
+		margin: 0;
+	}
+
+	.featured-card__title {
+		font-family: var(--font-heading);
+		font-size: var(--text-lg);
+		line-height: var(--leading-snug);
+		letter-spacing: var(--tracking-tight);
+		margin: 0;
+		display: -webkit-box;
+		-webkit-line-clamp: 3;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+
+	.featured-card__description {
+		font-size: var(--text-sm);
+		line-height: var(--leading-relaxed);
+		color: var(--color-text-muted);
+		margin: 0;
+		display: -webkit-box;
+		-webkit-line-clamp: 3;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+
+	.featured-card__meta {
+		margin: var(--space-2xs) 0 0;
+		font-size: var(--text-xs);
+		letter-spacing: var(--tracking-wide);
+		text-transform: uppercase;
+		color: var(--color-text-muted);
+		font-weight: var(--weight-semibold);
+	}
+
+	/* ---------- Full list ---------- */
+	.right-to-resist__cards {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
+		gap: var(--space-l);
+	}
+
+	.card {
+		display: flex;
+	}
+
+	.card__inner {
+		display: flex;
+		flex-direction: column;
+		width: 100%;
+		background: var(--color-bg-soft);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-m);
+		overflow: hidden;
+		transition:
+			transform var(--duration-base) var(--ease-out),
+			border-color var(--duration-base) var(--ease-out),
+			box-shadow var(--duration-base) var(--ease-out);
+	}
+
+	.card__inner:hover,
+	.card__inner:focus-within {
+		transform: translateY(-2px);
+		border-color: color-mix(in oklch, var(--color-accent) 35%, var(--color-border));
+		box-shadow: var(--shadow-lift);
+	}
+
+	.card__media {
+		display: block;
+		aspect-ratio: 1 / 1;
+		background: var(--color-paper-edge);
+		overflow: hidden;
+	}
+
+	.card__media img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+
+	.card__media--placeholder {
+		background: repeating-linear-gradient(
+			45deg,
+			var(--color-paper-edge) 0 12px,
+			var(--color-paper-soft) 12px 24px
+		);
+	}
+
+	.card__body {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2xs);
+		padding: var(--space-m);
+		flex: 1;
+	}
+
+	.card__meta {
+		margin: 0;
+		font-size: var(--text-xs);
+		letter-spacing: var(--tracking-wide);
+		text-transform: uppercase;
+		color: var(--color-text-muted);
+		font-weight: var(--weight-semibold);
+	}
+
+	.card__title {
+		margin: 0;
+		font-size: var(--text-lg);
+		line-height: var(--leading-snug);
+	}
+
+	.card__title a {
+		color: var(--color-text);
+		text-decoration: none;
+	}
+
+	.card__title a:hover,
+	.card__title a:focus-visible {
+		color: var(--color-accent);
+	}
+
+	.card__description {
+		margin: 0;
+		font-size: var(--text-sm);
+		line-height: var(--leading-relaxed);
+		color: var(--color-text-muted);
+		display: -webkit-box;
+		-webkit-line-clamp: 3;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+
+	.card__cta {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2xs);
+		margin-top: auto;
+		padding-top: var(--space-2xs);
+		font-family: var(--font-body);
+		font-size: var(--text-sm);
+		font-weight: var(--weight-semibold);
+		color: var(--color-accent);
+	}
+
+	.card__cta span {
+		transition: transform var(--duration-base) var(--ease-out);
+	}
+
+	.card__inner:hover .card__cta span {
+		transform: translateX(4px);
+	}
+
+	.right-to-resist__empty {
+		font-size: var(--text-base);
+		color: var(--color-text-muted);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.featured-card__link,
+		.card__inner,
+		.card__cta span {
+			transition: none;
+		}
+	}
+</style>
