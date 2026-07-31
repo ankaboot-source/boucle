@@ -669,18 +669,28 @@ triage:
 
                       if [ -n "$IMG_URL" ]; then
                         # 5. Fetch du commentaire existant, append section Aperçu, PUT.
+                        #    Garde: si EXISTING_BODY est vide (échec fetch), ne PAS PUT —
+                        #    sinon on écrase le commentaire de triage entier (perte du
+                        #    marqueur boucle:triage + critères + disposition).
                         EXISTING_BODY=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
                           "/projects/$CI_PROJECT_ID/issues/$IID/notes/$TRIAGE_NOTE_ID" 2>/dev/null \
                           | jq -r '.body' 2>/dev/null)
-                        NEW_BODY=$(printf '%s\n\n## Aperçu\n%s\n' "$EXISTING_BODY" "$IMG_URL")
-                        if glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT \
-                          "/projects/$CI_PROJECT_ID/issues/$IID/notes/$TRIAGE_NOTE_ID" \
-                          -f body="$NEW_BODY" >/dev/null 2>&1; then
-                          # 6. Idempotence: supprimer RENDER_REQUEST (pas de re-render au retry).
-                          rm -f "$RENDER_REQUEST_FILE"
-                          echo "[boucle] Visual preview embedded in triage comment #$TRIAGE_NOTE_ID"
+                        if [ -n "$EXISTING_BODY" ]; then
+                          NEW_BODY=$(printf '%s\n\n## Aperçu\n%s\n' "$EXISTING_BODY" "$IMG_URL")
+                          if glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT \
+                            "/projects/$CI_PROJECT_ID/issues/$IID/notes/$TRIAGE_NOTE_ID" \
+                            -f body="$NEW_BODY" >/dev/null 2>&1; then
+                            # 6. Idempotence: supprimer RENDER_REQUEST (pas de re-render au retry).
+                            rm -f "$RENDER_REQUEST_FILE"
+                            echo "[boucle] Visual preview embedded in triage comment #$TRIAGE_NOTE_ID"
+                          else
+                            echo "[boucle] WARN: PUT notes failed — RENDER_REQUEST kept for retry"
+                          fi
                         else
-                          echo "[boucle] WARN: PUT notes failed — RENDER_REQUEST kept for retry"
+                          echo "[boucle] WARN: existing comment body empty — posting fallback note"
+                          glab api --hostname "$BOUCLE_FORGE_HOST" -X POST \
+                            "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+                            -f body="Aperçu indisponible (échec lecture commentaire) — validez sur le TL;DR." >/dev/null 2>&1
                         fi
                       else
                         echo "[boucle] WARN: PNG upload failed — posting fallback note"
