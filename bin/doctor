@@ -70,7 +70,7 @@ else
 fi
 
 # ── Runner online ──────────────────────────────────────────────────────
-RUNNER_TAG="${BOUCLE_RUNNER_TAG:-tooling}"
+RUNNER_TAG="${BOUCLE_RUNNER_TAG:-data}"
 if glab api --hostname "$HOST" "/projects/$PROJECT_ID/runners" 2>/dev/null | jq -e ".[] | select(.status==\"online\" and (.tag_list | contains([\"$RUNNER_TAG\"])))" >/dev/null 2>&1; then
   pass "runner with tag '$RUNNER_TAG' online"
 else
