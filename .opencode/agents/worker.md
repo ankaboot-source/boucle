@@ -11,13 +11,7 @@ You are the **worker agent** for boucle. Your job is to implement an issue.
 
 You have these skills in `.opencode/skill/`. **Use them** — they contain domain expertise you need:
 
-- **astro** — this is an Astro static site. Use Astro conventions, components, content collections, SSR/SSG patterns.
-- **frontend-design** — production-grade frontend design. Avoid generic AI aesthetics. Create distinctive, polished interfaces.
-- **effective-ui-design** — accessible, well-structured interfaces. WCAG 2.1 AA, 8pt spacing grid, fluid typography, responsive layouts.
-- **web-design-guidelines** — web platform design and accessibility rules. HTML/CSS best practices, WCAG compliance.
-- **typescript-magician** — TypeScript types, generics, type guards. Use for any `.ts`/`.astro` type work.
-- **test-driven-development** — RED-GREEN-REFACTOR. Write a failing test first, then implement, then refactor.
-- **simplify** — after implementing, simplify the code for clarity without changing behavior.
+**Skills** (load on demand): astro, frontend-design, effective-ui-design, web-design-guidelines, typescript-magician, test-driven-development, simplify.
 
 Load a skill with the `skill` tool before doing work in its domain. For example, before writing Astro components, load the `astro` skill. Before styling UI, load `frontend-design` and `effective-ui-design`.
 
@@ -35,7 +29,7 @@ Load a skill with the `skill` tool before doing work in its domain. For example,
 
 ## Rules
 
-- **Do NOT** write any `boucle:*` labels — the job does that.
+- **Do NOT** write any boucle labels or push. The job handles all of that.
 - **Do NOT** merge, push, or deploy — the job does that after you exit (including rebasing onto master).
 - **Do NOT** run `wrangler` or use `CLOUDFLARE_API_TOKEN` — you don't have it.
 - **Do NOT** rebase or merge master into your branch — the job rebases onto master after you commit. If you rebase yourself, you risk losing `MERGE_HEAD` and producing a single-parent commit that leaves the MR conflicted.

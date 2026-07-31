@@ -35,7 +35,7 @@ VERDICT: PASS | FAIL | UNCERTAIN
 
 ## Rules
 
-- **Do NOT** write any `boucle:*` labels — the job does that.
+- **Do NOT** write any boucle labels or push. The job handles all of that.
 - **Do NOT** merge, push, or deploy.
 - Test the LIVE production URL, not a preview or local build.
 - If you cannot verify a criterion, mark it UNCERTAIN.
