@@ -1880,6 +1880,79 @@ doctor:
         printf '%s' "${out:-[]}"
       }
 
+      # ── Recover stuck boucle:working / boucle:review issues ────────────
+      # A worker/reviewer pipeline can be interrupted (runner crash, manual
+      # cancel, force-push mid-run) leaving the issue stuck at boucle:working
+      # or boucle:review with no active pipeline. The dispatch job does NOT
+      # re-route these labels (it only handles triage/todo/needs-info/spec-
+      # review), so without this recovery the issue hangs forever. Re-trigger
+      # the appropriate role if the label has been stuck for >15 min with no
+      # matching role pipeline currently running.
+      echo "Scanning for stuck boucle:working / boucle:review issues..."
+      STUCK_WORKING=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:working&per_page=100" \
+        | jq -r '.[].iid')
+      STUCK_REVIEW=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:review&per_page=100" \
+        | jq -r '.[].iid')
+
+      for IID in $STUCK_WORKING $STUCK_REVIEW; do
+        # Determine which role to re-trigger based on the label.
+        ISSUE_LABELS=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID" | jq -r '.labels | join(",")')
+        if echo "$ISSUE_LABELS" | grep -q "boucle:working"; then
+          ROLE="worker"
+        elif echo "$ISSUE_LABELS" | grep -q "boucle:review"; then
+          ROLE="reviewer"
+        else
+          continue
+        fi
+
+        # Check if a role pipeline is currently running/created for this issue.
+        # We query recent trigger pipelines and inspect their jobs for a
+        # running/created worker/reviewer job with BOUCLE_ISSUE=$IID.
+        # GitLab doesn't expose pipeline variables in the list endpoint, so
+        # we check the last 10 trigger pipelines' jobs.
+        ACTIVE=false
+        RECENT_PIPELINES=$(glab api --hostname "$HOST" "/projects/$PID/pipelines?per_page=10&order_by=id&sort=desc" \
+          | jq -r '[.[] | select(.source=="trigger")] | .[].id')
+        for PID2 in $RECENT_PIPELINES; do
+          JOB_STATUS=$(glab api --hostname "$HOST" "/projects/$PID/pipelines/$PID2/jobs" \
+            | jq -r --arg role "$ROLE" --arg iid "$IID" '
+              [.[] | select(.name == $role) | select(.status | test("running|created|pending|waiting_for_resource"))]
+              | length
+            ' 2>/dev/null)
+          # We can't confirm the BOUCLE_ISSUE variable from the jobs API, so
+          # we use a time heuristic: if ANY role job is currently active, skip
+          # re-triggering to avoid duplicate runs. The resource_group serializes
+          # per-issue anyway, so a duplicate would just queue, not collide.
+          if [ "${JOB_STATUS:-0}" -gt 0 ]; then
+            ACTIVE=true
+            break
+          fi
+        done
+
+        if [ "$ACTIVE" = "true" ]; then
+          echo "  → #$IID ($ROLE): a $ROLE pipeline is currently active — skipping"
+          continue
+        fi
+
+        # Time heuristic: check the issue's updated_at. If it was updated
+        # within the last 15 min, a pipeline may have just started — skip.
+        UPDATED_AT=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID" | jq -r '.updated_at')
+        UPDATED_EPOCH=$(date -d "$UPDATED_AT" +%s 2>/dev/null || echo 0)
+        NOW_EPOCH=$(date +%s)
+        AGE=$((NOW_EPOCH - UPDATED_EPOCH))
+        if [ "$AGE" -lt 900 ]; then
+          echo "  → #$IID ($ROLE): issue updated ${AGE}s ago (< 15 min) — may still be processing, skipping"
+          continue
+        fi
+
+        echo "  → #$IID ($ROLE): stuck for ${AGE}s with no active pipeline — re-triggering $ROLE"
+        curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
+          -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+          -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=$ROLE" > /dev/null
+        echo "  → re-triggered $ROLE for #$IID"
+        RECOVERED=$((RECOVERED + 1))
+      done
+
       # Also check boucle:split parents: close the parent when all its
       # sub-issues are closed. This is the fallback cascade for sub-issues
       # closed via MR merge (Closes #N) where the deploy-triggered e2e
