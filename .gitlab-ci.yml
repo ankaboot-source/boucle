@@ -189,6 +189,8 @@ check:
     - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"
   before_script:
     - apt-get update -qq && apt-get install -y -qq curl git make xz-utils
+    # Initialize bats test helper submodules
+    - git submodule update --init --recursive
     # shellcheck (static binary, pinned)
     - |
       SC_VER="v0.11.0"
