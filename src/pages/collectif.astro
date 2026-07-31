@@ -289,32 +289,32 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 
 		<!--
 		  ====================================================================
-		  Legacy CTA images — the two image-buttons that the legacy site
-		  displayed at the bottom of the Sections Locales and Mobilisation
-		  étudiante pages. They link to the same Google Forms the text
-		  buttons above point at; the visual version is kept here for
-		  fidelity to the original design.
+		  Visuels à relayer — the two official PNG CTAs from the collectif.
+		  Each image is a real, clickable call-to-action: it links to the
+		  same Google Form as the matching text button above. Share them on
+		  your networks to invite people to take the next step.
 		  ====================================================================
 		-->
-		<section class="legacy-ctas" aria-labelledby="legacy-ctas-title">
-			<h2 id="legacy-ctas-title" class="legacy-ctas__title">
-				Les visuels officiels du collectif
+		<section class="pictogram-ctas" aria-labelledby="pictogram-ctas-title">
+			<h2 id="pictogram-ctas-title" class="pictogram-ctas__title">
+				Visuels à relayer pour grossir les rangs
 			</h2>
-			<p class="legacy-ctas__lede">
-				Tu peux aussi relayer ces visuels sur tes réseaux&nbsp;: ils
-				renvoient aux mêmes formulaires que les boutons ci-dessus.
+			<p class="pictogram-ctas__lede">
+				Chaque visuel ci-dessous renvoie au formulaire correspondant —
+				clique pour t'engager, ou partage l'image sur tes réseaux pour
+				inviter d'autres personnes à faire de même.
 			</p>
-			<ul class="legacy-ctas__grid" role="list">
-				<li class="legacy-cta">
+			<ul class="pictogram-ctas__grid" role="list">
+				<li class="pictogram-cta">
 					<a
-						class="legacy-cta__link"
+						class="pictogram-cta__link"
 						href={CREER_UN_COLLECTIF_URL}
 						rel="noopener external"
 						target="_blank"
 						aria-label="Créer un collectif — ouvre le formulaire Google dans un nouvel onglet"
 					>
 						<img
-							class="legacy-cta__image"
+							class="pictogram-cta__image"
 							src="/collectif/cta-creer-un-collectif.png"
 							alt="Visuel officiel « Créer un collectif »"
 							loading="lazy"
@@ -324,16 +324,16 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 						/>
 					</a>
 				</li>
-				<li class="legacy-cta">
+				<li class="pictogram-cta">
 					<a
-						class="legacy-cta__link"
+						class="pictogram-cta__link"
 						href={JE_MENGAGE_URL}
 						rel="noopener external"
 						target="_blank"
 						aria-label="Je m'engage — ouvre le formulaire Google dans un nouvel onglet"
 					>
 						<img
-							class="legacy-cta__image"
+							class="pictogram-cta__image"
 							src="/collectif/cta-je-mengage.png"
 							alt="Visuel officiel « Je m'engage »"
 							loading="lazy"
@@ -496,43 +496,45 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		color: var(--color-text-muted);
 	}
 
+	/*
+	 * .cta-card__btn — Variant A of the CTA charter (clickable, hard-edged
+	 * red rectangle, heading face, uppercase). Both .cta-card--primary and
+	 * .cta-card--secondary use the same recipe; the difference is the
+	 * parent card accent, not the button itself.
+	 */
 	.cta-card__btn {
 		display: inline-flex;
 		align-items: center;
+		justify-content: center;
 		gap: var(--space-2xs);
 		margin-top: var(--space-2xs);
-		font-family: var(--font-body);
-		font-size: var(--text-base);
-		font-weight: var(--weight-semibold);
-		text-decoration: none;
 		min-height: 44px;
-		padding: 0 var(--space-s);
-		border-radius: var(--radius-pill);
+		padding: var(--space-s) var(--space-l);
+		background: var(--color-flag-red);
+		color: var(--color-flag-white);
+		font-family: var(--font-heading);
+		font-size: var(--text-base);
+		font-weight: var(--weight-bold);
+		letter-spacing: var(--tracking-wide);
+		text-transform: uppercase;
+		text-decoration: none;
+		border: 0;
+		border-radius: var(--radius-sharp);
 		align-self: flex-start;
+		cursor: pointer;
 		transition:
-			background-color var(--duration-base) var(--ease-out),
-			color var(--duration-base) var(--ease-out),
+			background-color var(--duration-fast) var(--ease-out),
 			transform var(--duration-fast) var(--ease-out);
 	}
 
-	.cta-card--primary .cta-card__btn {
-		background: var(--color-flag-red);
-		color: var(--color-flag-white);
-	}
-
-	.cta-card--primary .cta-card__btn:hover {
+	.cta-card__btn:hover {
 		background: var(--color-flag-red-deep);
 		transform: translateY(-1px);
 	}
 
-	.cta-card--secondary .cta-card__btn {
-		background: var(--color-ink);
-		color: var(--color-ink-on-dark);
-	}
-
-	.cta-card--secondary .cta-card__btn:hover {
-		background: var(--color-flag-green);
-		transform: translateY(-1px);
+	.cta-card__btn:focus-visible {
+		outline: 2px solid var(--color-flag-white);
+		outline-offset: 3px;
 	}
 
 	.cta-card__arrow {
@@ -564,7 +566,7 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 	.locales,
 	.etudiantes,
 	.footer-cta,
-	.legacy-ctas {
+	.pictogram-ctas {
 		width: min(100% - 2 * var(--space-s), var(--container-wide));
 		margin-inline: auto;
 	}
@@ -760,21 +762,29 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		margin-top: var(--space-2xs);
 	}
 
+	/*
+	 * .etudiante-card__btn — CTA charter (Variant A) on the dark mobilisation
+	 * card. Primary = red rectangle, ghost = inverted ink rectangle so the
+	 * two reads stay high-contrast against the surrounding dark surface.
+	 */
 	.etudiante-card__btn {
 		display: inline-flex;
 		align-items: center;
+		justify-content: center;
 		gap: var(--space-2xs);
-		font-family: var(--font-body);
-		font-size: var(--text-base);
-		font-weight: var(--weight-semibold);
-		text-decoration: none;
 		min-height: 44px;
-		padding: 0 var(--space-m);
-		border-radius: var(--radius-pill);
-		border: 1.5px solid transparent;
+		padding: var(--space-s) var(--space-l);
+		font-family: var(--font-heading);
+		font-size: var(--text-base);
+		font-weight: var(--weight-bold);
+		letter-spacing: var(--tracking-wide);
+		text-transform: uppercase;
+		text-decoration: none;
+		border: 0;
+		border-radius: var(--radius-sharp);
+		cursor: pointer;
 		transition:
-			background-color var(--duration-base) var(--ease-out),
-			color var(--duration-base) var(--ease-out),
+			background-color var(--duration-fast) var(--ease-out),
 			transform var(--duration-fast) var(--ease-out);
 	}
 
@@ -788,15 +798,24 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		transform: translateY(-1px);
 	}
 
+	.etudiante-card__btn--primary:focus-visible {
+		outline: 2px solid var(--color-flag-white);
+		outline-offset: 3px;
+	}
+
 	.etudiante-card__btn--ghost {
-		background: transparent;
-		color: var(--color-ink-on-dark);
-		border-color: var(--color-ink-on-dark);
+		background: var(--color-flag-white);
+		color: var(--color-ink);
 	}
 
 	.etudiante-card__btn--ghost:hover {
-		background: var(--color-ink-on-dark);
-		color: var(--color-ink);
+		background: var(--color-paper-edge);
+		transform: translateY(-1px);
+	}
+
+	.etudiante-card__btn--ghost:focus-visible {
+		outline: 2px solid var(--color-flag-red);
+		outline-offset: 3px;
 	}
 
 	/* ---------- Bottom CTA ---------- */
@@ -833,8 +852,56 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		gap: var(--space-2xs);
 	}
 
-	/* ---------- Legacy CTA images ---------- */
-	.legacy-ctas {
+	/*
+	 * .footer-cta__actions .btn — local override on the base .btn to align
+	 * with the CTA charter (Variant A). The .btn--primary in this file
+	 * is the red action; .btn--ghost is the secondary outline-inverted
+	 * pair so both stay high-contrast against the soft surface.
+	 */
+	.footer-cta__actions .btn {
+		min-height: 44px;
+		padding: var(--space-s) var(--space-l);
+		font-family: var(--font-heading);
+		font-size: var(--text-base);
+		font-weight: var(--weight-bold);
+		letter-spacing: var(--tracking-wide);
+		text-transform: uppercase;
+		border-radius: var(--radius-sharp);
+		border-width: 0;
+	}
+
+	.footer-cta__actions .btn--primary {
+		background: var(--color-flag-red);
+		color: var(--color-flag-white);
+	}
+
+	.footer-cta__actions .btn--primary:hover {
+		background: var(--color-flag-red-deep);
+		color: var(--color-flag-white);
+	}
+
+	.footer-cta__actions .btn--primary:focus-visible {
+		outline: 2px solid var(--color-flag-white);
+		outline-offset: 3px;
+	}
+
+	.footer-cta__actions .btn--ghost {
+		background: var(--color-ink);
+		color: var(--color-ink-on-dark);
+	}
+
+	.footer-cta__actions .btn--ghost:hover {
+		background: var(--color-ink-soft);
+		color: var(--color-ink-on-dark);
+	}
+
+	.footer-cta__actions .btn--ghost:focus-visible {
+		outline: 2px solid var(--color-flag-red);
+		outline-offset: 3px;
+	}
+
+	/* ---------- Visuels à relayer (image CTAs) ---------- */
+	.pictogram-ctas {
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-s);
@@ -842,15 +909,16 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		border-top: 1px solid var(--color-border);
 	}
 
-	.legacy-ctas__title {
+	.pictogram-ctas__title {
 		font-family: var(--font-heading);
 		font-size: var(--text-xl);
 		line-height: var(--leading-snug);
 		letter-spacing: var(--tracking-tight);
+		text-transform: uppercase;
 		margin: 0;
 	}
 
-	.legacy-ctas__lede {
+	.pictogram-ctas__lede {
 		font-size: var(--text-base);
 		line-height: var(--leading-relaxed);
 		color: var(--color-text-muted);
@@ -858,7 +926,7 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		max-width: 60ch;
 	}
 
-	.legacy-ctas__grid {
+	.pictogram-ctas__grid {
 		list-style: none;
 		margin: 0;
 		padding: 0;
@@ -868,21 +936,26 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 	}
 
 	@media (min-width: 48rem) {
-		.legacy-ctas__grid {
+		.pictogram-ctas__grid {
 			grid-template-columns: repeat(2, 1fr);
 		}
 	}
 
-	.legacy-cta {
+	.pictogram-cta {
 		display: flex;
 	}
 
-	.legacy-cta__link {
+	/*
+	 * Image-button CTA: hard-edged frame around the official PNG, with a
+	 * subtle hover lift and an accessible focus ring on the red accent.
+	 * The PNG itself carries the brand colors; the wrapper just frames it.
+	 */
+	.pictogram-cta__link {
 		display: block;
 		width: 100%;
-		border-radius: var(--radius-m);
+		border-radius: var(--radius-sharp);
 		overflow: hidden;
-		border: 1px solid var(--color-border);
+		border: 1.5px solid var(--color-ink);
 		background: var(--color-bg-soft);
 		transition:
 			transform var(--duration-base) var(--ease-out),
@@ -890,18 +963,18 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 			box-shadow var(--duration-base) var(--ease-out);
 	}
 
-	.legacy-cta__link:hover {
+	.pictogram-cta__link:hover {
 		transform: translateY(-2px);
-		border-color: var(--color-ink);
+		border-color: var(--color-flag-red);
 		box-shadow: var(--shadow-lift);
 	}
 
-	.legacy-cta__link:focus-visible {
-		outline: 2px solid var(--color-accent);
+	.pictogram-cta__link:focus-visible {
+		outline: 2px solid var(--color-flag-red);
 		outline-offset: 3px;
 	}
 
-	.legacy-cta__image {
+	.pictogram-cta__image {
 		display: block;
 		width: 100%;
 		height: auto;
@@ -914,7 +987,7 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		.cta-card__btn,
 		.locale-card__link,
 		.etudiante-card__btn,
-		.legacy-cta__link {
+		.pictogram-cta__link {
 			transition: none;
 		}
 	}
