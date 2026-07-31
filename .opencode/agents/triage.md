@@ -103,12 +103,7 @@ The Disposition field is not a free choice. It is **determined** by your Questio
 
 ### What counts as a blocking question
 
-A blocking question is one where the answer changes what the worker would build. Examples:
-- "What email address should the contact form send to?" — changes the implementation.
-- "Should the newsletter modal appear on page load or on scroll?" — changes the implementation.
-- "Which pages should use the brand symbols?" — changes the implementation.
-
-If a question is just a note or suggestion (the answer doesn't change what gets built), put it in the Analysis section, not in Questions. Only list questions that **block** implementation.
+A blocking question changes what the worker would build (e.g. target email, modal trigger condition). Non-blocking notes go in Analysis, not Questions.
 
 ## NEEDS-SPLIT output
 
