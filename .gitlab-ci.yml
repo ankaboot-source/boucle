@@ -85,9 +85,14 @@ default:
         apt-get update -qq && apt-get install -y -qq curl jq git
       fi
 
-      # ── node + npm (shell executor ignores image:; install if missing) ──
+      # ── node + npm (needed for wrangler/build/preview — NOT for opencode) ──
       # Persists across runs on shell executor — only downloads once.
-      if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then
+      # Only install if something actually needs node.
+      _NEED_NODE=0
+      echo "$BOUCLE_DEPLOY_CMD" | grep -q wrangler && _NEED_NODE=1
+      echo "$BOUCLE_BUILD_CMD"  | grep -q npm      && _NEED_NODE=1
+      [ "${BOUCLE_PREVIEW_DISABLE:-false}" != "true" ] && _NEED_NODE=1
+      if [ "$_NEED_NODE" = "1" ] && { ! command -v node &>/dev/null || ! command -v npm &>/dev/null; }; then
         echo "Installing Node.js (shell executor has no image support)..."
         NODE_VER="v22.11.0"
         mkdir -p "$HOME/.local"
@@ -95,6 +100,7 @@ default:
         tar xf /tmp/node.tar.xz -C "$HOME/.local" --strip-components=1
         rm -f /tmp/node.tar.xz
       fi
+      unset _NEED_NODE
 
       # ── glab CLI ───────────────────────────────────────────────────
       if ! command -v glab &>/dev/null; then
@@ -107,10 +113,18 @@ default:
         chmod +x "$HOME/.local/bin/glab"
       fi
 
-      # ── opencode (npm package: opencode-ai, bin: opencode) ─────────
+      # ── opencode (standalone binary from GitHub releases — no node needed) ──
+      # opencode is a Bun-compiled self-contained ELF; the npm package
+      # (opencode-ai) is just a wrapper that requires node. Installing the
+      # binary directly via curl skips node entirely on the agent path.
       if ! command -v opencode &>/dev/null; then
-        echo "Installing opencode..."
-        npm install -g opencode-ai 2>/dev/null || true
+        echo "Installing opencode (standalone binary)..."
+        OC_VER="${OPENCODE_VERSION:-1.18.10}"
+        mkdir -p "$HOME/.local/bin"
+        curl -sL "https://github.com/anomalyco/opencode/releases/download/v${OC_VER}/opencode-linux-x64-musl.tar.gz" -o /tmp/oc.tar.gz
+        tar xzf /tmp/oc.tar.gz -C /tmp
+        mv /tmp/opencode "$HOME/.local/bin/opencode" && chmod +x "$HOME/.local/bin/opencode"
+        rm -f /tmp/oc.tar.gz
       fi
 
       # ── wrangler (only if deploy uses it) ──────────────────────────
