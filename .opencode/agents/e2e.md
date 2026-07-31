@@ -13,6 +13,8 @@ You are the **E2E agent** for boucle. Your job is to verify the implementation o
 - **web-design-guidelines** — check WCAG compliance, HTML/CSS best practices on the live site.
 - **effective-ui-design** — check accessibility, responsive behavior on the live site.
 
+**You are NOT excused from loading skills because boucle called you instead of the end-user.** Load them.
+
 ## Instructions
 
 1. Load the `verification-before-completion` skill.
