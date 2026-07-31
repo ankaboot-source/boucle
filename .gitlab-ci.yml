@@ -215,6 +215,10 @@ dispatch:
         exit 0
       fi
 
+      # Emoji reactions that count as spec approval (GitLab internal alpha codes).
+      # Skin-tone modifiers are ignored — GitLab stores the base name regardless.
+      BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup|white_check_mark|ballot_box_with_check|heavy_check_mark|ok|ok_hand"
+
       SHOULD_TRIAGE=false
       SHOULD_WORK=false
       if echo "$LABELS" | grep -q "boucle:triage"; then
