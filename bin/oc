@@ -47,6 +47,90 @@ STATE_FILE="$STATE_DIR/state.md"
 ITERATIONS_FILE="$STATE_DIR/iterations.md"
 OPENCODE_DB="$CI_PROJECT_DIR/.opencode-$CI_JOB_ID.db"
 
+# ── Observability (lightweight, non-breaking) ──────────────────────────
+# Emit a single structured [boucle:metrics] line to stderr after each
+# opencode run so we can diagnose runner memory bottlenecks in CI.
+# Measurements are best-effort: any failure falls back to "unavailable"
+# and the script still completes normally.
+START_EPOCH=$(date +%s)
+METRICS_TMP="$(mktemp -t boucle-metrics.XXXXXX 2>/dev/null || echo "")"
+RSS_SAMPLER_TMP="$(mktemp -t boucle-rss.XXXXXX 2>/dev/null || echo "")"
+RSS_SAMPLER_PID=""
+
+cleanup_metrics() {
+  if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2>/dev/null; then
+    kill "$RSS_SAMPLER_PID" 2>/dev/null || true
+    wait "$RSS_SAMPLER_PID" 2>/dev/null || true
+  fi
+  [ -n "$METRICS_TMP" ] && [ -f "$METRICS_TMP" ] && rm -f "$METRICS_TMP" || true
+  [ -n "$RSS_SAMPLER_TMP" ] && [ -f "$RSS_SAMPLER_TMP" ] && rm -f "$RSS_SAMPLER_TMP" || true
+}
+trap cleanup_metrics EXIT
+
+# /usr/bin/time -v gives "Maximum resident set size (kbytes): NNN" in its
+# output file. We prefer it over /proc polling when available.
+HAVE_GNU_TIME=0
+if [ -x /usr/bin/time ]; then
+  HAVE_GNU_TIME=1
+fi
+
+# Start a /proc VmRSS poller as a background subshell. Tracks the max RSS
+# (kB) seen for any "opencode run" process and writes it to $RSS_SAMPLER_TMP.
+# Returns 0 if started, 1 if /proc/$$ is unavailable.
+start_rss_sampler() {
+  if [ -z "$RSS_SAMPLER_TMP" ] || [ ! -r /proc/self/status ]; then
+    return 1
+  fi
+  (
+    max_kb=0
+    while true; do
+      pids=$(pgrep -f "opencode run" 2>/dev/null || true)
+      cur=0
+      for pid in $pids; do
+        # Aggregate RSS across all matching PIDs (parent + children).
+        rss=$(awk '/^VmRSS:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo 0)
+        cur=$((cur + rss))
+      done
+      if [ "$cur" -gt "$max_kb" ]; then
+        max_kb=$cur
+        echo "$max_kb" > "$RSS_SAMPLER_TMP"
+      fi
+      sleep 2
+    done
+  ) &
+  RSS_SAMPLER_PID=$!
+  return 0
+}
+
+# Read peak RSS (kB) from whichever source produced data.
+# Echoes a value, or "unavailable".
+get_peak_rss_kb() {
+  if [ "$HAVE_GNU_TIME" = "1" ] && [ -n "$METRICS_TMP" ] && [ -s "$METRICS_TMP" ]; then
+    val=$(awk '/Maximum resident set size/ {print $NF}' "$METRICS_TMP" 2>/dev/null || true)
+    if [ -n "$val" ] && [ "$val" -gt 0 ] 2>/dev/null; then
+      echo "$val"
+      return 0
+    fi
+  fi
+  if [ -n "$RSS_SAMPLER_TMP" ] && [ -s "$RSS_SAMPLER_TMP" ]; then
+    val=$(cat "$RSS_SAMPLER_TMP" 2>/dev/null || true)
+    if [ -n "$val" ] && [ "$val" -gt 0 ] 2>/dev/null; then
+      echo "$val"
+      return 0
+    fi
+  fi
+  echo "unavailable"
+}
+
+# Print the structured metrics line to stderr.
+print_metrics_line() {
+  local elapsed db_size peak_rss
+  elapsed=$(( $(date +%s) - START_EPOCH ))
+  db_size=$(stat -c %s "$OPENCODE_DB" 2>/dev/null || stat -f %z "$OPENCODE_DB" 2>/dev/null || echo 0)
+  peak_rss=$(get_peak_rss_kb)
+  echo "[boucle:metrics] role=$ROLE agent=$AGENT iteration=$ITERATION wall_clock=${elapsed}s peak_rss=${peak_rss}kb db_size=${db_size}b" >&2
+}
+
 # ── 1. Isolate opencode DB (required, not optional) ───────────────────
 export OPENCODE_DB
 
@@ -115,8 +199,18 @@ if [ "$DRY_RUN" = "true" ]; then
   # Token economy: --variant low for bounded roles, OUTPUT_TOKEN_MAX caps response size.
   VARIANT_ARGS=()
   [ -n "$VARIANT" ] && VARIANT_ARGS+=(--variant "$VARIANT")
+  # Start RSS sampler; /usr/bin/time wrapper is skipped in dry-run to keep
+  # output untouched. Sampler will be stopped below.
+  start_rss_sampler 2>/dev/null || true
   OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
     opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" 2>&1 || true
+  # Stop the RSS sampler so it stops writing to the tmp file.
+  if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2>/dev/null; then
+    kill "$RSS_SAMPLER_PID" 2>/dev/null || true
+    wait "$RSS_SAMPLER_PID" 2>/dev/null || true
+  fi
+  RSS_SAMPLER_PID=""
+  print_metrics_line
   # In dry run, we don't assert side effects
   exit 0
 fi
@@ -124,8 +218,25 @@ fi
 AGENT_EXIT=0
 VARIANT_ARGS=()
 [ -n "$VARIANT" ] && VARIANT_ARGS+=(--variant "$VARIANT")
-OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
-  opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" || AGENT_EXIT=$?
+# Wrap opencode with /usr/bin/time -v when available to capture peak RSS.
+# The env-prefix assignment applies to /usr/bin/time, which inherits and
+# passes it through to the opencode child. Exit code still propagates.
+if [ "$HAVE_GNU_TIME" = "1" ] && [ -n "$METRICS_TMP" ]; then
+  OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
+    /usr/bin/time -v -o "$METRICS_TMP" \
+      opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" || AGENT_EXIT=$?
+else
+  # Fall back to /proc poller if /usr/bin/time is missing.
+  start_rss_sampler 2>/dev/null || true
+  OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
+    opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" || AGENT_EXIT=$?
+  if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2>/dev/null; then
+    kill "$RSS_SAMPLER_PID" 2>/dev/null || true
+    wait "$RSS_SAMPLER_PID" 2>/dev/null || true
+  fi
+  RSS_SAMPLER_PID=""
+fi
+print_metrics_line
 
 # ── 6. Restore scrubbed secrets ───────────────────────────────────────
 if [ -n "$SCRUBBED_CF_TOKEN" ]; then
