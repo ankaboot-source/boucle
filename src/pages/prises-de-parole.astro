@@ -2,7 +2,8 @@
 /*
  * /prises-de-parole — Prises de parole index.
  *
- * Lists every entry in the `communiques` content collection, sorted
+ * Lists every entry in the `prises-de-parole` content collection (formerly
+ * named `communiques` — renamed in #25 for taxonomy clarity). Sorted
  * newest first. Each card links to the per-entry page at
  * `/prises-de-parole/<slug>/` and renders the first inline image from
  * the Markdown body as a thumbnail (or a neutral placeholder when the
@@ -17,9 +18,11 @@
 import Layout from "../layouts/Layout.astro";
 import { getCollection } from "astro:content";
 
-type Entry = Awaited<ReturnType<typeof getCollection<"communiques">>>[number];
+type Entry = Awaited<
+	ReturnType<typeof getCollection<"prisesDeParole">>
+>[number];
 
-const entries: Entry[] = (await getCollection("communiques"))
+const entries: Entry[] = (await getCollection("prises-de-parole"))
 	// Sort newest first so the index reads chronologically.
 	.sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
 

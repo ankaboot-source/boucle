@@ -37,13 +37,17 @@ public_folder: /media
 
 collections:
   # ---------------------------------------------------------------------------
-  # Communiqués / Prises de parole
+  # Prises de parole (anciennement « communiqués »)
   # ---------------------------------------------------------------------------
-  - name: communiques
-    label: Communiqués
-    label_singular: Communiqué
-    description: Prises de parole officielles du collectif.
-    folder: src/content/communiques
+  # Single bucket that groups the collectif's public voice under one
+  # taxonomy (`communique` | `analyse` | `appel-a-mobilisation`). The
+  # `category` enum mirrors the Zod enum in `src/content.config.ts` —
+  # keep both in sync.
+  - name: prises-de-parole
+    label: Prises de parole
+    label_singular: Prise de parole
+    description: Communiqués de presse, analyses politiques et appels à mobilisation du collectif.
+    folder: src/content/prises-de-parole
     create: true
     delete: true
     slug: "{{year}}-{{month}}-{{slug}}"
@@ -51,6 +55,15 @@ collections:
       - { name: title, label: Titre, widget: string }
       - { name: date, label: Date, widget: datetime, date_format: YYYY-MM-DD, time_format: false, picker_utc: true }
       - { name: description, label: Résumé, widget: text, required: false }
+      - name: category
+        label: Catégorie
+        widget: select
+        required: false
+        default: communique
+        options:
+          - { label: Communiqué, value: communique }
+          - { label: Analyse, value: analyse }
+          - { label: Appel à mobilisation, value: appel-a-mobilisation }
       - { name: body, label: Contenu, widget: markdown }
 
   # ---------------------------------------------------------------------------
