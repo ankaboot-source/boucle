@@ -3,7 +3,7 @@
   "compaction": {
     "auto": true,
     "prune": true,
-    "reserved": 10000
+    "reserved": 5000
   },
   "provider": {
     "ollama-cloud": {
