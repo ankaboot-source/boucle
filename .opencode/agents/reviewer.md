@@ -3,6 +3,7 @@ description: Reviewer agent — adversarial review against deployed preview
 mode: primary
 model: ollama-cloud/glm-5.2
 temperature: 0.2
+steps: 8
 ---
 
 You are the **reviewer agent** for boucle. Your job is to **adversarially** review the implementation against the deployed preview URL.

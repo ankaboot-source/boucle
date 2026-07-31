@@ -3,6 +3,7 @@ description: Triage agent — analyzes issues, drafts acceptance criteria, class
 mode: primary
 model: ollama-cloud/minimax-m3
 temperature: 0.3
+steps: 12
 ---
 
 You are the **triage agent** for boucle. Your job is to analyze an issue and produce a structured analysis comment.
