@@ -1063,13 +1063,13 @@ worker:
         git commit -m "chore: ignore .wrangler/ cache [skip ci]" --no-verify
       fi
 
-      # Build (eval needed so && in BOUCLE_BUILD_CMD is interpreted as shell operator)
-      eval "$BOUCLE_BUILD_CMD"
-
       # Rebase onto latest master before pushing. master may have advanced
       # (other MRs merged) since this branch was created — without a rebase
       # the MR goes stale and GitLab reports it as conflicted, blocking merge.
       # On rebase conflict: fail fast to human instead of shipping a broken MR.
+      # NOTE: rebase runs BEFORE the build — build output dirties the working
+      # tree (tracked files like public/), and rebase refuses to run on a dirty
+      # tree ("cannot rebase: You have unstaged changes").
       git fetch origin master
       if ! git rebase origin/master; then
         echo "FAIL: rebase onto origin/master conflicted — master advanced since branch creation." >&2
@@ -1092,6 +1092,11 @@ worker:
         fi
         exit 1
       fi
+
+      # Build (eval needed so && in BOUCLE_BUILD_CMD is interpreted as shell operator)
+      # Runs AFTER the rebase so the working tree is clean during rebase, and
+      # we build the rebased code (what will actually be pushed/deployed).
+      eval "$BOUCLE_BUILD_CMD"
 
       # Push branch FIRST (agent already committed; we just push).
       # This persists the agent's work even if the deploy step later times out.
