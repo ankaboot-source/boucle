@@ -41,16 +41,16 @@ variables:
 # before_script installs glab + opencode + wrangler (not in the image).
 default:
   image: node:22-slim
-  # Route to the project's dedicated runner (tag: tooling). It's a shell
+  # Route to the project's dedicated runner (tag: data). It's a shell
   # executor (ignores image:), so before_script self-installs node — but
   # the install persists across runs, making subsequent runs faster than
   # docker (which reinstalls every time). NOTE: the shared docker runner
-  # (Atchoum) has no "tooling" tag, so it CANNOT pick up these jobs — only
-  # the dedicated tooling runner can. Loop-critical control-plane jobs
+  # (Atchoum) has no "data" tag, so it CANNOT pick up these jobs — only
+  # the dedicated data runner can. Loop-critical control-plane jobs
   # (dispatch, merger) override this with `tags: []` so they run on any
   # available runner (including Atchoum) and are never blocked by a busy
-  # tooling runner.
-  tags: [tooling]
+  # data runner.
+  tags: [data]
   before_script:
     - |
       # Trace commands only when CI_DEBUG_TRACE is set (GitLab's native debug flag).
@@ -121,8 +121,8 @@ dispatch:
   stage: dispatch
   # Loop-critical entry point: must run on ANY available runner (including
   # the shared docker runner Atchoum) so webhooks are never blocked waiting
-  # for the single tooling runner to free up. Without this, a long-running
-  # worker job can stall the entire loop by hogging the tooling runner.
+  # for the single data runner to free up. Without this, a long-running
+  # worker job can stall the entire loop by hogging the data runner.
   tags: []
   rules:
     - if: $BOUCLE_ENABLED != "true"
@@ -147,7 +147,7 @@ dispatch:
       # fail instead so downstream triage (needs: [dispatch] without optional)
       # is skipped. This prevents no-op webhook pipelines (bot events, MR
       # actions that chain via API, unhandled events) from consuming the
-      # tooling runner while triage bootstraps only to find no work to do.
+      # data runner while triage bootstraps only to find no work to do.
       trap 'if [ $? -eq 0 ] && [ ! -f .boucle-issue ]; then exit 1; fi' EXIT
 
       ACTOR=$(jq -r '.user.username // empty' "$TRIGGER_PAYLOAD")
@@ -1376,7 +1376,7 @@ merger:
   stage: merge
   # Loop-critical: merger makes only API calls + git operations — lightweight.
   # Run on ANY available runner (tags: []) so an approved MR is never blocked
-  # waiting behind a heavy worker/reviewer job on the single tooling runner.
+  # waiting behind a heavy worker/reviewer job on the single data runner.
   tags: []
   # Serialize all merges project-wide — one MR merges at a time.
   resource_group: boucle-merge
@@ -1550,7 +1550,7 @@ catchup:
   stage: merge
   # Loop-critical control-plane job: API calls only, no build. Run on ANY
   # available runner (tags: []) so a direct merge is never blocked waiting
-  # behind a heavy worker/reviewer job on the single tooling runner.
+  # behind a heavy worker/reviewer job on the single data runner.
   tags: []
   needs:
     - job: dispatch
