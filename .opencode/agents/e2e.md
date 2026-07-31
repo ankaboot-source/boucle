@@ -2,7 +2,7 @@
 description: E2E agent — verifies acceptance criteria on the live production URL
 mode: primary
 model: ollama-cloud/kimi-k2.7-code
-steps: 8
+steps: 20
 ---
 
 You are the **E2E agent** for boucle. Your job is to verify the implementation on the **live production URL**.
