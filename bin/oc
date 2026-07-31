@@ -242,6 +242,15 @@ build_prompt() {
 # ── 5. Run the agent ──────────────────────────────────────────────────
 PROMPT=$(build_prompt "$ROLE")
 
+# Capture agent stdout to a log file so the CI job can scrape a
+# drafted-but-unposted comment as a fallback when the agent runs out of
+# steps before calling glab. The log is per-issue, per-run (overwritten).
+# We redirect to the file then cat it (instead of tee) because run_with_retry
+# sets a global AGENT_EXIT — piping would run it in a subshell and lose that
+# variable. Redirect+cat preserves exit-code propagation with no race.
+AGENT_LOG="$STATE_DIR/agent-output.log"
+: > "$AGENT_LOG"
+
 if [ "$DRY_RUN" = "true" ]; then
   echo "[boucle] DRY RUN — agent output goes to log only, nothing pushed"
   # Token economy: --variant low for bounded roles, OUTPUT_TOKEN_MAX caps response size.
@@ -252,10 +261,12 @@ if [ "$DRY_RUN" = "true" ]; then
   start_rss_sampler 2> /dev/null || true
   # Bash env-prefix on a function: sets the var in run_with_retry's
   # environment, which propagates through to the opencode child.
-  # 2>&1 merges opencode's stderr into our stdout for the dry-run log.
-  # Final exit is captured into AGENT_EXIT but ignored.
+  # Agent stdout+stderr → $AGENT_LOG (for CI log-scraping fallback), then
+  # echoed to the job log. AGENT_EXIT is set by run_with_retry in this
+  # shell (no pipe → no subshell → global propagates). Final exit ignored.
   OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
-    run_with_retry -- opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" 2>&1 || true
+    run_with_retry -- opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" > "$AGENT_LOG" 2>&1 || true
+  cat "$AGENT_LOG"
   # Stop the RSS sampler so it stops writing to the tmp file.
   if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2> /dev/null; then
     kill "$RSS_SAMPLER_PID" 2> /dev/null || true
@@ -272,22 +283,26 @@ VARIANT_ARGS=()
 [ -n "$VARIANT" ] && VARIANT_ARGS+=(--variant "$VARIANT")
 # Wrap opencode with /usr/bin/time -v when available to capture peak RSS.
 # The env-prefix assignment applies to /usr/bin/time, which inherits and
-# passes it through to the opencode child. Exit code still propagates.
+# passes it through to the opencode child. Exit code still propagates via
+# the AGENT_EXIT global set by run_with_retry (no pipe → no subshell).
+# Agent stdout+stderr → $AGENT_LOG (for CI log-scraping fallback), then
+# echoed to the job log for human debugging.
 if [ "$HAVE_GNU_TIME" = "1" ] && [ -n "$METRICS_TMP" ]; then
   OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
     run_with_retry -- /usr/bin/time -v -o "$METRICS_TMP" \
-      opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT"
+      opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" > "$AGENT_LOG" 2>&1
 else
   # Fall back to /proc poller if /usr/bin/time is missing.
   start_rss_sampler 2> /dev/null || true
   OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
-    run_with_retry -- opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT"
+    run_with_retry -- opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" > "$AGENT_LOG" 2>&1
   if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2> /dev/null; then
     kill "$RSS_SAMPLER_PID" 2> /dev/null || true
     wait "$RSS_SAMPLER_PID" 2> /dev/null || true
   fi
   RSS_SAMPLER_PID=""
 fi
+cat "$AGENT_LOG"
 print_metrics_line
 
 # ── 6. Restore scrubbed secrets ───────────────────────────────────────
