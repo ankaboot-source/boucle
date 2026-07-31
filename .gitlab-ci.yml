@@ -613,7 +613,7 @@ triage:
                   --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
                   --data-urlencode "assignee_ids[]=$AUTHOR_ID"
               fi
-              SPEC_MSG=$(printf 'Review the acceptance criteria above. If they match what you want:\n- React with 👍 ✅ ☑️ ✔️ 🆗 or 👌 on this comment to approve, OR\n- Reply to this issue with any comment.\nIf not, reply with corrections.')
+              SPEC_MSG=$(printf 'Review the **TL;DR** above. If it matches what you want:\n- React with 👍 ✅ ☑️ ✔️ 🆗 or 👌 on this comment to approve, OR\n- Reply to this issue with any comment.\nIf not, reply with corrections.')
               glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
                 -f body="$SPEC_MSG" > /dev/null
             else
