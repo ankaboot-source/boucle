@@ -134,9 +134,12 @@ dispatch:
     - if: $CI_PIPELINE_SOURCE == "trigger"
   # Anti-accumulation: a no-op dispatch (bot event, MR action that chains
   # via API, unhandled event) exits 0 without writing .boucle-issue, then the
-  # EXIT trap flips it to exit 1. allow_failure keeps the pipeline green while
-  # still skipping downstream triage (needs: [dispatch] without optional).
-  allow_failure: true
+  # EXIT trap flips it to exit 1. We do NOT use allow_failure here because
+  # GitLab treats allow_failure jobs as "soft success" and still runs
+  # downstream jobs that need them. A hard failure on dispatch is the
+  # signal that skips triage (needs: [dispatch] without optional). The
+  # pipeline will show as "failed" on no-op webhook events — that's
+  # expected and harmless: it just means "nothing to do".
   script:
     - |
       # Anti-accumulation: if dispatch exits 0 without writing .boucle-issue,
