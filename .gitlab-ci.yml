@@ -646,8 +646,14 @@ triage:
       # Makes them available to the triage agent via BOUCLE_ISSUE_ATTACHMENTS.
       ./bin/fetch-issue-images || echo "[boucle] WARN: image fetch failed — continuing without images"
 
-      # Run the agent
-      ./bin/oc triage
+      # Run the agent. Use `|| rc=$?` to suppress set -e so the script
+      # continues to comment parsing even if the agent exits non-zero
+      # (step limit, crash, etc.).
+      rc=0
+      ./bin/oc triage || rc=$?
+      if [ "$rc" -ne 0 ]; then
+        echo "WARN: ./bin/oc triage exited $rc — checking if a triage comment was posted anyway."
+      fi
 
       # Parse the triage comment for Disposition and Size
       # GitLab notes API returns notes newest-first, so `first` = newest.
@@ -1133,8 +1139,15 @@ worker:
       # Makes them available to the worker agent via BOUCLE_ISSUE_ATTACHMENTS.
       ./bin/fetch-issue-images || echo "[boucle] WARN: image fetch failed — continuing without images"
 
-      # Run the agent (agent commits its own work)
-      ./bin/oc worker
+      # Run the agent. Use `|| rc=$?` to suppress set -e so the script
+      # continues to the safety-net commit even if the agent exits non-zero
+      # (step limit, crash, etc.). The safety-net commit below captures any
+      # uncommitted work the agent produced before exiting.
+      rc=0
+      ./bin/oc worker || rc=$?
+      if [ "$rc" -ne 0 ]; then
+        echo "WARN: ./bin/oc worker exited $rc — proceeding to safety-net commit."
+      fi
 
       # Safety-net commit: the agent may run out of steps before committing.
       # Stage and commit any uncommitted tracked changes so the index is clean
@@ -1387,8 +1400,16 @@ reviewer:
 
       export BOUCLE_PREVIEW_URL="$PREVIEW_URL"
 
-      # Run the agent against the preview
-      ./bin/oc reviewer
+      # Run the agent against the preview.
+      # Use `|| rc=$?` to suppress set -e so the script continues to
+      # verdict parsing even if the agent exits non-zero (step limit,
+      # crash, etc.). The missing-verdict recovery below handles the
+      # case where the agent didn't post a verdict.
+      rc=0
+      ./bin/oc reviewer || rc=$?
+      if [ "$rc" -ne 0 ]; then
+        echo "WARN: ./bin/oc reviewer exited $rc — checking if a verdict was posted anyway."
+      fi
 
       # Parse verdict — agent posts on the MR, not the issue.
       # Filter by the current MR head SHA (the verdict marker includes sha=<head>)
