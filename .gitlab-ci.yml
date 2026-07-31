@@ -1701,7 +1701,7 @@ doctor:
         NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
 
         # Find the last triage comment (has <!-- boucle:triage marker)
-        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
+        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | last | .id // 0')
 
         # Find the last human (non-bot) note after the triage comment
         # A human reply means the reporter answered the blocking questions.
@@ -1739,26 +1739,33 @@ doctor:
         echo "Checking #$IID (boucle:spec-review) for spec approval..."
         NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
         # Find the last triage comment (same as needs-info recovery above)
-        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
+        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | last | .id // 0')
         # Detect any non-bot note after the last triage comment
         HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" '
           [.[] | select(.author.username != "up-bot") | select(.id > ($tid | tonumber))]
           | length
         ')
-        # Check for an approval emoji on the triage comment (polls the
-        # award_emoji API — recovers even if the emoji webhook was missed).
+        # Check for an approval emoji on the spec-review invitation comment
+        # AND the triage comment. The spec-review invitation (the comment
+        # containing "React with") is where users are told to react, but some
+        # users react on the triage comment instead — poll both to be safe.
+        # Polls the award_emoji API — recovers even if the emoji webhook was
+        # missed (emoji_events disabled or webhook delivery failed).
+        SPEC_INVITE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("React with"))] | last | .id // 0')
         EMOJI_APPROVAL_FOUND=false
-        if [ "$LAST_TRIAGE_NOTE_ID" != "0" ] && [ -n "$LAST_TRIAGE_NOTE_ID" ]; then
+        for NOTE_ID in $LAST_TRIAGE_NOTE_ID $SPEC_INVITE_NOTE_ID; do
+          [ "$NOTE_ID" = "0" ] || [ -z "$NOTE_ID" ] && continue
           AWARDS=$(glab api --hostname "$HOST" \
-            "/projects/$PID/issues/$IID/notes/$LAST_TRIAGE_NOTE_ID/award_emoji" 2>/dev/null)
+            "/projects/$PID/issues/$IID/notes/$NOTE_ID/award_emoji" 2>/dev/null)
           if echo "$AWARDS" | jq -e --arg emojis "$BOUCLE_SPEC_APPROVAL_EMOJIS" '
             [.[] | select(.user.username != "up-bot") | .name]
             | map(select(. as $n | ($emojis | split("|")) | index($n)))
             | length > 0
           ' >/dev/null 2>&1; then
             EMOJI_APPROVAL_FOUND=true
+            break
           fi
-        fi
+        done
         if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ] || [ "$EMOJI_APPROVAL_FOUND" = true ]; then
           echo "  → #$IID approved (reply=$HUMAN_REPLY_AFTER_TRIAGE, emoji=$EMOJI_APPROVAL_FOUND) — re-triggering worker"
           set_boucle_label "$IID" "boucle:todo" "boucle::status::bot"
@@ -1784,7 +1791,7 @@ doctor:
         # We can't easily map pipelines to issues, so check if the triage
         # label has been stuck for >15 min (no triage comment posted recently).
         NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
-        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
+        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | last | .id // 0')
 
         # If there's a recent triage comment (within last 15 min), skip —
         # triage may still be running. Only re-trigger if no triage comment
@@ -1829,7 +1836,7 @@ doctor:
         NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
 
         # Does this issue have any triage comment at all?
-        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
+        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | last | .id // 0')
         if [ "$LAST_TRIAGE_NOTE_ID" = "0" ]; then
           # No triage comment — this is a brand-new issue that was never
           # triaged. The dispatch job should pick it up on the next webhook.
