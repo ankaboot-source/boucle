@@ -4,6 +4,7 @@ import Layout from "../layouts/Layout.astro";
 import NewsletterSignup from "../components/NewsletterSignup.astro";
 import NewsletterModal from "../components/NewsletterModal.astro";
 import DonationCTA from "../components/DonationCTA.astro";
+import GeneralCTA from "../components/GeneralCTA.astro";
 ---
 
 <Layout>
@@ -43,6 +44,18 @@ import DonationCTA from "../components/DonationCTA.astro";
 				/>
 			</figure>
 		</section>
+
+		<!--
+		  ============================================================
+		  General CTA: a non-clickable, two-stripe visual harness for
+		  the upcoming CTA migrations. Pure Astro, no client JS.
+		  ============================================================
+		-->
+		<GeneralCTA
+			eyebrow="S'informer"
+			title="S'informer, c'est déjà résister"
+			ctaLabel="Lire les derniers articles"
+		/>
 
 		<!--
 		  ============================================================
