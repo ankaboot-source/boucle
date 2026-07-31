@@ -1076,6 +1076,13 @@ merger:
       BRANCH="boucle/$BOUCLE_ISSUE"
       git fetch origin master "$BRANCH"
 
+      # Set git identity BEFORE the rebase — git rebase rewrites commits and
+      # needs a committer identity. On a fresh docker executor there is no
+      # global git config, so the rebase fails with "Committer identity unknown".
+      git config user.email "bot@ankaboot.dev"
+      git config user.name "up-bot"
+      git remote set-url origin "https://up-bot:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${CI_PROJECT_PATH}.git"
+
       # Rebase the MR branch onto latest master. This is the key conflict-
       # avoidance mechanism: because merges are serialized, each rebase is
       # against a master that already includes all previously-merged MRs.
@@ -1090,9 +1097,6 @@ merger:
       fi
 
       # Push the rebased branch
-      git config user.email "bot@ankaboot.dev"
-      git config user.name "up-bot"
-      git remote set-url origin "https://up-bot:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${CI_PROJECT_PATH}.git"
       git push --force-with-lease origin "$BRANCH"
 
       # Wait for GitLab to recompute mergeability after the force-push (poll).
