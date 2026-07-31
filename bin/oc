@@ -30,10 +30,21 @@ DRY_RUN="${BOUCLE_DRY_RUN:-false}"
 VARIANT=""
 OUTPUT_TOKEN_MAX=""
 case "$ROLE" in
-  triage)   AGENT="triage";   VARIANT="low"; OUTPUT_TOKEN_MAX="1200" ;;
-  worker)   AGENT="worker" ;;
-  reviewer) AGENT="reviewer"; VARIANT="low"; OUTPUT_TOKEN_MAX="4000" ;;
-  e2e)      AGENT="e2e";      OUTPUT_TOKEN_MAX="4000" ;;
+  triage)
+    AGENT="triage"
+    VARIANT="low"
+    OUTPUT_TOKEN_MAX="1200"
+    ;;
+  worker) AGENT="worker" ;;
+  reviewer)
+    AGENT="reviewer"
+    VARIANT="low"
+    OUTPUT_TOKEN_MAX="4000"
+    ;;
+  e2e)
+    AGENT="e2e"
+    OUTPUT_TOKEN_MAX="4000"
+    ;;
   *)
     echo "Unknown role: $ROLE" >&2
     exit 1
@@ -45,6 +56,7 @@ CI_PROJECT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
 STATE_DIR="$CI_PROJECT_DIR/.boucle/$ISSUE"
 STATE_FILE="$STATE_DIR/state.md"
 ITERATIONS_FILE="$STATE_DIR/iterations.md"
+# shellcheck disable=SC2154 # CI_JOB_ID is a GitLab CI predefined env var
 OPENCODE_DB="$CI_PROJECT_DIR/.opencode-$CI_JOB_ID.db"
 
 # ── Observability (lightweight, non-breaking) ──────────────────────────
@@ -53,14 +65,14 @@ OPENCODE_DB="$CI_PROJECT_DIR/.opencode-$CI_JOB_ID.db"
 # Measurements are best-effort: any failure falls back to "unavailable"
 # and the script still completes normally.
 START_EPOCH=$(date +%s)
-METRICS_TMP="$(mktemp -t boucle-metrics.XXXXXX 2>/dev/null || echo "")"
-RSS_SAMPLER_TMP="$(mktemp -t boucle-rss.XXXXXX 2>/dev/null || echo "")"
+METRICS_TMP="$(mktemp -t boucle-metrics.XXXXXX 2> /dev/null || echo "")"
+RSS_SAMPLER_TMP="$(mktemp -t boucle-rss.XXXXXX 2> /dev/null || echo "")"
 RSS_SAMPLER_PID=""
 
 cleanup_metrics() {
-  if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2>/dev/null; then
-    kill "$RSS_SAMPLER_PID" 2>/dev/null || true
-    wait "$RSS_SAMPLER_PID" 2>/dev/null || true
+  if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2> /dev/null; then
+    kill "$RSS_SAMPLER_PID" 2> /dev/null || true
+    wait "$RSS_SAMPLER_PID" 2> /dev/null || true
   fi
   [ -n "$METRICS_TMP" ] && [ -f "$METRICS_TMP" ] && rm -f "$METRICS_TMP" || true
   [ -n "$RSS_SAMPLER_TMP" ] && [ -f "$RSS_SAMPLER_TMP" ] && rm -f "$RSS_SAMPLER_TMP" || true
@@ -84,11 +96,11 @@ start_rss_sampler() {
   (
     max_kb=0
     while true; do
-      pids=$(pgrep -f "opencode run" 2>/dev/null || true)
+      pids=$(pgrep -f "opencode run" 2> /dev/null || true)
       cur=0
       for pid in $pids; do
         # Aggregate RSS across all matching PIDs (parent + children).
-        rss=$(awk '/^VmRSS:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo 0)
+        rss=$(awk '/^VmRSS:/ {print $2}' "/proc/$pid/status" 2> /dev/null || echo 0)
         cur=$((cur + rss))
       done
       if [ "$cur" -gt "$max_kb" ]; then
@@ -106,15 +118,15 @@ start_rss_sampler() {
 # Echoes a value, or "unavailable".
 get_peak_rss_kb() {
   if [ "$HAVE_GNU_TIME" = "1" ] && [ -n "$METRICS_TMP" ] && [ -s "$METRICS_TMP" ]; then
-    val=$(awk '/Maximum resident set size/ {print $NF}' "$METRICS_TMP" 2>/dev/null || true)
-    if [ -n "$val" ] && [ "$val" -gt 0 ] 2>/dev/null; then
+    val=$(awk '/Maximum resident set size/ {print $NF}' "$METRICS_TMP" 2> /dev/null || true)
+    if [ -n "$val" ] && [ "$val" -gt 0 ] 2> /dev/null; then
       echo "$val"
       return 0
     fi
   fi
   if [ -n "$RSS_SAMPLER_TMP" ] && [ -s "$RSS_SAMPLER_TMP" ]; then
-    val=$(cat "$RSS_SAMPLER_TMP" 2>/dev/null || true)
-    if [ -n "$val" ] && [ "$val" -gt 0 ] 2>/dev/null; then
+    val=$(cat "$RSS_SAMPLER_TMP" 2> /dev/null || true)
+    if [ -n "$val" ] && [ "$val" -gt 0 ] 2> /dev/null; then
       echo "$val"
       return 0
     fi
@@ -125,8 +137,8 @@ get_peak_rss_kb() {
 # Print the structured metrics line to stderr.
 print_metrics_line() {
   local elapsed db_size peak_rss
-  elapsed=$(( $(date +%s) - START_EPOCH ))
-  db_size=$(stat -c %s "$OPENCODE_DB" 2>/dev/null || stat -f %z "$OPENCODE_DB" 2>/dev/null || echo 0)
+  elapsed=$(($(date +%s) - START_EPOCH))
+  db_size=$(stat -c %s "$OPENCODE_DB" 2> /dev/null || stat -f %z "$OPENCODE_DB" 2> /dev/null || echo 0)
   peak_rss=$(get_peak_rss_kb)
   echo "[boucle:metrics] role=$ROLE agent=$AGENT iteration=$ITERATION wall_clock=${elapsed}s peak_rss=${peak_rss}kb db_size=${db_size}b" >&2
 }
@@ -201,13 +213,13 @@ if [ "$DRY_RUN" = "true" ]; then
   [ -n "$VARIANT" ] && VARIANT_ARGS+=(--variant "$VARIANT")
   # Start RSS sampler; /usr/bin/time wrapper is skipped in dry-run to keep
   # output untouched. Sampler will be stopped below.
-  start_rss_sampler 2>/dev/null || true
+  start_rss_sampler 2> /dev/null || true
   OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
     opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" 2>&1 || true
   # Stop the RSS sampler so it stops writing to the tmp file.
-  if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2>/dev/null; then
-    kill "$RSS_SAMPLER_PID" 2>/dev/null || true
-    wait "$RSS_SAMPLER_PID" 2>/dev/null || true
+  if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2> /dev/null; then
+    kill "$RSS_SAMPLER_PID" 2> /dev/null || true
+    wait "$RSS_SAMPLER_PID" 2> /dev/null || true
   fi
   RSS_SAMPLER_PID=""
   print_metrics_line
@@ -224,15 +236,15 @@ VARIANT_ARGS=()
 if [ "$HAVE_GNU_TIME" = "1" ] && [ -n "$METRICS_TMP" ]; then
   OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
     /usr/bin/time -v -o "$METRICS_TMP" \
-      opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" || AGENT_EXIT=$?
+    opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" || AGENT_EXIT=$?
 else
   # Fall back to /proc poller if /usr/bin/time is missing.
-  start_rss_sampler 2>/dev/null || true
+  start_rss_sampler 2> /dev/null || true
   OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
     opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" || AGENT_EXIT=$?
-  if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2>/dev/null; then
-    kill "$RSS_SAMPLER_PID" 2>/dev/null || true
-    wait "$RSS_SAMPLER_PID" 2>/dev/null || true
+  if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2> /dev/null; then
+    kill "$RSS_SAMPLER_PID" 2> /dev/null || true
+    wait "$RSS_SAMPLER_PID" 2> /dev/null || true
   fi
   RSS_SAMPLER_PID=""
 fi
@@ -246,8 +258,8 @@ fi
 # ── 7. Append to iterations.md ────────────────────────────────────────
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 FILES_TOUCHED=""
-if [ -d "$CI_PROJECT_DIR" ] && command -v git &>/dev/null; then
-  FILES_TOUCHED=$(cd "$CI_PROJECT_DIR" && git diff --name-only HEAD 2>/dev/null | tr '\n' ', ' || echo "none")
+if [ -d "$CI_PROJECT_DIR" ] && command -v git &> /dev/null; then
+  FILES_TOUCHED=$(cd "$CI_PROJECT_DIR" && git diff --name-only HEAD 2> /dev/null | tr '\n' ', ' || echo "none")
 fi
 
 cat >> "$ITERATIONS_FILE" << EOF
