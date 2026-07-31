@@ -280,8 +280,12 @@ dispatch:
               echo "MR !${MR_IID} updated after approval — reverting issue #$MR_ISSUE_IID to boucle:review"
               # Preserve non-boucle labels, set boucle:review + bot status
               NON_BOUCLE=$(echo "$MR_LABELS" | tr ',' '\n' | grep -v '^boucle:' | tr '\n' ',' | sed 's/,$//')
-              glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID" \
-                -f labels="${NON_BOUCLE:+$NON_BOUCLE,}boucle:review,boucle::status::bot" > /dev/null
+              # Idempotence: skip the PUT when the target labels are already set
+              # (GitLab records a Resource Label Event on every PUT, even no-ops).
+              if ! (echo "$MR_LABELS" | tr ',' '\n' | grep -qx "boucle:review" && echo "$MR_LABELS" | tr ',' '\n' | grep -qx "boucle::status::bot"); then
+                glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID" \
+                  -f labels="${NON_BOUCLE:+$NON_BOUCLE,}boucle:review,boucle::status::bot" > /dev/null
+              fi
             fi
             echo "MR !${MR_IID} updated — re-triggering reviewer for issue #$MR_ISSUE_IID"
             curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
@@ -296,8 +300,12 @@ dispatch:
             echo "MR !${MR_IID} closed (rejected) — reverting issue #$MR_ISSUE_IID to boucle:todo for worker re-run"
             MR_LABELS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID" | jq -r '.labels | join(",")')
             NON_BOUCLE=$(echo "$MR_LABELS" | tr ',' '\n' | grep -v '^boucle:' | tr '\n' ',' | sed 's/,$//')
-            glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID" \
-              -f labels="${NON_BOUCLE:+$NON_BOUCLE,}boucle:todo,boucle::status::bot" > /dev/null
+            # Idempotence: skip the PUT when the target labels are already set
+            # (GitLab records a Resource Label Event on every PUT, even no-ops).
+            if ! (echo "$MR_LABELS" | tr ',' '\n' | grep -qx "boucle:todo" && echo "$MR_LABELS" | tr ',' '\n' | grep -qx "boucle::status::bot"); then
+              glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID" \
+                -f labels="${NON_BOUCLE:+$NON_BOUCLE,}boucle:todo,boucle::status::bot" > /dev/null
+            fi
             curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
               -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
               -F "variables[BOUCLE_ISSUE]=$MR_ISSUE_IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
@@ -317,8 +325,12 @@ dispatch:
             echo "MR !${MR_IID} unapproved — reverting issue #$MR_ISSUE_IID to boucle:review"
             MR_LABELS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID" | jq -r '.labels | join(",")')
             NON_BOUCLE=$(echo "$MR_LABELS" | tr ',' '\n' | grep -v '^boucle:' | tr '\n' ',' | sed 's/,$//')
-            glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID" \
-              -f labels="${NON_BOUCLE:+$NON_BOUCLE,}boucle:review,boucle::status::bot" > /dev/null
+            # Idempotence: skip the PUT when the target labels are already set
+            # (GitLab records a Resource Label Event on every PUT, even no-ops).
+            if ! (echo "$MR_LABELS" | tr ',' '\n' | grep -qx "boucle:review" && echo "$MR_LABELS" | tr ',' '\n' | grep -qx "boucle::status::bot"); then
+              glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID" \
+                -f labels="${NON_BOUCLE:+$NON_BOUCLE,}boucle:review,boucle::status::bot" > /dev/null
+            fi
             curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
               -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
               -F "variables[BOUCLE_ISSUE]=$MR_ISSUE_IID" -F "variables[BOUCLE_ROLE]=reviewer" > /dev/null
@@ -373,8 +385,12 @@ dispatch:
           # Revert to boucle:todo so the worker re-runs (preserving non-boucle labels)
           MR_NOTE_LABELS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$MR_NOTE_ISSUE_IID" | jq -r '.labels | join(",")')
           NON_BOUCLE=$(echo "$MR_NOTE_LABELS" | tr ',' '\n' | grep -v '^boucle:' | tr '\n' ',' | sed 's/,$//')
-          glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$MR_NOTE_ISSUE_IID" \
-            -f labels="${NON_BOUCLE:+$NON_BOUCLE,}boucle:todo,boucle::status::bot" > /dev/null
+          # Idempotence: skip the PUT when the target labels are already set
+          # (GitLab records a Resource Label Event on every PUT, even no-ops).
+          if ! (echo "$MR_NOTE_LABELS" | tr ',' '\n' | grep -qx "boucle:todo" && echo "$MR_NOTE_LABELS" | tr ',' '\n' | grep -qx "boucle::status::bot"); then
+            glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$MR_NOTE_ISSUE_IID" \
+              -f labels="${NON_BOUCLE:+$NON_BOUCLE,}boucle:todo,boucle::status::bot" > /dev/null
+          fi
           curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
             -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
             -F "variables[BOUCLE_ISSUE]=$MR_NOTE_ISSUE_IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
@@ -403,8 +419,20 @@ dispatch:
       # writing a new pair. Caller passes detail as $2 and gross as $3.
       set_boucle_label() {
         local iid="$1" new="$2" gross="$3"
-        local current
-        current=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        local current resp current_all
+        resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
+        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        current_all=$(echo "$resp" | jq -r '.labels | join(",")')
+        # Idempotence: skip the PUT when every label in "$new,$gross" is already
+        # on the issue. GitLab records a Resource Label Event on every PUT even
+        # if the label set is unchanged — this guard prevents the no-op writes
+        # that surface as spurious "status changes" on the board.
+        local all_present=true lbl
+        for lbl in $(echo "$new,$gross" | tr ',' ' '); do
+          [ -z "$lbl" ] && continue
+          echo "$current_all" | tr ',' '\n' | grep -qx "$lbl" || { all_present=false; break; }
+        done
+        [ "$all_present" = true ] && return 0
         local merged="${current:+$current,}$new,$gross"
         glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
         # When the issue moves to the bot side, assign it to the bot user so
@@ -588,8 +616,20 @@ triage:
       # writing a new pair. Caller passes detail as $2 and gross as $3.
       set_boucle_label() {
         local iid="$1" new="$2" gross="$3"
-        local current
-        current=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        local current resp current_all
+        resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
+        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        current_all=$(echo "$resp" | jq -r '.labels | join(",")')
+        # Idempotence: skip the PUT when every label in "$new,$gross" is already
+        # on the issue. GitLab records a Resource Label Event on every PUT even
+        # if the label set is unchanged — this guard prevents the no-op writes
+        # that surface as spurious "status changes" on the board.
+        local all_present=true lbl
+        for lbl in $(echo "$new,$gross" | tr ',' ' '); do
+          [ -z "$lbl" ] && continue
+          echo "$current_all" | tr ',' '\n' | grep -qx "$lbl" || { all_present=false; break; }
+        done
+        [ "$all_present" = true ] && return 0
         local merged="${current:+$current,}$new,$gross"
         glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
         # When the issue moves to the bot side, assign it to the bot user so
@@ -1119,8 +1159,20 @@ worker:
       # writing a new pair. Caller passes detail as $2 and gross as $3.
       set_boucle_label() {
         local iid="$1" new="$2" gross="$3"
-        local current
-        current=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        local current resp current_all
+        resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
+        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        current_all=$(echo "$resp" | jq -r '.labels | join(",")')
+        # Idempotence: skip the PUT when every label in "$new,$gross" is already
+        # on the issue. GitLab records a Resource Label Event on every PUT even
+        # if the label set is unchanged — this guard prevents the no-op writes
+        # that surface as spurious "status changes" on the board.
+        local all_present=true lbl
+        for lbl in $(echo "$new,$gross" | tr ',' ' '); do
+          [ -z "$lbl" ] && continue
+          echo "$current_all" | tr ',' '\n' | grep -qx "$lbl" || { all_present=false; break; }
+        done
+        [ "$all_present" = true ] && return 0
         local merged="${current:+$current,}$new,$gross"
         glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
         # When the issue moves to the bot side, assign it to the bot user so
@@ -1412,8 +1464,20 @@ reviewer:
       # writing a new pair. Caller passes detail as $2 and gross as $3.
       set_boucle_label() {
         local iid="$1" new="$2" gross="$3"
-        local current
-        current=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        local current resp current_all
+        resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
+        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        current_all=$(echo "$resp" | jq -r '.labels | join(",")')
+        # Idempotence: skip the PUT when every label in "$new,$gross" is already
+        # on the issue. GitLab records a Resource Label Event on every PUT even
+        # if the label set is unchanged — this guard prevents the no-op writes
+        # that surface as spurious "status changes" on the board.
+        local all_present=true lbl
+        for lbl in $(echo "$new,$gross" | tr ',' ' '); do
+          [ -z "$lbl" ] && continue
+          echo "$current_all" | tr ',' '\n' | grep -qx "$lbl" || { all_present=false; break; }
+        done
+        [ "$all_present" = true ] && return 0
         local merged="${current:+$current,}$new,$gross"
         glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
         # When the issue moves to the bot side, assign it to the bot user so
@@ -1638,8 +1702,20 @@ merger:
       # writing a new pair. Caller passes detail as $2 and gross as $3.
       set_boucle_label() {
         local iid="$1" new="$2" gross="$3"
-        local current
-        current=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        local current resp current_all
+        resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
+        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        current_all=$(echo "$resp" | jq -r '.labels | join(",")')
+        # Idempotence: skip the PUT when every label in "$new,$gross" is already
+        # on the issue. GitLab records a Resource Label Event on every PUT even
+        # if the label set is unchanged — this guard prevents the no-op writes
+        # that surface as spurious "status changes" on the board.
+        local all_present=true lbl
+        for lbl in $(echo "$new,$gross" | tr ',' ' '); do
+          [ -z "$lbl" ] && continue
+          echo "$current_all" | tr ',' '\n' | grep -qx "$lbl" || { all_present=false; break; }
+        done
+        [ "$all_present" = true ] && return 0
         local merged="${current:+$current,}$new,$gross"
         glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
         # When the issue moves to the bot side, assign it to the bot user so
@@ -1822,8 +1898,20 @@ catchup:
       # Tolerate glab non-zero exit (version warnings, transient API errors).
       set_boucle_label() {
         local iid="$1" new="$2" gross="$3"
-        local current
-        current=$(set +e; glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")' 2>/dev/null) || true
+        local current resp current_all
+        resp=$(set +e; glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null) || true
+        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")' 2>/dev/null) || true
+        current_all=$(echo "$resp" | jq -r '.labels | join(",")' 2>/dev/null) || true
+        # Idempotence: skip the PUT when every label in "$new,$gross" is already
+        # on the issue. GitLab records a Resource Label Event on every PUT even
+        # if the label set is unchanged — this guard prevents the no-op writes
+        # that surface as spurious "status changes" on the board.
+        local all_present=true lbl
+        for lbl in $(echo "$new,$gross" | tr ',' ' '); do
+          [ -z "$lbl" ] && continue
+          echo "$current_all" | tr ',' '\n' | grep -qx "$lbl" || { all_present=false; break; }
+        done
+        [ "$all_present" = true ] && return 0
         local merged="${current:+$current,}$new,$gross"
         glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null 2>&1 || true
         # When the issue moves to the bot side, assign it to the bot user so
@@ -2064,8 +2152,20 @@ e2e:
       # Tolerate glab non-zero exit (version warnings, transient API errors).
       set_boucle_label() {
         local iid="$1" new="$2" gross="$3"
-        local current
-        current=$(set +e; glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")' 2>/dev/null) || true
+        local current resp current_all
+        resp=$(set +e; glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null) || true
+        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")' 2>/dev/null) || true
+        current_all=$(echo "$resp" | jq -r '.labels | join(",")' 2>/dev/null) || true
+        # Idempotence: skip the PUT when every label in "$new,$gross" is already
+        # on the issue. GitLab records a Resource Label Event on every PUT even
+        # if the label set is unchanged — this guard prevents the no-op writes
+        # that surface as spurious "status changes" on the board.
+        local all_present=true lbl
+        for lbl in $(echo "$new,$gross" | tr ',' ' '); do
+          [ -z "$lbl" ] && continue
+          echo "$current_all" | tr ',' '\n' | grep -qx "$lbl" || { all_present=false; break; }
+        done
+        [ "$all_present" = true ] && return 0
         local merged="${current:+$current,}$new,$gross"
         glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null 2>&1 || true
         # When the issue moves to the bot side, assign it to the bot user so
@@ -2307,8 +2407,20 @@ doctor:
       # side, matching the behavior of the rest of the loop.
       set_boucle_label() {
         local iid="$1" new="$2" gross="$3"
-        local current
-        current=$(glab api --hostname "$HOST" "/projects/$PID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        local current resp current_all
+        resp=$(glab api --hostname "$HOST" "/projects/$PID/issues/$iid")
+        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        current_all=$(echo "$resp" | jq -r '.labels | join(",")')
+        # Idempotence: skip the PUT when every label in "$new,$gross" is already
+        # on the issue. GitLab records a Resource Label Event on every PUT even
+        # if the label set is unchanged — this guard prevents the no-op writes
+        # that surface as spurious "status changes" on the board.
+        local all_present=true lbl
+        for lbl in $(echo "$new,$gross" | tr ',' ' '); do
+          [ -z "$lbl" ] && continue
+          echo "$current_all" | tr ',' '\n' | grep -qx "$lbl" || { all_present=false; break; }
+        done
+        [ "$all_present" = true ] && return 0
         local merged="${current:+$current,}$new,$gross"
         glab api --hostname "$HOST" -X PUT "/projects/$PID/issues/$iid" -f labels="$merged" > /dev/null
         if [ "$gross" = "boucle::status::bot" ] && [ -n "${BOUCLE_BOT_ID:-}" ]; then
