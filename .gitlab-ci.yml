@@ -454,18 +454,18 @@ triage:
           #   <body...>
           #   Size: S | M
           #   ### Sub-issue 2: ...
-          SUBISSUES_SECTION=$(echo "$COMMENT" | sed -n '/^## Sub-issues/,/^## /p' | head -n -1)
+          SUBISSUES_SECTION=$(echo "$COMMENT" | sed -n '/^## Sub-issues/,/^## /p' | sed -e '${/^## /d}')
           # If the selected comment has no Sub-issues section, the agent may have
           # posted a truncated duplicate. Search ALL triage comments (newest-first)
           # for one that has a parseable Sub-issues section.
-          if [ -z "$SUBISSUES_SECTION" ] || ! echo "$SUBISSUES_SECTION" | grep -qE '^### Sub-issue [0-9]+:'; then
+          if [ -z "$SUBISSUES_SECTION" ] || ! echo "$SUBISSUES_SECTION" | grep -qE '^### Sub-issue [0-9]+[[:space:]]*:'; then
             echo "Selected triage comment has no Sub-issues section — searching all triage comments..."
             SUBISSUES_SECTION=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-              | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("### Sub-issue [0-9]+:"))] | first | .body' \
-              | sed -n '/^## Sub-issues/,/^## /p' | head -n -1)
+              | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("### Sub-issue [0-9]+[[:space:]]*:"))] | first | .body' \
+              | sed -n '/^## Sub-issues/,/^## /p' | sed -e '${/^## /d}')
           fi
           # Skip if still no parseable sub-issues after searching all comments
-          if [ -z "$SUBISSUES_SECTION" ] || ! echo "$SUBISSUES_SECTION" | grep -qE '^### Sub-issue [0-9]+:'; then
+          if [ -z "$SUBISSUES_SECTION" ] || ! echo "$SUBISSUES_SECTION" | grep -qE '^### Sub-issue [0-9]+[[:space:]]*:'; then
             echo "NEEDS-SPLIT but no parseable sub-issues — falling back to boucle:human"
             set_boucle_label "$IID" "boucle:human"
             glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
@@ -488,10 +488,10 @@ triage:
           echo "$SUBISSUES_SECTION" | awk '
             BEGIN { rec = 0 }
             /^<!-- boucle:sub-issue/ { next }
-            /^### Sub-issue [0-9]+:/ {
+            /^### Sub-issue [0-9]+[[:space:]]*:/ {
               if (rec > 0) { print "---END---" }
               rec++
-              sub(/^### Sub-issue [0-9]+: /, "")
+              sub(/^### Sub-issue [0-9]+[[:space:]]*:[[:space:]]*/, "")
               print "TITLE:" $0
               next
             }
