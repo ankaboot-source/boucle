@@ -290,6 +290,49 @@ const { formId = "engagement-form" } = Astro.props;
 		margin-top: var(--space-s);
 	}
 
+	/*
+	 * Submit button — local override on the base .btn to align with the
+	 * CTA charter (Variant A): hard-edged red rectangle, heading face,
+	 * uppercase. The busy/disabled state keeps the same shape but dims
+	 * the label and the cursor so users get clear feedback.
+	 */
+	.engagement-form__actions .btn--primary {
+		min-height: 44px;
+		padding: var(--space-s) var(--space-l);
+		font-family: var(--font-heading);
+		font-size: var(--text-base);
+		font-weight: var(--weight-bold);
+		letter-spacing: var(--tracking-wide);
+		text-transform: uppercase;
+		background: var(--color-flag-red);
+		color: var(--color-flag-white);
+		border: 0;
+		border-radius: var(--radius-sharp);
+		align-self: flex-start;
+		transition:
+			background-color var(--duration-fast) var(--ease-out),
+			transform var(--duration-fast) var(--ease-out),
+			opacity var(--duration-fast) var(--ease-out);
+	}
+
+	.engagement-form__actions .btn--primary:hover {
+		background: var(--color-flag-red-deep);
+		color: var(--color-flag-white);
+		transform: translateY(-1px);
+	}
+
+	.engagement-form__actions .btn--primary:focus-visible {
+		outline: 2px solid var(--color-flag-red);
+		outline-offset: 3px;
+	}
+
+	.engagement-form__actions .btn--primary:disabled,
+	.engagement-form__actions .btn--primary[data-busy="1"] {
+		opacity: 0.65;
+		cursor: progress;
+		transform: none;
+	}
+
 	.engagement-form__legal {
 		font-size: var(--text-xs);
 		color: var(--color-text-faint);
