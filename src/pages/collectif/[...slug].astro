@@ -423,13 +423,66 @@ const pageDescription =
 		margin-top: var(--space-2xs);
 	}
 
-	.entry__article--etudiante .entry__cta .btn--ghost {
+	/*
+	 * .entry__cta .btn — local override on the base .btn to align with
+	 * the CTA charter (Variant A). Hard-edged red rectangle for primary,
+	 * inverted ink rectangle for ghost so both reads stay high-contrast
+	 * against the surrounding ink contact panel.
+	 */
+	.entry__cta .btn {
+		min-height: 44px;
+		padding: var(--space-s) var(--space-l);
+		font-family: var(--font-heading);
+		font-size: var(--text-base);
+		font-weight: var(--weight-bold);
+		letter-spacing: var(--tracking-wide);
+		text-transform: uppercase;
+		border-radius: var(--radius-sharp);
+		border-width: 0;
+	}
+
+	.entry__cta .btn--primary {
+		background: var(--color-flag-red);
+		color: var(--color-flag-white);
+	}
+
+	.entry__cta .btn--primary:hover {
+		background: var(--color-flag-red-deep);
+		color: var(--color-flag-white);
+	}
+
+	.entry__cta .btn--primary:focus-visible {
+		outline: 2px solid var(--color-flag-white);
+		outline-offset: 3px;
+	}
+
+	.entry__cta .btn--ghost {
+		background: var(--color-flag-white);
 		color: var(--color-ink);
-		border-color: var(--color-ink);
+	}
+
+	.entry__cta .btn--ghost:hover {
+		background: var(--color-paper-edge);
+		color: var(--color-ink);
+	}
+
+	.entry__cta .btn--ghost:focus-visible {
+		outline: 2px solid var(--color-flag-red);
+		outline-offset: 3px;
+	}
+
+	/*
+	 * Etudiante variant: the contact panel swaps to a light surface, so
+	 * invert the pair — primary stays red, ghost becomes ink so the two
+	 * reads remain balanced on the lighter background.
+	 */
+	.entry__article--etudiante .entry__cta .btn--ghost {
+		background: var(--color-ink);
+		color: var(--color-ink-on-dark);
 	}
 
 	.entry__article--etudiante .entry__cta .btn--ghost:hover {
-		background: var(--color-ink);
+		background: var(--color-ink-soft);
 		color: var(--color-ink-on-dark);
 	}
 </style>
