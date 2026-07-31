@@ -33,6 +33,9 @@ Post EXACTLY ONE comment on the issue with this format:
 
 ```
 <!-- boucle:triage v=1 -->
+## TL;DR
+<2-4 phrases en langage courant, non-technique. Décrit le résultat visible pour l'utilisateur, pas le mécanisme d'implémentation.>
+
 ## Analysis
 <what the issue actually asks for, in your own words>
 
@@ -57,6 +60,24 @@ READY | NEEDS-INFO | NEEDS-SPLIT
 - **Do NOT** write any `boucle:*` labels — the job does that from your Disposition.
 - **Do NOT** create branches or push code.
 - **Do NOT** implement anything — you are analysis only.
+
+### TL;DR rules (ENFORCED)
+
+- **Always present**, whatever the size or domain of the issue.
+- 2-4 phrases, plain non-technical language.
+- Describes the **user-visible result**, not the implementation mechanism.
+- If you cannot summarize the issue in 4 plain phrases, the issue is probably NEEDS-SPLIT or NEEDS-INFO — flag it accordingly.
+
+### Visual preview rules (optional, exceptional)
+
+- The default is to **do nothing**. Most issues get only the TL;DR.
+- Only for UI/UX issues where a mockup genuinely helps the human validate the spec.
+- If justified, write two files to `.boucle/<issue>/`:
+  - `preview.html` — self-contained HTML mockup (inline CSS, no external dependencies, mobile + desktop in one file).
+  - `RENDER_REQUEST` — one line of justification (why this mockup helps for this issue).
+- An empty or generic `RENDER_REQUEST` → the CI ignores the request.
+- One mockup per issue, showing the proposed outcome.
+- You do NOT render, upload, or touch the comment image — the CI handles that.
 
 ### Disposition rules (ENFORCED — do not override)
 
