@@ -1225,12 +1225,13 @@ e2e:
       # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
       # starts with "boucle:"), so we strip all boucle-managed labels when
       # writing a new pair. Caller passes detail as $2 and gross as $3.
+      # Tolerate glab non-zero exit (version warnings, transient API errors).
       set_boucle_label() {
         local iid="$1" new="$2" gross="$3"
         local current
-        current=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        current=$(set +e; glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")' 2>/dev/null) || true
         local merged="${current:+$current,}$new,$gross"
-        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
+        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null 2>&1 || true
         # When the issue moves to the bot side, assign it to the bot user so
         # the board reflects who owns the next action and humans aren't spammed.
         # BOUCLE_BOT_ID is the GitLab user ID of the bot (set via bin/setup).
@@ -1382,9 +1383,12 @@ e2e:
       ./bin/oc e2e || true
 
       # Parse verdict from agent output (bin/oc logs to stdout)
-      # If BOUCLE_ISSUE is set, parse from issue comment; otherwise from agent stdout
-      COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-        | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | first | .body')
+      # If BOUCLE_ISSUE is set, parse from issue comment; otherwise from agent stdout.
+      # Tolerate glab/jq non-zero exit (glab may warn about version updates on
+      # stderr; jq may error on unexpected JSON). An empty COMMENT → empty VERDICT
+      # → UNCERTAIN branch, which is safe.
+      COMMENT=$(set +e; glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" 2>/dev/null \
+        | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | first | .body // empty' 2>/dev/null) || true
       VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
 
       case "$VERDICT" in
