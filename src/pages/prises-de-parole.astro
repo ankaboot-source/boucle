@@ -22,7 +22,7 @@ type Entry = Awaited<
 	ReturnType<typeof getCollection<"prisesDeParole">>
 >[number];
 
-const entries: Entry[] = (await getCollection("prises-de-parole"))
+const entries: Entry[] = (await getCollection("prisesDeParole"))
 	// Sort newest first so the index reads chronologically.
 	.sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
 

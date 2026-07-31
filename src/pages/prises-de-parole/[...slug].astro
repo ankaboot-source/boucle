@@ -14,7 +14,7 @@ import { getCollection, render } from "astro:content";
 import type { GetStaticPaths } from "astro";
 
 export const getStaticPaths = (async () => {
-	const entries = await getCollection("communiques");
+	const entries = await getCollection("prisesDeParole");
 	return entries.map((entry) => ({
 		// `params.slug` mirrors the URL the index page emits:
 		//   /prises-de-parole/<entry-id-without-YYYY-MM-DD-prefix>/
