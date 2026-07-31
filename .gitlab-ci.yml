@@ -1073,11 +1073,23 @@ worker:
       git fetch origin master
       if ! git rebase origin/master; then
         echo "FAIL: rebase onto origin/master conflicted — master advanced since branch creation." >&2
-        echo "Escalating to human (boucle:human). The worker cannot auto-resolve merge conflicts." >&2
         git rebase --abort 2>/dev/null || true
-        set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-        glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-          -f body="⚠️ Worker could not rebase onto master (conflict). Master advanced since this branch was created. Human rebase needed." > /dev/null
+        ITERATION="${BOUCLE_ITERATION:-1}"
+        if [ "$ITERATION" -lt 3 ]; then
+          echo "Re-triggering worker (iteration $((ITERATION+1))) — next run resets branch to origin/master, no rebase needed." >&2
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
+          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+            -f body="🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh master (iteration $((ITERATION+1))/3)." > /dev/null
+          curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
+            -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+            -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=worker" \
+            -F "variables[BOUCLE_ITERATION]=$((ITERATION+1))" > /dev/null
+        else
+          echo "Escalating to human (boucle:human) — iteration cap (3) reached after repeated rebase conflicts." >&2
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
+          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+            -f body="⚠️ Worker could not rebase onto master (conflict) after 3 attempts. Master keeps advancing. Human intervention needed." > /dev/null
+        fi
         exit 1
       fi
 
@@ -1399,9 +1411,14 @@ merger:
       if ! git rebase origin/master; then
         echo "FAIL: rebase onto origin/master conflicted — even after serial merge." >&2
         git rebase --abort 2>/dev/null || true
-        set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
+        echo "Re-triggering worker (iteration 1) — the MR will be regenerated on fresh master, no rebase needed." >&2
+        set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
         glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-          -f body="⚠️ Merger could not rebase MR !${MR_IID} onto master (conflict). Human rebase needed." > /dev/null
+          -f body="🔄 Merger could not rebase MR !${MR_IID} onto master (conflict). Re-running the worker on fresh master to regenerate the MR." > /dev/null
+        curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
+          -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+          -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=worker" \
+          -F "variables[BOUCLE_ITERATION]=1" > /dev/null
         exit 1
       fi
 
