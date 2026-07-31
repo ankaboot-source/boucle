@@ -1055,6 +1055,14 @@ worker:
       # Run the agent (agent commits its own work)
       ./bin/oc worker
 
+      # Safety-net commit: the agent may run out of steps before committing.
+      # Stage and commit any uncommitted tracked changes so the index is clean
+      # before the rebase (rebase refuses to run on a dirty tree).
+      if ! git diff --quiet || ! git diff --cached --quiet; then
+        git add -A
+        git commit -m "feat: worker changes for #$BOUCLE_ISSUE [skip ci]" --no-verify
+      fi
+
       # Ensure wrangler cache isn't committed. Commit this change immediately
       # so the index is clean before the rebase (rebase fails on a dirty index).
       if ! grep -q '.wrangler/' .gitignore 2>/dev/null; then
