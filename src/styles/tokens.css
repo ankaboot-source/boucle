@@ -100,6 +100,7 @@
 	--space-2xl: clamp(3.5rem, 2.5rem + 4vw, 5.5rem);   /* 56-88 */
 	--space-3xl: clamp(5rem, 3.5rem + 6vw, 8rem);       /* 80-128 */
 
+	--radius-sharp: 0;                       /* hard edge; see src/styles/CTA.md */
 	--radius-xs: 4px;
 	--radius-s: 8px;
 	--radius-m: 14px;
