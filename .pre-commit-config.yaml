@@ -1,0 +1,50 @@
+# .pre-commit-config.yaml — boucle quality gates
+# Works with both prek (Rust, recommended) and pre-commit (Python).
+# Install:  prek install   (or: pre-commit install)
+# Run all:  prek run --all-files   (or: pre-commit run --all-files)
+
+repos:
+  # ── Hygiene (pre-commit-hooks; prek auto-replaces with builtin Rust impl) ──
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-added-large-files
+        args: [--maxkb=512]
+      - id: check-yaml
+      - id: check-json
+      - id: check-case-conflict
+      - id: detect-private-key
+
+  # ── shellcheck (static analysis) ──
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.11.0
+    hooks:
+      - id: shellcheck
+        args: ["--severity=warning", "-x"]
+
+  # ── shfmt (formatting) ──
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.13.1-1
+    hooks:
+      - id: shfmt
+        args: ["-i", "2", "-bn", "-ci", "-sr"]
+
+  # ── bats unit tests (local hook, pre-push so commits stay fast) ──
+  - repo: local
+    hooks:
+      - id: bats
+        name: bats unit tests
+        entry: bash scripts/test.sh
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
+default_install_hook_types: [pre-commit, pre-push]
