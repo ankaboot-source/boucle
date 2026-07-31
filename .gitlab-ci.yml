@@ -41,15 +41,16 @@ variables:
 # before_script installs glab + opencode + wrangler (not in the image).
 default:
   image: node:22-slim
-  # Route to the project's dedicated runner (tag: data). It's a shell
-  # executor (ignores image:), so before_script self-installs node — but
-  # the install persists across runs, making subsequent runs faster than
-  # docker (which reinstalls every time). NOTE: the shared docker runner
-  # (Atchoum) has no "data" tag, so it CANNOT pick up these jobs — only
-  # the dedicated data runner can. Loop-critical control-plane jobs
-  # (dispatch, merger) override this with `tags: []` so they run on any
-  # available runner (including Atchoum) and are never blocked by a busy
-  # data runner.
+  # Route to the project's dedicated runner. It's a shell executor (ignores
+  # image:), so before_script self-installs node — but the install persists
+  # across runs, making subsequent runs faster than docker (which reinstalls
+  # every time). NOTE: the shared docker runner (Atchoum) has no matching tag,
+  # so it CANNOT pick up these jobs — only the dedicated runner can.
+  # Loop-critical control-plane jobs (dispatch, merger) override this with
+  # `tags: []` so they run on any available runner (including Atchoum) and
+  # are never blocked by a busy dedicated runner.
+  # The tag is project-specific infrastructure — run `bin/setup --runner-tag
+  # <tag>` to configure it for your project. Default placeholder: boucle.
   tags: [data]
   before_script:
     - |
