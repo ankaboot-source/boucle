@@ -40,8 +40,12 @@ default:
   # Route to the project's dedicated runner (tag: tooling). It's a shell
   # executor (ignores image:), so before_script self-installs node — but
   # the install persists across runs, making subsequent runs faster than
-  # docker (which reinstalls every time). Falls back to shared docker
-  # runner (Atchoum) if tooling is offline.
+  # docker (which reinstalls every time). NOTE: the shared docker runner
+  # (Atchoum) has no "tooling" tag, so it CANNOT pick up these jobs — only
+  # the dedicated tooling runner can. Loop-critical control-plane jobs
+  # (dispatch, merger) override this with `tags: []` so they run on any
+  # available runner (including Atchoum) and are never blocked by a busy
+  # tooling runner.
   tags: [tooling]
   before_script:
     - |
@@ -111,6 +115,11 @@ default:
 # ── Dispatcher ──────────────────────────────────────────────────────────
 dispatch:
   stage: dispatch
+  # Loop-critical entry point: must run on ANY available runner (including
+  # the shared docker runner Atchoum) so webhooks are never blocked waiting
+  # for the single tooling runner to free up. Without this, a long-running
+  # worker job can stall the entire loop by hogging the tooling runner.
+  tags: []
   rules:
     - if: $BOUCLE_ENABLED != "true"
       when: never
@@ -1003,6 +1012,10 @@ reviewer:
 # deploy-triggered e2e had no issue context and maybe_close_parent never ran).
 merger:
   stage: merge
+  # Loop-critical: merger makes only API calls + git operations — lightweight.
+  # Run on ANY available runner (tags: []) so an approved MR is never blocked
+  # waiting behind a heavy worker/reviewer job on the single tooling runner.
+  tags: []
   # Serialize all merges project-wide — one MR merges at a time.
   resource_group: boucle-merge
   needs:
