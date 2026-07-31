@@ -247,6 +247,45 @@ const hasDescription = description.trim().length > 0;
 
 	.newsletter__submit {
 		min-height: 48px;
+		/*
+		 * .newsletter__submit — local override on the base .btn to align
+		 * with the CTA charter (Variant A): hard-edged red rectangle,
+		 * heading face, uppercase. Applied across all three variants
+		 * (inline, block, footer) so the same component stays consistent
+		 * wherever it ships.
+		 */
+		font-family: var(--font-heading);
+		font-size: var(--text-base);
+		font-weight: var(--weight-bold);
+		letter-spacing: var(--tracking-wide);
+		text-transform: uppercase;
+		background: var(--color-flag-red);
+		color: var(--color-flag-white);
+		border: 0;
+		border-radius: var(--radius-sharp);
+		padding: var(--space-s) var(--space-l);
+		transition:
+			background-color var(--duration-fast) var(--ease-out),
+			transform var(--duration-fast) var(--ease-out),
+			opacity var(--duration-fast) var(--ease-out);
+	}
+
+	.newsletter__submit:hover {
+		background: var(--color-flag-red-deep);
+		color: var(--color-flag-white);
+		transform: translateY(-1px);
+	}
+
+	.newsletter__submit:focus-visible {
+		outline: 2px solid var(--color-flag-red);
+		outline-offset: 3px;
+	}
+
+	.newsletter__submit:disabled,
+	.newsletter__submit[data-busy="1"] {
+		opacity: 0.65;
+		cursor: progress;
+		transform: none;
 	}
 
 	.newsletter__hint {
