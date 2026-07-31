@@ -154,31 +154,93 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 					sections.map((entry) => {
 						const d = entry.data;
 						const slug = entry.id;
-						const channels: string[] = [];
-						if (d.contact_email) channels.push("email");
-						if (d.instagram) channels.push("Instagram");
-						if (d.telegram) channels.push("Telegram");
-						if (d.twitter) channels.push("X");
-						if (d.facebook) channels.push("Facebook");
-						if (d.website) channels.push("site web");
+						type Chip = {
+							label: string;
+							href: string;
+							channel: string; // human-readable canal name for aria-label
+						};
+						const channels: Chip[] = [];
+						if (d.contact_email) {
+							channels.push({
+								label: "email",
+								href: `mailto:${d.contact_email}`,
+								channel: "courriel",
+							});
+						}
+						if (d.instagram) {
+							channels.push({
+								label: "Instagram",
+								href: d.instagram,
+								channel: "Instagram",
+							});
+						}
+						if (d.telegram) {
+							channels.push({
+								label: "Telegram",
+								href: d.telegram,
+								channel: "Telegram",
+							});
+						}
+						if (d.twitter) {
+							channels.push({
+								label: "X",
+								href: d.twitter,
+								channel: "X (Twitter)",
+							});
+						}
+						if (d.facebook) {
+							channels.push({
+								label: "Facebook",
+								href: d.facebook,
+								channel: "Facebook",
+							});
+						}
+						if (d.website) {
+							channels.push({
+								label: "site web",
+								href: d.website,
+								channel: "site web",
+							});
+						}
 						return (
 							<li class="locale-card">
-								<a class="locale-card__link" href={`/collectif/${slug}/`}>
-									<h3 class="locale-card__city">{d.city}</h3>
-									{d.description && (
-										<p class="locale-card__desc">{d.description}</p>
-									)}
-									{channels.length > 0 && (
-										<p class="locale-card__channels" aria-label="Moyens de contact">
-											{channels.map((label) => (
-												<span class="locale-card__chip">{label}</span>
-											))}
-										</p>
-									)}
-									<span class="locale-card__cta" aria-hidden="true">
-										Voir la fiche <span>→</span>
-									</span>
-								</a>
+								{/*
+								  The card-wide link uses the "block link overlay"
+								  pattern: `.locale-card__link` is positioned to
+								  cover the whole card, while each chip `<a>`
+								  sits above it with a higher z-index. This keeps
+								  the markup semantically valid (no nested
+								  interactive elements) and lets the chips route
+								  the user directly to the right channel without
+								  forcing a stop at the fiche page.
+								*/}
+								<a
+									class="locale-card__link"
+									href={`/collectif/${slug}/`}
+									aria-label={`Voir la fiche de la section ${d.city}`}
+								/>
+								<h3 class="locale-card__city">{d.city}</h3>
+								{d.description && (
+									<p class="locale-card__desc">{d.description}</p>
+								)}
+								{channels.length > 0 && (
+									<p class="locale-card__channels" aria-label="Moyens de contact">
+										{channels.map((chip) => (
+											<a
+												class="locale-card__chip"
+												href={chip.href}
+												aria-label={`Contacter la section de ${d.city} par ${chip.channel}`}
+												rel={chip.href.startsWith("http") ? "noopener" : undefined}
+												target={chip.href.startsWith("http") ? "_blank" : undefined}
+											>
+												{chip.label}
+											</a>
+										))}
+									</p>
+								)}
+								<span class="locale-card__cta" aria-hidden="true">
+									Voir la fiche <span>→</span>
+								</span>
 							</li>
 						);
 					})
@@ -594,29 +656,42 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 
 	.locale-card {
 		display: flex;
-	}
-
-	.locale-card__link {
-		display: flex;
 		flex-direction: column;
 		gap: var(--space-2xs);
-		width: 100%;
 		padding: var(--space-m);
 		background: var(--color-bg-soft);
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-m);
-		text-decoration: none;
 		color: var(--color-ink);
+		position: relative; /* anchor for the card-wide overlay link */
 		transition:
 			border-color var(--duration-base) var(--ease-out),
 			transform var(--duration-base) var(--ease-out),
 			background-color var(--duration-base) var(--ease-out);
 	}
 
-	.locale-card__link:hover {
+	.locale-card:hover {
 		border-color: var(--color-ink);
 		background: var(--color-paper);
 		transform: translateY(-2px);
+	}
+
+	/*
+	 * Card-wide link overlay.
+	 *
+	 * The city heading's `<a>` is positioned to cover the entire card,
+	 * while each chip `<a>` and the CTA span sit above it (higher
+	 * z-index). This keeps the markup valid (no nested interactive
+	 * elements) while preserving the "click anywhere on the card" UX.
+	 */
+	.locale-card__link {
+		display: block;
+		color: inherit;
+		text-decoration: none;
+		position: absolute;
+		inset: 0;
+		z-index: 0;
+		border-radius: inherit;
 	}
 
 	.locale-card__link:focus-visible {
@@ -644,6 +719,8 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		flex-wrap: wrap;
 		gap: var(--space-3xs);
 		margin: var(--space-2xs) 0 0;
+		position: relative; /* sits above the card-wide overlay */
+		z-index: 1;
 	}
 
 	.locale-card__chip {
@@ -656,6 +733,22 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-pill);
 		color: var(--color-text-soft);
+		text-decoration: none;
+		transition:
+			color var(--duration-base) var(--ease-out),
+			border-color var(--duration-base) var(--ease-out),
+			background-color var(--duration-base) var(--ease-out);
+	}
+
+	.locale-card__chip:hover {
+		color: var(--color-ink);
+		border-color: var(--color-ink);
+		background: var(--color-paper);
+	}
+
+	.locale-card__chip:focus-visible {
+		outline: 2px solid var(--color-accent);
+		outline-offset: 2px;
 	}
 
 	.locale-card__cta {
@@ -668,13 +761,20 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		font-size: var(--text-sm);
 		font-weight: var(--weight-semibold);
 		color: var(--color-accent);
+		position: relative; /* sits above the card-wide overlay */
+		z-index: 1;
 	}
 
 	.locale-card__cta span {
 		transition: transform var(--duration-base) var(--ease-out);
 	}
 
-	.locale-card__link:hover .locale-card__cta span {
+	/*
+	 * Trigger the CTA arrow on any card hover. The overlay link is a
+	 * sibling, not a parent, so we hook into the card itself.
+	 */
+	.locale-card:hover .locale-card__cta span,
+	.locale-card__link:hover ~ .locale-card__cta span {
 		transform: translateX(4px);
 	}
 
@@ -985,7 +1085,9 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		.cta-card__arrow,
 		.locale-card__cta span,
 		.cta-card__btn,
+		.locale-card,
 		.locale-card__link,
+		.locale-card__chip,
 		.etudiante-card__btn,
 		.pictogram-cta__link {
 			transition: none;
