@@ -1190,7 +1190,13 @@ worker:
 
       # Push branch FIRST (agent already committed; we just push).
       # This persists the agent's work even if the deploy step later times out.
-      git push --force-with-lease origin "$BRANCH"
+      # Use --force (not --force-with-lease): the worker resets to origin/master
+      # at the start of every run, so we always want to overwrite the remote
+      # branch regardless of its current state (previous failed runs, stale
+      # refs, etc.). --force-with-lease fails when the remote-tracking ref is
+      # stale (e.g. branch was pushed by a previous iteration that we didn't
+      # fetch), causing spurious "stale info" push rejections.
+      git push --force origin "$BRANCH"
 
       # Deploy to preview (configurable via BOUCLE_DEPLOY_CMD).
       # Happens AFTER push so the code is saved even if this step is slow or fails.
@@ -1552,7 +1558,11 @@ merger:
       fi
 
       # Push the rebased branch
-      git push --force-with-lease origin "$BRANCH"
+      # Use --force: the merger rebased onto master, so the local branch has
+      # diverged from the remote. --force-with-lease fails if the remote-tracking
+      # ref is stale (not fetched). We always want to overwrite with the rebased
+      # branch.
+      git push --force origin "$BRANCH"
 
       # Wait for GitLab to recompute mergeability after the force-push (poll).
       # detailed_merge_status can be "checking" for several seconds after a
