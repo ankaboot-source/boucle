@@ -3,7 +3,12 @@
   "compaction": {
     "auto": true,
     "prune": true,
-    "reserved": 5000
+    "reserved": 5000,
+    "tail_turns": 1
+  },
+  "tool_output": {
+    "max_lines": 1000,
+    "max_bytes": 25600
   },
   "provider": {
     "ollama-cloud": {
