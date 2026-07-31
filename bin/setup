@@ -151,8 +151,8 @@ echo ""
 # ── 2. Labels ─────────────────────────────────────────────────────────
 echo "=== Labels ==="
 
-# boucle:* labels (14)
-for label in triage needs-info todo working review human blocked done split approval approved spec-review spec-approved merging; do
+# boucle:* labels (13)
+for label in triage needs-info todo working review human blocked done split approval approved spec-review merging; do
   EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2>/dev/null | jq -r '.[0].name // empty')
   if [ -n "$EXISTING" ]; then
     log_skip "boucle:$label already exists"
@@ -188,7 +188,7 @@ else
   if [ -n "$BOARD_ID" ] && [ "$BOARD_ID" != "null" ]; then
     log_pass "boucle board created (ID: $BOARD_ID)"
     # Add lists for each boucle:* label
-    for label in triage needs-info todo working review human blocked done split approval spec-review spec-approved merging; do
+    for label in triage needs-info todo working review human blocked done split approval spec-review merging; do
       LABEL_ID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2>/dev/null | jq -r '.[0].id')
       if [ -n "$LABEL_ID" ] && [ "$LABEL_ID" != "null" ]; then
         run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/boards/$BOARD_ID/lists -f label_id=$LABEL_ID >/dev/null"
