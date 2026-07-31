@@ -645,6 +645,13 @@ triage:
             SPLIT_MSG=$(printf 'Split into: #%s.\n\nParent stays open until all sub-issues close. The loop closes this parent automatically when the last sub-issue completes.' "$(echo "$CREATED_IIDS" | sed 's/,/#, #/g')")
             glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
               -f body="$SPLIT_MSG" > /dev/null
+            # Post a machine-readable marker comment as a fallback for
+            # maybe_close_parent() when the work-items hierarchy API is
+            # unavailable (e.g. work_item_rest_api feature flag disabled on
+            # self-managed GitLab like Framagit). The marker is parsed by
+            # maybe_close_parent's legacy fallback path.
+            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+              -f body="<!-- boucle:split-parent iids=$CREATED_IIDS -->" > /dev/null 2>&1 || true
             # Mark the parent boucle:split so dispatch and doctor stop re-triaging it.
             # The parent stays open and is closed by maybe_close_parent() (e2e) or
             # the doctor's split-parent cascade when all sub-issues close.
