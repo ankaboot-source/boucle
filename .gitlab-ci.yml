@@ -1552,8 +1552,22 @@ doctor:
           [.[] | select(.author.username != "up-bot") | select(.id > ($tid | tonumber))]
           | length
         ')
-        if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ]; then
-          echo "  → #$IID has author reply after spec-review — orphaned spec gate, re-triggering worker"
+        # Check for an approval emoji on the triage comment (polls the
+        # award_emoji API — recovers even if the emoji webhook was missed).
+        EMOJI_APPROVAL_FOUND=false
+        if [ "$LAST_TRIAGE_NOTE_ID" != "0" ] && [ -n "$LAST_TRIAGE_NOTE_ID" ]; then
+          AWARDS=$(glab api --hostname "$HOST" \
+            "/projects/$PID/issues/$IID/notes/$LAST_TRIAGE_NOTE_ID/award_emoji" 2>/dev/null)
+          if echo "$AWARDS" | jq -e --arg emojis "$BOUCLE_SPEC_APPROVAL_EMOJIS" '
+            [.[] | select(.user.username != "up-bot") | .name]
+            | map(select(. as $n | ($emojis | split("|")) | index($n)))
+            | length > 0
+          ' >/dev/null 2>&1; then
+            EMOJI_APPROVAL_FOUND=true
+          fi
+        fi
+        if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ] || [ "$EMOJI_APPROVAL_FOUND" = true ]; then
+          echo "  → #$IID approved (reply=$HUMAN_REPLY_AFTER_TRIAGE, emoji=$EMOJI_APPROVAL_FOUND) — re-triggering worker"
           set_boucle_label "$IID" "boucle:todo" "boucle::status::bot"
           curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
             -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
@@ -1561,7 +1575,7 @@ doctor:
           echo "  → re-triggered worker for #$IID"
           RECOVERED=$((RECOVERED + 1))
         else
-          echo "  → #$IID: still waiting for author to reply"
+          echo "  → #$IID: still waiting for author reply or approval emoji"
         fi
       done
 
