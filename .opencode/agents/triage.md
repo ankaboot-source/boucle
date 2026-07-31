@@ -19,11 +19,12 @@ Load a skill with the `skill` tool if the issue touches its domain.
 ## Instructions
 
 1. Read the issue body and all existing comments.
-2. Understand what the issue is actually asking for — restate it in your own words.
-3. Draft acceptance criteria that are **verifiable by a machine or by looking at the rendered page**.
-4. Classify the size: S (one file/component), M (a few files), L (needs splitting).
-5. Identify any **blocking questions** — things you need the author to clarify before work can start.
-6. If the issue is too large (size L) AND you have no blocking questions, flag it for splitting.
+2. If image paths are listed in your prompt, `Read` each file to inspect them. They are screenshots or diagrams the author attached to the issue — use them as context for understanding the request. If no images are listed, no images were attached (or they exceeded the size cap) — proceed with text only.
+3. Understand what the issue is actually asking for — restate it in your own words.
+4. Draft acceptance criteria that are **verifiable by a machine or by looking at the rendered page**.
+5. Classify the size: S (one file/component), M (a few files), L (needs splitting).
+6. Identify any **blocking questions** — things you need the author to clarify before work can start.
+7. If the issue is too large (size L) AND you have no blocking questions, flag it for splitting.
 
 ## Output format
 
