@@ -325,18 +325,34 @@ triage:
       # the child-items hierarchy API). Issues and work items share the same
       # IID space since 16.0, so /work_items/:iid works for issues too.
       # Returns empty string on failure (loop must not break).
+      # NOTE: glab may exit 0 on HTTP 403 (e.g. when the work_item_rest_api
+      # feature flag is disabled) and print the error JSON to stdout, so we
+      # validate the response shape rather than rely on the exit code.
       get_work_item_global_id() {
-        local iid="$1" wi_data
+        local iid="$1" wi_data out
         wi_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/-/work_items/$iid" 2>/dev/null) || { echo ""; return; }
-        printf '%s' "$wi_data" | jq -r '.id // empty'
+        # Only accept a JSON object that actually has an .id field; anything
+        # else (403 error object, empty, non-JSON) is treated as a miss.
+        out=$(printf '%s' "$wi_data" | jq -r 'if (type == "object" and has("id")) then .id else empty end' 2>/dev/null)
+        printf '%s' "$out"
       }
 
       # List child work items of a parent. Returns JSON array (empty array on
       # failure). Each child has .iid, .state ("opened"|"closed"), .title.
+      # NOTE: glab may exit 0 on HTTP 403 (e.g. when the work_item_rest_api
+      # feature flag is disabled) and print the error JSON to stdout. A 403
+      # error object like {"message":"403 Forbidden ..."} is a JSON OBJECT,
+      # not an array — jq 'length' on an object returns its key count (1),
+      # which would falsely trip the idempotency guard. We therefore validate
+      # that the response is a JSON ARRAY and return [] otherwise.
       get_work_item_children() {
-        local parent_iid="$1" children
+        local parent_iid="$1" children out
         children=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/-/work_items/$parent_iid/children" 2>/dev/null) || { echo "[]"; return; }
-        printf '%s' "$children"
+        # Only pass through genuine arrays; coerce anything else (403 error
+        # object, empty, non-JSON) to []. Capture jq output so empty input
+        # (jq emits nothing, exits 0) still yields [].
+        out=$(printf '%s' "$children" | jq -c 'if type == "array" then . else [] end' 2>/dev/null)
+        printf '%s' "${out:-[]}"
       }
 
       # Run the agent
@@ -1112,10 +1128,13 @@ e2e:
 
       # List child work items of a parent. Returns JSON array (empty on failure).
       # Each child has .iid, .state ("opened"|"closed"), .title.
+      # NOTE: glab may exit 0 on HTTP 403 (work_item_rest_api feature flag
+      # disabled) and print the error JSON to stdout; validate array shape.
       get_work_item_children() {
-        local parent_iid="$1" children
+        local parent_iid="$1" children out
         children=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/-/work_items/$parent_iid/children" 2>/dev/null) || { echo "[]"; return; }
-        printf '%s' "$children"
+        out=$(printf '%s' "$children" | jq -c 'if type == "array" then . else [] end' 2>/dev/null)
+        printf '%s' "${out:-[]}"
       }
 
       # Parent-close cascade: if this issue is a sub-issue (has a "## Parent issue"
@@ -1445,10 +1464,13 @@ doctor:
       done
 
       # List child work items of a parent via the hierarchy API.
+      # NOTE: glab may exit 0 on HTTP 403 (work_item_rest_api feature flag
+      # disabled) and print the error JSON to stdout; validate array shape.
       get_work_item_children() {
-        local parent_iid="$1" children
+        local parent_iid="$1" children out
         children=$(glab api --hostname "$HOST" "/projects/$PID/-/work_items/$parent_iid/children" 2>/dev/null) || { echo "[]"; return; }
-        printf '%s' "$children"
+        out=$(printf '%s' "$children" | jq -c 'if type == "array" then . else [] end' 2>/dev/null)
+        printf '%s' "${out:-[]}"
       }
 
       # Also check boucle:split parents: close the parent when all its
