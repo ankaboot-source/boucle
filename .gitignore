@@ -35,3 +35,6 @@ pnpm-debug.log*
 # bats test artifacts
 test/report.xml
 test/.bats.*
+
+# git worktrees (local working branches, not for version control)
+.worktree/
