@@ -375,6 +375,9 @@ On every worker run, the worker job fetches ALL non-system notes from the issue'
 ### 5c. MR description refresh on re-runs
 When the worker reuses an existing MR (iteration 2+), the worker job calls `glab mr update` to refresh the title and description with the new preview URL, commit summary, and Approach. Without this, the MR description stays stale (wrong preview URL, empty Approach) and the reviewer tests the wrong deployment (see [AGENTS.md](AGENTS.md) lesson #19). The `## Approach` section of `state.md` is extracted into the MR description; if the worker leaves it as the seed placeholder, CI substitutes an explicit note so the description is never the literal seed text (see [AGENTS.md](AGENTS.md) lesson #20).
 
+### 5d. Preview freshness verification
+After the build, the worker job writes a commit-SHA marker into the build output (`__boucle_commit__.txt` + an HTML comment in `index.html`). After the deploy, the assertion fetches the marker from the preview URL with a retry loop (`BOUCLE_PREVIEW_PROPAGATION_WAIT`, default 60s, 5s backoff) until the deployed SHA matches the head SHA. The wrangler exit code is captured separately from the URL extraction (subshell + log file, not a swallowing pipeline under `set +o pipefail`). Without this, a stale preview (CDN cache, wrangler no-op on identical build output, or a failed redeploy swallowed by the pipeline) passes the old HTTP-200-only assertion and the reviewer FAILs on "preview doesn't match the commit" (see [AGENTS.md](AGENTS.md) lesson #21).
+
 ---
 
 ## 9. CI variables
@@ -404,6 +407,7 @@ All boucle configuration variables are prefixed with `BOUCLE_`. No other variabl
 | `BOUCLE_UPDATE_MODE` | Auto-update mode from upstream. | `release` |
 | `BOUCLE_BOT_ID` | GitLab ID of the bot account (to distinguish bot comments from human ones). | — |
 | `BOUCLE_REVIEWER_FEEDBACK` | All non-system notes from the issue's open MR (reviewer verdicts + human comments). Injected into the worker's prompt on every run so re-runs address prior feedback. Fetched by the worker job; empty on first run. | — |
+| `BOUCLE_PREVIEW_PROPAGATION_WAIT` | Max seconds to wait for the preview CDN to propagate the new deployment before failing the worker job. The deploy assertion retries every 5s until the deployed SHA marker matches the head SHA. | `60` |
 | `BOUCLE_RUNNER_TAG` | Tag of the GitLab runner that executes boucle jobs. | — |
 | `PI_AUTH` | Authentication for the pi agent (secondary coding agent). | file-type → `auth.json` |
 
