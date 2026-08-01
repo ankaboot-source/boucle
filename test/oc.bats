@@ -122,3 +122,31 @@ extract_func() {
   refute_output --partial "Issue images"
   rm -f "$TMPF"
 }
+
+# ── build_prompt: prior notes injection (triage) ───────────────────────
+# Regression: the triage agent used to re-ask questions the author had
+# already answered because prior issue notes were never injected into the
+# prompt. BOUCLE_ISSUE_NOTES carries the chronological discussion so the
+# agent can incorporate answers instead of re-asking them.
+
+@test "build_prompt: triage includes prior notes when BOUCLE_ISSUE_NOTES is set" {
+  TMPF=$(mktemp)
+  extract_func build_prompt "$TMPF"
+  run bash -c "ISSUE=27; BOUCLE_ISSUE_BODY='Amend DESIGN.md'; BOUCLE_ISSUE_NOTES='[tahrir] The Bold Font .ttf is attached
+[up-bot] Where is DESIGN.md?
+[tahrir] DESIGN.md is at repo root'; source '$TMPF'; build_prompt triage"
+  assert_success
+  assert_output --partial "Prior discussion"
+  assert_output --partial "The Bold Font .ttf is attached"
+  assert_output --partial "DESIGN.md is at repo root"
+  rm -f "$TMPF"
+}
+
+@test "build_prompt: no prior-notes section when BOUCLE_ISSUE_NOTES is empty" {
+  TMPF=$(mktemp)
+  extract_func build_prompt "$TMPF"
+  run bash -c "ISSUE=27; BOUCLE_ISSUE_BODY='Amend DESIGN.md'; unset BOUCLE_ISSUE_NOTES; source '$TMPF'; build_prompt triage"
+  assert_success
+  refute_output --partial "Prior discussion"
+  rm -f "$TMPF"
+}
