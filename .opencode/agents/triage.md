@@ -54,30 +54,60 @@ If the issue touches none, write "Docs impact: none" in Analysis.
 
 ### Post-before-explore (recommended)
 
-**Posting a first-pass triage comment early (before deep exploration) is the safe default.** If you explore first and compose the comment last, you risk running out of steps or time before you ever call `glab issue note` — which causes the loop to escalate to a human and wastes your entire analysis.
+**Posting a first-pass triage draft early (before deep exploration) is the safe default.** If you explore first and compose the comment last, you risk running out of steps or time before you ever call `glab issue note` — which causes the loop to escalate to a human and wastes your entire analysis.
 
 **You MAY explore first** (up to ~10 tool calls) before posting when:
-- The issue body or prior discussion is ambiguous and a quick `ls`/`Read` of charter files would meaningfully sharpen your first-pass comment, AND
+- The issue body or prior discussion is ambiguous and a quick `ls`/`Read` of charter files would meaningfully sharpen your first-pass draft, AND
 - You are confident you can still post within your remaining step budget.
 
-If you explore first, keep exploration tight (prefer `ls`/`grep` over full `Read`, read at most 2-3 files fully) and post the moment you have enough to write a conservative first-pass comment. A posted conservative comment beats a perfect analysis that never ships. If your refined analysis changes the disposition, post your refined analysis as a new comment — the CI automatically replaces the earlier comment with your refined version, so only the final analysis remains on the issue.
+If you explore first, keep exploration tight (prefer `ls`/`grep` over full `Read`, read at most 2-3 files fully) and post the moment you have enough to write a conservative first-pass draft. A posted conservative draft beats a perfect analysis that never ships.
+
+### CRITICAL — draft vs final marker
+
+The CI parser acts **immediately** on any comment containing the `<!-- boucle:triage v=1 -->` marker. If you post a first-pass NEEDS-INFO draft with the marker, the CI will set `boucle:needs-info` and pause the loop before you have time to refine — your refinement is wasted (issue #35 on up/urgence-palestine.fr: reviewer posted UNCERTAIN first-pass with marker, CI escalated to human before refinement).
+
+- **First-pass draft** (post early): use `<!-- boucle:draft role=triage -->` as the marker. The CI does NOT parse this — it only looks for `boucle:triage`. Format:
+  ```
+  <!-- boucle:draft role=triage -->
+  DRAFT — first-pass triage, refining next.
+  ## Disposition
+  NEEDS-INFO
+  ```
+  Use a conservative disposition (NEEDS-INFO > NEEDS-SPLIT > READY) so the loop pauses safely if you exhaust your steps after the draft.
+- **Final triage comment** (post after refinement): use `<!-- boucle:triage v=1 -->` as the marker. The CI parses this and acts on the Disposition. Format:
+  ```
+  <!-- boucle:triage v=1 -->
+  ## TL;DR
+  <2-4 phrases>
+  ## Analysis
+  <analysis>
+  ## Draft acceptance criteria
+  - [ ] <criterion>
+  ## Classification
+  Size: S | M | L
+  ## Questions
+  1. <question>
+  ## Disposition
+  READY | NEEDS-INFO | NEEDS-SPLIT
+  ```
+- If you exhaust your steps after posting only a draft (no final comment), the CI log-scraping fallback will scrape your draft from stdout and post it on your behalf — it promotes `boucle:draft` to `boucle:triage` so the loop has a parsable disposition to act on.
 
 1. **Read the issue body** (provided in your prompt as `$BOUCLE_ISSUE_BODY` — do NOT call `glab issue view` or `gh issue view`; the body is already in your prompt). If image paths are listed in your prompt, `Read` each file. If no images are listed, proceed with text only.
 2. **Read the Prior discussion** (provided in your prompt as the "Prior discussion" block, when present). This is the chronological list of prior issue notes — it includes your own previous triage comments AND the author's answers. **If a prior triage comment asked a question and the author has since answered it, do NOT re-ask the same question.** Incorporate the answer into your analysis and move the disposition forward (NEEDS-INFO → READY or NEEDS-SPLIT). Re-asking answered questions is a triage defect — it wastes a loop cycle and frustrates the author. If the author has NOT yet answered a prior question, you may keep it in your Questions section, but do not duplicate questions that are already answered.
-3. **Post a triage comment** with `glab issue note <iid> --repo <project> --message "$(cat <<'EOF' ... EOF)"`. Use a conservative disposition if unsure (NEEDS-INFO > NEEDS-SPLIT > READY) so the loop pauses safely. If you explored first (per the guideline above), post now — do not explore further.
-4. You may use tool calls to inspect the repo (`ls`, `grep`, `Read`) for a more accurate size classification or sharper criteria. Prefer `ls` and `grep` over full `Read` of large files. Do NOT read more than 2-3 files fully. **Before asking the author about design/intent, `Read` the charter files at the repo root (DESIGN.md, AGENTS.md, README.md) — they usually answer design questions.** Keep exploration tight and post the moment you have enough for a conservative first-pass comment.
-5. If your refined analysis changes the disposition or criteria, post your refined analysis as a new comment. The CI automatically collapses duplicate triage comments from the same run, replacing the earlier comment with your refined version — so only the final analysis remains visible.
+3. **Post a triage draft** with `glab issue note <iid> --repo <project> --message "$(cat <<'EOF' ... EOF)"`. Use the `<!-- boucle:draft role=triage -->` marker (NOT `boucle:triage`). Use a conservative disposition if unsure (NEEDS-INFO > NEEDS-SPLIT > READY) so the loop pauses safely. If you explored first (per the guideline above), post now — do not explore further.
+4. You may use tool calls to inspect the repo (`ls`, `grep`, `Read`) for a more accurate size classification or sharper criteria. Prefer `ls` and `grep` over full `Read` of large files. Do NOT read more than 2-3 files fully. **Before asking the author about design/intent, `Read` the charter files at the repo root (DESIGN.md, AGENTS.md, README.md) — they usually answer design questions.** Keep exploration tight and post the moment you have enough for a conservative first-pass draft.
+5. **Post your final triage comment** with the `<!-- boucle:triage v=1 -->` marker. If your refined analysis changes the disposition or criteria, the CI automatically collapses duplicate triage comments from the same run, replacing the earlier draft with your final version — so only the final analysis remains visible.
 6. Understand what the issue is actually asking for — restate it in your own words (in the Analysis section).
 7. Draft acceptance criteria that are **verifiable by a machine or by looking at the rendered page**.
 8. Classify the size: S (one file/component), M (a few files), L (needs splitting).
 9. Identify any **blocking questions** — things you need the author to clarify before work can start. **Cross-check each question against the Prior discussion and the charter files: if it is already answered there, it is NOT a blocking question — record the answer in Analysis instead.**
 10. If the issue is too large (size L) AND you have no blocking questions, flag it for splitting.
 
-**Never spend your whole budget exploring before posting. If you explore first, keep it tight and post the moment you have enough for a conservative first-pass comment.**
+**Never spend your whole budget exploring before posting. If you explore first, keep it tight and post the moment you have enough for a conservative first-pass draft.**
 
 ## Output format
 
-Post EXACTLY ONE comment on the issue with this format:
+Post your **final triage comment** on the issue with this format:
 
 ```
 <!-- boucle:triage v=1 -->
@@ -102,6 +132,8 @@ If no blocking questions, write "none" on its own line.
 ## Disposition
 READY | NEEDS-INFO | NEEDS-SPLIT
 ```
+
+You may also post a **first-pass draft** (with the `<!-- boucle:draft role=triage -->` marker — see "Instructions" above) before the final comment. The CI collapses duplicate triage comments from the same run, so the draft is replaced by the final comment.
 
 ## Rules
 
