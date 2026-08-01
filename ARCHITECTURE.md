@@ -1,32 +1,32 @@
-# ARCHITECTURE.md — Architecture de boucle
+# ARCHITECTURE.md — Boucle Architecture
 
-> **Maintenance** — Ce document est la référence architecturale de boucle.
-> Toute modification du code, du pipeline CI, ou des agents doit mettre à jour
-> ce document en conséquence. Voir [AGENTS.md](AGENTS.md) pour les conventions
-> de contribution.
-
----
-
-## 1. Vue d'ensemble
-
-Boucle est une boucle de développement autonome : un issue GitLab déclenche un pipeline CI qui orchestre 4 agents IA (triage, worker, reviewer, e2e) pour analyser, implémenter, revoir, fusionner et déployer sur Cloudflare Pages. La machine à états est pilotée par labels GitLab (`boucle:*`).
-
-**Principe fondamental** — la boucle est pilotée par **labels GitLab**, pas par un orchestrateur central. Chaque transition d'état est un job CI qui observe les labels, agit, puis ré-applique un nouveau label. Cela rend le système résilient aux pannes (un job échoué est simplement relancé), distribué (n'importe quel runner peut reprendre) et auditable (chaque transition est visible dans le timeline de l'issue).
-
-**Garde-fous humains** — boucle n'agit jamais seule pour deux décisions :
-1. **Validation du cahier des charges** (`boucle:spec-review`) — l'auteur de l'issue doit confirmer que la spec produite par le triage correspond à son besoin.
-2. **Approbation de la Merge Request** (`boucle:approval`) — un humain doit cliquer "Merge" sur la MR.
-
-Tout le reste — triage, implémentation, revue, déploiement, vérifications e2e — est automatique.
+> **Maintenance** — This document is the architectural reference for boucle.
+> Any change to the code, the CI pipeline, or the agents MUST update this
+> document accordingly. See [AGENTS.md](AGENTS.md) for contribution
+> conventions.
 
 ---
 
-## 2. Architecture générale
+## 1. Overview
+
+Boucle is an autonomous development loop: a GitLab issue triggers a CI pipeline that orchestrates 4 AI agents (triage, worker, reviewer, e2e) to analyze, implement, review, merge, and deploy on Cloudflare Pages. The state machine is driven by GitLab labels (`boucle:*`).
+
+**Core principle** — the loop is driven by **GitLab labels**, not by a central orchestrator. Every state transition is a CI job that observes the labels, acts, and re-applies a new label. This makes the system resilient to failures (a failed job is simply re-run), distributed (any runner can resume), and auditable (every transition is visible in the issue timeline).
+
+**Human guardrails** — boucle never acts alone for two decisions:
+1. **Specification validation** (`boucle:spec-review`) — the issue author MUST confirm that the spec produced by triage matches their need.
+2. **Merge Request approval** (`boucle:approval`) — a human MUST click "Merge" on the MR.
+
+Everything else — triage, implementation, review, deployment, e2e checks — is automatic.
+
+---
+
+## 2. General architecture
 
 ```mermaid
 flowchart LR
     subgraph Forge["GitLab (framagit.org)"]
-        Issues[Issues + labels boucle:*]
+        Issues[Issues + boucle:* labels]
         MRs[Merge Requests]
         Labels[Labels boucle:*]
         Webhook[Webhook]
@@ -64,12 +64,12 @@ flowchart LR
     Pi[.pi/ — pi coding agent]
 
     subgraph Deploy["Cloudflare Pages"]
-        Preview[Preview URL<br/>sous-domaine.pages.dev]
+        Preview[Preview URL<br/>subdomain.pages.dev]
         Prod[Production URL]
     end
 
     subgraph Memory["codebase-memory-mcp"]
-        KG[Knowledge Graph<br/>AST + sémantique]
+        KG[Knowledge Graph<br/>AST + semantics]
     end
 
     Issues -->|webhook| Webhook
@@ -90,7 +90,7 @@ flowchart LR
 
     Pipeline --> Oc
     Pipeline --> Update
-    Setup -.->|jour 0| Pipeline
+    Setup -.->|day 0| Pipeline
     Doctor -.->|scheduled| Pipeline
     Fetch -.-> Work
     Render -.-> Work
@@ -109,13 +109,13 @@ flowchart LR
 
 ---
 
-## 3. Pipeline CI
+## 3. CI Pipeline
 
-Le pipeline CI est composé de **8 stages** qui s'enchaînent via déclencheurs GitLab (webhook, trigger API, schedule). Chaque stage est idempotent : un job ré-exécuté après échec reprend l'état courant des labels sans corrompre la machine à états.
+The CI pipeline is composed of **8 stages** that chain through GitLab triggers (webhook, trigger API, schedule). Every stage is idempotent: a job re-run after a failure resumes the current label state without corrupting the state machine.
 
 ```mermaid
 flowchart TD
-    Start([Webhook GitLab<br/>issue.label.updated]) --> Check[check<br/>shellcheck + shfmt + bats]
+    Start([GitLab Webhook<br/>issue.label.updated]) --> Check[check<br/>shellcheck + shfmt + bats]
     Check --> Dispatch[dispatch<br/>webhook entry point]
 
     Dispatch -->|bin/update first| UpdateJob[Auto-update<br/>tarball + SYNC_PATHS]
@@ -127,38 +127,38 @@ flowchart TD
     Triage --> Disposition{Disposition?}
     Disposition -->|READY + Size L| Human[boucle:human<br/>terminal]
     Disposition -->|NEEDS-INFO| NeedsInfo[boucle:needs-info<br/>pause]
-    Disposition -->|NEEDS-SPLIT| Split[boucle:split<br/>créer sous-issues]
+    Disposition -->|NEEDS-SPLIT| Split[boucle:split<br/>create sub-issues]
     Disposition -->|READY + Size M| SpecGate[Spec gate<br/>product profile]
     Disposition -->|READY + Size S| Work
 
-    SpecGate -->|user valide| SpecDone[boucle:todo]
-    SpecGate -->|user rejette| SpecReject[boucle:needs-info]
+    SpecGate -->|user validates| SpecDone[boucle:todo]
+    SpecGate -->|user rejects| SpecReject[boucle:needs-info]
     SpecDone --> Work
     SpecReject --> NeedsInfo
 
-    NeedsInfo -->|user répond| Triage
-    Split -->|sous-issues fermés| Triage
+    NeedsInfo -->|user replies| Triage
+    Split -->|sub-issues closed| Triage
 
-    Work --> PRWorker[bin/oc worker<br/>branche + build + preview + MR]
+    Work --> PRWorker[bin/oc worker<br/>branch + build + preview + MR]
     PRWorker --> MRState{MR state?}
 
     MRState -->|MR opened| Review
-    MRState -->|push sur MR| Review
+    MRState -->|push to MR| Review
 
     Review --> Verdict{Verdict?}
-    Verdict -->|PASS| Approval[boucle:approval<br/>pause utilisateur]
+    Verdict -->|PASS| Approval[boucle:approval<br/>user pause]
     Verdict -->|FAIL + iter&lt;MAX| Retry[boucle:todo<br/>retry]
     Verdict -->|FAIL + iter≥MAX| Human
     Verdict -->|UNCERTAIN| Human
 
-    Approval -->|user approuve| Merger{Trigger?}
+    Approval -->|user approves| Merger{Trigger?}
     Merger -->|rebase+merge| MergeJob[merge<br/>merger]
     Merger -->|direct| CatchupJob[merge<br/>catchup]
 
     MergeJob --> Deploy[deploy<br/>build + wrangler deploy]
     CatchupJob --> Deploy
 
-    Deploy --> E2eJob[verify<br/>bin/oc e2e sur prod]
+    Deploy --> E2eJob[verify<br/>bin/oc e2e on prod]
     E2eJob --> E2eVerdict{E2E?}
     E2eVerdict -->|PASS| Done[boucle:done<br/>terminal]
     E2eVerdict -->|FAIL + iter&lt;MAX| Retry
@@ -170,19 +170,19 @@ flowchart TD
     DoctorSched -.->|re-trigger stuck| Review
 ```
 
-**Notes sur le pipeline**
-- `check` est exécuté sur les branches et les tags — c'est un quality gate (shellcheck, shfmt, bats) qui ne dépend pas de l'état de boucle.
-- `dispatch` est le **seul** point d'entrée webhook. Il applique systématiquement `bin/update` en premier pour rester à jour.
-- `merge` a deux sous-flows : **merger** (rebase interactif + merge après approbation) et **catchup** (merge direct quand la MR est déjà approved mais le pipeline merge a échoué).
-- `doctor` est **schedulé** (cron `*/10 min`) et **observe** les issues bloquées (seuil `BOUCLE_STALENESS_THRESHOLD`) pour les re-déclencher.
+**Pipeline notes**
+- `check` runs on branches and tags — it is a quality gate (shellcheck, shfmt, bats) that does not depend on boucle state.
+- `dispatch` is the **only** webhook entry point. It ALWAYS runs `bin/update` first to stay up to date.
+- `merge` has two sub-flows: **merger** (interactive rebase + merge after approval) and **catchup** (direct merge when the MR is already approved but the merge pipeline has failed).
+- `doctor` is **scheduled** (cron `*/10 min`) and **observes** stuck issues (threshold `BOUCLE_STALENESS_THRESHOLD`) to re-trigger them.
 
 ---
 
-## 4. Machine à états des labels
+## 4. Label state machine
 
 ```mermaid
 stateDiagram-v2
-    [*] --> triage : issue ouverte<br/>webhook issue.label
+    [*] --> triage : issue opened<br/>webhook issue.label
 
     triage --> needs_info : triage verdict NEEDS-INFO
     triage --> spec_review : READY + Size M
@@ -190,27 +190,27 @@ stateDiagram-v2
     triage --> human : READY + Size L
     triage --> split : NEEDS-SPLIT
 
-    needs_info --> triage : auteur répond<br/>(commentaire)
+    needs_info --> triage : author replies<br/>(comment)
 
-    split --> triage : tous sous-issues fermés
+    split --> triage : all sub-issues closed
 
-    spec_review --> todo : auteur valide spec
-    spec_review --> needs_info : auteur rejette spec
+    spec_review --> todo : author validates spec
+    spec_review --> needs_info : author rejects spec
 
-    todo --> working : worker démarre<br/>(trigger pipeline)
-    working --> review : MR ouverte / push
-    working --> human : échec technique<br/>non-récupérable
+    todo --> working : worker starts<br/>(trigger pipeline)
+    working --> review : MR opened / push
+    working --> human : technical failure<br/>non-recoverable
 
     review --> approval : reviewer PASS
     review --> todo : reviewer FAIL<br/>iter < BOUCLE_MAX_ITERATIONS
     review --> human : reviewer FAIL<br/>iter ≥ MAX
     review --> human : reviewer UNCERTAIN
 
-    approval --> merging : auteur approuve MR
-    approval --> working : auteur demande changes
+    approval --> merging : author approves MR
+    approval --> working : author requests changes
 
-    merging --> deploy : merge commit créé
-    deploy --> verify : déploiement CF Pages OK
+    merging --> deploy : merge commit created
+    deploy --> verify : CF Pages deployment OK
 
     verify --> done : e2e PASS
     verify --> todo : e2e FAIL + iter < MAX
@@ -222,29 +222,29 @@ stateDiagram-v2
 ```
 
 **Conventions**
-- Les labels sont **toujours** au singulier dans la machine à états et au pluriel dans les commentaires (lisibilité).
-- Un issue **ne doit jamais** avoir deux labels `boucle:*` actifs simultanément (le runner applique `replace_labels`).
-- Les transitions vers `human` ou `done` sont **terminales** : aucun agent ne retire ces labels.
-- Une ré-ouverture d'issue (reopen) remet l'état à `triage` après nettoyage des autres labels `boucle:*`.
+- Labels are **always** singular in the state machine and plural in comments (readability).
+- An issue **MUST NEVER** have two `boucle:*` labels active at the same time (the runner uses `replace_labels`).
+- Transitions to `human` or `done` are **terminal**: no agent removes these labels.
+- Reopening an issue resets the state to `triage` after cleaning up the other `boucle:*` labels.
 
 ---
 
-## 5. Architecture des agents
+## 5. Agent architecture
 
-### Tableau des agents
+### Agent table
 
-| Agent | Modèle | Steps | Rôle |
+| Agent | Model | Steps | Role |
 | --- | --- | --- | --- |
-| **triage** | `ollama-cloud/minimax-m3` | 200 | Analyse l'issue, poste un commentaire structuré (TL;DR + Analyse + Critères d'acceptation + Classification S/M/L + Questions + Disposition `READY`/`NEEDS-INFO`/`NEEDS-SPLIT`) |
-| **worker** | `ollama-cloud/minimax-m3` | 50 | Implémente sur une branche `boucle/<iid>`, build, déploie la preview Cloudflare, crée la MR |
-| **reviewer** | `ollama-cloud/glm-5.2` | 35 | Revue adversaire contre URL preview, verdict `PASS`/`FAIL`/`UNCERTAIN` ancré par SHA de commit |
-| **e2e** | `ollama-cloud/kimi-k2.7-code` | 20 | Vérifie sur URL de production, verdict `PASS`/`FAIL`/`UNCERTAIN` |
+| **triage** | `ollama-cloud/minimax-m3` | 200 | Analyzes the issue, posts a structured comment (TL;DR + Analysis + Acceptance criteria + Classification S/M/L + Questions + Disposition `READY`/`NEEDS-INFO`/`NEEDS-SPLIT`) |
+| **worker** | `ollama-cloud/minimax-m3` | 50 | Implements on a `boucle/<iid>` branch, builds, deploys the Cloudflare preview, creates the MR |
+| **reviewer** | `ollama-cloud/glm-5.2` | 35 | Adversarial review against the preview URL, verdict `PASS`/`FAIL`/`UNCERTAIN` anchored by commit SHA |
+| **e2e** | `ollama-cloud/kimi-k2.7-code` | 20 | Verifies on the production URL, verdict `PASS`/`FAIL`/`UNCERTAIN` |
 
-### Séquence d'interaction
+### Interaction sequence
 
 ```mermaid
 sequenceDiagram
-    participant U as Auteur (humain)
+    participant U as Author (human)
     participant G as GitLab (issue + MR)
     participant CI as CI Pipeline
     participant T as triage
@@ -253,220 +253,219 @@ sequenceDiagram
     participant CF as Cloudflare Pages
     participant E as e2e
 
-    U->>G: Ouvre issue
+    U->>G: Open issue
     G->>CI: webhook (boucle:triage)
     CI->>T: bin/oc triage
-    T->>G: commentaire structuré + boucle:todo
+    T->>G: structured comment + boucle:todo
 
-    Note over U,G: spec-review si Size M<br/>validation humaine
+    Note over U,G: spec-review if Size M<br/>human validation
 
     CI->>W: bin/oc worker (trigger)
-    W->>G: branche boucle/<iid> + commits
+    W->>G: boucle/<iid> branch + commits
     W->>CF: wrangler pages deploy (preview)
-    CF-->>W: URL preview
-    W->>G: MR ouverte → boucle:review
+    CF-->>W: preview URL
+    W->>G: MR opened → boucle:review
 
     CI->>R: bin/oc reviewer
-    R->>CF: GET preview URL (par SHA)
+    R->>CF: GET preview URL (by SHA)
     CF-->>R: HTML + assets
-    R->>G: commentaire + verdict
+    R->>G: comment + verdict
 
     alt verdict PASS
         R->>G: boucle:approval
-        U->>G: approuve MR
+        U->>G: approve MR
         G->>CI: MR merge event
         CI->>CF: deploy production
-        CF-->>CI: URL prod
+        CF-->>CI: prod URL
         CI->>E: bin/oc e2e
-        E->>CF: navigue + screenshots
+        E->>CF: navigate + screenshots
         E->>G: verdict
         alt e2e PASS
             E->>G: boucle:done
         else e2e FAIL
-            E->>G: boucle:todo (retry) ou boucle:human
+            E->>G: boucle:todo (retry) or boucle:human
         end
     else verdict FAIL
-        R->>G: boucle:todo (retry si iter<MAX)
+        R->>G: boucle:todo (retry if iter<MAX)
     else verdict UNCERTAIN
         R->>G: boucle:human
     end
 ```
 
-**Notes sur les agents**
-- Chaque agent est défini dans `.opencode/agents/<role>.md` et invoqué via `bin/oc <role>`.
-- Le **harness** (`bin/oc`) wrappe `opencode run`, applique le mapping de modèle, gère le retry (3x backoff exponentiel), capture les logs et applique un **empty-output guard** (sortie vide → exit 3 → retry).
-- Le **reviewer** et **e2e** sont **adversariaux** : ils doivent chercher activement des défauts, pas valider.
-- Le **triage** ne doit **jamais** modifier le code — il produit uniquement un commentaire structuré sur l'issue.
+**Agent notes**
+- Each agent is defined in `.opencode/agents/<role>.md` and invoked via `bin/oc <role>`.
+- The **harness** (`bin/oc`) wraps `opencode run`, applies the model mapping, handles retry (3x exponential backoff), captures logs, and applies an **empty-output guard** (empty output → exit 3 → retry).
+- The **reviewer** and **e2e** are **adversarial**: they MUST actively look for defects, not validate.
+- The **triage** agent **MUST NEVER** modify code — it only produces a structured comment on the issue.
 
 ---
 
-## 6. Scripts bin/
+## 6. bin/ scripts
 
-| Script | Rôle |
+| Script | Role |
 | --- | --- |
-| `bin/oc` | Harness entrypoint : wrap `opencode run`, role mapping (triage→m3, worker→m3, reviewer→glm-5.2, e2e→kimi-k2.7), retry 3x avec backoff exponentiel, **empty-output guard** (sortie vide → exit 3 → retry), capture des logs vers `.boucle/<issue>/`, métriques Prometheus, timeout configurable |
-| `bin/setup` | Setup infrastructure jour 0 (**idempotent**) : crée le runner tag, les variables CI, les labels `boucle:*`, le board, la branche protégée `main`, ajoute le bot comme member, génère le trigger token, configure le webhook, crée le projet Cloudflare Pages |
-| `bin/update` | Auto-update depuis upstream : fetch latest tag/commit, tarball download, extraction des `SYNC_PATHS`, **fail-open** (toute erreur → warning + exit 0), tracking via `.boucle-version`, modes `release` (latest tag) ou `dev` (latest commit on main), anti-feedback-loop guard (skip sur `push-source`) |
-| `bin/doctor` | Vérification jour 0 et diagnostique : ~20 checks (labels présents, CI variables, branch protection, runner disponible, agents résolvables, CF Pages joignable, version `.boucle-version` à jour) |
-| `bin/fetch-issue-attachments` | Télécharge les pièces jointes d'une issue vers `.boucle/<issue>/attachments/` avec quotas `BOUCLE_IMAGE_MAX_BYTES` et `BOUCLE_IMAGE_TOTAL_MAX_BYTES` |
-| `bin/render-preview.cjs` | Render `preview.html` → `preview.png` via `@sparticuz/chromium` + `puppeteer-core` (Layer de preview visuelle attaché aux MRs) |
-| `bin/collapse-duplicate-notes` | Collapser les commentaires dupliqués : si un agent poste v2, le CI remplace le premier (Note ID stable) |
+| `bin/oc` | Harness entrypoint: wraps `opencode run`, role mapping (triage→m3, worker→m3, reviewer→glm-5.2, e2e→kimi-k2.7), 3x retry with exponential backoff, **empty-output guard** (empty output → exit 3 → retry), log capture to `.boucle/<issue>/`, Prometheus metrics, configurable timeout |
+| `bin/setup` | Day-0 infrastructure setup (**idempotent**): creates the runner tag, CI variables, `boucle:*` labels, the board, the protected `main` branch, adds the bot as a member, generates the trigger token, configures the webhook, creates the Cloudflare Pages project |
+| `bin/update` | Auto-update from upstream: fetch latest tag/commit, tarball download, extraction of `SYNC_PATHS`, **fail-open** (any error → warning + exit 0), tracking via `.boucle-version`, modes `release` (latest tag) or `dev` (latest commit on main), anti-feedback-loop guard (skip on `push-source`) |
+| `bin/doctor` | Day-0 verification and diagnostics: ~20 checks (labels present, CI variables, branch protection, runner available, agents resolvable, CF Pages reachable, `.boucle-version` up to date) |
+| `bin/fetch-issue-attachments` | Downloads issue attachments to `.boucle/<issue>/attachments/` with quotas `BOUCLE_IMAGE_MAX_BYTES` and `BOUCLE_IMAGE_TOTAL_MAX_BYTES` |
+| `bin/render-preview.cjs` | Renders `preview.html` → `preview.png` via `@sparticuz/chromium` + `puppeteer-core` (visual preview layer attached to MRs) |
+| `bin/collapse-duplicate-notes` | Collapses duplicate comments: if an agent posts v2, CI replaces the first one (stable Note ID) |
 
 ---
 
-## 7. Mécanisme d'auto-update
+## 7. Auto-update mechanism
 
-Boucle s'auto-met à jour depuis son propre upstream. Cela permet aux consommateurs de bénéficier des correctifs sans intervention manuelle.
+Boucle self-updates from its own upstream. This lets consumers receive fixes without manual intervention.
 
 **Configuration**
-- `SYNC_PATHS` (constante dans `bin/update`) :
+- `SYNC_PATHS` (constant in `bin/update`):
   - `bin`
   - `.pi`
   - `.gitlab-ci.yml`
   - `.opencode/opencode.json`
   - `.opencode/agents`
-- `.boucle-version` (fichier à la racine du consommateur) : SHA court du dernier sync.
+- `.boucle-version` (file at the consumer root): short SHA of the last sync.
 
 **Modes**
-- `release` (défaut) : télécharge le dernier **tag** GitHub/GitLab. Stable, sans surprise.
-- `dev` : télécharge le dernier **commit sur main**. Pour testeurs, peut casser.
+- `release` (default): downloads the latest **tag** from GitHub/GitLab. Stable, no surprises.
+- `dev`: downloads the latest **commit on main**. For testers, may break.
 
-**Garde-fous**
-- **Fail-open** : toute erreur réseau, HTTP, ou d'extraction est convertie en warning + exit 0. Le pipeline continue avec l'ancienne version. Une boucle qui ne se met plus à jour est moins grave qu'une boucle qui plante les déploiements.
-- **Anti-feedback-loop** : sur les pipelines où la source du push est le job `update` lui-même (`$CI_PIPELINE_SOURCE == "push"`), `bin/update` est skippé. Sinon, le push de `.boucle-version` redéclencherait immédiatement un autre update.
-- **Premier run** : si `.boucle-version` n'existe pas, `bin/update` le crée avec le SHA actuel, commit, et push. Cela évite qu'un consommateur neuf déclenche un diff parasite au premier pipeline.
+**Guardrails**
+- **Fail-open**: any network, HTTP, or extraction error is converted to a warning + exit 0. The pipeline continues with the previous version. A loop that stops updating itself is less harmful than a loop that breaks deployments.
+- **Anti-feedback-loop**: on pipelines where the push source is the `update` job itself (`$CI_PIPELINE_SOURCE == "push"`), `bin/update` is skipped. Otherwise, the push of `.boucle-version` would immediately re-trigger another update.
+- **First run**: if `.boucle-version` does not exist, `bin/update` creates it with the current SHA, commits, and pushes. This prevents a fresh consumer from triggering a spurious diff on its first pipeline.
 
 **Workflow**
-1. `dispatch` démarre → `bin/update` s'exécute en premier.
-2. Compare le tag/commit upstream avec `.boucle-version` local.
-3. Si différent, télécharge le tarball, extrait `SYNC_PATHS`, écrit `.boucle-version`, commit, push.
-4. Le push déclenche un nouveau `dispatch` (mais skip update grâce au feedback-loop guard).
+1. `dispatch` starts → `bin/update` runs first.
+2. Compares the upstream tag/commit with the local `.boucle-version`.
+3. If different, downloads the tarball, extracts `SYNC_PATHS`, writes `.boucle-version`, commits, pushes.
+4. The push triggers a new `dispatch` (but update is skipped thanks to the feedback-loop guard).
 
 ---
 
-## 8. Points d'extension
+## 8. Extension points
 
-Boucle expose **5 seams** (coutures) — des points d'extension documentés et stables. Pour étendre boucle, vous modifiez l'un de ces seams :
+Boucle exposes **5 seams** — documented, stable extension points. To extend boucle, modify one of these seams:
 
-### 1. Machine à états (labels)
-Le contrat est : **un label `boucle:<state>` par issue, exactement un**. Pour ajouter un état, il faut :
-1. Ajouter le label via `bin/setup` (idempotent — tolérance aux doublons).
-2. Ajouter la transition dans le YAML CI (un job supplémentaire ou une branche dans un job existant).
-3. Documenter la transition dans ce fichier (section 4).
+### 1. State machine (labels)
+The contract is: **one `boucle:<state>` label per issue, exactly one**. To add a state:
+1. Add the label via `bin/setup` (idempotent — tolerates duplicates).
+2. Add the transition in the CI YAML (an extra job or a branch in an existing job).
+3. Document the transition in this file (section 4).
 
-### 2. Rôles des agents
-Chaque agent est un fichier `.opencode/agents/<role>.md` invoqué par `bin/oc <role>`. Pour ajouter un rôle (ex. `security-reviewer`) :
-1. Créer `.opencode/agents/security-reviewer.md` avec frontmatter `{model, steps}`.
-2. Ajouter le mapping modèle dans `bin/oc`.
-3. Ajouter un stage CI qui l'invoque après un label déclencheur.
+### 2. Agent roles
+Each agent is a `.opencode/agents/<role>.md` file invoked by `bin/oc <role>`. To add a role (e.g. `security-reviewer`):
+1. Create `.opencode/agents/security-reviewer.md` with frontmatter `{model, steps}`.
+2. Add the model mapping in `bin/oc`.
+3. Add a CI stage that invokes it after a trigger label.
 
 ### 3. Harness (bin/oc)
-Le harness est volontairement mince : il wrap `opencode run`. Pour ajouter une fonctionnalité (ex. cache de modèles, télémétrie custom), patcher `bin/oc` en gardant l'API stable : `bin/oc <role> <issue-iid>`.
+The harness is intentionally thin: it wraps `opencode run`. To add a feature (e.g. model cache, custom telemetry), patch `bin/oc` while keeping the API stable: `bin/oc <role> <issue-iid>`.
 
 ### 4. Forge (GitLab API)
-Tous les appels GitLab passent par `glab` (CLI officiel). Pour supporter une autre forge (GitHub, Gitea), remplacer l'implémentation derrière les helpers dans `bin/oc` sans toucher aux agents.
+All GitLab calls go through `glab` (official CLI). To support another forge (GitHub, Gitea), replace the implementation behind the helpers in `bin/oc` without touching the agents.
 
 ### 5. Work state (.boucle/<issue>/state.md)
-Chaque issue a un fichier d'état dans `.boucle/<issue>/state.md`, **seedé depuis le triage**. Les agents y lisent/écrivent leur progression, leurs hypothèses, leurs découvertes. Pour ajouter un champ (ex. `## Stratégie de tests`), documenter le schéma dans ce fichier (section 5) et mettre à jour le prompt du triage.
+Each issue has a state file at `.boucle/<issue>/state.md`, **seeded from triage**. Agents read/write their progress, assumptions, and discoveries there. To add a field (e.g. `## Testing strategy`), document the schema in this file (section 5) and update the triage prompt.
 
 ---
 
-## 9. Variables CI
+## 9. CI variables
 
-Toutes les variables de configuration de boucle sont préfixées `BOUCLE_`. Aucune autre variable ne doit être lue par `bin/oc`.
+All boucle configuration variables are prefixed with `BOUCLE_`. No other variable MUST be read by `bin/oc`.
 
-| Variable | Description | Défaut |
+| Variable | Description | Default |
 | --- | --- | --- |
-| `BOUCLE_ENABLED` | Active/désactive la boucle entière. Mettre `false` pour geler le pipeline sans désactiver le projet. | **requis**, `true` recommandé |
-| `BOUCLE_TOKEN` | Personal Access Token du bot (issues, MRs, comments). | masked+protected, **requis** |
-| `BOUCLE_TRIGGER_TOKEN` | Token de trigger pipeline pour les jobs enfants. | masked+protected, **requis** |
-| `BOUCLE_FORGE_HOST` | Hôte GitLab. | `framagit.org` |
-| `BOUCLE_BUILD_CMD` | Commande de build. | `npm ci && npm run build` |
-| `BOUCLE_BUILD_OUTPUT` | Dossier de sortie produit par `BUILD_CMD`. | `public` |
-| `BOUCLE_DEPLOY_CMD` | Commande de déploiement wrangler, doit contenir `$$BRANCH` (échappé pour YAML CI). | template |
-| `BOUCLE_DEPLOY_PROJECT` | Nom du projet Cloudflare Pages. | — |
-| `BOUCLE_DEPLOY_URL_REGEX` | Regex pour extraire l'URL preview du stdout de wrangler. | `https://[a-z0-9.-]+\.pages\.dev` |
-| `BOUCLE_PRODUCTION_URL` | URL de production (fallback pour e2e). | — |
-| `BOUCLE_IMAGE_MAX_BYTES` | Taille max par pièce jointe. | `10485760` (10 MiB) |
-| `BOUCLE_IMAGE_TOTAL_MAX_BYTES` | Taille max totale des pièces jointes d'une issue. | `52428800` (50 MiB) |
-| `BOUCLE_MAX_PARALLEL_ISSUES` | Cap de concurrence (issues traités en parallèle). | `0` (illimité) |
-| `BOUCLE_MAX_ITERATIONS` | Nombre max de re-runs worker (puis escalade `boucle:human`). | `3` |
-| `BOUCLE_STALENESS_THRESHOLD` | Seuil en secondes avant qu'une issue soit considérée bloquée par `doctor`. | `300` |
-| `BOUCLE_PREVIEW_DISABLE` | Désactive la génération de la preview PNG (`bin/render-preview`). | `false` |
-| `BOUCLE_SPEC_PROFILE` | Profil du spec gate (détermine quand la validation humaine est requise). | `product` (gate pour Size M) |
-| `BOUCLE_UPDATE_MODE` | Mode d'auto-update depuis upstream. | `release` |
-| `BOUCLE_BOT_ID` | ID GitLab du compte bot (pour distinguer les commentaires bot des humains). | — |
-| `BOUCLE_RUNNER_TAG` | Tag du runner GitLab qui exécute les jobs boucle. | — |
-| `PI_AUTH` | Authentification pour l'agent pi (coding agent secondaire). | file-type → `auth.json` |
+| `BOUCLE_ENABLED` | Enables or disables the entire loop. Set to `false` to freeze the pipeline without disabling the project. | **required**, `true` recommended |
+| `BOUCLE_TOKEN` | Bot personal access token (issues, MRs, comments). | masked+protected, **required** |
+| `BOUCLE_TRIGGER_TOKEN` | Pipeline trigger token for child jobs. | masked+protected, **required** |
+| `BOUCLE_FORGE_HOST` | GitLab host. | `framagit.org` |
+| `BOUCLE_BUILD_CMD` | Build command. | `npm ci && npm run build` |
+| `BOUCLE_BUILD_OUTPUT` | Output directory produced by `BUILD_CMD`. | `public` |
+| `BOUCLE_DEPLOY_CMD` | wrangler deploy command, MUST contain `$$BRANCH` (escaped for CI YAML). | template |
+| `BOUCLE_DEPLOY_PROJECT` | Cloudflare Pages project name. | — |
+| `BOUCLE_DEPLOY_URL_REGEX` | Regex to extract the preview URL from wrangler stdout. | `https://[a-z0-9.-]+\.pages\.dev` |
+| `BOUCLE_PRODUCTION_URL` | Production URL (fallback for e2e). | — |
+| `BOUCLE_IMAGE_MAX_BYTES` | Max size per attachment. | `10485760` (10 MiB) |
+| `BOUCLE_IMAGE_TOTAL_MAX_BYTES` | Max total size of an issue's attachments. | `52428800` (50 MiB) |
+| `BOUCLE_MAX_PARALLEL_ISSUES` | Concurrency cap (issues processed in parallel). | `0` (unlimited) |
+| `BOUCLE_MAX_ITERATIONS` | Max number of worker re-runs (then escalate to `boucle:human`). | `3` |
+| `BOUCLE_STALENESS_THRESHOLD` | Threshold in seconds before an issue is considered stuck by `doctor`. | `300` |
+| `BOUCLE_PREVIEW_DISABLE` | Disables PNG preview generation (`bin/render-preview`). | `false` |
+| `BOUCLE_SPEC_PROFILE` | Spec gate profile (determines when human validation is required). | `product` (gate for Size M) |
+| `BOUCLE_UPDATE_MODE` | Auto-update mode from upstream. | `release` |
+| `BOUCLE_BOT_ID` | GitLab ID of the bot account (to distinguish bot comments from human ones). | — |
+| `BOUCLE_RUNNER_TAG` | Tag of the GitLab runner that executes boucle jobs. | — |
+| `PI_AUTH` | Authentication for the pi agent (secondary coding agent). | file-type → `auth.json` |
 
-**Notes sur les variables**
-- `BOUCLE_TOKEN` et `BOUCLE_TRIGGER_TOKEN` doivent **toujours** être en `masked+protected`. Aucun job boucle ne doit jamais logger leur valeur.
-- `BOUCLE_DEPLOY_CMD` doit **toujours** contenir `$$BRANCH` (le double `$` est l'échappement YAML CI GitLab).
-- `BOUCLE_MAX_ITERATIONS` à `0` signifie **pas de retry** (premier échec → humain).
-- `BOUCLE_STALENESS_THRESHOLD` doit être **strictement supérieur** au timeout du job le plus long (~120s pour le worker).
+**Variable notes**
+- `BOUCLE_TOKEN` and `BOUCLE_TRIGGER_TOKEN` MUST **always** be `masked+protected`. No boucle job MUST ever log their value.
+- `BOUCLE_DEPLOY_CMD` MUST **always** contain `$$BRANCH` (the double `$` is the GitLab CI YAML escape).
+- `BOUCLE_MAX_ITERATIONS` set to `0` means **no retry** (first failure → human).
+- `BOUCLE_STALENESS_THRESHOLD` MUST be **strictly greater** than the longest job timeout (~120s for the worker).
 
 ---
 
-## 10. Auto-maintenance de la documentation
+## 10. Documentation self-maintenance
 
-Boucle s'auto-maintenir de sa propre documentation dans le cadre de sa boucle
-autonome. La documentation est du **code** : un document qui dérive du
-système qu'il décrit est un bug. Les 4 agents partagent la responsabilité de
-garder les documents charter (`ARCHITECTURE.md`, `AGENTS.md`, `CONTEXT.md`,
-`DESIGN.md`, `LOOP.md`) en synchro avec la réalité. `README.md` est exclu —
-il est destiné aux lecteurs humains, pas aux agents.
+Boucle self-maintains its own documentation as part of its autonomous loop.
+Documentation is **code**: a document that drifts from the system it describes
+is a bug. The 4 agents share the responsibility of keeping the charter
+documents (`ARCHITECTURE.md`, `AGENTS.md`, `CONTEXT.md`, `DESIGN.md`,
+`LOOP.md`) in sync with reality. `README.md` is excluded — it is intended
+for human readers, not agents.
 
-### Diagramme du flux de maintenance documentaire
+### Documentation maintenance flow diagram
 
 ```mermaid
 flowchart LR
-  triage[Triage] -->|Docs impact<br/>dans Analyse| worker[Worker]
-  worker -->|Conformes aux docs<br/>Mise à jour des docs<br/>dans la même MR| reviewer[Reviewer]
-  reviewer -->|Vérifie la conformité doc<br/>+ les mises à jour doc| e2e[E2E]
-  e2e -->|Vérifie que les docs<br/>matchent la prod| done[Done]
+  triage[Triage] -->|Docs impact<br/>in Analysis| worker[Worker]
+  worker -->|Conforms to docs<br/>Updates docs<br/>in the same MR| reviewer[Reviewer]
+  reviewer -->|Verifies doc conformance<br/>+ doc updates| e2e[E2E]
+  e2e -->|Verifies that docs<br/>match production| done[Done]
 ```
 
-### Responsabilités par agent
+### Per-agent responsibilities
 
-- **Triage** — Ajoute une ligne `Docs impact: <docs>` dans la section `Analyse`
-  du commentaire structuré, listant les documents charter que l'issue touche
-  (ex. `Docs impact: ARCHITECTURE.md, AGENTS.md`).
-- **Worker** — Lit les documents charter impactés **avant** d'implémenter.
-  S'y conforme. Si le changement nécessite une mise à jour d'un document
-  (nouvel état, nouvelle variable, nouvelle responsabilité d'agent, nouveau
-  seam), le worker met à jour le document **dans la même MR** que le code.
-  Lorsqu'il découvre un nouveau bug ou anti-pattern, le worker ajoute une
-  entrée dans `Leçons apprises` de [AGENTS.md](AGENTS.md).
-- **Reviewer** — Vérifie deux choses : (1) que le worker a respecté les
-  documents charter pendant l'implémentation (conformité doc), et (2) que le
-  worker a mis à jour les documents quand c'était requis (complétude doc).
-  Sur `FAIL`, le reviewer peut exiger que le worker ajoute une entrée dans
-  `Leçons apprises` pour capturer la régression.
-- **E2E** — Vérifie que les documents charter correspondent à la réalité de
-  la production : après le déploiement, l'agent e2e confirme que le pipeline
-  documenté, les responsabilités des agents et les seams tiennent toujours.
+- **Triage** — Adds a `Docs impact: <docs>` line to the `Analysis` section of
+  the structured comment, listing which charter documents the issue touches
+  (e.g. `Docs impact: ARCHITECTURE.md, AGENTS.md`).
+- **Worker** — Reads the impacted charter documents **before** implementing.
+  Conforms to them. If the change requires updating a document (new state,
+  new variable, new agent responsibility, new seam), the worker updates the
+  document **in the same MR** as the code. When discovering a new bug or
+  anti-pattern, the worker adds an entry to `Lessons learned` in
+  [AGENTS.md](AGENTS.md).
+- **Reviewer** — Verifies two things: (1) that the worker respected the
+  charter documents during implementation (doc conformance), and (2) that
+  the worker updated the documents when required (doc completeness). On
+  `FAIL`, the reviewer MAY require the worker to add a `Lessons learned`
+  entry to capture the regression.
+- **E2E** — Verifies that charter documents match production reality: after
+  deployment, the e2e agent confirms that the documented pipeline, agent
+  responsibilities, and seams still hold.
 
-### Règles de documentation
+### Documentation rules
 
-- Utiliser la **syntaxe Mermaid** (blocs ` ```mermaid `) pour tous les
-  diagrammes.
-- Utiliser un **ton explicite/impératif** ("MUST", "NEVER", "ALWAYS") — pas de
-  prose descriptive.
-- Garder les docs **à jour avec le code** — ne jamais laisser un doc décrire
-  un système qui n'existe plus.
-- **Cross-référencer** les docs liés avec des liens markdown relatifs
-  (ex. `[AGENTS.md](AGENTS.md)`).
+- Use **Mermaid syntax** (` ```mermaid ` fenced blocks) for all diagrams.
+- Use an **explicit/imperative tone** ("MUST", "NEVER", "ALWAYS") — no
+  descriptive prose.
+- Keep docs **up to date with the code** — NEVER let a doc describe a system
+  that no longer exists.
+- **Cross-reference** related docs with relative markdown links
+  (e.g. `[AGENTS.md](AGENTS.md)`).
 
-Voir [AGENTS.md](AGENTS.md) section "Documentation self-maintenance" pour le
-workflow détaillé et le format des entrées `Docs impact`.
+See [AGENTS.md](AGENTS.md) section "Documentation self-maintenance" for the
+detailed workflow and the `Docs impact` entry format.
 
 ---
 
-## Voir aussi
+## See also
 
-- [AGENTS.md](AGENTS.md) — Guide des agents, leçons apprises, anti-patternes
-- [CONTEXT.md](CONTEXT.md) — Contexte du projet, stack technique, contraintes
-- [README.md](README.md) — Vue d'ensemble, démarrage, usage
-- [DESIGN.md](DESIGN.md) — Charte visuelle du site consommateur
-- [LOOP.md](LOOP.md) — Configuration par consommateur
-- [.opencode/UPSTREAM-FIX-WORKFLOW.md](.opencode/UPSTREAM-FIX-WORKFLOW.md) — Workflow de fix upstream
+- [AGENTS.md](AGENTS.md) — Agent guide, lessons learned, anti-patterns
+- [CONTEXT.md](CONTEXT.md) — Project context, tech stack, constraints
+- [README.md](README.md) — Overview, getting started, usage
+- [DESIGN.md](DESIGN.md) — Consumer site visual charter
+- [LOOP.md](LOOP.md) — Per-consumer configuration
+- [.opencode/UPSTREAM-FIX-WORKFLOW.md](.opencode/UPSTREAM-FIX-WORKFLOW.md) — Upstream fix workflow
