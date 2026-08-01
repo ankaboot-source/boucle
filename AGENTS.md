@@ -638,6 +638,20 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       link was already parsed by 5 other call sites in `.gitlab-ci.yml` —
       only `fetch-issue-attachments` missed it.
 
+18. **bin/update requires GitHub auth (boucle not yet public)**
+    - ❌ DO NOT assume `bin/update` works out of the box on a consumer.
+      `boucle` is not yet a public GitHub repository. `bin/update` fetches a
+      tarball from `https://codeload.github.com/ankaboot-source/boucle/...`
+      without credentials, which 401s on a private repo. The consumer's
+      dispatch pipeline silently fails-open (stays on the current version)
+      and never picks up upstream fixes.
+    - ✅ DO: until boucle is public, propagate upstream fixes to consumers
+      **manually** — push the fix to `origin` on GitHub, then copy the
+      changed `SYNC_PATHS` (`bin`, `.pi`, `.gitlab-ci.yml`, `.opencode/...`)
+      into the consumer repo and bump `.boucle-version` to the upstream SHA.
+      Track this limitation here and remove the entry once boucle is public
+      and `bin/update` succeeds unauthenticated.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
