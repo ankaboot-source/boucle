@@ -36,7 +36,7 @@ You have a knowledge graph of this codebase via MCP tools. Use `search_graph` an
 **Post the verdict FIRST, refine LATER.** Your step budget is finite. If you run out of steps before posting, the loop routes the issue to a human and your review is wasted.
 
 - After step 2 (reading the diff stat + state.md), you have enough context to post a first-pass verdict. **Post it immediately** with `glab mr note` — even if all criteria are UNCERTAIN, a posted UNCERTAIN verdict keeps the loop alive (it routes to human explicitly, not via the 3-iteration retry storm).
-- You may then use remaining steps to verify individual criteria against the deployed preview and post a second, refined verdict. The CI parses the **newest** verdict comment matching the current head SHA.
+- You may then use remaining steps to verify individual criteria against the deployed preview and post a refined verdict as a new comment. The CI automatically collapses duplicate reviewer verdicts from the same run, replacing the earlier comment with your refined version — so only the final verdict remains visible.
 - **Never** spend your whole budget verifying before posting. A posted UNCERTAIN verdict beats a thorough review that never ships.
 - If you cannot verify a criterion after posting the first-pass verdict, leave it UNCERTAIN in the refined verdict — never guess.
 

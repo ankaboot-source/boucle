@@ -65,15 +65,17 @@ if [[ -z "$NOTES_JSON" ]]; then
   exit 0
 fi
 
-# Filter to boucle comments of this type, newer than pre_id, sorted oldest→newest.
-# Use jq with a numeric id > pre_id filter. pre_id=0 selects all (first run).
-MATCHES="$(printf '%s' "$NOTES_JSON" | jq -r "${FILTER} | select(.id > ${PRE_ID}) | \"\(.id)\t\(.body)\"" 2>/dev/null | sort -t$'\t' -k1,1n)"
-if [[ -z "$MATCHES" ]]; then
+# Filter to matching note IDs only (one per line, sorted oldest→newest).
+# IDs are integers with no embedded newlines, so wc/head/tail are safe here.
+# Note bodies DO contain newlines, so they are fetched separately below.
+# pre_id=0 selects all (first run).
+IDS="$(printf '%s' "$NOTES_JSON" | jq -r "${FILTER} | select(.id > ${PRE_ID}) | .id" 2>/dev/null | sort -n)"
+if [[ -z "$IDS" ]]; then
   log "collapse-duplicate-notes: no matching notes to collapse (type=$TYPE pre_id=$PRE_ID)"
   exit 0
 fi
 
-COUNT="$(printf '%s\n' "$MATCHES" | wc -l | tr -d ' ')"
+COUNT="$(printf '%s\n' "$IDS" | wc -l | tr -d ' ')"
 if [[ "$COUNT" -le 1 ]]; then
   log "collapse-duplicate-notes: only $COUNT match(es), nothing to collapse"
   exit 0
@@ -81,19 +83,22 @@ fi
 
 log "collapse-duplicate-notes: collapsing $COUNT duplicate $TYPE notes (pre_id=$PRE_ID)"
 
-# First line = oldest note (keep this id, overwrite body). Remaining = delete.
-FIRST_ID="$(printf '%s\n' "$MATCHES" | head -n1 | cut -f1)"
-NEWEST_BODY="$(printf '%s\n' "$MATCHES" | tail -n1 | cut -f2-)"
+# Oldest note = keep this id, overwrite body. Newest note = source of body.
+FIRST_ID="$(printf '%s\n' "$IDS" | head -n1)"
+NEWEST_ID="$(printf '%s\n' "$IDS" | tail -n1)"
 
-# PUT newest body onto first note id.
+# Fetch the newest note's body via a separate jq query (bodies contain newlines).
+NEWEST_BODY="$(printf '%s' "$NOTES_JSON" | jq -r "${FILTER} | select(.id > ${PRE_ID}) | select(.id == ${NEWEST_ID}) | .body" 2>/dev/null)"
+
+# PUT newest body onto first (oldest) note id.
 if [[ -n "$FIRST_ID" && -n "$NEWEST_BODY" ]]; then
   log "collapse-duplicate-notes: PUT $ENDPOINT/$FIRST_ID (newest body onto oldest id)"
   printf '%s' "$NEWEST_BODY" | glab api -X PUT "$ENDPOINT/$FIRST_ID" -F "body=@-" 2>/dev/null \
     || log "collapse-duplicate-notes: PUT failed for note $FIRST_ID (continuing)"
 fi
 
-# DELETE every other matching note id.
-printf '%s\n' "$MATCHES" | tail -n +2 | cut -f1 | while IFS= read -r DEL_ID; do
+# DELETE every other matching note id (all except the first/oldest).
+printf '%s\n' "$IDS" | tail -n +2 | while IFS= read -r DEL_ID; do
   [[ -z "$DEL_ID" ]] && continue
   log "collapse-duplicate-notes: DELETE $ENDPOINT/$DEL_ID"
   glab api -X DELETE "$ENDPOINT/$DEL_ID" 2>/dev/null \
