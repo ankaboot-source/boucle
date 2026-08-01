@@ -31,8 +31,11 @@ variables:
   BOUCLE_DEPLOY_URL_REGEX: "https://[a-z0-9.-]+\\.pages\\.dev"
   # Production URL (for e2e fallback when deploy doesn't pass a live URL)
   BOUCLE_PRODUCTION_URL: ""
-  # Image attachment policy: max size per image (bytes) and total per issue (bytes).
-  # Defaults: 10 MiB per image, 50 MiB total. Images over either cap are skipped.
+  # Attachment policy: max size per attachment (bytes) and total per issue (bytes).
+  # Applies to ALL uploads fetched by bin/fetch-issue-attachments (images, PDFs,
+  # archives, etc.), not just images. Variable names retain the IMAGE prefix for
+  # backward compatibility with consumers that override them via GitLab UI.
+  # Defaults: 10 MiB per attachment, 50 MiB total. Attachments over either cap are skipped.
   BOUCLE_IMAGE_MAX_BYTES: "10485760"
   BOUCLE_IMAGE_TOTAL_MAX_BYTES: "52428800"
   # Concurrency: max issues allowed in boucle:working state simultaneously.
@@ -742,9 +745,9 @@ triage:
         printf '%s' "${out:-[]}"
       }
 
-      # Download images attached to the issue (capped per BOUCLE_IMAGE_*_BYTES).
+      # Download attachments uploaded to the issue (capped per BOUCLE_IMAGE_*_BYTES).
       # Makes them available to the triage agent via BOUCLE_ISSUE_ATTACHMENTS.
-      ./bin/fetch-issue-images || echo "[boucle] WARN: image fetch failed — continuing without images"
+      ./bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
 
       # Fetch the issue body and export it so the triage agent does not
       # waste steps calling glab issue view / gh issue view (minimax-m3
@@ -1355,9 +1358,9 @@ worker:
       EOF
       fi
 
-      # Download images attached to the issue (capped per BOUCLE_IMAGE_*_BYTES).
+      # Download attachments uploaded to the issue (capped per BOUCLE_IMAGE_*_BYTES).
       # Makes them available to the worker agent via BOUCLE_ISSUE_ATTACHMENTS.
-      ./bin/fetch-issue-images || echo "[boucle] WARN: image fetch failed — continuing without images"
+      ./bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
 
       # Run the agent. Use `|| rc=$?` to suppress set -e so the script
       # continues to the safety-net commit even if the agent exits non-zero

@@ -1,23 +1,26 @@
 #!/usr/bin/env bash
-# bin/fetch-issue-images — downloads images attached to a GitLab issue
-# Called before ./bin/oc <role> to make issue images available to agents.
+# bin/fetch-issue-attachments — downloads attachments uploaded to a GitLab issue
+# Called before ./bin/oc <role> to make issue attachments available to agents.
 #
-# Policy: caps individual image size (BOUCLE_IMAGE_MAX_BYTES) and total
-# downloaded size per issue (BOUCLE_IMAGE_TOTAL_MAX_BYTES). Images over
+# Policy: caps individual attachment size (BOUCLE_IMAGE_MAX_BYTES) and total
+# downloaded size per issue (BOUCLE_IMAGE_TOTAL_MAX_BYTES). Attachments over
 # the individual cap are skipped. Once the total cap is reached, remaining
-# images are skipped.
+# attachments are skipped. Caps apply to ALL attachment types (images, PDFs,
+# archives, etc.) — not just images. Variable names retain the IMAGE prefix
+# for backward compatibility with consumers that override them via GitLab UI.
 #
 # Output: writes .boucle/$ISSUE/.attachments.env (sourced by bin/oc) and
-#         .boucle/$ISSUE/images/MANIFEST.md (human-readable log).
+#         .boucle/$ISSUE/attachments/MANIFEST.md (human-readable log).
 set -euo pipefail
 
 ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
 CI_PROJECT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
 STATE_DIR="$CI_PROJECT_DIR/.boucle/$ISSUE"
-IMG_DIR="$STATE_DIR/images"
+ATT_DIR="$STATE_DIR/attachments"
 ENV_FILE="$STATE_DIR/.attachments.env"
 
-# Size caps (defaults: 10 MiB per image, 50 MiB total per issue)
+# Size caps (defaults: 10 MiB per attachment, 50 MiB total per issue).
+# Names retain the IMAGE prefix for backward compatibility.
 MAX_BYTES="${BOUCLE_IMAGE_MAX_BYTES:-10485760}"
 TOTAL_MAX_BYTES="${BOUCLE_IMAGE_TOTAL_MAX_BYTES:-52428800}"
 
@@ -25,9 +28,9 @@ HOST="${BOUCLE_FORGE_HOST:-framagit.org}"
 TOKEN="${BOUCLE_TOKEN:?BOUCLE_TOKEN must be set}"
 PROJECT_ID="${CI_PROJECT_ID:?CI_PROJECT_ID must be set}"
 
-mkdir -p "$IMG_DIR"
+mkdir -p "$ATT_DIR"
 # Clean slate per run (re-download fresh each time)
-rm -f "$IMG_DIR"/* "$ENV_FILE" 2> /dev/null || true
+rm -f "$ATT_DIR"/* "$ENV_FILE" 2> /dev/null || true
 
 # Collect all markdown text from the issue description + all note bodies
 ALL_TEXT=$(mktemp)
@@ -40,16 +43,17 @@ trap 'rm -f "$ALL_TEXT"' EXIT
     | jq -r '.[].body // empty' 2> /dev/null || true
 } > "$ALL_TEXT"
 
-# Extract GitLab upload paths with image extensions.
+# Extract all GitLab upload paths (any extension — images, PDFs, archives, etc.).
 # GitLab markdown references uploads as ![alt](/uploads/<hash>/<filename.ext>)
-# We only download forge-hosted uploads (not arbitrary internet URLs) for safety.
+# or as regular links [label](/uploads/...). We only download forge-hosted
+# uploads (not arbitrary internet URLs) for safety.
 mapfile -t UPLOAD_PATHS < <(
-  grep -oiE "/uploads/[^[:space:]\"')]+\.(png|jpe?g|gif|webp|avif|svg)" "$ALL_TEXT" \
+  grep -oiE "/uploads/[^[:space:]\"')]+" "$ALL_TEXT" \
     | sort -u || true
 )
 
 if [ "${#UPLOAD_PATHS[@]}" -eq 0 ] || [ -z "${UPLOAD_PATHS[0]:-}" ]; then
-  echo "[fetch-issue-images] No images found in issue #$ISSUE"
+  echo "[fetch-issue-attachments] No attachments found in issue #$ISSUE"
   printf 'BOUCLE_ISSUE_ATTACHMENTS=""\n' > "$ENV_FILE"
   exit 0
 fi
@@ -67,14 +71,14 @@ for path in "${UPLOAD_PATHS[@]}"; do
   filename=$(basename "$path")
   # Sanitize filename (alphanumeric, dot, dash, underscore only)
   filename=$(echo "$filename" | tr -cd '[:alnum:]._-')
-  [ -z "$filename" ] && filename="image_${idx}.png"
+  [ -z "$filename" ] && filename="attachment_${idx}.bin"
 
   # Prefix with idx to guarantee uniqueness across uploads with same basename
-  outpath="$IMG_DIR/${idx}_${filename}"
+  outpath="$ATT_DIR/${idx}_${filename}"
 
   # Check total cap
   if [ "$total_size" -ge "$TOTAL_MAX_BYTES" ]; then
-    echo "[fetch-issue-images] Total cap ($TOTAL_MAX_BYTES bytes) reached — skipping $filename"
+    echo "[fetch-issue-attachments] Total cap ($TOTAL_MAX_BYTES bytes) reached — skipping $filename"
     skipped_count=$((skipped_count + 1))
     continue
   fi
@@ -91,39 +95,39 @@ for path in "${UPLOAD_PATHS[@]}"; do
     actual_size=$(wc -c < "$outpath")
     if [ "$actual_size" -eq 0 ]; then
       rm -f "$outpath"
-      echo "[fetch-issue-images] Empty response for $filename — skipping"
+      echo "[fetch-issue-attachments] Empty response for $filename — skipping"
       skipped_count=$((skipped_count + 1))
       continue
     fi
     # Double-check against cap (in case --max-filesize was ignored: no Content-Length)
     if [ "$actual_size" -gt "$per_file_cap" ]; then
       rm -f "$outpath"
-      echo "[fetch-issue-images] $filename ($actual_size bytes) exceeds cap ($per_file_cap) — skipping"
+      echo "[fetch-issue-attachments] $filename ($actual_size bytes) exceeds cap ($per_file_cap) — skipping"
       skipped_count=$((skipped_count + 1))
       continue
     fi
     total_size=$((total_size + actual_size))
     downloaded_files+=("$outpath")
-    echo "[fetch-issue-images] Downloaded ${idx}_${filename} ($actual_size bytes)"
+    echo "[fetch-issue-attachments] Downloaded ${idx}_${filename} ($actual_size bytes)"
   else
     rm -f "$outpath"
-    echo "[fetch-issue-images] Skipped $filename (over ${per_file_cap} bytes or download failed)"
+    echo "[fetch-issue-attachments] Skipped $filename (over ${per_file_cap} bytes or download failed)"
     skipped_count=$((skipped_count + 1))
   fi
 done
 
 # Write manifest
 {
-  echo "# Issue #$ISSUE — image attachments"
+  echo "# Issue #$ISSUE — attachments"
   echo ""
-  echo "- Downloaded: ${#downloaded_files[@]} image(s), $total_size bytes total"
+  echo "- Downloaded: ${#downloaded_files[@]} attachment(s), $total_size bytes total"
   [ "$skipped_count" -gt 0 ] && echo "- Skipped: $skipped_count (over size cap or total cap reached)"
   echo ""
   echo "## Files"
   for f in "${downloaded_files[@]}"; do
     echo "- $(basename "$f") ($(wc -c < "$f") bytes)"
   done
-} > "$IMG_DIR/MANIFEST.md"
+} > "$ATT_DIR/MANIFEST.md"
 
 # Write env file for bin/oc to source
 {
@@ -134,4 +138,4 @@ done
   printf '"\n'
 } > "$ENV_FILE"
 
-echo "[fetch-issue-images] Done: ${#downloaded_files[@]} images, $total_size bytes total, $skipped_count skipped"
+echo "[fetch-issue-attachments] Done: ${#downloaded_files[@]} attachments, $total_size bytes total, $skipped_count skipped"
