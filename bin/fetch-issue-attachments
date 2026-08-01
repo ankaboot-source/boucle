@@ -43,6 +43,32 @@ trap 'rm -f "$ALL_TEXT"' EXIT
     | jq -r '.[].body // empty' 2> /dev/null || true
 } > "$ALL_TEXT"
 
+# Parent-issue attachment inheritance.
+# Sub-issues created by boucle carry a "## Parent issue\n#N — <url>" section.
+# Assets (logos, zips, mockups) are often uploaded to the parent issue only,
+# so the worker on the sub-issue would not see them. Resolve the parent IID
+# from the current issue's description and append its description + notes to
+# the text we mine for upload paths. One level only (no recursion) to avoid
+# cycles and keep the scope tight to the split that produced this issue.
+# Disable with BOUCLE_PARENT_ATTACHMENTS_DISABLE=true.
+if [ "${BOUCLE_PARENT_ATTACHMENTS_DISABLE:-false}" != "true" ]; then
+  # Parse the parent IID from the current issue's description only (notes are
+  # not templated, so they cannot carry the "## Parent issue" section).
+  PARENT_IID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/issues/$ISSUE" 2>/dev/null \
+    | jq -r '.description // empty' 2>/dev/null \
+    | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' \
+    | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+  if [ -n "${PARENT_IID:-}" ] && [ "$PARENT_IID" != "$ISSUE" ]; then
+    echo "[fetch-issue-attachments] Found parent issue #$PARENT_IID — inheriting its attachments"
+    {
+      glab api --hostname "$HOST" "/projects/$PROJECT_ID/issues/$PARENT_IID" 2> /dev/null \
+        | jq -r '.description // empty' 2> /dev/null || true
+      glab api --hostname "$HOST" "/projects/$PROJECT_ID/issues/$PARENT_IID/notes" 2> /dev/null \
+        | jq -r '.[].body // empty' 2> /dev/null || true
+    } >> "$ALL_TEXT"
+  fi
+fi
+
 # Extract all GitLab upload paths (any extension — images, PDFs, archives, etc.).
 # GitLab markdown references uploads as ![alt](/uploads/<hash>/<filename.ext>)
 # or as regular links [label](/uploads/...). We only download forge-hosted
