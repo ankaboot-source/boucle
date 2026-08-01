@@ -823,6 +823,20 @@ triage:
             found { print; if (/^## Disposition/) { disp=1 } }
             disp && /^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$/ { exit }
           ' "$AGENT_LOG" 2>/dev/null || echo "")
+          # If no boucle:triage found, try the boucle:draft marker (first-pass
+          # draft posted early per the post-early rule). Promote it to a
+          # triage comment by replacing the draft marker with the triage marker.
+          if [ -z "$DRAFTED_COMMENT" ]; then
+            DRAFTED_COMMENT=$(awk '
+              /<!-- boucle:draft role=triage -->/ { found=1 }
+              found { print; if (/^## Disposition/) { disp=1 } }
+              disp && /^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$/ { exit }
+            ' "$AGENT_LOG" 2>/dev/null || echo "")
+            if [ -n "$DRAFTED_COMMENT" ]; then
+              echo "[boucle] WARN: no boucle:triage in log — promoting boucle:draft to triage (step-limit fallback)."
+              DRAFTED_COMMENT=$(printf '%s' "$DRAFTED_COMMENT" | sed 's|<!-- boucle:draft role=triage -->|<!-- boucle:triage v=1 -->|')
+            fi
+          fi
           if [ -n "$DRAFTED_COMMENT" ] && echo "$DRAFTED_COMMENT" | grep -qiE '^## Disposition'; then
             echo "[boucle] Recovering drafted triage comment from agent log (step-limit fallback)."
             # Strip leading/trailing ``` fences if the agent wrapped the comment.
@@ -2739,6 +2753,19 @@ e2e:
             /<!-- boucle:verdict v=1 role=e2e/ { found=1 }
             found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
           ' "$AGENT_LOG" 2>/dev/null || echo "")
+          # If no boucle:verdict found, try the boucle:draft marker (first-pass
+          # draft posted early per the post-early rule). Promote it to a
+          # verdict by replacing the draft marker with the verdict marker.
+          if [ -z "$DRAFTED_VERDICT" ]; then
+            DRAFTED_VERDICT=$(awk '
+              /<!-- boucle:draft role=e2e -->/ { found=1 }
+              found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
+            ' "$AGENT_LOG" 2>/dev/null || echo "")
+            if [ -n "$DRAFTED_VERDICT" ]; then
+              echo "[boucle] WARN: no boucle:verdict in log — promoting boucle:draft to verdict (step-limit fallback)."
+              DRAFTED_VERDICT=$(printf '%s' "$DRAFTED_VERDICT" | sed "s|<!-- boucle:draft role=e2e -->|<!-- boucle:verdict v=1 role=e2e sha=$MR_HEAD -->|")
+            fi
+          fi
           if [ -n "$DRAFTED_VERDICT" ] && echo "$DRAFTED_VERDICT" | grep -qiE 'VERDICT: (PASS|FAIL|UNCERTAIN)'; then
             echo "[boucle] Recovering drafted e2e verdict from agent log (step-limit fallback)."
             DRAFTED_VERDICT=$(echo "$DRAFTED_VERDICT" | sed '/^```$/d')
