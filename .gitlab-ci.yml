@@ -1494,6 +1494,14 @@ worker:
       if [ -f ".boucle/$BOUCLE_ISSUE/state.md" ]; then
         APPROACH=$(sed -n '/^## Approach/,/^## /p' ".boucle/$BOUCLE_ISSUE/state.md" | head -n -1 | tail -n +2 | head -20)
       fi
+      # Fallback: if the worker didn't fill the Approach section (still the
+      # seed placeholder or empty), note it explicitly so the MR description
+      # is not the literal placeholder. The worker is instructed to fill it
+      # (worker.md step 8) but consistently doesn't (issue #34 on
+      # up/urgence-palestine.fr: 3 reviewer FAIL verdicts, same root cause).
+      if [ -z "$APPROACH" ] || [ "$APPROACH" = "(to be determined by worker)" ]; then
+        APPROACH="(worker did not record an approach — see commit messages in 'What changed' above)"
+      fi
 
       # ── MR title policy ────────────────────────────────────────────────
       # Derive a meaningful title from the issue title instead of the generic
@@ -1557,6 +1565,15 @@ worker:
         MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?source_branch=$BRANCH" | jq -r '.[0].iid')
       else
         echo "MR !$MR_IID already exists for $BRANCH — reusing (worker iteration $ITERATION)"
+        # Update the MR description + title so the new preview URL and
+        # approach are reflected. Without this, iteration 2+ keeps the stale
+        # description from iteration 1 (wrong preview URL, empty Approach)
+        # and the reviewer tests the wrong URL (issue #34 on
+        # up/urgence-palestine.fr: MR pointed at the iteration-1 URL while
+        # iteration 2 deployed to a different branch-based URL).
+        glab mr update "$MR_IID" \
+          --title "$MR_TITLE" \
+          --description "$MR_DESCRIPTION" > /dev/null 2>&1 || true
       fi
 
       # Assign the MR to the original issue author at creation time so they're
