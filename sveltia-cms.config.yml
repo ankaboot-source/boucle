@@ -23,6 +23,31 @@ media_folder: /static/media
 public_folder: /media
 
 # =============================================================================
+# Singletons (global, root-level config editable from the Sveltia admin)
+# =============================================================================
+# A Sveltia "singleton" is a single file managed by the admin at the root of
+# the sidebar (it does not live inside a `collections:` block). We use one
+# to centralise the site's social-network handles: the same file is read by
+# `src/components/SocialCTA.astro` and `src/components/SocialSidebar.astro`
+# at build time, so editors can change a handle from the admin without
+# shipping a new release. Mirrored by the Zod schema in
+# `src/content.config.ts` (`social`).
+# See: https://sveltiacms.app/en/docs/collections/singletons
+singletons:
+  - name: social
+    label: Réseaux sociaux
+    icon: share
+    description: Comptes officiels du collectif (Instagram, TikTok, Telegram, Facebook, X/Twitter).
+    file: src/content/social.yaml
+    format: yaml
+    fields:
+      - { name: instagram, label: Instagram, widget: string, required: false }
+      - { name: tiktok, label: TikTok, widget: string, required: false }
+      - { name: telegram, label: Telegram, widget: string, required: false }
+      - { name: facebook, label: Facebook, widget: string, required: false }
+      - { name: twitter, label: X / Twitter, widget: string, required: false }
+
+# =============================================================================
 # Collections
 # =============================================================================
 # Three content streams:
