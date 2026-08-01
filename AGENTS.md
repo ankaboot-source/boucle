@@ -319,6 +319,28 @@ already committed and resolved. Any new regression MUST be added here in the sam
       `ls`/`cat`/`git log` to reconstitute the codebase, burning steps that
       should have gone to implementation. The graph was indexed but unused.
 
+24. **MR description frozen at iteration 1 on no-changes re-runs** (issue #35 on up/urgence-palestine.fr)
+    - ❌ DO NOT skip the MR description refresh when the worker produces no
+      code changes. The "no changes" handler (`exit 1` before the build/deploy
+      block) runs BEFORE the `glab mr update` that refreshes the description
+      with the new iteration number and preview URL. When the worker exhausts
+      its step budget across iterations 2 and 3 without committing, the MR
+      description stays frozen at "iteration 1" with the original preview URL
+      — the reviewer and the user see a misleading description that does not
+      reflect the actual loop state.
+    - ✅ DO: refresh the MR description in the "no changes" handler itself,
+      before the `exit 1`. Fetch the existing MR by source branch, preserve
+      its current preview URL (if any), and update title + description to
+      reflect the current iteration and the "no code changes" status. The
+      reviewer and the user now see the real iteration count and a clear
+      "no commits this iteration" status instead of a stale "iteration 1".
+    - Context: issue #35 iterations 2 and 3 both exhausted the step budget
+      before committing (the destructive reset of lesson #22 wiped the
+      prior validated work, forcing re-implementation from scratch). The MR
+      !31 description stayed at "iteration 1" with the original preview URL
+      throughout, misleading the user who reported "la description de la MR
+      indique toujours iteration 1 avec la preview URL initiale".
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
