@@ -44,11 +44,11 @@ for var in BOUCLE_TOKEN BOUCLE_ENABLED CLOUDFLARE_API_TOKEN BOUCLE_TRIGGER_TOKEN
   fi
 done
 
-# ── OPENCODE_AUTH (file type) ─────────────────────────────────────────
-if glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/OPENCODE_AUTH" 2> /dev/null | jq -e '.variable_type == "file"' > /dev/null 2>&1; then
-  pass "OPENCODE_AUTH is file type"
+# ── PI_AUTH (file type) ─────────────────────────────────────────
+if glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/PI_AUTH" 2> /dev/null | jq -e '.variable_type == "file"' > /dev/null 2>&1; then
+  pass "PI_AUTH is file type"
 else
-  fail "OPENCODE_AUTH missing or not file type"
+  fail "PI_AUTH missing or not file type"
 fi
 
 # ── Branch protection ──────────────────────────────────────────────────
@@ -90,18 +90,18 @@ fi
 
 # ── Agents parse ───────────────────────────────────────────────────────
 for role in triage worker reviewer e2e; do
-  if [ -f ".opencode/agents/$role.md" ]; then
+  if [ -f ".pi/agents/$role.md" ]; then
     pass "agent $role.md exists"
   else
     fail "agent $role.md missing"
   fi
 done
 
-# ── opencode reachable ─────────────────────────────────────────────────
-if command -v opencode &> /dev/null; then
-  pass "opencode in PATH"
+# ── pi reachable ─────────────────────────────────────────────────
+if command -v pi &> /dev/null; then
+  pass "pi in PATH"
 else
-  fail "opencode not in PATH"
+  fail "pi not in PATH"
 fi
 
 # ── CLOUDFLARE_API_TOKEN can deploy ────────────────────────────────────
