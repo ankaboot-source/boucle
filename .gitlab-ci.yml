@@ -1377,6 +1377,32 @@ worker:
         git commit -m "chore: ignore .wrangler/ cache [skip ci]" --no-verify
       fi
 
+      # Guard: if the agent produced no changes vs master (only .gitignore
+      # churn from the .wrangler chore above), don't create an empty MR.
+      # This happens when the agent exhausts its step budget without writing
+      # code. Re-trigger (iter < MAX) or escalate to human (iter == MAX).
+      DIFF_FILES=$(git diff --name-only origin/master..HEAD 2>/dev/null | grep -v '^\.gitignore$' || true)
+      if [ -z "$DIFF_FILES" ]; then
+        ITERATION="${BOUCLE_ITERATION:-1}"
+        MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
+        if [ "$ITERATION" -lt "$MAX_ITER" ]; then
+          echo "WARN: worker produced no changes (agent exhausted step budget?) — re-triggering (iteration $((ITERATION+1))/$MAX_ITER)." >&2
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
+          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+            -f body="🔄 Worker produced no code changes on iteration $ITERATION (agent likely exhausted its step budget). Re-running (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null
+          curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
+            -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+            -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=worker" \
+            -F "variables[BOUCLE_ITERATION]=$((ITERATION+1))" > /dev/null
+        else
+          echo "Escalating to human (boucle:human) — worker produced no changes after $MAX_ITER attempts." >&2
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
+          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+            -f body="⚠️ Worker produced no code changes after $MAX_ITER attempts. The agent may be unable to implement this issue within its step budget. Human intervention needed." > /dev/null
+        fi
+        exit 1
+      fi
+
       # Rebase onto latest master before pushing. master may have advanced
       # (other MRs merged) since this branch was created — without a rebase
       # the MR goes stale and GitLab reports it as conflicted, blocking merge.
