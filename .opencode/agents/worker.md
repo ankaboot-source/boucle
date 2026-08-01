@@ -86,8 +86,18 @@ You have these skills in `.opencode/skill/`. **Use them** — they contain domai
 1. Read `state.md` in `.boucle/<issue>/` FIRST — especially the "Tried and rejected" section.
 2. Read the issue body and the triage analysis comment.
 3. **Read the "Prior feedback on the MR" section of your prompt** (if present). It contains reviewer verdicts (`VERDICT: FAIL` with the unmet acceptance criteria) and human comments on the MR. You MUST address every actionable item before claiming done — a re-run that ignores prior feedback will FAIL the reviewer the same way again and waste the iteration budget. Map each unmet criterion to a concrete change in your implementation.
-4. If image paths are listed in your prompt, `Read` each file to inspect them. They are screenshots or diagrams the author attached to the issue — use them as context for the implementation. If no images are listed, no images were attached (or they exceeded the size cap) — proceed with text only.
-5. If MR comment attachment paths are listed in your prompt (separate from issue attachments), `Read` each file too. They are screenshots or mockups that a reviewer or human attached to MR comments — use them as context for addressing reviewer feedback. If none are listed, no images were attached to MR comments.
+4. **Issue attachments** (paths listed in your prompt under "Issue attachments") may be source assets to ship (logos, photos, visuals) OR mockups/screenshots for context. Decide based on the issue body and comment intent. For each file:
+   - Run `file <path>` to get its type and dimensions (e.g. `PNG 52x100` = vertical image). This tells you the format and aspect ratio without needing to see the pixels.
+   - **Do NOT use the Read tool on binary files** (PNG/ZIP/etc.) — it returns garbage on text-only models. Use `file` for metadata, not `Read` for content.
+   - If it's a source asset (logo, photo, visual to display), copy it into the build tree (e.g. `cp <path> public/<name>`) and reference it in your code (e.g. `<img src="/<name>">`).
+   - If it's a mockup/screenshot, use it as context for the implementation (dimensions, layout hints).
+   - If no issue attachments are listed, none were attached (or they exceeded the size cap) — proceed with text only.
+5. **MR comment attachments** (paths listed in your prompt under "MR comment attachments") have the same dual nature — mockups/screenshots for context OR source assets to ship. Decide based on the comment intent:
+   - Run `file <path>` to get type and dimensions.
+   - **Do NOT use the Read tool on binary files** — same as issue attachments.
+   - If the human explicitly says to use the file as an asset (e.g. "use this image", "with the attached visual", "séparation visuelle avec le visuel ci-joint"), treat it as a source asset — copy it into the build tree (`cp <path> public/<name>`) and reference it in your code.
+   - If it's a mockup/screenshot, use it as context for addressing the feedback (dimensions, layout hints).
+   - If none are listed, no images were attached to MR comments.
 6. **Query the codebase graph** (search_graph, trace_path) to understand the code you'll touch before reading files blindly.
 7. **Load relevant skills** with the `skill` tool — domain skills (astro, frontend-design, etc.) AND process skills (test-driven-development, etc.) based on what the issue asks for.
 8. Implement the acceptance criteria from `state.md`.
