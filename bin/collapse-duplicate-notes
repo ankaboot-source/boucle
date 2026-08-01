@@ -59,7 +59,7 @@ case "$TYPE" in
 esac
 
 # Fetch all notes. Tolerate failure (empty result → nothing to collapse).
-NOTES_JSON="$(glab api "$ENDPOINT" --paginate 2>/dev/null || true)"
+NOTES_JSON="$(glab api "$ENDPOINT" --paginate 2> /dev/null || true)"
 if [[ -z "$NOTES_JSON" ]]; then
   log "collapse-duplicate-notes: no notes fetched for $ENDPOINT"
   exit 0
@@ -69,7 +69,7 @@ fi
 # IDs are integers with no embedded newlines, so wc/head/tail are safe here.
 # Note bodies DO contain newlines, so they are fetched separately below.
 # pre_id=0 selects all (first run).
-IDS="$(printf '%s' "$NOTES_JSON" | jq -r "${FILTER} | select(.id > ${PRE_ID}) | .id" 2>/dev/null | sort -n)"
+IDS="$(printf '%s' "$NOTES_JSON" | jq -r "${FILTER} | select(.id > ${PRE_ID}) | .id" 2> /dev/null | sort -n)"
 if [[ -z "$IDS" ]]; then
   log "collapse-duplicate-notes: no matching notes to collapse (type=$TYPE pre_id=$PRE_ID)"
   exit 0
@@ -88,12 +88,12 @@ FIRST_ID="$(printf '%s\n' "$IDS" | head -n1)"
 NEWEST_ID="$(printf '%s\n' "$IDS" | tail -n1)"
 
 # Fetch the newest note's body via a separate jq query (bodies contain newlines).
-NEWEST_BODY="$(printf '%s' "$NOTES_JSON" | jq -r "${FILTER} | select(.id > ${PRE_ID}) | select(.id == ${NEWEST_ID}) | .body" 2>/dev/null)"
+NEWEST_BODY="$(printf '%s' "$NOTES_JSON" | jq -r "${FILTER} | select(.id > ${PRE_ID}) | select(.id == ${NEWEST_ID}) | .body" 2> /dev/null)"
 
 # PUT newest body onto first (oldest) note id.
 if [[ -n "$FIRST_ID" && -n "$NEWEST_BODY" ]]; then
   log "collapse-duplicate-notes: PUT $ENDPOINT/$FIRST_ID (newest body onto oldest id)"
-  printf '%s' "$NEWEST_BODY" | glab api -X PUT "$ENDPOINT/$FIRST_ID" -F "body=@-" 2>/dev/null \
+  printf '%s' "$NEWEST_BODY" | glab api -X PUT "$ENDPOINT/$FIRST_ID" -F "body=@-" 2> /dev/null \
     || log "collapse-duplicate-notes: PUT failed for note $FIRST_ID (continuing)"
 fi
 
@@ -101,7 +101,7 @@ fi
 printf '%s\n' "$IDS" | tail -n +2 | while IFS= read -r DEL_ID; do
   [[ -z "$DEL_ID" ]] && continue
   log "collapse-duplicate-notes: DELETE $ENDPOINT/$DEL_ID"
-  glab api -X DELETE "$ENDPOINT/$DEL_ID" 2>/dev/null \
+  glab api -X DELETE "$ENDPOINT/$DEL_ID" 2> /dev/null \
     || log "collapse-duplicate-notes: DELETE failed for note $DEL_ID (continuing)"
 done
 
