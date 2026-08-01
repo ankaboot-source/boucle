@@ -66,26 +66,55 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 	description="Droit à la résistance : kit militant, boycott et soutien aux prisonniers politiques palestiniens. Ressources, visuels et actions concrètes du collectif Urgence Palestine."
 >
 	<main id="main" class="right-to-resist">
-		<header class="right-to-resist__header">
-			<p class="eyebrow">
-				<img
-					class="accent-inline"
-					src="/symbols/slignshot_-_ancala_nusantara.png"
-					alt=""
-					loading="lazy"
-					decoding="async"
-					width="32"
-					height="32"
-					aria-hidden="true"
-				/>
-				Right to Resist
-			</p>
-			<h1 class="display">Right to Resist</h1>
-			<p class="right-to-resist__lede">
-				Trois campagnes de fond et les événements locaux des sections&nbsp;:
-				kit militant, boycott, soutien aux prisonnier·es politiques
-				palestinien·nes. Tout est imprimable, diffusable, relaiable.
-			</p>
+		<!--
+		  Header — wrapped in a dark, grunge-textured block. The visual
+		  treatment is intentionally harsher than the rest of the site
+		  (DESIGN.md §3 — brutalisme éditorial) to mark this page as
+		  the "campaigns" hub: the body's monochrome base is replaced
+		  by the brand's encre + flag-red, with a hard-edged flag
+		  band underneath the title. Tokens only — no hard-coded
+		  colour, font-family, or radius.
+		-->
+		<header class="rtr-header">
+			<div class="rtr-header__inner">
+				<p class="eyebrow rtr-header__eyebrow">
+					<img
+						class="accent-inline"
+						src="/symbols/slignshot_-_ancala_nusantara.png"
+						alt=""
+						loading="lazy"
+						decoding="async"
+						width="32"
+						height="32"
+						aria-hidden="true"
+					/>
+					Right to Resist
+				</p>
+				<h1 class="rtr-header__title">
+					Right<br />to Resist.
+				</h1>
+				<p class="rtr-header__lede">
+					Trois campagnes de fond et les événements locaux des sections&nbsp;:
+					kit militant, boycott, soutien aux prisonnier·es politiques
+					palestinien·nes. Tout est imprimable, diffusable, relaiable.
+				</p>
+			</div>
+			<!--
+			  A four-band flag stripe (no border-radius) that breaks the
+			  dark block at the bottom. This re-uses the brand's
+			  Palestinian flag palette as a deliberate signal, not as
+			  decoration.
+			-->
+			<div
+				class="rtr-header__flag"
+				role="img"
+				aria-label="Drapeau palestinien : noir, blanc, vert, rouge"
+			>
+				<span class="rtr-header__flag-band rtr-header__flag-band--black"></span>
+				<span class="rtr-header__flag-band rtr-header__flag-band--white"></span>
+				<span class="rtr-header__flag-band rtr-header__flag-band--green"></span>
+				<span class="rtr-header__flag-band rtr-header__flag-band--red"></span>
+			</div>
 		</header>
 
 		<!--
@@ -252,23 +281,144 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-2xl);
-		padding-block: var(--space-xl) var(--space-3xl);
-		width: min(100% - 2 * var(--space-s), var(--container-wide));
+		padding-block: 0 var(--space-3xl);
+		width: 100%;
 		margin-inline: auto;
 	}
 
-	.right-to-resist__header {
+	/* The dark, grunge-textured page header. Spans the full viewport
+	 * width (the page container's `width: 100%` above lets the header
+	 * break out of the standard container cap). Background is a single
+	 * colour (--color-flag-black) covered by a thin, evenly-spaced
+	 * diagonal-line texture (token-driven — no new colours introduced).
+	 * The 4-band flag stripe at the bottom of the header re-uses the
+	 * brand flag palette as a deliberate signal, not as decoration. */
+	.rtr-header {
+		position: relative;
+		width: 100%;
+		background-color: var(--color-flag-black);
+		color: var(--color-ink-on-dark);
+		/*
+		 * The "grunge" texture is a 2px diagonal hatch in deep ink,
+		 * token-driven (no hard-coded colour). The hatch is uniform and
+		 * evenly spaced — that is the brutalist register, not a soft
+		 * noise. Reduced motion does not affect this rule, and the
+		 * texture is purely static.
+		 */
+		background-image: repeating-linear-gradient(
+			45deg,
+			oklch(22% 0 0) 0 1px,
+			transparent 1px 6px
+		);
+		border-bottom: 1px solid var(--color-flag-red);
+		overflow: hidden;
+	}
+
+	.rtr-header__inner {
+		width: min(100% - 2 * var(--space-s), var(--container-wide));
+		margin-inline: auto;
+		padding-block: var(--space-2xl) var(--space-xl);
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-m);
-		max-width: 56rem;
 	}
 
-	.right-to-resist__lede {
-		font-size: var(--text-lg);
-		color: var(--color-text-muted);
-		max-width: 60ch;
+	.rtr-header__eyebrow {
+		color: var(--color-flag-red);
+		/* Subtle entrance micro-animation: a 240 ms fade-up using the
+		 * brand's irregular --ease-out cubic-bezier. Disabled entirely
+		 * under prefers-reduced-motion (see override at the bottom of
+		 * this <style> block). */
+		animation: rtr-rise var(--duration-base) var(--ease-out) both;
+	}
+
+	.rtr-header__title {
+		font-family: var(--font-heading);
+		font-size: var(--text-display);
+		line-height: 0.9;
+		letter-spacing: -0.02em;
+		text-transform: uppercase;
+		color: var(--color-flag-white);
 		margin: 0;
+		max-width: 14ch;
+		animation: rtr-rise var(--duration-slow) var(--ease-out) 80ms both;
+	}
+
+	.rtr-header__lede {
+		font-family: var(--font-body);
+		font-size: var(--text-lg);
+		line-height: var(--leading-relaxed);
+		color: oklch(85% 0 0);
+		max-width: 56ch;
+		margin: 0;
+		animation: rtr-rise var(--duration-base) var(--ease-out) 160ms both;
+	}
+
+	/* 4-band flag stripe that breaks the dark block. The bands are
+	 * border-radius: 0 and sit flush against the header edges. */
+	.rtr-header__flag {
+		display: grid;
+		grid-template-columns: repeat(4, 1fr);
+		height: 8px;
+		width: 100%;
+	}
+
+	.rtr-header__flag-band {
+		display: block;
+		height: 100%;
+	}
+
+	.rtr-header__flag-band--black { background: var(--color-flag-black); }
+	.rtr-header__flag-band--white { background: var(--color-flag-white); }
+	.rtr-header__flag-band--green { background: var(--color-flag-green); }
+	.rtr-header__flag-band--red   { background: var(--color-flag-red); }
+
+	/*
+	 * Subtle entrance keyframes. The element starts 12 px below its
+	 * final position and faded out, then snaps into place with the
+	 * brand's irregular --ease-out cubic-bezier. This is the
+	 * "micro-animation" called for by the issue — short, dry, and
+	 * token-driven.
+	 */
+	@keyframes rtr-rise {
+		from {
+			opacity: 0;
+			transform: translateY(12px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	/*
+	 * Card-specific rise: tighter (8 px) and slightly faster than the
+	 * header elements. Combined with a per-card delay set via inline
+	 * style on the <li>, this gives the featured strip a quick,
+	 * cascading entry. The 3-card grid stays coherent even when only
+	 * 1 or 2 cards are rendered (the delay on missing slots is a
+	 * no-op).
+	 */
+	@keyframes rtr-card-rise {
+		from {
+			opacity: 0;
+			transform: translateY(8px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	/*
+	 * The rest of the page lives inside the standard container width.
+	 * The featured and full-list sections get the same horizontal cap
+	 * as the rest of the site (--container-wide).
+	 */
+	.right-to-resist__featured,
+	.right-to-resist__list-section {
+		width: min(100% - 2 * var(--space-s), var(--container-wide));
+		margin-inline: auto;
 	}
 
 	.right-to-resist__section-title {
@@ -277,6 +427,23 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 		line-height: var(--leading-tight);
 		letter-spacing: var(--tracking-tight);
 		margin: 0 0 var(--space-l);
+		color: var(--color-ink);
+		/* Position relative so the under-mark — a 4px red bar — can be
+		 * absolutely positioned beneath the title. Token-driven, hard
+		 * edge, no border-radius. */
+		position: relative;
+		padding-bottom: var(--space-2xs);
+	}
+
+	.right-to-resist__section-title::after {
+		content: "";
+		display: block;
+		position: absolute;
+		left: 0;
+		bottom: 0;
+		width: 64px;
+		height: 4px;
+		background: var(--color-flag-red);
 	}
 
 	/* ---------- Featured strip ---------- */
@@ -304,6 +471,11 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 
 	.featured-card {
 		display: flex;
+		/* Entrance micro-animation on the cards: 320 ms rise with the
+		 * brand's irregular --ease-in-out cubic-bezier, staggered by
+		 * 60 ms per card via inline style. The cards fade up from
+		 * 8 px below their final position. */
+		animation: rtr-card-rise var(--duration-slow) var(--ease-in-out) both;
 	}
 
 	.featured-card__link {
@@ -541,8 +713,13 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 	@media (prefers-reduced-motion: reduce) {
 		.featured-card__link,
 		.card__inner,
-		.card__cta span {
+		.card__cta span,
+		.rtr-header__eyebrow,
+		.rtr-header__title,
+		.rtr-header__lede,
+		.featured-card {
 			transition: none;
+			animation: none;
 		}
 	}
 </style>
