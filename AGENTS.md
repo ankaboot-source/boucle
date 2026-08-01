@@ -95,3 +95,18 @@ Les valeurs concrètes (couleurs, échelles, durées, familles typo,
 tokens) vivent dans [`src/styles/tokens.css`](src/styles/tokens.css) ;
 `DESIGN.md` en expose l'intention, les interdits et la direction
 esthétique.
+
+## Lessons learned
+
+- ❌ **Shipping a design MR with the `## Approach` section of
+  `.boucle/<iid>/state.md` left at its template placeholder
+  (« (to be determined by worker) »).** The boucle job uses the
+  `## Approach` content as the MR description; leaving it empty
+  produces a boilerplate MR with no `DESIGN.md` citation, which
+  violates `AGENTS.md` §6 and fails the reviewer on every
+  design-touching PR.
+  ✅ **Always fill the `## Approach` section of `state.md` with a
+  `DESIGN.md` citation (interdits §2 + trois règles d'or §4) before
+  committing.** Treat the citation as part of the deliverable, not
+  as an afterthought. Even a one-paragraph note is enough to flip a
+  `VERDICT: FAIL` on the documentation criterion to a `PASS`.
