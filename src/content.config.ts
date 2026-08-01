@@ -175,8 +175,34 @@ const mobilisation = defineCollection({
 	}),
 });
 
+// =============================================================================
+// Global social handles
+// =============================================================================
+// Single-file collection backed by `src/content/social.yaml`, mirrored by
+// the `singletons[]` block in `sveltia-cms.config.yml` (one file, no
+// folder). Loaded via the `file()` loader — not the `glob()` loader —
+// because the file is at a known path, not part of a folder of entries.
+// Used by:
+//   - `src/components/SocialCTA.astro`      (in-page social block on /)
+//   - `src/components/SocialSidebar.astro`  (fixed sidebar, all pages)
+//
+// All five fields are optional URLs so the CMS can be set up empty
+// without breaking the build; the social components filter out empty
+// entries before rendering.
+const social = defineCollection({
+	loader: glob({ pattern: "social.yaml", base: "./src/content" }),
+	schema: z.object({
+		instagram: optionalUrl,
+		tiktok: optionalUrl,
+		telegram: optionalUrl,
+		facebook: optionalUrl,
+		twitter: optionalUrl,
+	}),
+});
+
 export const collections = {
 	prisesDeParole,
 	collectif,
 	mobilisation,
+	social,
 };
