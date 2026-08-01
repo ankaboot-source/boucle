@@ -309,6 +309,7 @@ sequenceDiagram
 | `bin/update` | Auto-update from upstream: fetch latest tag/commit, tarball download, extraction of `SYNC_PATHS`, **fail-open** (any error → warning + exit 0), tracking via `.boucle-version`, modes `release` (latest tag) or `dev` (latest commit on main), anti-feedback-loop guard (skip on `push-source`) |
 | `bin/doctor` | Day-0 verification and diagnostics: ~20 checks (labels present, CI variables, branch protection, runner available, agents resolvable, CF Pages reachable, `.boucle-version` up to date) |
 | `bin/fetch-issue-attachments` | Downloads issue attachments to `.boucle/<issue>/attachments/` with quotas `BOUCLE_IMAGE_MAX_BYTES` and `BOUCLE_IMAGE_TOTAL_MAX_BYTES`. Inherits attachments from the parent issue (one level) when the issue is a sub-issue carrying a `## Parent issue` section; disable with `BOUCLE_PARENT_ATTACHMENTS_DISABLE` |
+| `bin/fetch-mr-attachments` | Downloads attachments uploaded to MR comments (reviewer screenshots, human mockups) to `.boucle/<issue>/mr-attachments/` with the same `BOUCLE_IMAGE_MAX_BYTES` and `BOUCLE_IMAGE_TOTAL_MAX_BYTES` quotas as `bin/fetch-issue-attachments`. No parent inheritance (MRs have no parent). Gated on `BOUCLE_MR_IID` being non-empty (no MR on first run). Mirrors `bin/fetch-issue-attachments` for the feedback channel |
 | `bin/render-preview.cjs` | Renders `preview.html` → `preview.png` via `@sparticuz/chromium` + `puppeteer-core` (visual preview layer attached to MRs) |
 | `bin/collapse-duplicate-notes` | Collapses duplicate comments: if an agent posts v2, CI replaces the first one (stable Note ID) |
 
@@ -372,6 +373,9 @@ Each issue has a state file at `.boucle/<issue>/state.md`, **seeded from triage*
 ### 5b. Feedback channel (reviewer + human → worker)
 On every worker run, the worker job fetches ALL non-system notes from the issue's open MR (`boucle/<iid>` source branch) and exports them as `BOUCLE_REVIEWER_FEEDBACK`. `bin/oc` injects them into the worker's prompt as a "Prior feedback on the MR" section. This covers all 4 re-trigger paths (reviewer FAIL, human MR comment, empty MR, rebase conflict) with a single fetch — no per-path variable passing needed. On the first run, no MR exists yet, so the feedback is empty. The worker MUST address every actionable item before claiming done (see [AGENTS.md](AGENTS.md) lesson #16).
 
+### 5b'. MR comment attachment extraction
+In addition to the text-only feedback above, [`bin/fetch-mr-attachments`](bin/fetch-mr-attachments) mines the same MR notes for `/uploads/...` paths (reviewer screenshots, human mockups attached as image/PDF/etc. uploads) and downloads them to `.boucle/<issue>/mr-attachments/`. `bin/oc` sources the resulting `BOUCLE_MR_ATTACHMENTS` and appends the local paths to the agent prompt so the worker can `Read` reviewer/human attachments. Mirrors [bin/fetch-issue-attachments](#6-bin-scripts) but for MR notes (no parent-issue inheritance — MRs have no parent). Gated on `MR_FOR_FEEDBACK` being non-empty (no MR on first run).
+
 ### 5c. MR description refresh on re-runs
 When the worker reuses an existing MR (iteration 2+), the worker job calls `glab mr update` to refresh the title and description with the new preview URL, commit summary, and Approach. Without this, the MR description stays stale (wrong preview URL, empty Approach) and the reviewer tests the wrong deployment (see [AGENTS.md](AGENTS.md) lesson #19). The `## Approach` section of `state.md` is extracted into the MR description; if the worker leaves it as the seed placeholder, CI substitutes an explicit note so the description is never the literal seed text (see [AGENTS.md](AGENTS.md) lesson #20).
 
@@ -407,6 +411,7 @@ All boucle configuration variables are prefixed with `BOUCLE_`. No other variabl
 | `BOUCLE_UPDATE_MODE` | Auto-update mode from upstream. | `release` |
 | `BOUCLE_BOT_ID` | GitLab ID of the bot account (to distinguish bot comments from human ones). | — |
 | `BOUCLE_REVIEWER_FEEDBACK` | All non-system notes from the issue's open MR (reviewer verdicts + human comments). Injected into the worker's prompt on every run so re-runs address prior feedback. Fetched by the worker job; empty on first run. | — |
+| `BOUCLE_MR_IID` | The issue's open MR IID (the `boucle/<iid>` source branch). Resolved by the worker job from `MR_FOR_FEEDBACK` and passed to `bin/fetch-mr-attachments`. Empty on first run (no MR yet). | — |
 | `BOUCLE_PREVIEW_PROPAGATION_WAIT` | Max seconds to wait for the preview CDN to propagate the new deployment before failing the worker job. The deploy assertion retries every 5s until the deployed SHA marker matches the head SHA. | `60` |
 | `BOUCLE_RUNNER_TAG` | Tag of the GitLab runner that executes boucle jobs. | — |
 | `PI_AUTH` | Authentication for the pi agent (secondary coding agent). | file-type → `auth.json` |

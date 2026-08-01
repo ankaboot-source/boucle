@@ -87,14 +87,15 @@ You have these skills in `.opencode/skill/`. **Use them** — they contain domai
 2. Read the issue body and the triage analysis comment.
 3. **Read the "Prior feedback on the MR" section of your prompt** (if present). It contains reviewer verdicts (`VERDICT: FAIL` with the unmet acceptance criteria) and human comments on the MR. You MUST address every actionable item before claiming done — a re-run that ignores prior feedback will FAIL the reviewer the same way again and waste the iteration budget. Map each unmet criterion to a concrete change in your implementation.
 4. If image paths are listed in your prompt, `Read` each file to inspect them. They are screenshots or diagrams the author attached to the issue — use them as context for the implementation. If no images are listed, no images were attached (or they exceeded the size cap) — proceed with text only.
-5. **Query the codebase graph** (search_graph, trace_path) to understand the code you'll touch before reading files blindly.
-6. **Load relevant skills** with the `skill` tool — domain skills (astro, frontend-design, etc.) AND process skills (test-driven-development, etc.) based on what the issue asks for.
-7. Implement the acceptance criteria from `state.md`.
-8. Update `state.md`:
+5. If MR comment attachment paths are listed in your prompt (separate from issue attachments), `Read` each file too. They are screenshots or mockups that a reviewer or human attached to MR comments — use them as context for addressing reviewer feedback. If none are listed, no images were attached to MR comments.
+6. **Query the codebase graph** (search_graph, trace_path) to understand the code you'll touch before reading files blindly.
+7. **Load relevant skills** with the `skill` tool — domain skills (astro, frontend-design, etc.) AND process skills (test-driven-development, etc.) based on what the issue asks for.
+8. Implement the acceptance criteria from `state.md`.
+9. Update `state.md`:
    - **Fill in the "Approach" section with what you did.** This is NOT optional. The Approach section becomes the MR description that the reviewer reads to verify doc conformance (e.g. DESIGN.md §2 and §4 citations). An empty or placeholder Approach causes reviewer FAIL loops — issue #34 on up/urgence-palestine.fr had 3 FAIL verdicts, all blocking on the same criterion: "MR description does not cite DESIGN.md". Write 2-5 sentences explaining your implementation approach and how it conforms to the charter docs (cite the specific sections you followed).
    - If you tried and rejected an approach, add it to "Tried and rejected" with why.
-9. Append to `iterations.md` with what you changed.
-10. **Update charter docs** if your changes impact them (see "Doc maintenance" above). Commit doc updates in the same MR as the code.
+10. Append to `iterations.md` with what you changed.
+11. **Update charter docs** if your changes impact them (see "Doc maintenance" above). Commit doc updates in the same MR as the code.
 
 ## Rules
 
