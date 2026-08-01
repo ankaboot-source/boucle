@@ -32,7 +32,9 @@ variables:
   # Production URL (for e2e fallback when deploy doesn't pass a live URL)
   BOUCLE_PRODUCTION_URL: ""
   # Attachment policy: max size per attachment (bytes) and total per issue (bytes).
-  # Applies to ALL uploads (images, PDFs, archives, etc.) downloaded from the issue.
+  # Applies to ALL uploads fetched by bin/fetch-issue-attachments (images, PDFs,
+  # archives, etc.), not just images. Variable names retain the IMAGE prefix for
+  # backward compatibility with consumers that override them via GitLab UI.
   # Defaults: 10 MiB per attachment, 50 MiB total. Attachments over either cap are skipped.
   BOUCLE_IMAGE_MAX_BYTES: "10485760"
   BOUCLE_IMAGE_TOTAL_MAX_BYTES: "52428800"
@@ -281,7 +283,12 @@ dispatch:
 
         case "$MR_ACTION" in
           approved)
-            # Verify the issue is at boucle:approval (reviewer PASS'd it) or boucle:human (human override)
+            # Trigger merger if the issue is at boucle:approval (reviewer
+            # PASS'd it) OR boucle:human (human override — the reviewer
+            # failed/UNCERTAIN but the human manually approves the MR,
+            # overriding the reviewer's verdict). Without this fallback,
+            # a reviewer failure strands the issue at boucle:human with no
+            # path forward even after the human approves the MR natively.
             MR_LABELS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID" | jq -r '.labels | join(",")')
             if ! echo "$MR_LABELS" | grep -qE "boucle:(approval|human)"; then
               echo "Issue #$MR_ISSUE_IID not at boucle:approval or boucle:human (labels: $MR_LABELS) — ignoring MR approval, skipping"
@@ -738,7 +745,7 @@ triage:
         printf '%s' "${out:-[]}"
       }
 
-      # Download attachments from the issue (capped per BOUCLE_IMAGE_*_BYTES).
+      # Download attachments uploaded to the issue (capped per BOUCLE_IMAGE_*_BYTES).
       # Makes them available to the triage agent via BOUCLE_ISSUE_ATTACHMENTS.
       ./bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
 
@@ -865,6 +872,9 @@ triage:
         echo "[boucle] No new triage comment posted by this run — leaving issue #$IID at boucle:triage, no label change."
         exit 0
       fi
+
+      # Collapse duplicate triage comments (agent may post a v2; CI replaces the first).
+      ./bin/collapse-duplicate-notes triage "$CI_PROJECT_ID" "$IID" "$PRE_RUN_TRIAGE_ID" "$BOUCLE_FORGE_HOST"
 
       # Route based on disposition
       case "$DISPOSITION" in
@@ -1351,7 +1361,24 @@ worker:
       EOF
       fi
 
-      # Download attachments from the issue (capped per BOUCLE_IMAGE_*_BYTES).
+      # ── Feedback channel: inject reviewer verdicts + human MR comments ──
+      # On re-runs (reviewer FAIL, human MR comment, empty MR, rebase conflict),
+      # the worker MUST see what the reviewer and humans said on the MR.
+      # Without this, each re-run starts blind and repeats the same mistakes
+      # (issue #35 on up/urgence-palestine.fr: 3 FAIL verdicts, same root cause,
+      # never addressed). We fetch ALL non-system MR notes (reviewer verdicts
+      # carry the boucle:verdict marker; human comments are plain text) and
+      # inject them into the worker's prompt via BOUCLE_REVIEWER_FEEDBACK.
+      # On the first run, no MR exists yet — the feedback is empty, that's fine.
+      export BOUCLE_REVIEWER_FEEDBACK
+      BOUCLE_REVIEWER_FEEDBACK=""
+      MR_FOR_FEEDBACK=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?source_branch=boucle%2F$BOUCLE_ISSUE&state=opened" 2>/dev/null | jq -r '.[0].iid // empty' 2>/dev/null || echo "")
+      if [ -n "$MR_FOR_FEEDBACK" ]; then
+        BOUCLE_REVIEWER_FEEDBACK=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_FOR_FEEDBACK/notes?per_page=100&order_by=created_at&sort=asc" 2>/dev/null \
+          | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | .[]' 2>/dev/null || echo "")
+      fi
+
+      # Download attachments uploaded to the issue (capped per BOUCLE_IMAGE_*_BYTES).
       # Makes them available to the worker agent via BOUCLE_ISSUE_ATTACHMENTS.
       ./bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
 
@@ -1665,6 +1692,12 @@ reviewer:
       # verdict parsing even if the agent exits non-zero (step limit,
       # crash, etc.). The missing-verdict recovery below handles the
       # case where the agent didn't post a verdict.
+      # Capture the highest reviewer verdict note ID that existed BEFORE this
+      # run, so we can collapse duplicate v2 verdicts below.
+      PRE_RUN_VERDICT_ID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes" --paginate \
+        | jq -r '[.[] | select(.body | test("<!-- boucle:verdict")) | select(.body | test("role=reviewer")) | .id] | max // 0' 2>/dev/null || echo 0)
+      echo "PRE_RUN_VERDICT_ID=$PRE_RUN_VERDICT_ID"
+
       rc=0
       ./bin/oc reviewer || rc=$?
       if [ "$rc" -ne 0 ]; then
@@ -1676,10 +1709,28 @@ reviewer:
       # so we only pick up a verdict for THIS version of the code, not a stale
       # one from a previous worker iteration. Use `last` (newest) in case the
       # agent posts multiple notes.
+      # Robustness: the SHA filter uses `contains("sha=\($sha)")` which requires
+      # the agent to emit the bare `sha=<hex>` substring with no quotes/whitespace.
+      # As a fallback, if the SHA-anchored filter returns empty, retry WITHOUT
+      # the SHA filter (accept the newest reviewer verdict regardless of SHA) —
+      # this recovers cases where the agent omitted or malformed the SHA but
+      # still posted a valid VERDICT line. The human-override path (dispatch
+      # `approved` accepting boucle:human) handles the residual risk.
       COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
         | jq -r --arg sha "$MR_HEAD" '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer") and contains("sha=\($sha)"))] | first | .body // empty')
-
       VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+
+      # SHA-filter fallback: if the SHA-anchored parse found nothing, accept
+      # the newest reviewer verdict regardless of SHA. Better to act on a
+      # verdict for a slightly-stale SHA than to strand the issue at human.
+      if [ -z "$VERDICT" ]; then
+        COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
+          | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer"))] | first | .body // empty')
+        VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+        if [ -n "$VERDICT" ]; then
+          echo "[boucle] WARN: SHA-anchored verdict parse empty — accepted newest reviewer verdict (SHA-unanchored fallback)."
+        fi
+      fi
 
       # ── Log-scraping fallback (step-limit recovery) ──────────────────
       # If the agent drafted a verdict but ran out of steps before posting it
@@ -1690,22 +1741,37 @@ reviewer:
         AGENT_LOG="$CI_PROJECT_DIR/.boucle/$BOUCLE_ISSUE/agent-output.log"
         if [ -f "$AGENT_LOG" ]; then
           # Extract the drafted verdict comment: from the boucle:verdict marker
-          # (matching this MR's head SHA) to the VERDICT line. The agent prints
-          # the full comment in its stdout when it can't call glab.
+          # to the VERDICT line. Try SHA-anchored first, then SHA-unanchored
+          # (tolerates agent omitting/malforming the SHA in the drafted marker).
           DRAFTED_VERDICT=$(awk -v sha="$MR_HEAD" '
             $0 ~ "<!-- boucle:verdict v=1 role=reviewer sha=" sha " -->" { found=1 }
             found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
           ' "$AGENT_LOG" 2>/dev/null || echo "")
+          if [ -z "$DRAFTED_VERDICT" ]; then
+            DRAFTED_VERDICT=$(awk '
+              /<!-- boucle:verdict v=1 role=reviewer/ { found=1 }
+              found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
+            ' "$AGENT_LOG" 2>/dev/null || echo "")
+            if [ -n "$DRAFTED_VERDICT" ]; then
+              echo "[boucle] WARN: SHA-anchored log scrape empty — used SHA-unanchored scrape."
+            fi
+          fi
           if [ -n "$DRAFTED_VERDICT" ] && echo "$DRAFTED_VERDICT" | grep -qiE 'VERDICT: (PASS|FAIL|UNCERTAIN)'; then
             echo "[boucle] Recovering drafted reviewer verdict from agent log (step-limit fallback)."
             # Strip leading/trailing ``` fences if the agent wrapped the comment.
             DRAFTED_VERDICT=$(echo "$DRAFTED_VERDICT" | sed '/^```$/d')
             glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes" \
               -f body="$DRAFTED_VERDICT" > /dev/null 2>&1 || true
-            # Re-fetch and re-parse the now-posted verdict.
+            # Re-fetch and re-parse the now-posted verdict (SHA-anchored, then
+            # SHA-unanchored fallback — same logic as the primary parse above).
             COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
               | jq -r --arg sha "$MR_HEAD" '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer") and contains("sha=\($sha)"))] | first | .body // empty')
             VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+            if [ -z "$VERDICT" ]; then
+              COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
+                | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer"))] | first | .body // empty')
+              VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+            fi
             if [ -n "$VERDICT" ]; then
               echo "[boucle] Step-limit fallback succeeded: recovered verdict=$VERDICT."
             else
@@ -1714,6 +1780,9 @@ reviewer:
           fi
         fi
       fi
+
+      # Collapse duplicate reviewer verdicts (agent may post a v2; CI replaces the first).
+      ./bin/collapse-duplicate-notes reviewer "$CI_PROJECT_ID" "$MR_IID" "$PRE_RUN_VERDICT_ID" "$BOUCLE_FORGE_HOST" "$MR_HEAD"
 
       case "$VERDICT" in
         PASS)
@@ -2457,6 +2526,12 @@ e2e:
       # yet exit non-zero (e.g. pi cleanup, glab "new version" warning on
       # stderr). We verify the verdict from the issue comment below, so the
       # agent exit code is not authoritative.
+      # Capture the highest e2e verdict note ID that existed BEFORE this run,
+      # so we can collapse duplicate v2 verdicts below.
+      PRE_RUN_VERDICT_ID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" --paginate \
+        | jq -r '[.[] | select(.body | test("<!-- boucle:verdict")) | select(.body | test("role=e2e")) | .id] | max // 0' 2>/dev/null || echo 0)
+      echo "PRE_RUN_VERDICT_ID=$PRE_RUN_VERDICT_ID"
+
       ./bin/oc e2e || true
 
       # Disable errexit for the post-agent section: the verdict parsing and
@@ -2502,6 +2577,9 @@ e2e:
           fi
         fi
       fi
+
+      # Collapse duplicate e2e verdicts (agent may post a v2; CI replaces the first).
+      ./bin/collapse-duplicate-notes e2e "$CI_PROJECT_ID" "$BOUCLE_ISSUE" "$PRE_RUN_VERDICT_ID" "$BOUCLE_FORGE_HOST"
 
       case "$VERDICT" in
         PASS)
@@ -2550,9 +2628,8 @@ e2e:
               --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || true
           fi
           # Close the original issue: work is transferred to the follow-up.
-          # Post a link comment so the human can trace from the original →
-          # follow-up, then close the original and cascade the parent
-          # (mirrors PASS branch behavior).
+          # Post a link comment so the human can trace from #29 → #32, then
+          # close #29 and cascade the parent (mirrors PASS branch behavior).
           E2E_LINK_BODY="<!-- boucle:e2e-fail v=1 iid=$BOUCLE_ISSUE followup=$E2E_NEW_IID -->
       E2E verification FAILED. A follow-up issue #$E2E_NEW_IID has been opened in triage to fix the defect.
 
