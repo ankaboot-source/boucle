@@ -319,27 +319,24 @@ already committed and resolved. Any new regression MUST be added here in the sam
       `ls`/`cat`/`git log` to reconstitute the codebase, burning steps that
       should have gone to implementation. The graph was indexed but unused.
 
-24. **MR description frozen at iteration 1 on no-changes re-runs** (issue #35 on up/urgence-palestine.fr)
-    - ❌ DO NOT skip the MR description refresh when the worker produces no
-      code changes. The "no changes" handler (`exit 1` before the build/deploy
-      block) runs BEFORE the `glab mr update` that refreshes the description
-      with the new iteration number and preview URL. When the worker exhausts
-      its step budget across iterations 2 and 3 without committing, the MR
-      description stays frozen at "iteration 1" with the original preview URL
-      — the reviewer and the user see a misleading description that does not
-      reflect the actual loop state.
-    - ✅ DO: refresh the MR description in the "no changes" handler itself,
-      before the `exit 1`. Fetch the existing MR by source branch, preserve
-      its current preview URL (if any), and update title + description to
-      reflect the current iteration and the "no code changes" status. The
-      reviewer and the user now see the real iteration count and a clear
-      "no commits this iteration" status instead of a stale "iteration 1".
-    - Context: issue #35 iterations 2 and 3 both exhausted the step budget
-      before committing (the destructive reset of lesson #22 wiped the
-      prior validated work, forcing re-implementation from scratch). The MR
-      !31 description stayed at "iteration 1" with the original preview URL
-      throughout, misleading the user who reported "la description de la MR
-      indique toujours iteration 1 avec la preview URL initiale".
+24. **MR description overwritten on no-changes re-runs** (issue #35 on up/urgence-palestine.fr)
+    - ❌ DO NOT overwrite the MR description when the worker produces no code
+      changes. The previous description may contain a detailed Approach and a
+      working preview URL from the last successful iteration — replacing them
+      with a "no code changes" placeholder destroys useful information. The
+      user reported: "s'il y a pas de résultats pas la peine d'écraser le
+      précédent contenu".
+    - ✅ DO: update only the MR TITLE to reflect the current iteration (so
+      the user sees the real iteration count), but leave the DESCRIPTION
+      untouched. The iteration status is already tracked via the issue note
+      posted by the no-changes handler. The description from the last
+      successful iteration is more useful than a "no commits this iteration"
+      placeholder.
+    - Context: issue #35 iteration 3 produced a full implementation (FeaturedFeed.astro,
+      index.astro, sections.css, tokens.css) with a detailed Approach citing
+      DESIGN.md. A later no-changes run overwrote the description with
+      "Issue #35 — iteration 1 (no code changes)" + "(no commits this
+      iteration)", wiping the Approach and the working preview URL.
 
 25. **MR comment attachments not extracted** (issue discovered 2026-08-01)
     - ❌ DO NOT fetch MR notes as text-only (`.body` field) and silently drop
