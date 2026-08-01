@@ -1470,6 +1470,30 @@ worker:
       # we build the rebased code (what will actually be pushed/deployed).
       eval "$BOUCLE_BUILD_CMD"
 
+      # ── Preview freshness marker ──────────────────────────────────────
+      # Write a commit-SHA marker into the build output so the deploy
+      # verification can confirm the deployed content matches the head
+      # commit (not a stale CDN-cached or cache-hit build from a previous
+      # iteration). Without this, the worker can ship a new commit but the
+      # preview keeps serving the old deployment because:
+      #   - wrangler returns the same content-hash URL for identical output
+      #   - the CDN edge keeps serving cached content for seconds-to-minutes
+      #   - the only assertion was HTTP 200, which cached content also passes
+      # The marker is a plain HTML comment injected into index.html AND a
+      # standalone /__boucle_commit__.txt file (so non-HTML backends work too).
+      # See AGENTS.md lesson #21.
+      HEAD_SHA=$(git rev-parse HEAD)
+      MARKER_HTML="<!-- boucle:commit sha=${HEAD_SHA} -->"
+      MARKER_TXT="boucle:commit sha=${HEAD_SHA}"
+      if [ -f "$BOUCLE_BUILD_OUTPUT/index.html" ]; then
+        # Inject the marker right after <html> so it survives minifiers that
+        # strip leading/trailing comments. Use a temp file to avoid sed -i
+        # portability issues across GNU/BSD sed.
+        sed "1i\\${MARKER_HTML}" "$BOUCLE_BUILD_OUTPUT/index.html" > "$BOUCLE_BUILD_OUTPUT/index.html.boucle" \
+          && mv "$BOUCLE_BUILD_OUTPUT/index.html.boucle" "$BOUCLE_BUILD_OUTPUT/index.html"
+      fi
+      printf '%s\n' "$MARKER_TXT" > "$BOUCLE_BUILD_OUTPUT/__boucle_commit__.txt"
+
       # Push branch FIRST (agent already committed; we just push).
       # This persists the agent's work even if the deploy step later times out.
       # Use --force (not --force-with-lease): the worker resets to origin/master
@@ -1482,7 +1506,27 @@ worker:
 
       # Deploy to preview (configurable via BOUCLE_DEPLOY_CMD).
       # Happens AFTER push so the code is saved even if this step is slow or fails.
-      PREVIEW_URL=$(eval "$BOUCLE_DEPLOY_CMD" 2>&1 | grep -oE "$BOUCLE_DEPLOY_URL_REGEX" | head -1)
+      # Capture wrangler's exit code separately from the URL extraction: the
+      # `$(...) | grep | head` pipeline swallows wrangler failures because the
+      # script runs with `set +o pipefail` (line 1255), so the pipeline's exit
+      # code is always `head`'s (0). We run the deploy in a subshell, save its
+      # full stdout+stderr to a file, then grep the URL out of the file. This
+      # way a wrangler auth failure or upload error is detected instead of
+      # silently treated as success. See AGENTS.md lesson #21.
+      DEPLOY_LOG=$(mktemp)
+      (eval "$BOUCLE_DEPLOY_CMD") > "$DEPLOY_LOG" 2>&1
+      DEPLOY_RC=$?
+      PREVIEW_URL=$(grep -oE "$BOUCLE_DEPLOY_URL_REGEX" "$DEPLOY_LOG" | head -1)
+      if [ "$DEPLOY_RC" -ne 0 ] && [ -n "$PREVIEW_URL" ]; then
+        echo "WARN: wrangler exited non-zero ($DEPLOY_RC) but emitted a preview URL — proceeding (may be a partial deploy)" >&2
+      fi
+      if [ "$DEPLOY_RC" -ne 0 ] && [ -z "$PREVIEW_URL" ]; then
+        echo "FAIL: deploy exited $DEPLOY_RC with no preview URL" >&2
+        cat "$DEPLOY_LOG" >&2
+        rm -f "$DEPLOY_LOG"
+        exit 1
+      fi
+      rm -f "$DEPLOY_LOG"
 
       # Build MR description with context (printf keeps YAML-valid, no multi-line string)
       # NOTE: CI checks out a detached HEAD — there is no local `master` ref.
@@ -1589,12 +1633,41 @@ worker:
           --data-urlencode "assignee_ids[]=$AUTHOR_ID" 2>/dev/null || true
       fi
 
-      # Assert: branch exists, MR open, preview returns 200
+      # Assert: branch exists, MR open, preview returns 200 AND serves the
+      # fresh commit (not a stale CDN-cached or cache-hit build from a previous
+      # iteration). The marker file written above (__boucle_commit__.txt) is
+      # fetched from the preview URL and compared to the head SHA. A retry
+      # loop gives the CDN edge time to propagate the new deployment (up to
+      # BOUCLE_PREVIEW_PROPAGATION_WAIT seconds, default 60s, 5s backoff).
+      # Without this, a stale preview passes the old HTTP-200-only assertion
+      # and the reviewer FAILs on "preview doesn't match the commit". See
+      # AGENTS.md lesson #21.
       if [ -z "$PREVIEW_URL" ]; then
         echo "FAIL: no preview URL" >&2; exit 1
       fi
       if ! curl -s -o /dev/null -w "%{http_code}" "$PREVIEW_URL" | grep -q "200"; then
         echo "FAIL: preview URL not 200" >&2; exit 1
+      fi
+      PROPAGATION_WAIT="${BOUCLE_PREVIEW_PROPAGATION_WAIT:-60}"
+      PROPAGATION_STEP=5
+      ELAPSED=0
+      DEPLOYED_SHA=""
+      while [ "$ELAPSED" -lt "$PROPAGATION_WAIT" ]; do
+        DEPLOYED_SHA=$(curl -s "${PREVIEW_URL%/}/__boucle_commit__.txt" 2>/dev/null \
+          | grep -oE 'sha=[a-f0-9]{7,40}' | head -1 | sed 's/sha=//')
+        if [ "$DEPLOYED_SHA" = "$HEAD_SHA" ]; then
+          echo "Preview fresh: deployed SHA ${DEPLOYED_SHA:0:12} matches head ${HEAD_SHA:0:12} (after ${ELAPSED}s)"
+          break
+        fi
+        echo "Preview not fresh yet (got '${DEPLOYED_SHA:-none}', want '${HEAD_SHA:0:12}') — retrying in ${PROPAGATION_STEP}s (${ELAPSED}/${PROPAGATION_WAIT}s)"
+        sleep "$PROPAGATION_STEP"
+        ELAPSED=$((ELAPSED + PROPAGATION_STEP))
+      done
+      if [ "$DEPLOYED_SHA" != "$HEAD_SHA" ]; then
+        echo "FAIL: preview stale after ${PROPAGATION_WAIT}s — deployed SHA '${DEPLOYED_SHA:-none}' != head '${HEAD_SHA:0:12}'" >&2
+        echo "The preview URL is serving content that does not match the head commit." >&2
+        echo "Likely causes: CDN cache, wrangler no-op on identical build output, or a failed redeploy." >&2
+        exit 1
       fi
 
       # Set review label
