@@ -63,7 +63,30 @@ const socialLinks = [
 			class="site-header__wordmark"
 			aria-label="Urgence Palestine — Accueil"
 		>
-			<span class="site-header__title">Urgence Palestine</span>
+			{/*
+			  * Two logos live in the markup at all times; CSS hides the
+			  * inactive one. The square is the default (extended header,
+			  * two-line layout); the rectangle takes over once the
+			  * header has been compressed by the scroll listener. The
+			  * aria-label above provides the accessible name so the
+			  * decorative alt="" is intentional on both.
+			  */}
+			<img
+				class="site-header__logo site-header__logo--square"
+				src="/logos/logo-up-carre.png"
+				width="900"
+				height="900"
+				alt=""
+				decoding="async"
+			/>
+			<img
+				class="site-header__logo site-header__logo--rectangle"
+				src="/logos/logo-up-rectangle-fond-transparent.png"
+				width="900"
+				height="400"
+				alt=""
+				decoding="async"
+			/>
 		</a>
 
 		<nav class="site-header__nav" aria-label="Navigation principale">
@@ -244,7 +267,11 @@ const socialLinks = [
 		justify-content: space-between;
 		flex-wrap: wrap;
 		gap: var(--space-s);
-		min-height: 64px;
+		/* The extended layout has the square logo on its own row above
+		 * the nav + CTAs + social row; 168px is enough headroom for a
+		 * 120px square plus both rows of padding. The scrolled layout
+		 * snaps back to a single, much shorter row (see below). */
+		min-height: 168px;
 		padding-block: var(--space-xs);
 		transition: min-height var(--duration-base) steps(3, end);
 	}
@@ -256,11 +283,24 @@ const socialLinks = [
 	}
 
 	.site-header__wordmark {
-		display: inline-flex;
+		display: flex;
 		align-items: center;
+		justify-content: center;
+		flex-basis: 100%;
+		/* Negative offset compensates for the small inline gap that
+		 * flex-wrap leaves around wrapped items, so the square's own
+		 * row sits flush with the rest of the header padding. */
+		margin-bottom: calc(-1 * var(--space-2xs));
 		color: var(--color-ink-on-dark);
 		text-decoration: none;
 		transition: color var(--duration-base) var(--ease-out);
+	}
+
+	/* Scrolled state: the wordmark collapses to the natural size of the
+	 * rectangle and rejoins the single row. */
+	.site-header.is-scrolled .site-header__wordmark {
+		flex-basis: auto;
+		margin-bottom: 0;
 	}
 
 	.site-header__wordmark:hover {
@@ -279,13 +319,53 @@ const socialLinks = [
 		text-underline-offset: 4px;
 	}
 
-	.site-header__title {
-		font-family: var(--font-heading);
-		font-size: var(--text-lg);
-		font-weight: var(--weight-bold);
-		letter-spacing: var(--tracking-tight);
-		line-height: var(--leading-tight);
-		text-transform: uppercase;
+	/*
+	 * Wordmark — two logos, one anchor.
+	 * --------------------------------
+	 * The square (900×900) is the extended-state wordmark: it spans its
+	 * own row inside the inner flex container, sitting on top of the nav
+	 * + CTAs + social row. The rectangle (900×400) replaces it once the
+	 * header collapses; it tucks back into the same row as the nav.
+	 *
+	 * Only one logo is rendered visible at a time — the other is `display:
+	 * none` so it does not occupy a slot in the flex row. The hidden
+	 * image is still fetched by the browser (it's a small, local PNG);
+	 * the swap on scroll is then instantaneous.
+	 *
+	 * Native `width`/`height` attributes on the <img> tags above let
+	 * the browser reserve the layout box before the image loads — no
+	 * CLS.
+	 */
+	.site-header__logo {
+		display: block;
+	}
+
+	/* Extended state: square on its own row, centered. The anchor
+	 * expands to 100% of the row so the image can sit centered without
+	 * bleeding into the nav row. The square is rendered at ~120px tall
+	 * to read as a brand block without dominating the page. */
+	.site-header__logo--square {
+		width: 120px;
+		height: 120px;
+	}
+
+	.site-header__logo--rectangle {
+		display: none;
+		width: 120px;
+		height: auto;
+		aspect-ratio: 900 / 400;
+	}
+
+	/* Scrolled state: rectangle joins the single row, square is hidden. */
+	.site-header.is-scrolled .site-header__logo--square {
+		display: none;
+	}
+
+	.site-header.is-scrolled .site-header__logo--rectangle {
+		display: block;
+		/* In the compressed row, the rectangle sits at 32px tall — the
+		 * aspect-ratio declaration above keeps it proportional. */
+		height: 32px;
 	}
 
 	.site-header__nav {
@@ -478,6 +558,10 @@ const socialLinks = [
 			align-items: flex-start;
 			gap: var(--space-2xs);
 			padding-block: var(--space-xs) var(--space-s);
+			/* Tighter min-height on small screens — the 120px square still
+			 * fits, but the social row no longer pushes the header taller
+			 * than necessary. */
+			min-height: 152px;
 		}
 
 		.site-header__list {
@@ -487,6 +571,18 @@ const socialLinks = [
 		.site-header__cta,
 		.site-header__social {
 			justify-content: flex-start;
+		}
+
+		/* On the scrolled state, the rectangle reverts the wordmark to
+		 * its natural size and lets it sit inline with the nav row,
+		 * rather than as a wrapped column item. */
+		.site-header.is-scrolled .site-header__wordmark {
+			flex-basis: auto;
+			margin-bottom: 0;
+		}
+
+		.site-header.is-scrolled .site-header__inner {
+			min-height: 44px;
 		}
 	}
 </style>
@@ -499,12 +595,15 @@ const socialLinks = [
 	 * receives an `is-scrolled` class that:
 	 *   - shifts the surface to the flag-red (rouge sang) accent,
 	 *   - snaps to a compressed height (no soft glide),
-	 *   - tightens the bottom border to a deeper, dryer line.
+	 *   - tightens the bottom border to a deeper, dryer line,
+	 *   - swaps the square wordmark (extended, two-line) for the
+	 *     rectangle wordmark (collapsed, single-line).
 	 *
 	 * Motion is kept dry (no `ease-in-out`), and uses ONLY the duration
 	 * tokens exposed in `tokens.css` (`--duration-fast` / `--duration-base`
-	 * / `--duration-slow`). When the user prefers reduced motion, we do not
-	 * attach the listener at all — the header stays in its static state.
+	 * / `--duration-slow`). When the user prefers reduced motion, we do
+	 * not attach the listener at all — the header stays in its static
+	 * (extended) state, with the square logo and two-line layout intact.
 	 */
 	const SCROLL_THRESHOLD = 64;
 
