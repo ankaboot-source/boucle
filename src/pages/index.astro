@@ -5,6 +5,7 @@ import NewsletterSignup from "../components/NewsletterSignup.astro";
 import NewsletterModal from "../components/NewsletterModal.astro";
 import DonationCTA from "../components/DonationCTA.astro";
 import GeneralCTA from "../components/GeneralCTA.astro";
+import MobilisationBlock from "../components/MobilisationBlock.astro";
 ---
 
 <Layout>
@@ -64,6 +65,21 @@ import GeneralCTA from "../components/GeneralCTA.astro";
 		  ============================================================
 		-->
 		<DonationCTA />
+
+		<!--
+		  ============================================================
+		  Mobilisation: a photo of a manifestation, covered by a solid
+		  flag-red overlay, with the title sitting on the overlay and
+		  the body lede + CTA living below the photo on a clean paper
+		  surface. No body paragraph, no CTA floats over the photo.
+		  Image is a temporary placeholder (see
+		  `static/mobilisation/_placeholder-manifestation.svg` and
+		  `data-placeholder="true"` on the rendered element). When the
+		  author supplies a real photograph, swap the `backgroundImage`
+		  prop and drop `isPlaceholder` to `false`.
+		  ============================================================
+		-->
+		<MobilisationBlock />
 
 		<!-- Decorative olive branch above the flag stripe. -->
 		<p class="section-head__lede section-head__lede--centered" aria-hidden="false">
