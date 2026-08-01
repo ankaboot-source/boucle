@@ -254,6 +254,17 @@ if [ -f "$ATTACHMENTS_ENV" ]; then
 fi
 BOUCLE_ISSUE_ATTACHMENTS="${BOUCLE_ISSUE_ATTACHMENTS:-}"
 
+# ── 3b. Load MR attachments (if bin/fetch-mr-attachments ran) ──
+# The fetch script writes .boucle/$ISSUE/.mr-attachments.env with
+# BOUCLE_MR_ATTACHMENTS="path1 path2 ...". Empty string = no MR attachments
+# (first run with no MR, or no uploads in MR comments).
+MR_ATTACHMENTS_ENV="$STATE_DIR/.mr-attachments.env"
+if [ -f "$MR_ATTACHMENTS_ENV" ]; then
+  # shellcheck disable=SC1090
+  source "$MR_ATTACHMENTS_ENV"
+fi
+BOUCLE_MR_ATTACHMENTS="${BOUCLE_MR_ATTACHMENTS:-}"
+
 # ── 4. Build the agent prompt (issue-specific context only) ──────────
 # Role instructions live in .opencode/agents/<role>.md (system prompt).
 # The user prompt below only adds issue-specific context to avoid duplication.
@@ -335,6 +346,15 @@ ${feedback}
     echo ""
     echo "Issue attachments are available at these local paths. Read each with the Read tool to inspect them (note: not all are images — some may be PDFs, archives, or other binary files; the Read tool handles binaries too):"
     echo "$BOUCLE_ISSUE_ATTACHMENTS"
+  fi
+
+  # Append MR attachment paths (if any) so the agent knows to Read them.
+  # bin/fetch-mr-attachments downloads MR-note uploads to
+  # .boucle/$ISSUE/mr-attachments/ (screenshots, mockups from reviewer/human).
+  if [ -n "${BOUCLE_MR_ATTACHMENTS:-}" ]; then
+    echo ""
+    echo "MR comment attachments are available at these local paths. Read each with the Read tool to inspect them (note: not all are images — some may be PDFs, archives, or other binary files; the Read tool handles binaries too):"
+    echo "$BOUCLE_MR_ATTACHMENTS"
   fi
 }
 
