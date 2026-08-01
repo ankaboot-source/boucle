@@ -339,22 +339,39 @@ ${feedback}
 
   echo "$prompt"
 
-  # Append attachment paths (if any) so the agent knows to Read them.
+  # Append attachment paths (if any) so the agent knows how to handle them.
   # bin/fetch-issue-attachments downloads issue uploads to
   # .boucle/$ISSUE/attachments/ (images, PDFs, archives, etc.).
+  # Attachments can be source assets to ship (logos, photos) OR mockups/
+  # screenshots for context. Decide based on the issue body + comment intent.
+  # Do NOT `Read` binary files (PNG/ZIP) — the Read tool returns garbage on
+  # binaries for text-only models. Use `file <path>` for dimensions/metadata.
   if [ -n "${BOUCLE_ISSUE_ATTACHMENTS:-}" ]; then
     echo ""
-    echo "Issue attachments are available at these local paths. Read each with the Read tool to inspect them (note: not all are images — some may be PDFs, archives, or other binary files; the Read tool handles binaries too):"
+    echo "Issue attachments are available at these local paths:"
     echo "$BOUCLE_ISSUE_ATTACHMENTS"
+    echo ""
+    echo "These may be source assets to ship in the build (logos, photos) OR mockups/screenshots for context. Decide based on the issue body and comment intent. For each file:"
+    echo "- Run \`file <path>\` to get its type and dimensions (e.g. PNG 52x100 = vertical image)."
+    echo "- Do NOT use the Read tool on binary files (PNG/ZIP/etc.) — it returns garbage on text-only models."
+    echo "- If it's a source asset (logo, photo, visual to display), copy it into the build tree (e.g. \`cp <path> public/<name>\`) and reference it in your code."
+    echo "- If it's a mockup/screenshot, use it as context for the implementation (dimensions, layout hints)."
   fi
 
-  # Append MR attachment paths (if any) so the agent knows to Read them.
+  # Append MR attachment paths (if any) so the agent knows how to handle them.
   # bin/fetch-mr-attachments downloads MR-note uploads to
-  # .boucle/$ISSUE/mr-attachments/ (screenshots, mockups from reviewer/human).
+  # .boucle/$ISSUE/mr-attachments/ (screenshots, mockups, assets from reviewer/human).
+  # Same dual nature as issue attachments — decide based on the comment intent.
   if [ -n "${BOUCLE_MR_ATTACHMENTS:-}" ]; then
     echo ""
-    echo "MR comment attachments are available at these local paths. Read each with the Read tool to inspect them (note: not all are images — some may be PDFs, archives, or other binary files; the Read tool handles binaries too):"
+    echo "MR comment attachments are available at these local paths:"
     echo "$BOUCLE_MR_ATTACHMENTS"
+    echo ""
+    echo "These may be mockups/screenshots for context OR source assets to ship. Decide based on the comment intent. For each file:"
+    echo "- Run \`file <path>\` to get its type and dimensions (e.g. PNG 52x100 = vertical image)."
+    echo "- Do NOT use the Read tool on binary files (PNG/ZIP/etc.) — it returns garbage on text-only models."
+    echo "- If the human explicitly says to use the file as an asset (e.g. 'use this image', 'with the attached visual', 'séparation visuelle avec le visuel ci-joint'), copy it into the build tree (e.g. \`cp <path> public/<name>\`) and reference it in your code."
+    echo "- If it's a mockup/screenshot, use it as context for addressing the feedback (dimensions, layout hints)."
   fi
 }
 
