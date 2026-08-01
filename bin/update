@@ -116,6 +116,17 @@ download_and_extract() {
 main() {
   local dry_run=false mode current upstream
 
+  # Self-update guard: never push from a push-source pipeline. A push
+  # triggers a new pipeline on master; if bin/update pushes back from
+  # inside that pipeline, it creates a feedback loop (push → pipeline →
+  # bin/update → push → pipeline → ...). The loop workflow only runs on
+  # trigger-source pipelines (webhooks + chained trigger/pipeline calls),
+  # so skipping self-update on push is safe.
+  if [ "${CI_PIPELINE_SOURCE:-}" = "push" ]; then
+    echo "[boucle] self-update skipped in push pipeline (CI_PIPELINE_SOURCE=push)"
+    return 0
+  fi
+
   [ "${1:-}" = "--dry-run" ] && dry_run=true
 
   mode=$(get_mode)
