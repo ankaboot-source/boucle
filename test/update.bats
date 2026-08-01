@@ -71,3 +71,22 @@ setup() {
   run needs_update "" "def"
   assert_success
 }
+
+# ── SYNC_PATHS ────────────────────────────────────────────────────────
+
+@test "SYNC_PATHS includes .opencode/opencode.json (issue #27 CI fix)" {
+  # Regression guard: the consumer CI was producing zero output because
+  # .opencode/opencode.json (compaction, setCacheKey, tool_output limits)
+  # was never synced. bin/update must carry it.
+  run bash -c 'source bin/update && echo "$SYNC_PATHS"'
+  assert_success
+  assert_output --partial ".opencode/opencode.json"
+}
+
+@test "SYNC_PATHS includes .opencode/agents (agent prompt propagation)" {
+  # Agent prompts (triage.md, worker.md, reviewer.md, e2e.md) must propagate
+  # to consumers on update, otherwise prompt fixes never reach CI.
+  run bash -c 'source bin/update && echo "$SYNC_PATHS"'
+  assert_success
+  assert_output --partial ".opencode/agents"
+}
