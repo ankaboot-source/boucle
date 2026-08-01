@@ -62,3 +62,36 @@ Do not push unless explicitly asked. Do not amend or force-push unless
 explicitly asked. If a commit fails (e.g. a pre-commit hook rejects
 it), fix the issue and create a new commit — do not amend the failed
 one.
+
+## Charte design
+
+[`./DESIGN.md`](./DESIGN.md) est la **référence obligatoire** pour toute
+contribution touchant au design, à la typographie, aux couleurs, à la
+mise en page, aux animations et aux symboles du site. Avant toute
+proposition visuelle (nouveau composant, variante de CTA, retouche
+typographique, motion, palette, symbolique), consulter ce document et
+s'aligner sur sa direction (brutalisme éditorial) et ses interdits.
+
+Les **trois règles d'or** énoncées au §4 de `DESIGN.md` doivent guider
+chaque décision et chaque revue :
+
+1. **Intentionnalité** — chaque élément a une raison d'être là. Si on ne
+   peut pas dire laquelle en une phrase, on l'enlève. Le décoratif pur
+   est interdit.
+2. **Imperfection** — on assume l'aspérité : coins durs, contrastes
+   francs, hiérarchies sans nuance. Mieux vaut une page honnête et rude
+   qu'une page léchée et oubliable.
+3. **Caractère** — une voix de collectif, directe, solidaire, sans
+   complaisance ni condescendance. Pas une voix de chatbot, pas une voix
+   d'ONG corporate.
+
+Conformément au §6 de `DESIGN.md`, **toute PR touchant au design doit
+citer `DESIGN.md` dans sa description** et expliquer — même brièvement —
+où se situent les choix par rapport aux interdits du §2 et aux trois
+règles d'or du §4. Une PR de design qui ne cite pas `DESIGN.md` est
+incomplète et doit être amendée avant revue.
+
+Les valeurs concrètes (couleurs, échelles, durées, familles typo,
+tokens) vivent dans [`src/styles/tokens.css`](src/styles/tokens.css) ;
+`DESIGN.md` en expose l'intention, les interdits et la direction
+esthétique.
