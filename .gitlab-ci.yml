@@ -1321,11 +1321,31 @@ worker:
       # stale CI clone (master may have advanced between clone and this job).
       git fetch origin master
 
-      # Create/checkout branch (stable name — iteration 2+ reuses & resets to master)
+      # Create/checkout branch (stable name — iteration 2+ reuses the branch).
+      # Preserve prior worker commits across iterations: rebase onto
+      # origin/master instead of wiping. Without this, a reviewer FAIL on a
+      # stale preview (not on the code) forces the next worker to re-implement
+      # from scratch — 50 steps is not enough to rebuild a complex feature
+      # (issue #35 on up/urgence-palestine.fr: commit 6ca8aa33 with the full
+      # FeaturedFeed.astro implementation was wiped by reset --hard, the next
+      # worker exhausted its step budget reconstituting context and produced
+      # zero code changes). If the branch has worker commits (diff vs
+      # origin/master is non-empty), rebase to incorporate master updates while
+      # keeping the work. If the rebase conflicts or the branch has no worker
+      # commits, reset to origin/master (clean slate).
       BRANCH="boucle/$BOUCLE_ISSUE"
       if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
         git checkout "$BRANCH"
-        git reset --hard origin/master
+        if git log --oneline origin/master.."$BRANCH" 2>/dev/null | grep -q .; then
+          echo "[boucle] Branch has prior worker commits — rebasing onto origin/master to preserve work."
+          if ! git rebase origin/master; then
+            echo "[boucle] Rebase conflicted — resetting to origin/master (prior work lost)."
+            git rebase --abort 2>/dev/null || true
+            git reset --hard origin/master
+          fi
+        else
+          git reset --hard origin/master
+        fi
       else
         git checkout -b "$BRANCH"
       fi

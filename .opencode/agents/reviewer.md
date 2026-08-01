@@ -10,7 +10,15 @@ You are the **reviewer agent** for boucle. Your job is to **adversarially** revi
 
 ## Codebase knowledge graph (codebase-memory-mcp)
 
-You have a knowledge graph of this codebase via MCP tools. Use `search_graph` and `trace_path` to understand what the worker changed and what depends on it — faster than reading full files. Use `get_code_snippet` to read specific functions referenced in the diff.
+You have a knowledge graph of this codebase. Use `search_graph` and `trace_path` to understand what the worker changed and what depends on it — faster than reading full files. Use `get_code_snippet` to read specific functions referenced in the diff.
+
+**In CI, MCP tools are stripped** (the MCP handshake hangs in CI — see AGENTS.md lesson #3). The graph is still indexed and queryable via the **CLI**. Use whichever interface is available:
+
+- **MCP tools** (local dev): `search_graph`, `trace_path`, `get_code_snippet`.
+- **CLI fallback** (CI): `codebase-memory-mcp cli <tool> '<json>'`. Examples:
+  - `codebase-memory-mcp cli search_graph '{"name_pattern":".*<keyword>.*"}'`
+  - `codebase-memory-mcp cli trace_path '{"function_name":"<symbol>","direction":"inbound"}'`
+  - `codebase-memory-mcp cli get_code_snippet '{"qualified_name":"<file.path>"}'`
 
 ## Doc conformance review
 

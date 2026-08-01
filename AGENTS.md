@@ -274,6 +274,51 @@ already committed and resolved. Any new regression MUST be added here in the sam
       stale-content path remained open until this marker + retry assertion
       was added.
 
+22. **Destructive `git reset --hard` wipes validated worker commits** (issue #35 on up/urgence-palestine.fr)
+    - ❌ DO NOT unconditionally `git reset --hard origin/master` at the start
+      of every worker iteration. When the reviewer FAILs on a non-code issue
+      (stale preview, missing doc citation, MR description placeholder), the
+      worker's code from the previous iteration is correct and committed —
+      a hard reset wipes it, forcing the next worker to re-implement from
+      scratch in its 50-step budget. The worker exhausts its steps
+      reconstituting context and produces an empty or trivial MR.
+    - ✅ DO: preserve worker commits and rebase. If
+      `git log origin/master..$BRANCH --oneline` shows worker commits, run
+      `git rebase origin/master` to keep the work on top of the latest master.
+      Fall back to `git reset --hard origin/master` ONLY when the rebase
+      conflicts or the branch has no worker commits (clean slate). This keeps
+      the anti-accumulation property (lesson #8) without destroying validated
+      work on non-code FAILs.
+    - Context: issue #35 iteration 3 produced commit `6ca8aa33` (full
+      FeaturedFeed.astro + index.astro + sections.css + tokens.css, all 5
+      tahrir comments addressed). The reviewer FAILed on a stale preview
+      (lesson #21), not on the code. The next iteration's `git reset --hard
+      origin/master` wiped `6ca8aa33` (now an orphan in the repo), leaving
+      only `fa1699f2` (a token-only commit). The next worker spent all 50
+      steps reconstituting context and produced no code changes.
+
+23. **Codebase graph indexed in CI but unusable by agents** (issue #35 on up/urgence-palestine.fr)
+    - ❌ DO NOT instruct agents to use MCP graph tools (`search_graph`,
+      `trace_path`, `get_code_snippet`) without documenting the CLI fallback
+      for CI. `bin/oc` strips MCP servers from the opencode config in CI
+      (lesson #3, MCP handshake hangs within 30s), so the tools the agent
+      prompts reference do not exist at runtime. The graph is built every run
+      (`codebase-memory-mcp cli index_repository`) but never queried — wasted
+      compute and blind agents that fall back to `grep`/`glob`.
+    - ✅ DO: document the CLI fallback in every agent prompt that references
+      graph tools. The CLI is available in CI as
+      `codebase-memory-mcp cli <tool> '<json>'` (e.g.
+      `codebase-memory-mcp cli search_graph '{"name_pattern":".*FeaturedFeed.*"}'`).
+      Agent prompts (`worker.md`, `triage.md`, `reviewer.md`) now list both
+      the MCP tools (local dev) and the CLI fallback (CI) with concrete
+      examples, so the agent knows how to query the graph in both
+      environments.
+    - Context: `worker.md:12-20` told the worker to use `search_graph` and
+      `trace_path`, but `bin/oc:170` (`strip_mcp_for_ci`) removed those tools
+      in CI. The worker (minimax-m3) on issue #35 iteration 4 fell back to
+      `ls`/`cat`/`git log` to reconstitute the codebase, burning steps that
+      should have gone to implementation. The graph was indexed but unused.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
