@@ -122,3 +122,106 @@ extract_func() {
   refute_output --partial "Issue images"
   rm -f "$TMPF"
 }
+
+# ── build_prompt: prior notes injection (triage) ───────────────────────
+# Regression: the triage agent used to re-ask questions the author had
+# already answered because prior issue notes were never injected into the
+# prompt. BOUCLE_ISSUE_NOTES carries the chronological discussion so the
+# agent can incorporate answers instead of re-asking them.
+
+@test "build_prompt: triage includes prior notes when BOUCLE_ISSUE_NOTES is set" {
+  TMPF=$(mktemp)
+  extract_func build_prompt "$TMPF"
+  run bash -c "ISSUE=27; BOUCLE_ISSUE_BODY='Amend DESIGN.md'; BOUCLE_ISSUE_NOTES='[tahrir] The Bold Font .ttf is attached
+[up-bot] Where is DESIGN.md?
+[tahrir] DESIGN.md is at repo root'; source '$TMPF'; build_prompt triage"
+  assert_success
+  assert_output --partial "Prior discussion"
+  assert_output --partial "The Bold Font .ttf is attached"
+  assert_output --partial "DESIGN.md is at repo root"
+  rm -f "$TMPF"
+}
+
+@test "build_prompt: no prior-notes section when BOUCLE_ISSUE_NOTES is empty" {
+  TMPF=$(mktemp)
+  extract_func build_prompt "$TMPF"
+  run bash -c "ISSUE=27; BOUCLE_ISSUE_BODY='Amend DESIGN.md'; unset BOUCLE_ISSUE_NOTES; source '$TMPF'; build_prompt triage"
+  assert_success
+  refute_output --partial "Prior discussion"
+  rm -f "$TMPF"
+}
+
+# ── Empty-output guard (silent-failure detection) ─────────────────────
+# bin/oc exits 3 when the agent produced NO posted comment AND NO drafted
+# comment in its log. This breaks the doctor re-trigger loop (issue #27).
+# We can't run the full bin/oc (it calls opencode), but we can verify the
+# guard logic by simulating the grep checks it performs.
+
+@test "empty-output guard: log with glab issue note call is NOT a silent failure" {
+  # Simulate an agent log that contains a glab issue note call.
+  LOG=$(mktemp)
+  echo "> triage · minimax-m3
+glab issue note 27 --repo up/urgence-palestine.fr --message \"$(cat <<'EOF'
+<!-- boucle:triage v=1 -->
+## TL;DR
+test
+## Disposition
+READY
+EOF
+)\"" > "$LOG"
+  # The guard greps for glab issue note / glab api POST / boucle:triage marker.
+  # This log has both → not a silent failure.
+  run grep -qiE 'glab (issue note|api .* -X POST|api .*/notes)' "$LOG"
+  assert_success
+  run grep -qiE '<!-- boucle:(triage|verdict)' "$LOG"
+  assert_success
+  rm -f "$LOG"
+}
+
+@test "empty-output guard: log with only opencode header IS a silent failure" {
+  # Simulate the exact issue #27 failure: only the opencode header, no
+  # glab call, no boucle:triage marker. The guard should detect this.
+  LOG=$(mktemp)
+  echo "> triage · minimax-m3
+" > "$LOG"
+  # Neither grep should match → silent failure.
+  run grep -qiE 'glab (issue note|api .* -X POST|api .*/notes)' "$LOG"
+  assert_failure
+  run grep -qiE '<!-- boucle:(triage|verdict)' "$LOG"
+  assert_failure
+  rm -f "$LOG"
+}
+
+@test "empty-output guard: log with drafted-but-unposted triage marker is NOT silent failure" {
+  # Simulate an agent that drafted a comment but hit the output cap before
+  # calling glab. The boucle:triage marker is in the log text → the CI's
+  # log-scraping fallback can recover it → not a silent failure.
+  LOG=$(mktemp)
+  echo "> triage · minimax-m3
+<!-- boucle:triage v=1 -->
+## TL;DR
+test
+## Disposition
+NEEDS-SPLIT" > "$LOG"
+  run grep -qiE 'glab (issue note|api .* -X POST|api .*/notes)' "$LOG"
+  assert_failure
+  run grep -qiE '<!-- boucle:(triage|verdict)' "$LOG"
+  assert_success
+  rm -f "$LOG"
+}
+
+# ── OUTPUT_TOKEN_MAX regression ───────────────────────────────────────
+# 1200 was too small for triage (agent hit the cap mid-comment on issue
+# #27 and never reached the glab tool call). Verify the new value.
+
+@test "bin/oc: triage OUTPUT_TOKEN_MAX is 4000 (not the old 1200)" {
+  # 1200 was too small for triage (agent hit the cap mid-comment on issue
+  # #27 and never reached the glab tool call). Verify the new value.
+  run grep -E 'OUTPUT_TOKEN_MAX="4000"' bin/oc
+  assert_success
+  assert_output --partial 'OUTPUT_TOKEN_MAX="4000"'
+  # Ensure the old 1200 value is gone from the triage block.
+  # grep -c exits 1 when count is 0 (no matches) — that's what we want.
+  run bash -c "grep -c 'OUTPUT_TOKEN_MAX=\"1200\"' bin/oc || true"
+  [ "$output" = "0" ]
+}
