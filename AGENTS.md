@@ -181,6 +181,22 @@ already committed and resolved. Any new regression MUST be added here in the sam
       iterations. The re-trigger curl passed only `BOUCLE_ISSUE` +
       `BOUCLE_ROLE` + `BOUCLE_ITERATION` — no feedback channel existed.
 
+17. **Parent-issue attachments not inherited** (issue #34 on up/urgence-palestine.fr)
+    - ❌ DO NOT mine only the current issue for uploads when the issue is a
+      sub-issue. Assets (logos, zips, mockups) are often uploaded to the
+      parent issue only, and a worker that cannot find them improvises
+      (fabricated monochrome logos instead of the real brand assets).
+    - ✅ DO: `bin/fetch-issue-attachments` resolves the parent IID from the
+      `## Parent issue\n#N` section (same awk pattern as `maybe_close_parent`
+      and `resolve_reporter_id`) and appends the parent's description + notes
+      to the text mined for `/uploads/...` paths. One level only, gated by
+      `BOUCLE_PARENT_ATTACHMENTS_DISABLE` (default `false` = enabled).
+    - Context: issue #34 (sub-issue of #33) needed the logo .zip uploaded to
+      #33. `fetch-issue-attachments` fetched only #34's description + notes,
+      never saw the .zip, and the worker fabricated fake logos. The parent
+      link was already parsed by 5 other call sites in `.gitlab-ci.yml` —
+      only `fetch-issue-attachments` missed it.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.

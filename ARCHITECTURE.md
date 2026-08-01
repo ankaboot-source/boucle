@@ -308,7 +308,7 @@ sequenceDiagram
 | `bin/setup` | Day-0 infrastructure setup (**idempotent**): creates the runner tag, CI variables, `boucle:*` labels, the board, the protected `main` branch, adds the bot as a member, generates the trigger token, configures the webhook, creates the Cloudflare Pages project |
 | `bin/update` | Auto-update from upstream: fetch latest tag/commit, tarball download, extraction of `SYNC_PATHS`, **fail-open** (any error → warning + exit 0), tracking via `.boucle-version`, modes `release` (latest tag) or `dev` (latest commit on main), anti-feedback-loop guard (skip on `push-source`) |
 | `bin/doctor` | Day-0 verification and diagnostics: ~20 checks (labels present, CI variables, branch protection, runner available, agents resolvable, CF Pages reachable, `.boucle-version` up to date) |
-| `bin/fetch-issue-attachments` | Downloads issue attachments to `.boucle/<issue>/attachments/` with quotas `BOUCLE_IMAGE_MAX_BYTES` and `BOUCLE_IMAGE_TOTAL_MAX_BYTES` |
+| `bin/fetch-issue-attachments` | Downloads issue attachments to `.boucle/<issue>/attachments/` with quotas `BOUCLE_IMAGE_MAX_BYTES` and `BOUCLE_IMAGE_TOTAL_MAX_BYTES`. Inherits attachments from the parent issue (one level) when the issue is a sub-issue carrying a `## Parent issue` section; disable with `BOUCLE_PARENT_ATTACHMENTS_DISABLE` |
 | `bin/render-preview.cjs` | Renders `preview.html` → `preview.png` via `@sparticuz/chromium` + `puppeteer-core` (visual preview layer attached to MRs) |
 | `bin/collapse-duplicate-notes` | Collapses duplicate comments: if an agent posts v2, CI replaces the first one (stable Note ID) |
 
@@ -392,6 +392,7 @@ All boucle configuration variables are prefixed with `BOUCLE_`. No other variabl
 | `BOUCLE_PRODUCTION_URL` | Production URL (fallback for e2e). | — |
 | `BOUCLE_IMAGE_MAX_BYTES` | Max size per attachment. | `10485760` (10 MiB) |
 | `BOUCLE_IMAGE_TOTAL_MAX_BYTES` | Max total size of an issue's attachments. | `52428800` (50 MiB) |
+| `BOUCLE_PARENT_ATTACHMENTS_DISABLE` | Disables parent-issue attachment inheritance in `bin/fetch-issue-attachments`. When `false`, sub-issues inherit uploads from their parent issue (one level). | `false` |
 | `BOUCLE_MAX_PARALLEL_ISSUES` | Concurrency cap (issues processed in parallel). | `0` (unlimited) |
 | `BOUCLE_MAX_ITERATIONS` | Max number of worker re-runs (then escalate to `boucle:human`). | `3` |
 | `BOUCLE_STALENESS_THRESHOLD` | Threshold in seconds before an issue is considered stuck by `doctor`. | `300` |
