@@ -280,7 +280,7 @@ EOF
   extract_func strip_mcp_for_ci "$WORKDIR/func"
   # shellcheck disable=SC1090
   ( export CI_PROJECT_DIR="$WORKDIR"; unset OPENCODE_CONFIG; source "$WORKDIR/func"; strip_mcp_for_ci; echo "OPENCODE_CONFIG=${OPENCODE_CONFIG:-unset}" ) > "$WORKDIR/out" 2>&1
-  run cat "$WORKDIR.out"
+  run cat "$WORKDIR/out"
   assert_output --partial "OPENCODE_CONFIG=unset"
   rm -rf "$WORKDIR"
 }
