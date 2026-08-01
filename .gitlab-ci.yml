@@ -1874,6 +1874,10 @@ reviewer:
       COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
         | jq -r --arg sha "$MR_HEAD" '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer") and contains("sha=\($sha)"))] | first | .body // empty')
       VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+      # Track whether the verdict we found matches the current MR head SHA.
+      # The SHA-anchored parse above filters on sha=$MR_HEAD, so if VERDICT is
+      # non-empty here, the verdict is fresh (matches the current head).
+      VERDICT_SHA_MATCHED=true
 
       # SHA-filter fallback: if the SHA-anchored parse found nothing, accept
       # the newest reviewer verdict regardless of SHA. Better to act on a
@@ -1882,8 +1886,12 @@ reviewer:
         COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
           | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer"))] | first | .body // empty')
         VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+        # SHA-unanchored fallback → the verdict may be stale (different SHA).
+        # Flag it so the log-scraping fallback below gets a chance to find the
+        # current run's drafted verdict in stdout, which is fresher.
+        VERDICT_SHA_MATCHED=false
         if [ -n "$VERDICT" ]; then
-          echo "[boucle] WARN: SHA-anchored verdict parse empty — accepted newest reviewer verdict (SHA-unanchored fallback)."
+          echo "[boucle] WARN: SHA-anchored verdict parse empty — accepted newest reviewer verdict (SHA-unanchored fallback, may be stale)."
         fi
       fi
 
@@ -1896,7 +1904,16 @@ reviewer:
       # (no CI action) before the final `boucle:verdict` marker. If the agent
       # exhausted its steps after the draft, we promote the draft to a verdict
       # (replace the marker) so the loop has a parsable verdict to act on.
-      if [ -z "$VERDICT" ]; then
+      #
+      # Run the log-scraping if VERDICT is empty OR if the verdict we found is
+      # SHA-stale (VERDICT_SHA_MATCHED=false). A stale verdict from a previous
+      # iteration is worse than the current run's drafted verdict in stdout.
+      # (issue #35 on up/urgence-palestine.fr: reviewer posted FAIL in stdout
+      # but exhausted steps before posting via glab; SHA-unanchored fallback
+      # found an old UNCERTAIN verdict with a different SHA, set
+      # VERDICT=UNCERTAIN, and the log-scraping was skipped — the FAIL verdict
+      # was lost and the issue was wrongly escalated to human.)
+      if [ -z "$VERDICT" ] || [ "$VERDICT_SHA_MATCHED" = false ]; then
         AGENT_LOG="$CI_PROJECT_DIR/.boucle/$BOUCLE_ISSUE/agent-output.log"
         if [ -f "$AGENT_LOG" ]; then
           # Extract the drafted verdict comment: from the boucle:verdict marker
@@ -1905,12 +1922,12 @@ reviewer:
           DRAFTED_VERDICT=$(awk -v sha="$MR_HEAD" '
             $0 ~ "<!-- boucle:verdict v=1 role=reviewer sha=" sha " -->" { found=1 }
             found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
-          ' "$AGENT_LOG" 2>/dev/null || echo "")
+          ' "$AGENT_LOG" 2> /dev/null || echo "")
           if [ -z "$DRAFTED_VERDICT" ]; then
             DRAFTED_VERDICT=$(awk '
               /<!-- boucle:verdict v=1 role=reviewer/ { found=1 }
               found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
-            ' "$AGENT_LOG" 2>/dev/null || echo "")
+            ' "$AGENT_LOG" 2> /dev/null || echo "")
             if [ -n "$DRAFTED_VERDICT" ]; then
               echo "[boucle] WARN: SHA-anchored log scrape empty — used SHA-unanchored scrape."
             fi
@@ -1922,7 +1939,7 @@ reviewer:
             DRAFTED_VERDICT=$(awk -v sha="$MR_HEAD" '
               /<!-- boucle:draft role=reviewer -->/ { found=1 }
               found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
-            ' "$AGENT_LOG" 2>/dev/null || echo "")
+            ' "$AGENT_LOG" 2> /dev/null || echo "")
             if [ -n "$DRAFTED_VERDICT" ]; then
               echo "[boucle] WARN: no boucle:verdict in log — promoting boucle:draft to verdict (step-limit fallback)."
               # Promote the draft marker to a verdict marker so the CI parser
@@ -1938,19 +1955,25 @@ reviewer:
               -f body="$DRAFTED_VERDICT" > /dev/null 2>&1 || true
             # Re-fetch and re-parse the now-posted verdict (SHA-anchored, then
             # SHA-unanchored fallback — same logic as the primary parse above).
-            COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
+            NEW_COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
               | jq -r --arg sha "$MR_HEAD" '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer") and contains("sha=\($sha)"))] | first | .body // empty')
-            VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
-            if [ -z "$VERDICT" ]; then
-              COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
+            NEW_VERDICT=$(echo "$NEW_COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+            if [ -z "$NEW_VERDICT" ]; then
+              NEW_COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
                 | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer"))] | first | .body // empty')
-              VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+              NEW_VERDICT=$(echo "$NEW_COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
             fi
-            if [ -n "$VERDICT" ]; then
-              echo "[boucle] Step-limit fallback succeeded: recovered verdict=$VERDICT."
+            if [ -n "$NEW_VERDICT" ]; then
+              # The log-scraping found a fresher verdict — override the stale one.
+              COMMENT="$NEW_COMMENT"
+              VERDICT="$NEW_VERDICT"
+              VERDICT_SHA_MATCHED=true
+              echo "[boucle] Step-limit fallback succeeded: recovered verdict=$VERDICT (overrode stale verdict)."
             else
-              echo "[boucle] Step-limit fallback failed: drafted verdict had no parsable VERDICT line."
+              echo "[boucle] Step-limit fallback failed: drafted verdict had no parsable VERDICT line — keeping previous verdict=$VERDICT."
             fi
+          else
+            echo "[boucle] Step-limit fallback: no drafted verdict in log — keeping previous verdict=$VERDICT."
           fi
         fi
       fi
