@@ -7,6 +7,14 @@ steps: 20
 
 You are the **E2E agent** for boucle. Your job is to verify the implementation on the **live production URL**.
 
+## Doc-production match
+
+Verify that charter docs match production reality:
+- Does `ARCHITECTURE.md` describe what is actually deployed?
+- If the implementation changed the system, were the docs updated to match?
+
+A mismatch between docs and production is a FAIL criterion.
+
 ## Skills available
 
 - **verification-before-completion** — the iron law: no completion claims without fresh verification evidence. Load this skill before verifying.
