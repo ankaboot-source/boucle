@@ -407,6 +407,61 @@ Toutes les variables de configuration de boucle sont préfixées `BOUCLE_`. Aucu
 
 ---
 
+## 10. Auto-maintenance de la documentation
+
+Boucle s'auto-maintenir de sa propre documentation dans le cadre de sa boucle
+autonome. La documentation est du **code** : un document qui dérive du
+système qu'il décrit est un bug. Les 4 agents partagent la responsabilité de
+garder les documents charter (`ARCHITECTURE.md`, `AGENTS.md`, `CONTEXT.md`,
+`DESIGN.md`, `LOOP.md`) en synchro avec la réalité. `README.md` est exclu —
+il est destiné aux lecteurs humains, pas aux agents.
+
+### Diagramme du flux de maintenance documentaire
+
+```mermaid
+flowchart LR
+  triage[Triage] -->|Docs impact<br/>dans Analyse| worker[Worker]
+  worker -->|Conformes aux docs<br/>Mise à jour des docs<br/>dans la même MR| reviewer[Reviewer]
+  reviewer -->|Vérifie la conformité doc<br/>+ les mises à jour doc| e2e[E2E]
+  e2e -->|Vérifie que les docs<br/>matchent la prod| done[Done]
+```
+
+### Responsabilités par agent
+
+- **Triage** — Ajoute une ligne `Docs impact: <docs>` dans la section `Analyse`
+  du commentaire structuré, listant les documents charter que l'issue touche
+  (ex. `Docs impact: ARCHITECTURE.md, AGENTS.md`).
+- **Worker** — Lit les documents charter impactés **avant** d'implémenter.
+  S'y conforme. Si le changement nécessite une mise à jour d'un document
+  (nouvel état, nouvelle variable, nouvelle responsabilité d'agent, nouveau
+  seam), le worker met à jour le document **dans la même MR** que le code.
+  Lorsqu'il découvre un nouveau bug ou anti-pattern, le worker ajoute une
+  entrée dans `Leçons apprises` de [AGENTS.md](AGENTS.md).
+- **Reviewer** — Vérifie deux choses : (1) que le worker a respecté les
+  documents charter pendant l'implémentation (conformité doc), et (2) que le
+  worker a mis à jour les documents quand c'était requis (complétude doc).
+  Sur `FAIL`, le reviewer peut exiger que le worker ajoute une entrée dans
+  `Leçons apprises` pour capturer la régression.
+- **E2E** — Vérifie que les documents charter correspondent à la réalité de
+  la production : après le déploiement, l'agent e2e confirme que le pipeline
+  documenté, les responsabilités des agents et les seams tiennent toujours.
+
+### Règles de documentation
+
+- Utiliser la **syntaxe Mermaid** (blocs ` ```mermaid `) pour tous les
+  diagrammes.
+- Utiliser un **ton explicite/impératif** ("MUST", "NEVER", "ALWAYS") — pas de
+  prose descriptive.
+- Garder les docs **à jour avec le code** — ne jamais laisser un doc décrire
+  un système qui n'existe plus.
+- **Cross-référencer** les docs liés avec des liens markdown relatifs
+  (ex. `[AGENTS.md](AGENTS.md)`).
+
+Voir [AGENTS.md](AGENTS.md) section "Documentation self-maintenance" pour le
+workflow détaillé et le format des entrées `Docs impact`.
+
+---
+
 ## Voir aussi
 
 - [AGENTS.md](AGENTS.md) — Guide des agents, leçons apprises, anti-patternes

@@ -1,257 +1,296 @@
-# AGENTS.md — Guide des agents boucle
+# AGENTS.md — Boucle agent guide
 
-> **Maintenance** — Ce document capture les leçons apprises, les anti-patternes
-> et les principes de fonctionnement des agents. **Toute nouvelle leçon découverte
-> doit être ajoutée ici** pour éviter de répéter les mêmes erreurs. Voir
-> [ARCHITECTURE.md](ARCHITECTURE.md) pour l'architecture système complète.
+> **Maintenance** — This document captures lessons learned, anti-patterns
+> and operating principles for agents. **Any new lesson discovered must be
+> added here** to avoid repeating the same mistakes. See
+> [ARCHITECTURE.md](ARCHITECTURE.md) for the full system architecture.
 
-## Fichiers de référence (charter files)
+## Reference files (charter files)
 
-Avant toute intervention sur une issue, les agents DOIVENT consulter les fichiers
-suivants à la racine du dépôt :
+Before working on any issue, agents MUST consult these files at the repo root:
 
-- [DESIGN.md](DESIGN.md) — charte visuelle du site consommateur. **OBLIGATOIRE** :
-  tout composant visuel DOIT s'y conformer.
-- [AGENTS.md](AGENTS.md) — ce document. Leçons apprises et conventions agents.
-- [README.md](README.md) — vue d'ensemble du projet et démarrage.
-- [LOOP.md](LOOP.md) — configuration par consommateur (repo cible, cadence, gates, caps).
-- [ARCHITECTURE.md](ARCHITECTURE.md) — architecture système complète (pipeline, state machine, diagrammes Mermaid).
-- [CONTEXT.md](CONTEXT.md) — contexte du projet, stack technique, contraintes.
+- [DESIGN.md](DESIGN.md) — consumer site visual charter. Any visual component MUST conform to it.
+- [AGENTS.md](AGENTS.md) — this document. Lessons learned and conventions.
+- [README.md](README.md) — project overview and getting started.
+- [LOOP.md](LOOP.md) — per-consumer configuration (target repo, cadence, gates, caps).
+- [ARCHITECTURE.md](ARCHITECTURE.md) — full system architecture.
+- [CONTEXT.md](CONTEXT.md) — project context, tech stack, constraints.
 
-**INTERDIT** de commencer un travail sans avoir lu [ARCHITECTURE.md](ARCHITECTURE.md)
-et [LOOP.md](LOOP.md).
+**FORBIDDEN** to start any work without first reading [ARCHITECTURE.md](ARCHITECTURE.md)
+and [LOOP.md](LOOP.md).
 
-## Rôles des agents
+## Agent roles
 
-| Agent   | Modèle                       | Steps | Temp | Rôle                                                                                                              |
-| ------- | ---------------------------- | ----- | ---- | ----------------------------------------------------------------------------------------------------------------- |
-| triage  | ollama-cloud/minimax-m3      | 200   | 0.3  | Analyse l'issue, poste un commentaire structuré (TL;DR + Analyse + Critères d'acceptation + Classification S/M/L + Questions + Disposition) |
-| worker  | ollama-cloud/minimax-m3      | 50    | —    | Implémente sur branche `boucle/<iid>`, lit `state.md`, utilise codebase-memory-mcp, commit conventionnel           |
-| reviewer| ollama-cloud/glm-5.2         | 35    | 0.2  | Revue adverse contre URL preview, verdict ancré par SHA                                                          |
-| e2e     | ollama-cloud/kimi-k2.7-code  | 20    | —    | Vérifie sur URL production, verdict ancré par SHA                                                                 |
+| Agent   | Model                       | Steps | Temp | Role                                                                                                                |
+| ------- | ---------------------------- | ----- | ---- | ------------------------------------------------------------------------------------------------------------------- |
+| triage  | ollama-cloud/minimax-m3      | 200   | 0.3  | Analyzes issue, posts structured comment (TL;DR + Analysis + Acceptance criteria + Classification S/M/L + Questions + Disposition) |
+| worker  | ollama-cloud/minimax-m3      | 50    | —    | Implements on branch `boucle/<iid>`, reads `state.md`, uses codebase-memory-mcp, conventional commit                 |
+| reviewer| ollama-cloud/glm-5.2         | 35    | 0.2  | Adversarial review against preview URL, SHA-anchored verdict                                                       |
+| e2e     | ollama-cloud/kimi-k2.7-code  | 20    | —    | Verifies on production URL, SHA-anchored verdict                                                                    |
 
-Voir [ARCHITECTURE.md](ARCHITECTURE.md) pour le détail du pipeline et de la state machine.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full pipeline and state machine details.
 
-## Principes de fonctionnement OBLIGATOIRES
+## MANDATORY operating principles
 
-Ces principes sont **NON NÉGOCIABLES**. Tout agent qui les enfreint introduit un
-bug récurrent connu et documenté dans la section « Leçons apprises ».
+These principles are **NON-NEGOTIABLE**. Any agent that violates them introduces a
+known recurring bug, documented in the "Lessons learned" section.
 
-1. **Post-early rule** — L'agent DOIT poster son commentaire ou verdict
-   **D'ABORD**, puis le raffiner ensuite. Le gaspillage de steps (l'agent épuise
-   son budget sans jamais poster) est le bug #1. **Règle** : un brouillon incomplet
-   posté vaut TOUJOURS mieux qu'un raffinement jamais posté.
+1. **Post-early rule** — The agent MUST post its comment or verdict **FIRST**, then
+   refine it afterward. Step-limit waste (the agent exhausts its budget without ever
+   posting) is bug #1. **Rule**: an incomplete draft posted is ALWAYS better than a
+   refinement never posted.
 
-2. **Silent-failure detection** — `bin/oc` sort avec le code `3` si l'agent n'a
-   produit aucun commentaire posté ou drafté. Le CI escalade alors vers un humain.
-   Un agent qui ne produit rien DOIT être détecté, **JAMAIS** ignoré.
+2. **Silent-failure detection** — `bin/oc` exits with code `3` if the agent has
+   produced no posted or drafted comment. CI then escalates to a human.
+   An agent that produces nothing MUST be detected, **NEVER** ignored.
 
-3. **Log-scraping fallback** — Le CI scrape le stdout de l'agent depuis
-   `agent-output.log`. Si l'agent draft un commentaire mais épuise ses steps avant
-   de poster, le CI le poste à sa place. **L'agent DOIT donc TOUJOURS produire
-   son output sur stdout** (pas uniquement en mémoire, pas uniquement via tool calls).
+3. **Log-scraping fallback** — CI scrapes the agent stdout from `agent-output.log`.
+   If the agent drafts a comment but exhausts its steps before posting, CI posts it
+   on the agent's behalf. **The agent MUST therefore ALWAYS produce its output on
+   stdout** (not only in memory, not only via tool calls).
 
-4. **SHA-anchored verdict** — Le verdict du reviewer/e2e DOIT inclure le SHA
-   en **hex nu** : ni quotes, ni whitespace, ni angle brackets.
-   Format exact : `<!-- boucle:verdict v=1 role=reviewer sha=abc123def456 -->`.
-   Le parseur CI **ÉCHOUE** si le format n'est pas respecté à la lettre.
+4. **SHA-anchored verdict** — The reviewer/e2e verdict MUST include the SHA as
+   **bare hex**: no quotes, no whitespace, no angle brackets.
+   Exact format: `<!-- boucle:verdict v=1 role=reviewer sha=abc123def456 -->`.
+   The CI parser **FAILS** if the format is not respected to the letter.
 
-5. **Idempotence des labels** — GitLab enregistre un *Resource Label Event* à
-   chaque PUT, **même si le label est inchangé**. TOUJOURS vérifier si le label
-   est déjà présent avant de l'écrire. Un no-op write pollue l'historique et
-   peut fausser les transitions de la state machine.
+5. **Label idempotence** — GitLab records a *Resource Label Event* on every PUT,
+   **even if the label is unchanged**. ALWAYS check whether the label is already
+   present before writing it. A no-op write pollutes the history and may skew the
+   state machine transitions.
 
-6. **Anti-accumulation** — Le `dispatch` EXIT trap échoue si aucun fichier
-   `.boucle-issue` n'est écrit. Un webhook qui ne produit pas de travail DOIT
-   échouer, **JAMAIS** consommer un runner silencieusement.
+6. **Anti-accumulation** — The `dispatch` EXIT trap fails if no `.boucle-issue` file
+   is written. A webhook that produces no work MUST fail, **NEVER** silently consume
+   a runner.
 
-7. **Rebase avant build** — Le build salit le working tree (`public/`).
-   Le rebase **REFUSE** un tree sale. TOUJOURS rebase **AVANT** de build,
-   **JAMAIS** l'inverse.
+7. **Rebase before build** — Build dirties the working tree (`public/`).
+   Rebase **REFUSES** a dirty tree. ALWAYS rebase **BEFORE** building,
+   **NEVER** the reverse.
 
-8. **Safety-net commit** — L'agent peut épuiser ses steps avant de committer.
-   Le CI stage+commit automatiquement les changements non committés avant le
-   rebase. L'agent n'a donc **PAS BESOIN** de se soucier de committer parfaitement
-   — mais il DOIT éviter les changements non stageables (binaires, configs locales).
+8. **Safety-net commit** — The agent may exhaust its steps before committing. CI
+   stages+commits uncommitted changes automatically before rebase. The agent does
+   **NOT** need to worry about committing perfectly — but it MUST avoid unstageable
+   changes (binaries, local configs).
 
-9. **Empty-MR guard** — Le worker peut produire zéro changement (steps épuisés).
-   Le CI détecte `base_sha == head_sha` et re-trigger le worker ou escalade.
-   Un worker DOIT produire au minimum un commit (même trivial) pour éviter cette
-   branche.
+9. **Empty-MR guard** — The worker may produce zero changes (steps exhausted).
+   CI detects `base_sha == head_sha` and re-triggers the worker or escalates.
+   A worker MUST produce at least one commit (even trivial) to avoid this branch.
 
-10. **Serial merge** — `resource_group: boucle-merge` sérialise tous les merges.
-    Chaque rebase est contre un `master` qui inclut les MRs précédemment fusionnées.
-    **NE JAMAIS** paralléliser les merges.
+10. **Serial merge** — `resource_group: boucle-merge` serializes all merges.
+    Each rebase is against a `master` that includes previously-merged MRs.
+    **NEVER** parallelize merges.
 
-## Leçons apprises (anti-patterns à ne pas reproduire)
+11. **Doc self-maintenance** — Boucle maintains its own documentation as part
+    of its loop. The triage identifies which charter docs an issue impacts,
+    the worker updates them in the same MR as the code, the reviewer verifies
+    conformance and completeness, the e2e verifies docs match production.
+    Doc updates use Mermaid diagrams, explicit/imperative tone, and
+    cross-references. **NEVER** let docs drift from code — a doc that
+    describes a system that no longer exists is a bug.
 
-Cette section est **LA PLUS IMPORTANTE** du document. Elle catalogue les
-15 erreurs déjà commises et résolues. Toute nouvelle régression doit y être
-ajoutée dans le même format `❌ NE PAS / ✅ FAIRE`.
+## Lessons learned (anti-patterns to never reproduce)
 
-1. **Gaspi de steps par raffinement itératif** (issue #27)
-   - ❌ NE PAS raffiner le commentaire en boucle avant de poster.
-   - ✅ FAIRE : poster le commentaire **D'ABORD** (même incomplet), puis raffiner
-     dans un second commentaire si des steps restent.
-   - Contexte : 6 notes de triage répétées, doctor re-trigger en boucle infinie.
+This is **THE MOST IMPORTANT** section of the document. It catalogs the 15 errors
+already committed and resolved. Any new regression MUST be added here in the same
+`❌ DO NOT / ✅ DO` format.
 
-2. **Échec silencieux non détecté**
-   - ❌ NE PAS ignorer un agent qui ne produit aucun output.
-   - ✅ FAIRE : `bin/oc` exit `3` → escalade vers humain. Casse la boucle de
-     doctor re-trigger.
+1. **Step waste by iterative refinement** (issue #27)
+   - ❌ DO NOT refine the comment in a loop before posting.
+   - ✅ DO: post the comment **FIRST** (even incomplete), then refine in a second
+     comment if steps remain.
+   - Context: 6 repeated triage notes, infinite doctor re-trigger loop.
 
-3. **MCP hang en CI**
-   - ❌ NE PAS compter sur `codebase-memory-mcp` en CI (handshake MCP échoue
-     dans la fenêtre de 30s).
-   - ✅ FAIRE : `bin/oc` strip les MCP servers du config opencode en CI.
-     L'agent utilise les outils `glob`/`grep`/`read` natifs à la place.
+2. **Silent failure undetected**
+   - ❌ DO NOT ignore an agent that produces no output.
+   - ✅ DO: `bin/oc` exit `3` → escalate to human. Breaks the doctor re-trigger loop.
+
+3. **MCP hang in CI**
+   - ❌ DO NOT rely on `codebase-memory-mcp` in CI (MCP handshake fails within 30s).
+   - ✅ DO: `bin/oc` strips MCP servers from the opencode config in CI. The agent
+     uses native `glob`/`grep`/`read` tools instead.
 
 4. **No-op label write**
-   - ❌ NE PAS `PUT` un label déjà présent.
-   - ✅ FAIRE : vérifier l'état actuel avant d'écrire. GitLab enregistre un
-     event à chaque `PUT` — un no-op pollue l'historique.
+   - ❌ DO NOT `PUT` a label that is already present.
+   - ✅ DO: check the current state before writing. GitLab records an event on every
+     `PUT` — a no-op pollutes the history.
 
-5. **Log-scraping manqué**
-   - ❌ NE PAS produire un output uniquement en mémoire.
-   - ✅ FAIRE : l'agent DOIT écrire sur stdout. Le CI scrape `agent-output.log`
-     en fallback pour rattraper les drafts non postés.
+5. **Log-scraping missed**
+   - ❌ DO NOT produce output only in memory.
+   - ✅ DO: the agent MUST write to stdout. CI scrapes `agent-output.log` as fallback
+     to catch unposted drafts.
 
-6. **Verdict sans SHA**
-   - ❌ NE PAS poster un verdict sans SHA en hex nu.
-   - ✅ FAIRE : `<!-- boucle:verdict v=1 role=reviewer sha=abc123 -->` —
-     pas de quotes, pas de whitespace, pas d'angle brackets autour du SHA.
+6. **Verdict without SHA**
+   - ❌ DO NOT post a verdict without bare hex SHA.
+   - ✅ DO: `<!-- boucle:verdict v=1 role=reviewer sha=abc123 -->` —
+     no quotes, no whitespace, no angle brackets around the SHA.
 
-7. **Webhook sans travail**
-   - ❌ NE PAS laisser un webhook consommer un runner sans produire de travail.
-   - ✅ FAIRE : `dispatch` EXIT trap échoue si aucun `.boucle-issue` n'est écrit.
+7. **Webhook without work**
+   - ❌ DO NOT let a webhook consume a runner without producing work.
+   - ✅ DO: `dispatch` EXIT trap fails if no `.boucle-issue` is written.
 
-8. **Merge parallèle**
-   - ❌ NE PAS paralléliser les merges (rebase contre un `master` stale).
-   - ✅ FAIRE : `resource_group: boucle-merge` sérialise. Chaque rebase inclut
-     les MRs précédemment fusionnées.
+8. **Parallel merge**
+   - ❌ DO NOT parallelize merges (rebase against a stale `master`).
+   - ✅ DO: `resource_group: boucle-merge` serializes. Each rebase includes the
+     previously merged MRs.
 
-9. **OUTPUT_TOKEN_MAX trop petit**
-   - ❌ NE PAS utiliser 1200 tokens max pour le triage (trop petit pour un
-     commentaire structuré complet).
-   - ✅ FAIRE : 4000 tokens (doit matcher reviewer/e2e).
+9. **OUTPUT_TOKEN_MAX too small**
+   - ❌ DO NOT use 1200 tokens max for triage (too small for a complete structured comment).
+   - ✅ DO: 4000 tokens (must match reviewer/e2e).
 
-10. **Build avant rebase**
-    - ❌ NE PAS build avant rebase (`public/` salit le tree, rebase échoue).
-    - ✅ FAIRE : rebase **AVANT** build, toujours.
+10. **Build before rebase**
+    - ❌ DO NOT build before rebase (`public/` dirties the tree, rebase fails).
+    - ✅ DO: rebase **BEFORE** build, always.
 
-11. **Détection d'assignation bot**
-    - Un humain peut déclencher boucle en **assignant** l'issue au bot
-      (pas de label nécessaire). Le dispatch DOIT détecter l'assignation
-      comme trigger valide, en plus du label `boucle:queued`.
+11. **Bot assignment detection**
+    - A human can trigger boucle by **assigning** the issue to the bot
+      (no label required). Dispatch MUST detect assignment as a valid trigger,
+      in addition to the `boucle:queued` label.
 
-12. **Cap de concurrence**
-    - `BOUCLE_MAX_PARALLEL_ISSUES` défère le trigger worker si trop d'issues
-      sont en cours. **JAMAIS** désactiver ce cap — il évite la saturation
-      du runner et les conditions de course sur le rebase.
+12. **Concurrency cap**
+    - `BOUCLE_MAX_PARALLEL_ISSUES` defers the worker trigger if too many issues are
+      in progress. **NEVER** disable this cap — it prevents runner saturation and
+      race conditions on rebase.
 
-13. **Hiérarchie de sub-issues**
-    - Utiliser l'API work-items hierarchy pour parent-child.
-    - **Fallback** : `legacy split-parent marker` si l'API n'est pas disponible
-      sur l'instance GitLab cible.
+13. **Sub-issue hierarchy**
+    - Use the work-items hierarchy API for parent-child.
+    - **Fallback**: `legacy split-parent marker` if the API is not available on
+      the target GitLab instance.
 
-14. **Commit de sécurité**
-    - L'agent peut épuiser ses steps avant de committer. Le CI stage+commit
-      automatiquement avant rebase. **PAS BESOIN** de paniquer sur un commit
-      raté — mais les changements non stageables (binaires) seront perdus.
+14. **Safety-net commit**
+    - The agent may exhaust its steps before committing. CI stages+commits
+      automatically before rebase. **NO NEED** to panic on a missed commit — but
+      unstageable changes (binaries) will be lost.
 
-15. **MR vide**
-    - Le worker peut produire zéro changement (steps épuisés). Le CI détecte
-      `base_sha == head_sha` → re-trigger ou escalade. Un worker DOIT produire
-      au minimum un commit pour franchir ce guard.
+15. **Empty MR**
+    - The worker may produce zero changes (steps exhausted). CI detects
+      `base_sha == head_sha` → re-trigger or escalate. A worker MUST produce at
+      least one commit to clear this guard.
+
+## Documentation self-maintenance
+
+Boucle self-maintains its own documentation as part of the autonomous loop.
+Documentation is **code**: a doc that drifts from the system it describes is a
+bug. The four agents share the responsibility of keeping the charter docs
+(`ARCHITECTURE.md`, `AGENTS.md`, `CONTEXT.md`, `DESIGN.md`, `LOOP.md`) in sync
+with reality. `README.md` is excluded — it is for human readers, not agents.
+
+### Distributed workflow
+
+- **Triage** — Adds a `Docs impact: <docs>` line to the `Analysis` section of
+  the structured comment, listing which charter docs the issue touches
+  (e.g. `Docs impact: ARCHITECTURE.md, AGENTS.md`).
+- **Worker** — Reads the impacted charter docs **before** implementing. Conforms
+  to them. If the change requires updating a doc (new state, new variable, new
+  agent responsibility, new seam), the worker updates the doc **in the same
+  MR** as the code change. When discovering a new bug or anti-pattern, the
+  worker adds a `Lessons learned` entry here in `AGENTS.md`.
+- **Reviewer** — Verifies two things: (1) the worker respected the charter docs
+  during implementation (doc conformance), and (2) the worker updated the docs
+  when required (doc completeness). On `FAIL`, the reviewer may require the
+  worker to add a `Lessons learned` entry to capture the regression.
+- **E2E** — Verifies that charter docs match production reality: after
+  deployment, the e2e agent confirms that the documented pipeline, agent
+  responsibilities, and seams still hold.
+
+### Doc rules
+
+- Use **Mermaid syntax** (` ```mermaid ` fenced blocks) for all diagrams.
+- Use **explicit/imperative tone** ("MUST", "NEVER", "ALWAYS") — not descriptive
+  prose.
+- Keep docs **up to date with the code** — never let a doc describe a system
+  that no longer exists.
+- **Cross-reference** related docs with relative markdown links
+  (e.g. `[ARCHITECTURE.md](ARCHITECTURE.md)`).
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) section "Documentation
+self-maintenance" for the pipeline diagram and the per-agent responsibilities.
 
 <!-- codebase-memory-mcp:start -->
 ## Codebase Knowledge Graph (codebase-memory-mcp)
 
-Ce projet utilise `codebase-memory-mcp` pour maintenir un graphe de connaissances
-du code. **TOUJOURS** préférer les outils MCP à `grep`/`glob`/`file-search`
-pour la découverte de code.
+This project uses `codebase-memory-mcp` to maintain a knowledge graph of the codebase.
+**ALWAYS** prefer MCP graph tools over `grep`/`glob`/`file-search` for code discovery.
 
-Le graphe est construit une fois (par CI ou localement) et se synchronise
-automatiquement. Si `search_graph` ne retourne rien, lancer `index_repository`
-avec le chemin du repo, puis réessayer.
+The graph is built once (by CI or locally) and auto-syncs on changes. If
+`search_graph` returns nothing, run `index_repository` with the repo path, then
+retry.
 
-### Ordre de priorité
+### Priority order
 
-1. `search_graph` — trouver fonctions, classes, routes, variables par pattern
-2. `trace_path` — tracer qui appelle une fonction ou ce qu'elle appelle
-3. `get_code_snippet` — lire le code source d'une fonction/classe précise
-4. `query_graph` — exécuter des requêtes Cypher pour des patterns complexes
-5. `get_architecture` — résumé haut-niveau du projet
+1. `search_graph` — find functions, classes, routes, variables by pattern
+2. `trace_path` — trace who calls a function or what it calls
+3. `get_code_snippet` — read specific function/class source code
+4. `query_graph` — run Cypher queries for complex patterns
+5. `get_architecture` — high-level project summary
 
-### Quand retomber sur grep/glob
+### When to fall back to grep/glob
 
-- Recherche de littéraux string, messages d'erreur, valeurs de config
-- Recherche dans des fichiers non-code (Dockerfiles, scripts shell, configs)
-- Quand les outils MCP retournent des résultats insuffisants
+- Searching for string literals, error messages, config values
+- Searching non-code files (Dockerfiles, shell scripts, configs)
+- When MCP tools return insufficient results
 
-### Exemples
+### Examples
 
-- Trouver un composant page : `search_graph(name_pattern=".*PrisesDeParole.*")`
-- Qui appelle un helper : `trace_path(function_name="getCategory", direction="inbound")`
-- Lire une source : `get_code_snippet(qualified_name="src/pages/prises-de-parole.astro")`
-- Vue d'ensemble : `get_architecture(aspects=["all"])`
+- Find a handler: `search_graph(name_pattern=".*OrderHandler.*")`
+- Who calls it: `trace_path(function_name="OrderHandler", direction="inbound")`
+- Read source: `get_code_snippet(qualified_name="pkg/orders.OrderHandler")`
+- Architecture overview: `get_architecture(aspects=["all"])`
 <!-- codebase-memory-mcp:end -->
 
-## Conventions de commit
+## Commit conventions
 
-**TOUJOURS** committer les changements avant de finir. Les éditions non
-committées ne sont **PAS** durables — elles peuvent être perdues si le
-working tree est reset, checkout, ou si la session se termine.
+**ALWAYS** commit changes before finishing. Uncommitted edits are **NOT** durable —
+they can be lost if the working tree is reset, checked out, or if the session ends.
 
 ### Format
 
-- Format obligatoire : `feat: <description> (#<iid>) [skip ci]`
-- Conventional commits : `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`
-- **JAMAIS** de rebase, merge, push ou deploy par le worker — c'est le CI qui s'en charge.
-- **TOUJOURS** vérifier `git log --oneline -1` et `git status` (working tree clean)
-  après chaque commit.
+- Mandatory format: `feat: <description> (#<iid>) [skip ci]`
+- Conventional commits: `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`
+- **NEVER** rebase, merge, push or deploy from the worker — CI handles that.
+- **ALWAYS** verify `git log --oneline -1` and `git status` (clean working tree)
+  after each commit.
 
-### Procédure
+### Procedure
 
-1. Stage les fichiers modifiés : `git add <paths>` (être précis, **JAMAIS**
-   `git add -A` sauf si `git status` est vérifié propre).
-2. Committer avec un message conventional-commit concis.
-3. Vérifier que le commit est passé : `git log --oneline -1` et `git status`.
+1. Stage modified files: `git add <paths>` (be specific, **NEVER** `git add -A`
+   unless `git status` is verified clean).
+2. Commit with a concise conventional-commit message.
+3. Verify the commit landed: `git log --oneline -1` and `git status`.
 
-**JAMAIS** push sauf demande explicite. **JAMAIS** amend ou force-push sauf
-demande explicite. Si un commit échoue (hook pre-commit rejeté), corriger et
-créer un **nouveau** commit — ne **JAMAIS** amender le commit raté.
+**NEVER** push unless explicitly requested. **NEVER** amend or force-push unless
+explicitly requested. If a commit fails (pre-commit hook rejected), fix the issue
+and create a **NEW** commit — **NEVER** amend the failed commit.
 
-## Workflow de fix upstream
+## Upstream fix workflow
 
-Le workflow upstream-first est défini dans
+The upstream-first workflow is defined in
 [`.opencode/UPSTREAM-FIX-WORKFLOW.md`](.opencode/UPSTREAM-FIX-WORKFLOW.md).
-Ce fichier est **portable** : il ship avec boucle quand installé dans les
-projets consommateurs (via le répertoire `.opencode/`).
+That file is **portable**: it ships with boucle when installed in consumer projects
+(via the `.opencode/` directory).
 
-### Règle d'or
+### Golden rule
 
-**Fix upstream dans boucle D'ABORD, puis update boucle dans le consommateur,
-PUIS remédier les données existantes.** Ordre obligatoire :
+**Fix upstream in boucle FIRST, then update boucle in the consumer, THEN remediate
+existing data.** Mandatory order:
 
-1. Corriger le bug dans le repo boucle upstream.
-2. Mettre à jour l'installation de boucle dans le projet consommateur.
-3. Remédier les données existantes impactées par le bug.
+1. Fix the bug in the boucle upstream repo.
+2. Update the boucle installation in the consumer project.
+3. Remediate existing data impacted by the bug.
 
-### INTERDIT
+### FORBIDDEN
 
-- **JAMAIS** patcher un consommateur pour contourner un défaut boucle.
-- **JAMAIS** introduire un workaround local qui ne sera pas reporté upstream.
-- **JAMAIS** masquer un bug boucle par une config consommateur.
+- **NEVER** patch a consumer to work around a boucle defect.
+- **NEVER** introduce a local workaround that won't be reported upstream.
+- **NEVER** mask a boucle bug with a consumer config.
 
-Un bug sur un projet consommateur DOIT être tracé jusqu'à sa cause racine
-dans boucle et corrigé là-bas d'abord.
+A bug on a consumer project MUST be traced to its root cause in boucle and fixed
+there first.
 
-## Voir aussi
+## See also
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — Architecture système, pipeline, diagrammes Mermaid
-- [CONTEXT.md](CONTEXT.md) — Contexte du projet, stack technique, contraintes
-- [README.md](README.md) — Vue d'ensemble, démarrage, usage
-- [DESIGN.md](DESIGN.md) — Charte visuelle du site consommateur
-- [LOOP.md](LOOP.md) — Configuration par consommateur
-- [.opencode/UPSTREAM-FIX-WORKFLOW.md](.opencode/UPSTREAM-FIX-WORKFLOW.md) — Workflow de fix upstream
+- [ARCHITECTURE.md](ARCHITECTURE.md) — System architecture, pipeline, Mermaid diagrams
+- [CONTEXT.md](CONTEXT.md) — Project context, tech stack, constraints
+- [README.md](README.md) — Overview, getting started, usage
+- [DESIGN.md](DESIGN.md) — Consumer site visual charter
+- [LOOP.md](LOOP.md) — Per-consumer configuration
+- [.opencode/UPSTREAM-FIX-WORKFLOW.md](.opencode/UPSTREAM-FIX-WORKFLOW.md) — Upstream fix workflow
