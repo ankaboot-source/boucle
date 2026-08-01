@@ -1436,6 +1436,35 @@ worker:
       if [ -z "$DIFF_FILES" ]; then
         ITERATION="${BOUCLE_ITERATION:-1}"
         MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
+        # Refresh the MR description even on no-changes, so it doesn't stay
+        # frozen at "iteration 1" with a stale preview URL across multiple
+        # failed iterations. Without this, the reviewer and the user see a
+        # misleading "iteration 1" description while the worker has actually
+        # run N times (issue #35 on up/urgence-palestine.fr: MR !31 stayed at
+        # "iteration 1" through iterations 2 and 3, both of which exhausted
+        # the step budget before committing).
+        EXISTING_MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?source_branch=$BRANCH&state=opened" 2>/dev/null | jq -r '.[0].iid // empty')
+        if [ -n "$EXISTING_MR_IID" ]; then
+          EXISTING_DESC=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$EXISTING_MR_IID" 2>/dev/null | jq -r '.description // empty')
+          EXISTING_PREVIEW=$(printf '%s' "$EXISTING_DESC" | grep -oE 'https://[a-z0-9.-]+\.pages\.dev' | head -1)
+          NOCHANGE_TITLE="feat: worker iteration $ITERATION — no code changes yet (#$BOUCLE_ISSUE)"
+          NOCHANGE_DESC=$(printf '%s\n' \
+            "## Issue #$BOUCLE_ISSUE — iteration $ITERATION (no code changes)" \
+            "" \
+            "Preview: ${EXISTING_PREVIEW:-_(no preview deployed yet)_}" \
+            "" \
+            "### Status" \
+            "Worker ran iteration $ITERATION but produced no code changes (agent exhausted its step budget before committing). Re-running." \
+            "" \
+            "### What changed" \
+            "- (no commits this iteration)" \
+            "" \
+            "---" \
+            "_Closes #$BOUCLE_ISSUE | boucle worker run $ITERATION_")
+          glab mr update "$EXISTING_MR_IID" \
+            --title "$NOCHANGE_TITLE" \
+            --description "$NOCHANGE_DESC" > /dev/null 2>&1 || true
+        fi
         if [ "$ITERATION" -lt "$MAX_ITER" ]; then
           echo "WARN: worker produced no changes (agent exhausted step budget?) — re-triggering (iteration $((ITERATION+1))/$MAX_ITER)." >&2
           set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
