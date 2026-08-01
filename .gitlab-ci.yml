@@ -1669,18 +1669,14 @@ worker:
           --description "$MR_DESCRIPTION" > /dev/null 2>&1 || true
       fi
 
-      # Assign the MR to the original issue author at creation time so they're
-      # notified of the review even if the reviewer never runs (e.g. preview URL
-      # assertion fails before the reviewer chains). The reviewer PASS branch
-      # re-assigns on its own; this is the safety net for the failure path.
-      # Resolve the reporter id (handles sub-issues: use parent author).
-      AUTHOR_ID=$(resolve_reporter_id "$BOUCLE_ISSUE")
-      if [ -n "$AUTHOR_ID" ] && [ "$AUTHOR_ID" != "null" ]; then
-        # Assign the MR to the issue author (curl — glab array-param is broken)
-        curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/merge_requests/$MR_IID" \
-          --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-          --data-urlencode "assignee_ids[]=$AUTHOR_ID" 2>/dev/null || true
-      fi
+      # NOTE: do NOT assign the MR to the issue author here. During
+      # `boucle:working` the MR belongs to the bot — assigning it to the
+      # human at every worker run is premature and confuses the user (issue
+      # #35 on up/urgence-palestine.fr: MR was assigned to tahrir during
+      # iteration 2, before any review). The MR is assigned to the author
+      # only when their action is actually required: on reviewer PASS
+      # (line ~1946, approval needed) or on `boucle:human` escalation
+      # (reviewer FAIL after max iterations / UNCERTAIN — see reviewer job).
 
       # Assert: branch exists, MR open, preview returns 200 AND serves the
       # fresh commit (not a stale CDN-cached or cache-hit build from a previous
@@ -1923,6 +1919,31 @@ reviewer:
       # Collapse duplicate reviewer verdicts (agent may post a v2; CI replaces the first).
       ./bin/collapse-duplicate-notes reviewer "$CI_PROJECT_ID" "$MR_IID" "$PRE_RUN_VERDICT_ID" "$BOUCLE_FORGE_HOST" "$MR_HEAD"
 
+      # Resolve the reporter id once, before the verdict case, so every branch
+      # (PASS, FAIL, UNCERTAIN) can assign the MR to the author when their
+      # action is required. Handles sub-issues: uses the parent issue's author.
+      resolve_reporter_id() {
+        local iid="$1" data parent_iid parent_data reporter_id
+        data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null) || { echo ""; return; }
+        parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+        if [ -n "$parent_iid" ]; then
+          parent_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid" 2>/dev/null) || { echo ""; return; }
+          reporter_id=$(printf '%s' "$parent_data" | jq -r '.author.id // empty')
+        else
+          reporter_id=$(printf '%s' "$data" | jq -r '.author.id // empty')
+        fi
+        echo "$reporter_id"
+      }
+      AUTHOR_ID=$(resolve_reporter_id "$BOUCLE_ISSUE")
+      assign_mr_to_author() {
+        # Assign the MR to the issue author (curl — glab array-param is broken)
+        if [ -n "$AUTHOR_ID" ] && [ "$AUTHOR_ID" != "null" ] && [ -n "$MR_IID" ]; then
+          curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/merge_requests/$MR_IID" \
+            --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+            --data-urlencode "assignee_ids[]=$AUTHOR_ID" 2>/dev/null || true
+        fi
+      }
+
       case "$VERDICT" in
         PASS)
           # Assign the MR to the original issue author so they're notified
@@ -1930,26 +1951,7 @@ reviewer:
           # author clicks "Approve" on the MR (GitLab native approval). The
           # merge_request webhook (action=approved) triggers the merger job,
           # which merges serially to avoid conflicts.
-          # Resolve the reporter id (handles sub-issues: use parent author).
-          resolve_reporter_id() {
-            local iid="$1" data parent_iid parent_data reporter_id
-            data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null) || { echo ""; return; }
-            parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
-            if [ -n "$parent_iid" ]; then
-              parent_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid" 2>/dev/null) || { echo ""; return; }
-              reporter_id=$(printf '%s' "$parent_data" | jq -r '.author.id // empty')
-            else
-              reporter_id=$(printf '%s' "$data" | jq -r '.author.id // empty')
-            fi
-            echo "$reporter_id"
-          }
-          AUTHOR_ID=$(resolve_reporter_id "$BOUCLE_ISSUE")
-          if [ -n "$AUTHOR_ID" ] && [ "$AUTHOR_ID" != "null" ]; then
-            # Assign the MR to the issue author (curl — glab array-param is broken)
-            curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/merge_requests/$MR_IID" \
-              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-              --data-urlencode "assignee_ids[]=$AUTHOR_ID"
-          fi
+          assign_mr_to_author
           # Set boucle:approval (waits for author to approve the MR natively)
           set_boucle_label "$BOUCLE_ISSUE" "boucle:approval" "boucle::status::human"
           APPROVAL_MSG=$(printf '✅ Reviewer verdict: **PASS**. MR !%s is ready to merge.\n\nThe MR has been assigned to you for approval. To approve and merge, click the **Approve** button on [MR !%s](%s). The merger will then rebase the MR onto master and merge it serially (avoiding conflicts with other approved MRs).' "$MR_IID" "$MR_IID" "$MR_URL")
@@ -1970,12 +1972,24 @@ reviewer:
             # Final reviewer FAIL after $MAX_ITER attempts: fused into boucle:human
             # (was boucle:blocked, deleted). Configurable via BOUCLE_MAX_ITERATIONS.
             set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
+            # Assign the MR to the issue author so they're notified that human
+            # intervention is required. Without this, the user never gets a
+            # signal that the loop exhausted its iterations (issue #35 on
+            # up/urgence-palestine.fr: MR stayed assigned to the bot after 3
+            # reviewer FAILs, the user saw no notification).
+            assign_mr_to_author
+            ESCALATION_MSG=$(printf '⚠️ Reviewer verdict: **FAIL** after %s iterations. The loop could not satisfy the acceptance criteria automatically.\n\nThe MR has been assigned to you for manual review. Inspect [MR !%s](%s) and the reviewer verdicts, then either:\n- **Approve** the MR if the work is acceptable (the merger will rebase + merge), or\n- **Comment** with guidance and re-assign to the bot to re-trigger the worker.' "$MAX_ITER" "$MR_IID" "$MR_URL")
+            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+              -f body="$ESCALATION_MSG" > /dev/null
           fi
           ;;
         UNCERTAIN|*)
           set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
+          # Assign the MR to the issue author on escalation (same rationale as
+          # the FAIL-after-max branch above).
+          assign_mr_to_author
           glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-            -f body="Verdict unparsable or uncertain. Human review needed." > /dev/null
+            -f body="Verdict unparsable or uncertain. Human review needed. The MR has been assigned to you." > /dev/null
           ;;
       esac
 
