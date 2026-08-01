@@ -54,8 +54,8 @@ trap 'rm -f "$ALL_TEXT"' EXIT
 if [ "${BOUCLE_PARENT_ATTACHMENTS_DISABLE:-false}" != "true" ]; then
   # Parse the parent IID from the current issue's description only (notes are
   # not templated, so they cannot carry the "## Parent issue" section).
-  PARENT_IID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/issues/$ISSUE" 2>/dev/null \
-    | jq -r '.description // empty' 2>/dev/null \
+  PARENT_IID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/issues/$ISSUE" 2> /dev/null \
+    | jq -r '.description // empty' 2> /dev/null \
     | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' \
     | grep -oE '#[0-9]+' | head -1 | tr -d '#')
   if [ -n "${PARENT_IID:-}" ] && [ "$PARENT_IID" != "$ISSUE" ]; then
