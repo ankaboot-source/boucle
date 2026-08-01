@@ -33,7 +33,16 @@ case "$ROLE" in
   triage)
     AGENT="triage"
     VARIANT="low"
-    OUTPUT_TOKEN_MAX="1200"
+    # 1200 was too small: the triage comment format (TL;DR + Analysis +
+    # Draft acceptance criteria + Classification + Questions + Disposition
+    # + optional Sub-issues) routinely exceeds 1200 tokens. On issue #27
+    # (up/urgence-palestine.fr) the agent spent 7 turns exploring, then on
+    # turn 8 started composing the triage comment, hit the 1200-token cap
+    # mid-comment (finish=LENGTH), and never reached the `glab issue note`
+    # tool call — producing zero posted output and an infinite doctor
+    # re-trigger loop. 4000 matches reviewer/e2e and leaves room for the
+    # full comment + the glab tool call.
+    OUTPUT_TOKEN_MAX="4000"
     ;;
   worker) AGENT="worker" ;;
   reviewer)
@@ -333,6 +342,34 @@ else
 fi
 cat "$AGENT_LOG"
 print_metrics_line
+
+# ── 5a. Empty-output guard (silent-failure detection) ─────────────────
+# If the agent produced NO posted comment AND NO drafted triage comment
+# in its log, it failed silently (e.g. hit OUTPUT_TOKEN_MAX mid-comment
+# before reaching the glab tool call, or the model returned void). Exit 3
+# so the CI can escalate to a human instead of leaving the issue at
+# boucle:triage for the doctor to re-trigger forever (issue #27 loop).
+# Only applies to roles that MUST post a comment (triage/reviewer/e2e).
+# worker is exempt (it commits code, not comments).
+case "$ROLE" in
+  triage|reviewer|e2e)
+    if [ -s "$AGENT_LOG" ]; then
+      # A posted comment shows up as a glab issue note / glab api POST call.
+      # A drafted-but-unposted comment shows up as the boucle:triage (or
+      # boucle:verdict) marker in the log text. If neither is present, the
+      # agent produced nothing actionable.
+      if ! grep -qiE 'glab (issue note|api .* -X POST|api .*/notes)' "$AGENT_LOG" \
+         && ! grep -qiE '<!-- boucle:(triage|verdict)' "$AGENT_LOG"; then
+        echo "[boucle] ERROR: agent produced no posted comment and no drafted comment in log — silent failure (exit 3)." >&2
+        echo "[boucle] This breaks the doctor re-trigger loop. CI should escalate to human." >&2
+        exit 3
+      fi
+    else
+      echo "[boucle] ERROR: agent log is empty — silent failure (exit 3)." >&2
+      exit 3
+    fi
+    ;;
+esac
 
 # ── 6. Restore scrubbed secrets ───────────────────────────────────────
 if [ -n "$SCRUBBED_CF_TOKEN" ]; then
