@@ -873,6 +873,9 @@ triage:
         exit 0
       fi
 
+      # Collapse duplicate triage comments (agent may post a v2; CI replaces the first).
+      ./bin/collapse-duplicate-notes triage "$CI_PROJECT_ID" "$IID" "$PRE_RUN_TRIAGE_ID" "$BOUCLE_FORGE_HOST"
+
       # Route based on disposition
       case "$DISPOSITION" in
         READY)
@@ -1672,6 +1675,12 @@ reviewer:
       # verdict parsing even if the agent exits non-zero (step limit,
       # crash, etc.). The missing-verdict recovery below handles the
       # case where the agent didn't post a verdict.
+      # Capture the highest reviewer verdict note ID that existed BEFORE this
+      # run, so we can collapse duplicate v2 verdicts below.
+      PRE_RUN_VERDICT_ID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes" --paginate \
+        | jq -r '[.[] | select(.body | test("<!-- boucle:verdict")) | select(.body | test("role=reviewer")) | .id] | max // 0' 2>/dev/null || echo 0)
+      echo "PRE_RUN_VERDICT_ID=$PRE_RUN_VERDICT_ID"
+
       rc=0
       ./bin/oc reviewer || rc=$?
       if [ "$rc" -ne 0 ]; then
@@ -1754,6 +1763,9 @@ reviewer:
           fi
         fi
       fi
+
+      # Collapse duplicate reviewer verdicts (agent may post a v2; CI replaces the first).
+      ./bin/collapse-duplicate-notes reviewer "$CI_PROJECT_ID" "$MR_IID" "$PRE_RUN_VERDICT_ID" "$BOUCLE_FORGE_HOST" "$MR_HEAD"
 
       case "$VERDICT" in
         PASS)
@@ -2497,6 +2509,12 @@ e2e:
       # yet exit non-zero (e.g. pi cleanup, glab "new version" warning on
       # stderr). We verify the verdict from the issue comment below, so the
       # agent exit code is not authoritative.
+      # Capture the highest e2e verdict note ID that existed BEFORE this run,
+      # so we can collapse duplicate v2 verdicts below.
+      PRE_RUN_VERDICT_ID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" --paginate \
+        | jq -r '[.[] | select(.body | test("<!-- boucle:verdict")) | select(.body | test("role=e2e")) | .id] | max // 0' 2>/dev/null || echo 0)
+      echo "PRE_RUN_VERDICT_ID=$PRE_RUN_VERDICT_ID"
+
       ./bin/oc e2e || true
 
       # Disable errexit for the post-agent section: the verdict parsing and
@@ -2542,6 +2560,9 @@ e2e:
           fi
         fi
       fi
+
+      # Collapse duplicate e2e verdicts (agent may post a v2; CI replaces the first).
+      ./bin/collapse-duplicate-notes e2e "$CI_PROJECT_ID" "$BOUCLE_ISSUE" "$PRE_RUN_VERDICT_ID" "$BOUCLE_FORGE_HOST"
 
       case "$VERDICT" in
         PASS)

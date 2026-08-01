@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# Collapse duplicate boucle comments posted in the same run.
+# When an agent posts a second "v2" comment, replace the first with the v2
+# content and delete the redundant copies. Best-effort: always exits 0.
+#
+# Usage:
+#   bin/collapse-duplicate-notes <type> <project_id> <note_iid> <pre_id> [host] [sha]
+#
+# type: triage | reviewer | e2e
+# project_id: GitLab project ID (numeric) or "proj/path" for --repo fallback
+# note_iid: issue IID (triage/e2e) or MR IID (reviewer)
+# pre_id: highest note ID that existed BEFORE this run (0 = first run)
+# host: optional forge host (default: $BOUCLE_FORGE_HOST or gitlab.com)
+# sha: optional head SHA (reviewer/e2e verdict anchoring)
+#
+# Behavior:
+#   1. Fetch all notes for the issue/MR.
+#   2. Filter to boucle comments of <type> with id > pre_id.
+#   3. If 0 or 1 match: nothing to collapse, exit 0.
+#   4. If 2+ matches: PUT the newest body onto the FIRST (oldest) note_id,
+#      then DELETE every other matching note_id.
+#   5. Any API failure is logged to stderr but does not change exit code.
+set -u
+
+TYPE="${1:-}"
+PROJECT_ID="${2:-}"
+NOTE_IID="${3:-}"
+PRE_ID="${4:-0}"
+HOST="${5:-${BOUCLE_FORGE_HOST:-gitlab.com}}"
+SHA="${6:-}"
+
+log() { printf '%s\n' "$*" >&2; }
+
+if [[ -z "$TYPE" || -z "$PROJECT_ID" || -z "$NOTE_IID" ]]; then
+  log "collapse-duplicate-notes: missing required arg (type=$TYPE project=$PROJECT_ID iid=$NOTE_IID)"
+  exit 0
+fi
+
+case "$TYPE" in
+  triage)
+    ENDPOINT="projects/${PROJECT_ID}/issues/${NOTE_IID}/notes"
+    # boucle:triage marker + ## Disposition section
+    FILTER='.[] | select(.body | test("<!-- boucle:triage")) | select(.body | test("(?m)^## Disposition"))'
+    ;;
+  reviewer)
+    ENDPOINT="projects/${PROJECT_ID}/merge_requests/${NOTE_IID}/notes"
+    FILTER='.[] | select(.body | test("<!-- boucle:verdict")) | select(.body | test("role=reviewer"))'
+    [[ -n "$SHA" ]] && FILTER="${FILTER} | select(.body | test(\"${SHA}\"))"
+    ;;
+  e2e)
+    ENDPOINT="projects/${PROJECT_ID}/issues/${NOTE_IID}/notes"
+    FILTER='.[] | select(.body | test("<!-- boucle:verdict")) | select(.body | test("role=e2e"))'
+    [[ -n "$SHA" ]] && FILTER="${FILTER} | select(.body | test(\"${SHA}\"))"
+    ;;
+  *)
+    log "collapse-duplicate-notes: unknown type '$TYPE' (expected triage|reviewer|e2e)"
+    exit 0
+    ;;
+esac
+
+# Fetch all notes. Tolerate failure (empty result → nothing to collapse).
+NOTES_JSON="$(glab api "$ENDPOINT" --paginate 2>/dev/null || true)"
+if [[ -z "$NOTES_JSON" ]]; then
+  log "collapse-duplicate-notes: no notes fetched for $ENDPOINT"
+  exit 0
+fi
+
+# Filter to boucle comments of this type, newer than pre_id, sorted oldest→newest.
+# Use jq with a numeric id > pre_id filter. pre_id=0 selects all (first run).
+MATCHES="$(printf '%s' "$NOTES_JSON" | jq -r "${FILTER} | select(.id > ${PRE_ID}) | \"\(.id)\t\(.body)\"" 2>/dev/null | sort -t$'\t' -k1,1n)"
+if [[ -z "$MATCHES" ]]; then
+  log "collapse-duplicate-notes: no matching notes to collapse (type=$TYPE pre_id=$PRE_ID)"
+  exit 0
+fi
+
+COUNT="$(printf '%s\n' "$MATCHES" | wc -l | tr -d ' ')"
+if [[ "$COUNT" -le 1 ]]; then
+  log "collapse-duplicate-notes: only $COUNT match(es), nothing to collapse"
+  exit 0
+fi
+
+log "collapse-duplicate-notes: collapsing $COUNT duplicate $TYPE notes (pre_id=$PRE_ID)"
+
+# First line = oldest note (keep this id, overwrite body). Remaining = delete.
+FIRST_ID="$(printf '%s\n' "$MATCHES" | head -n1 | cut -f1)"
+NEWEST_BODY="$(printf '%s\n' "$MATCHES" | tail -n1 | cut -f2-)"
+
+# PUT newest body onto first note id.
+if [[ -n "$FIRST_ID" && -n "$NEWEST_BODY" ]]; then
+  log "collapse-duplicate-notes: PUT $ENDPOINT/$FIRST_ID (newest body onto oldest id)"
+  printf '%s' "$NEWEST_BODY" | glab api -X PUT "$ENDPOINT/$FIRST_ID" -F "body=@-" 2>/dev/null \
+    || log "collapse-duplicate-notes: PUT failed for note $FIRST_ID (continuing)"
+fi
+
+# DELETE every other matching note id.
+printf '%s\n' "$MATCHES" | tail -n +2 | cut -f1 | while IFS= read -r DEL_ID; do
+  [[ -z "$DEL_ID" ]] && continue
+  log "collapse-duplicate-notes: DELETE $ENDPOINT/$DEL_ID"
+  glab api -X DELETE "$ENDPOINT/$DEL_ID" 2>/dev/null \
+    || log "collapse-duplicate-notes: DELETE failed for note $DEL_ID (continuing)"
+done
+
+exit 0
