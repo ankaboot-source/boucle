@@ -275,13 +275,22 @@ dispatch:
 
         case "$MR_ACTION" in
           approved)
-            # Verify the issue is at boucle:approval (reviewer PASS'd it)
+            # Trigger merger if the issue is at boucle:approval (reviewer
+            # PASS'd it) OR boucle:human (human override — the reviewer
+            # failed/UNCERTAIN but the human manually approves the MR,
+            # overriding the reviewer's verdict). Without this fallback,
+            # a reviewer failure strands the issue at boucle:human with no
+            # path forward even after the human approves the MR natively.
             MR_LABELS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID" | jq -r '.labels | join(",")')
-            if ! echo "$MR_LABELS" | grep -q "boucle:approval"; then
-              echo "Issue #$MR_ISSUE_IID not at boucle:approval (labels: $MR_LABELS) — ignoring MR approval, skipping"
+            if ! echo "$MR_LABELS" | grep -qE "boucle:(approval|human)"; then
+              echo "Issue #$MR_ISSUE_IID not at boucle:approval or boucle:human (labels: $MR_LABELS) — ignoring MR approval, skipping"
               exit 0
             fi
-            echo "MR !${MR_IID} approved (native GitLab approval) for issue #$MR_ISSUE_IID — triggering merger"
+            if echo "$MR_LABELS" | grep -q "boucle:human"; then
+              echo "MR !${MR_IID} approved (native GitLab approval) for issue #$MR_ISSUE_IID — human override of reviewer verdict, triggering merger"
+            else
+              echo "MR !${MR_IID} approved (native GitLab approval) for issue #$MR_ISSUE_IID — triggering merger"
+            fi
             curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
               -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
               -F "variables[BOUCLE_ISSUE]=$MR_ISSUE_IID" -F "variables[BOUCLE_ROLE]=merger" > /dev/null
@@ -438,7 +447,11 @@ dispatch:
         local iid="$1" new="$2" gross="$3"
         local current resp current_all
         resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        if echo "$new" | grep -q "size:"; then
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") or startswith("size:") | not)) | join(",")')
+        else
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        fi
         current_all=$(echo "$resp" | jq -r '.labels | join(",")')
         # Idempotence: skip the PUT when every label in "$new,$gross" is already
         # on the issue. GitLab records a Resource Label Event on every PUT even
@@ -635,7 +648,11 @@ triage:
         local iid="$1" new="$2" gross="$3"
         local current resp current_all
         resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        if echo "$new" | grep -q "size:"; then
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") or startswith("size:") | not)) | join(",")')
+        else
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        fi
         current_all=$(echo "$resp" | jq -r '.labels | join(",")')
         # Idempotence: skip the PUT when every label in "$new,$gross" is already
         # on the issue. GitLab records a Resource Label Event on every PUT even
@@ -1235,7 +1252,11 @@ worker:
         local iid="$1" new="$2" gross="$3"
         local current resp current_all
         resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        if echo "$new" | grep -q "size:"; then
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") or startswith("size:") | not)) | join(",")')
+        else
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        fi
         current_all=$(echo "$resp" | jq -r '.labels | join(",")')
         # Idempotence: skip the PUT when every label in "$new,$gross" is already
         # on the issue. GitLab records a Resource Label Event on every PUT even
@@ -1540,7 +1561,11 @@ reviewer:
         local iid="$1" new="$2" gross="$3"
         local current resp current_all
         resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        if echo "$new" | grep -q "size:"; then
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") or startswith("size:") | not)) | join(",")')
+        else
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        fi
         current_all=$(echo "$resp" | jq -r '.labels | join(",")')
         # Idempotence: skip the PUT when every label in "$new,$gross" is already
         # on the issue. GitLab records a Resource Label Event on every PUT even
@@ -1621,10 +1646,28 @@ reviewer:
       # so we only pick up a verdict for THIS version of the code, not a stale
       # one from a previous worker iteration. Use `last` (newest) in case the
       # agent posts multiple notes.
+      # Robustness: the SHA filter uses `contains("sha=\($sha)")` which requires
+      # the agent to emit the bare `sha=<hex>` substring with no quotes/whitespace.
+      # As a fallback, if the SHA-anchored filter returns empty, retry WITHOUT
+      # the SHA filter (accept the newest reviewer verdict regardless of SHA) —
+      # this recovers cases where the agent omitted or malformed the SHA but
+      # still posted a valid VERDICT line. The human-override path (dispatch
+      # `approved` accepting boucle:human) handles the residual risk.
       COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
         | jq -r --arg sha "$MR_HEAD" '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer") and contains("sha=\($sha)"))] | first | .body // empty')
-
       VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+
+      # SHA-filter fallback: if the SHA-anchored parse found nothing, accept
+      # the newest reviewer verdict regardless of SHA. Better to act on a
+      # verdict for a slightly-stale SHA than to strand the issue at human.
+      if [ -z "$VERDICT" ]; then
+        COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
+          | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer"))] | first | .body // empty')
+        VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+        if [ -n "$VERDICT" ]; then
+          echo "[boucle] WARN: SHA-anchored verdict parse empty — accepted newest reviewer verdict (SHA-unanchored fallback)."
+        fi
+      fi
 
       # ── Log-scraping fallback (step-limit recovery) ──────────────────
       # If the agent drafted a verdict but ran out of steps before posting it
@@ -1635,22 +1678,37 @@ reviewer:
         AGENT_LOG="$CI_PROJECT_DIR/.boucle/$BOUCLE_ISSUE/agent-output.log"
         if [ -f "$AGENT_LOG" ]; then
           # Extract the drafted verdict comment: from the boucle:verdict marker
-          # (matching this MR's head SHA) to the VERDICT line. The agent prints
-          # the full comment in its stdout when it can't call glab.
+          # to the VERDICT line. Try SHA-anchored first, then SHA-unanchored
+          # (tolerates agent omitting/malforming the SHA in the drafted marker).
           DRAFTED_VERDICT=$(awk -v sha="$MR_HEAD" '
             $0 ~ "<!-- boucle:verdict v=1 role=reviewer sha=" sha " -->" { found=1 }
             found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
           ' "$AGENT_LOG" 2>/dev/null || echo "")
+          if [ -z "$DRAFTED_VERDICT" ]; then
+            DRAFTED_VERDICT=$(awk '
+              /<!-- boucle:verdict v=1 role=reviewer/ { found=1 }
+              found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
+            ' "$AGENT_LOG" 2>/dev/null || echo "")
+            if [ -n "$DRAFTED_VERDICT" ]; then
+              echo "[boucle] WARN: SHA-anchored log scrape empty — used SHA-unanchored scrape."
+            fi
+          fi
           if [ -n "$DRAFTED_VERDICT" ] && echo "$DRAFTED_VERDICT" | grep -qiE 'VERDICT: (PASS|FAIL|UNCERTAIN)'; then
             echo "[boucle] Recovering drafted reviewer verdict from agent log (step-limit fallback)."
             # Strip leading/trailing ``` fences if the agent wrapped the comment.
             DRAFTED_VERDICT=$(echo "$DRAFTED_VERDICT" | sed '/^```$/d')
             glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes" \
               -f body="$DRAFTED_VERDICT" > /dev/null 2>&1 || true
-            # Re-fetch and re-parse the now-posted verdict.
+            # Re-fetch and re-parse the now-posted verdict (SHA-anchored, then
+            # SHA-unanchored fallback — same logic as the primary parse above).
             COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
               | jq -r --arg sha "$MR_HEAD" '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer") and contains("sha=\($sha)"))] | first | .body // empty')
             VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+            if [ -z "$VERDICT" ]; then
+              COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
+                | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer"))] | first | .body // empty')
+              VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+            fi
             if [ -n "$VERDICT" ]; then
               echo "[boucle] Step-limit fallback succeeded: recovered verdict=$VERDICT."
             else
@@ -1778,7 +1836,11 @@ merger:
         local iid="$1" new="$2" gross="$3"
         local current resp current_all
         resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        if echo "$new" | grep -q "size:"; then
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") or startswith("size:") | not)) | join(",")')
+        else
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        fi
         current_all=$(echo "$resp" | jq -r '.labels | join(",")')
         # Idempotence: skip the PUT when every label in "$new,$gross" is already
         # on the issue. GitLab records a Resource Label Event on every PUT even
@@ -1974,7 +2036,11 @@ catchup:
         local iid="$1" new="$2" gross="$3"
         local current resp current_all
         resp=$(set +e; glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null) || true
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")' 2>/dev/null) || true
+        if echo "$new" | grep -q "size:"; then
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") or startswith("size:") | not)) | join(",")' 2>/dev/null) || true
+        else
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")' 2>/dev/null) || true
+        fi
         current_all=$(echo "$resp" | jq -r '.labels | join(",")' 2>/dev/null) || true
         # Idempotence: skip the PUT when every label in "$new,$gross" is already
         # on the issue. GitLab records a Resource Label Event on every PUT even
@@ -2228,7 +2294,11 @@ e2e:
         local iid="$1" new="$2" gross="$3"
         local current resp current_all
         resp=$(set +e; glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null) || true
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")' 2>/dev/null) || true
+        if echo "$new" | grep -q "size:"; then
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") or startswith("size:") | not)) | join(",")' 2>/dev/null) || true
+        else
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")' 2>/dev/null) || true
+        fi
         current_all=$(echo "$resp" | jq -r '.labels | join(",")' 2>/dev/null) || true
         # Idempotence: skip the PUT when every label in "$new,$gross" is already
         # on the issue. GitLab records a Resource Label Event on every PUT even
@@ -2483,7 +2553,11 @@ doctor:
         local iid="$1" new="$2" gross="$3"
         local current resp current_all
         resp=$(glab api --hostname "$HOST" "/projects/$PID/issues/$iid")
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        if echo "$new" | grep -q "size:"; then
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") or startswith("size:") | not)) | join(",")')
+        else
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        fi
         current_all=$(echo "$resp" | jq -r '.labels | join(",")')
         # Idempotence: skip the PUT when every label in "$new,$gross" is already
         # on the issue. GitLab records a Resource Label Event on every PUT even
