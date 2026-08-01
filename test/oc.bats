@@ -225,3 +225,62 @@ NEEDS-SPLIT" > "$LOG"
   run bash -c "grep -c 'OUTPUT_TOKEN_MAX=\"1200\"' bin/oc || true"
   [ "$output" = "0" ]
 }
+
+# ── MCP stripping for CI (silent-hang fix) ─────────────────────────────
+# opencode hangs at boot when codebase-memory-mcp fails the MCP initialize
+# handshake within the 30s default timeout (issue #27 job 3826534: 36s
+# wall-clock, 4096b db, zero output). The successful run proved the agent
+# ignores MCP entirely, so we strip the `mcp` key from the config in CI via
+# OPENCODE_CONFIG pointing at a temp copy. These tests verify the logic.
+
+@test "bin/oc defines strip_mcp_for_ci function" {
+  run grep -E '^strip_mcp_for_ci\(\)' bin/oc
+  assert_success
+}
+
+@test "strip_mcp_for_ci: no-op without CI_PROJECT_DIR (local dev keeps MCP)" {
+  # Local dev (no CI_PROJECT_DIR) must keep the full config — MCP stays.
+  TMPF=$(mktemp)
+  cat > "$TMPF" <<'EOF'
+{"mcp": {"codebase-memory-mcp": {"type": "local", "command": ["x"]}}, "agent": {}}
+EOF
+  # Simulate: no CI_PROJECT_DIR set → function returns 0 without exporting.
+  # We extract and call the function in a clean shell.
+  extract_func strip_mcp_for_ci "$TMPF.func"
+  # shellcheck disable=SC1090
+  ( unset CI_PROJECT_DIR; unset OPENCODE_CONFIG; source "$TMPF.func"; strip_mcp_for_ci; echo "OPENCODE_CONFIG=${OPENCODE_CONFIG:-unset}" ) > "$TMPF.out" 2>&1
+  run cat "$TMPF.out"
+  assert_output --partial "OPENCODE_CONFIG=unset"
+  rm -f "$TMPF" "$TMPF.func" "$TMPF.out"
+}
+
+@test "strip_mcp_for_ci: strips mcp key when CI_PROJECT_DIR is set" {
+  # In CI, the mcp key should be removed from the temp config.
+  WORKDIR=$(mktemp -d)
+  mkdir -p "$WORKDIR/.opencode"
+  cat > "$WORKDIR/.opencode/opencode.json" <<'EOF'
+{
+  "mcp": {"codebase-memory-mcp": {"type": "local", "command": ["codebase-memory-mcp"]}},
+  "agent": {"triage": {"model": "minimax-m3"}}
+}
+EOF
+  extract_func strip_mcp_for_ci "$WORKDIR/func"
+  # shellcheck disable=SC1090
+  ( export CI_PROJECT_DIR="$WORKDIR"; unset OPENCODE_CONFIG; source "$WORKDIR/func"; strip_mcp_for_ci; cat "$OPENCODE_CONFIG" ) > "$WORKDIR/out" 2>&1
+  run cat "$WORKDIR/out"
+  # mcp key must be gone, agent key must survive.
+  refute_output --partial '"codebase-memory-mcp"'
+  refute_output --partial '"mcp"'
+  assert_output --partial '"minimax-m3"'
+  rm -rf "$WORKDIR"
+}
+
+@test "strip_mcp_for_ci: no-op when .opencode/opencode.json is absent" {
+  WORKDIR=$(mktemp -d)
+  extract_func strip_mcp_for_ci "$WORKDIR/func"
+  # shellcheck disable=SC1090
+  ( export CI_PROJECT_DIR="$WORKDIR"; unset OPENCODE_CONFIG; source "$WORKDIR/func"; strip_mcp_for_ci; echo "OPENCODE_CONFIG=${OPENCODE_CONFIG:-unset}" ) > "$WORKDIR/out" 2>&1
+  run cat "$WORKDIR/out"
+  assert_output --partial "OPENCODE_CONFIG=unset"
+  rm -rf "$WORKDIR"
+}
