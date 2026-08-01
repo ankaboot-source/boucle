@@ -369,6 +369,9 @@ All GitLab calls go through `glab` (official CLI). To support another forge (Git
 ### 5. Work state (.boucle/<issue>/state.md)
 Each issue has a state file at `.boucle/<issue>/state.md`, **seeded from triage**. Agents read/write their progress, assumptions, and discoveries there. To add a field (e.g. `## Testing strategy`), document the schema in this file (section 5) and update the triage prompt.
 
+### 5b. Feedback channel (reviewer + human → worker)
+On every worker run, the worker job fetches ALL non-system notes from the issue's open MR (`boucle/<iid>` source branch) and exports them as `BOUCLE_REVIEWER_FEEDBACK`. `bin/oc` injects them into the worker's prompt as a "Prior feedback on the MR" section. This covers all 4 re-trigger paths (reviewer FAIL, human MR comment, empty MR, rebase conflict) with a single fetch — no per-path variable passing needed. On the first run, no MR exists yet, so the feedback is empty. The worker MUST address every actionable item before claiming done (see [AGENTS.md](AGENTS.md) lesson #16).
+
 ---
 
 ## 9. CI variables
@@ -396,6 +399,7 @@ All boucle configuration variables are prefixed with `BOUCLE_`. No other variabl
 | `BOUCLE_SPEC_PROFILE` | Spec gate profile (determines when human validation is required). | `product` (gate for Size M) |
 | `BOUCLE_UPDATE_MODE` | Auto-update mode from upstream. | `release` |
 | `BOUCLE_BOT_ID` | GitLab ID of the bot account (to distinguish bot comments from human ones). | — |
+| `BOUCLE_REVIEWER_FEEDBACK` | All non-system notes from the issue's open MR (reviewer verdicts + human comments). Injected into the worker's prompt on every run so re-runs address prior feedback. Fetched by the worker job; empty on first run. | — |
 | `BOUCLE_RUNNER_TAG` | Tag of the GitLab runner that executes boucle jobs. | — |
 | `PI_AUTH` | Authentication for the pi agent (secondary coding agent). | file-type → `auth.json` |
 

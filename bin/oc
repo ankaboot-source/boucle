@@ -295,7 +295,24 @@ Post your analysis as a comment with the boucle:triage marker. Use: glab issue n
       fi
       ;;
     worker)
-      prompt="Implement issue #${ISSUE}. Read state.md first. Commit your changes with [skip ci]."
+      # Inject reviewer verdicts + human MR comments (fetched by CI as
+      # BOUCLE_REVIEWER_FEEDBACK) so re-runs after a reviewer FAIL or a human
+      # MR comment actually address the feedback. Without this, each re-run
+      # starts blind and repeats the same mistakes (issue #35 on
+      # up/urgence-palestine.fr: 3 FAIL verdicts, same root cause, never fixed).
+      # Empty on the first run (no MR exists yet) — that's fine.
+      local feedback="${BOUCLE_REVIEWER_FEEDBACK:-}"
+      if [ -n "$feedback" ]; then
+        prompt="Implement issue #${ISSUE}. Read state.md first. Commit your changes with [skip ci].
+
+Prior feedback on the MR (reviewer verdicts + human comments, oldest first — you MUST address every actionable item before claiming done):
+---
+${feedback}
+---
+"
+      else
+        prompt="Implement issue #${ISSUE}. Read state.md first. Commit your changes with [skip ci]."
+      fi
       ;;
     reviewer)
       prompt="Review the MR for issue #${ISSUE}. Test the deployed preview at \$BOUCLE_PREVIEW_URL. Post your verdict with the boucle:verdict marker."

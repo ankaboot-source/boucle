@@ -164,7 +164,22 @@ already committed and resolved. Any new regression MUST be added here in the sam
 15. **Empty MR**
     - The worker may produce zero changes (steps exhausted). CI detects
       `base_sha == head_sha` → re-trigger or escalate. A worker MUST produce at
-      least one commit to clear this guard.
+      at least one commit to clear this guard.
+
+16. **Blind re-run after reviewer FAIL** (issue #35 on up/urgence-palestine.fr)
+    - ❌ DO NOT re-trigger the worker after a reviewer FAIL without passing
+      the reviewer's verdict and human MR comments to the next run. A worker
+      that starts blind repeats the same mistakes and exhausts the iteration
+      budget (`BOUCLE_MAX_ITERATIONS`) without ever addressing the root cause.
+    - ✅ DO: the worker job fetches ALL non-system MR notes (reviewer verdicts
+      carry the `boucle:verdict` marker; human comments are plain text) and
+      exports them as `BOUCLE_REVIEWER_FEEDBACK`. `bin/oc` injects them into
+      the worker's prompt as a "Prior feedback on the MR" section. The worker
+      MUST address every actionable item before claiming done.
+    - Context: 3 reviewer FAIL verdicts on MR !31, same root cause (MR
+      description did not cite `DESIGN.md` §2 and §4), never fixed across
+      iterations. The re-trigger curl passed only `BOUCLE_ISSUE` +
+      `BOUCLE_ROLE` + `BOUCLE_ITERATION` — no feedback channel existed.
 
 ## Documentation self-maintenance
 

@@ -1361,6 +1361,23 @@ worker:
       EOF
       fi
 
+      # ── Feedback channel: inject reviewer verdicts + human MR comments ──
+      # On re-runs (reviewer FAIL, human MR comment, empty MR, rebase conflict),
+      # the worker MUST see what the reviewer and humans said on the MR.
+      # Without this, each re-run starts blind and repeats the same mistakes
+      # (issue #35 on up/urgence-palestine.fr: 3 FAIL verdicts, same root cause,
+      # never addressed). We fetch ALL non-system MR notes (reviewer verdicts
+      # carry the boucle:verdict marker; human comments are plain text) and
+      # inject them into the worker's prompt via BOUCLE_REVIEWER_FEEDBACK.
+      # On the first run, no MR exists yet — the feedback is empty, that's fine.
+      export BOUCLE_REVIEWER_FEEDBACK
+      BOUCLE_REVIEWER_FEEDBACK=""
+      MR_FOR_FEEDBACK=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?source_branch=boucle%2F$BOUCLE_ISSUE&state=opened" 2>/dev/null | jq -r '.[0].iid // empty' 2>/dev/null || echo "")
+      if [ -n "$MR_FOR_FEEDBACK" ]; then
+        BOUCLE_REVIEWER_FEEDBACK=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_FOR_FEEDBACK/notes?per_page=100&order_by=created_at&sort=asc" 2>/dev/null \
+          | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | .[]' 2>/dev/null || echo "")
+      fi
+
       # Download attachments uploaded to the issue (capped per BOUCLE_IMAGE_*_BYTES).
       # Makes them available to the worker agent via BOUCLE_ISSUE_ATTACHMENTS.
       ./bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"

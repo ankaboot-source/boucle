@@ -76,15 +76,16 @@ You have these skills in `.opencode/skill/`. **Use them** — they contain domai
 
 1. Read `state.md` in `.boucle/<issue>/` FIRST — especially the "Tried and rejected" section.
 2. Read the issue body and the triage analysis comment.
-3. If image paths are listed in your prompt, `Read` each file to inspect them. They are screenshots or diagrams the author attached to the issue — use them as context for the implementation. If no images are listed, no images were attached (or they exceeded the size cap) — proceed with text only.
-4. **Query the codebase graph** (search_graph, trace_path) to understand the code you'll touch before reading files blindly.
-5. **Load relevant skills** with the `skill` tool — domain skills (astro, frontend-design, etc.) AND process skills (test-driven-development, etc.) based on what the issue asks for.
-6. Implement the acceptance criteria from `state.md`.
-7. Update `state.md`:
+3. **Read the "Prior feedback on the MR" section of your prompt** (if present). It contains reviewer verdicts (`VERDICT: FAIL` with the unmet acceptance criteria) and human comments on the MR. You MUST address every actionable item before claiming done — a re-run that ignores prior feedback will FAIL the reviewer the same way again and waste the iteration budget. Map each unmet criterion to a concrete change in your implementation.
+4. If image paths are listed in your prompt, `Read` each file to inspect them. They are screenshots or diagrams the author attached to the issue — use them as context for the implementation. If no images are listed, no images were attached (or they exceeded the size cap) — proceed with text only.
+5. **Query the codebase graph** (search_graph, trace_path) to understand the code you'll touch before reading files blindly.
+6. **Load relevant skills** with the `skill` tool — domain skills (astro, frontend-design, etc.) AND process skills (test-driven-development, etc.) based on what the issue asks for.
+7. Implement the acceptance criteria from `state.md`.
+8. Update `state.md`:
    - Fill in the "Approach" section with what you did.
    - If you tried and rejected an approach, add it to "Tried and rejected" with why.
-8. Append to `iterations.md` with what you changed.
-9. **Update charter docs** if your changes impact them (see "Doc maintenance" above). Commit doc updates in the same MR as the code.
+9. Append to `iterations.md` with what you changed.
+10. **Update charter docs** if your changes impact them (see "Doc maintenance" above). Commit doc updates in the same MR as the code.
 
 ## Rules
 
