@@ -782,6 +782,26 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       throughout, misleading the user who reported "la description de la MR
       indique toujours iteration 1 avec la preview URL initiale".
 
+25. **MR comment attachments not extracted** (issue discovered 2026-08-01)
+    - ❌ DO NOT fetch MR notes as text-only (`.body` field) and silently drop
+      embedded `/uploads/...` image links. A reviewer or human who attaches a
+      screenshot of a bug or a mockup to an MR comment has their text passed
+      to the worker but the image is invisible — the worker cannot see the
+      very evidence that prompted the feedback.
+    - ✅ DO: `bin/fetch-mr-attachments` mirrors `bin/fetch-issue-attachments`
+      for merge requests. It mines `/uploads/` paths from MR notes
+      (`/projects/<id>/merge_requests/<iid>/notes`), downloads them to
+      `.boucle/<issue>/mr-attachments/`, and exports `BOUCLE_MR_ATTACHMENTS`
+      via `.mr-attachments.env`. `bin/oc` sources this and appends the paths
+      to the agent prompt so the worker can `Read` reviewer/human screenshots.
+      Gated on `MR_FOR_FEEDBACK` being non-empty (no MR on first run).
+    - Context: `bin/fetch-issue-attachments` mined issue descriptions + notes +
+      parent-issue notes for `/uploads/` paths, but the symmetric MR path
+      (`bin/oc:298-315` injecting `BOUCLE_REVIEWER_FEEDBACK` as plain text)
+      never resolved embedded image links. A human commenting "this button is
+      wrong" with a screenshot got the text through to the worker but the
+      screenshot was dropped.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.

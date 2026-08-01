@@ -517,6 +517,15 @@ ${feedback}
     echo "- If the human explicitly says to use the file as an asset (e.g. 'use this image', 'with the attached visual', 'séparation visuelle avec le visuel ci-joint'), copy it into the build tree (e.g. \`cp <path> public/<name>\`) and reference it in your code."
     echo "- If it's a mockup/screenshot, use it as context for addressing the feedback (dimensions, layout hints)."
   fi
+
+  # Append MR attachment paths (if any) so the agent knows to Read them.
+  # bin/fetch-mr-attachments downloads MR-note uploads to
+  # .boucle/$ISSUE/mr-attachments/ (screenshots, mockups from reviewer/human).
+  if [ -n "${BOUCLE_MR_ATTACHMENTS:-}" ]; then
+    echo ""
+    echo "MR comment attachments are available at these local paths. Read each with the Read tool to inspect them (note: not all are images — some may be PDFs, archives, or other binary files; the Read tool handles binaries too):"
+    echo "$BOUCLE_MR_ATTACHMENTS"
+  fi
 }
 
 # ── 5. Run the agent ──────────────────────────────────────────────────
