@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
-# test/fetch-issue-images.bats — smoke + pure-logic tests for bin/fetch-issue-images.
+# test/fetch-issue-attachments.bats — smoke + pure-logic tests for bin/fetch-issue-attachments.
 #
-# bin/fetch-issue-images has no BASH_SOURCE guard and executes its full
+# bin/fetch-issue-attachments has no BASH_SOURCE guard and executes its full
 # body on source: it calls glab api to fetch the issue, makes network
 # requests with curl, writes manifest/env files, etc. The script has no
 # user-defined functions — it's all top-level imperative code.
@@ -15,16 +15,16 @@ setup() {
   load 'test_helper/bats-assert/load'
 }
 
-# Extract the upload-path regex from bin/fetch-issue-images source. The
+# Extract the upload-path regex from bin/fetch-issue-attachments source. The
 # script's regex is a bash double-quoted string containing both single
-# and double quotes (line 47); we extract it as-is so tests stay
+# and double quotes; we extract it as-is so tests stay
 # faithful to real behavior. Output is the regex string suitable for
 # `grep -E`.
 upload_regex() {
   # awk -F'"' splits on unescaped double quotes. The script's pattern
   # uses an escaped \" inside a "..." string, so the regex ends up
   # across two awk fields. Re-insert the literal " between them.
-  grep -nE 'grep -oiE' bin/fetch-issue-images \
+  grep -nE 'grep -oiE' bin/fetch-issue-attachments \
     | head -1 \
     | awk -F'"' '{print $2 "\"" $3}'
 }
@@ -54,32 +54,32 @@ teardown() {
 
 # ── Syntax ────────────────────────────────────────────────────────────
 
-@test "bin/fetch-issue-images parses without syntax error" {
-  run bash -n bin/fetch-issue-images
+@test "bin/fetch-issue-attachments parses without syntax error" {
+  run bash -n bin/fetch-issue-attachments
   assert_success
 }
 
 # ── Required env vars ────────────────────────────────────────────────
 
-@test "bin/fetch-issue-images requires BOUCLE_ISSUE" {
-  run env -u BOUCLE_ISSUE bash bin/fetch-issue-images
+@test "bin/fetch-issue-attachments requires BOUCLE_ISSUE" {
+  run env -u BOUCLE_ISSUE bash bin/fetch-issue-attachments
   assert_failure
 }
 
-@test "bin/fetch-issue-images requires BOUCLE_TOKEN" {
-  run env -u BOUCLE_TOKEN BOUCLE_ISSUE=1 bash bin/fetch-issue-images
+@test "bin/fetch-issue-attachments requires BOUCLE_TOKEN" {
+  run env -u BOUCLE_TOKEN BOUCLE_ISSUE=1 bash bin/fetch-issue-attachments
   assert_failure
 }
 
-@test "bin/fetch-issue-images requires CI_PROJECT_ID" {
-  run env -u CI_PROJECT_ID BOUCLE_ISSUE=1 BOUCLE_TOKEN=t bash bin/fetch-issue-images
+@test "bin/fetch-issue-attachments requires CI_PROJECT_ID" {
+  run env -u CI_PROJECT_ID BOUCLE_ISSUE=1 BOUCLE_TOKEN=t bash bin/fetch-issue-attachments
   assert_failure
 }
 
-# ── Pure regex: extract /uploads/... image paths ──────────────────────
-# The script uses `grep -oiE "/uploads/[^[:space:]\"')]+\.(...)"` to find
-# image attachments in issue/note markdown. We test that the same regex
-# extracted from the script behaves as expected.
+# ── Pure regex: extract /uploads/... paths (any extension) ───────────
+# The script uses `grep -oiE "/uploads/[^[:space:]\"')]+"` to find all
+# upload attachments in issue/note markdown (images, PDFs, archives, etc.).
+# We test that the same regex extracted from the script behaves as expected.
 
 @test "regex extracts /uploads/ PNG path" {
   write_upload_regex_file
@@ -112,10 +112,12 @@ teardown() {
   assert_output --partial "/uploads/x/d.svg"
 }
 
-@test "regex ignores non-image extensions" {
+@test "regex extracts /uploads/ non-image paths (pdf, zip)" {
   write_upload_regex_file
-  run bash -c "source '$UPLOAD_REGEX_FILE'; echo '[file](/uploads/x/doc.pdf)' | grep -oiE \"\$RE\""
-  assert_failure
+  run bash -c "source '$UPLOAD_REGEX_FILE'; printf '%s\n' '[file](/uploads/x/doc.pdf)' '[archive](/uploads/x/backup.zip)' | grep -oiE \"\$RE\" | sort -u"
+  assert_success
+  assert_output --partial "/uploads/x/doc.pdf"
+  assert_output --partial "/uploads/x/backup.zip"
 }
 
 @test "regex ignores external URLs" {
