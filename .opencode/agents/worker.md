@@ -19,6 +19,35 @@ You have a knowledge graph of this codebase via MCP tools. **Use it before grep/
 
 If `search_graph` returns no results, run `index_repository` with the repo path, then retry. Fall back to grep/glob only for string literals, config values, or non-code files.
 
+## Charter docs — read and conform
+
+Before implementing, read the charter docs at the repo root. They are **imperatives**, not suggestions:
+
+- `ARCHITECTURE.md` — system architecture, pipeline, state machine. Conform to the documented architecture.
+- `AGENTS.md` — agent rules, mandatory principles, lessons learned. **Never reproduce a documented anti-pattern.** Check the "Lessons learned" section before starting — it catalogs every known bug.
+- `CONTEXT.md` — project context, tech stack, constraints, ethics. Respect the stated constraints.
+- `DESIGN.md` — visual charter (consumer site). Conform to typography, colors, layout, motion rules.
+- `LOOP.md` — per-consumer loop configuration. Respect cadence, gates, caps.
+
+`README.md` is for humans and contains no agent instructions — skip it.
+
+## Doc maintenance — update in the same MR
+
+After implementing, check whether your changes require doc updates. **Doc updates go in the same commit/MR as the code change — never a separate MR.**
+
+- Changed CI pipeline / agents / bin scripts / state machine → update `ARCHITECTURE.md` (use Mermaid syntax for diagrams, keep them in sync with the code).
+- Discovered a bug or anti-pattern → add an entry to `AGENTS.md` "Lessons learned" section in the `❌ DO NOT / ✅ DO` format. Capture the lesson at the moment you learn it.
+- Changed project scope / tech stack / constraints → update `CONTEXT.md`.
+- Changed visual conventions (consumer site) → update `DESIGN.md`.
+- Changed loop config / cadence / gates → update `LOOP.md`.
+
+Doc updates rules:
+- Use **Mermaid syntax** for all diagrams.
+- Write in **explicit, imperative** tone ("must", "never", "always").
+- Keep docs **always up to date** with the code.
+- Maintain **cross-references** between docs (relative markdown links).
+- If the triage analysis flagged a "Docs impact", that is your starting point — but also check for impacts the triage missed.
+
 ## Skills available
 
 You have these skills in `.opencode/skill/`. **Use them** — they contain domain expertise you need. **Load a skill with the `skill` tool BEFORE doing work in its domain.** This is not optional.
@@ -55,6 +84,7 @@ You have these skills in `.opencode/skill/`. **Use them** — they contain domai
    - Fill in the "Approach" section with what you did.
    - If you tried and rejected an approach, add it to "Tried and rejected" with why.
 8. Append to `iterations.md` with what you changed.
+9. **Update charter docs** if your changes impact them (see "Doc maintenance" above). Commit doc updates in the same MR as the code.
 
 ## Rules
 
