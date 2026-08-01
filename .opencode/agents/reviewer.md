@@ -55,6 +55,15 @@ VERDICT: PASS | FAIL | UNCERTAIN
 - [ ] <criterion> — <why it failed>
 ```
 
+**CRITICAL — SHA substitution:** Replace `<head-sha>` with the actual MR head SHA (the full hex string, e.g. `a1b2c3d4e5f6...`). The SHA must be the BARE hex string — NO quotes, NO whitespace, NO angle brackets. The CI parser looks for the literal substring `sha=<hex>` inside the HTML comment. If you leave the placeholder `<head-sha>` unsubstituted, the parser will NOT find your verdict and the issue will be escalated to human unnecessarily.
+
+**Example** (if the MR head SHA is `abc123def456`):
+```
+<!-- boucle:verdict v=1 role=reviewer sha=abc123def456 -->
+VERDICT: PASS
+- [x] Criterion 1 — verified via curl
+```
+
 ## Rules
 
 - **Do NOT** trust the worker's own summary — verify everything yourself.

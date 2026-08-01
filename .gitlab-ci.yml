@@ -275,13 +275,17 @@ dispatch:
 
         case "$MR_ACTION" in
           approved)
-            # Verify the issue is at boucle:approval (reviewer PASS'd it)
+            # Verify the issue is at boucle:approval (reviewer PASS'd it) or boucle:human (human override)
             MR_LABELS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID" | jq -r '.labels | join(",")')
-            if ! echo "$MR_LABELS" | grep -q "boucle:approval"; then
-              echo "Issue #$MR_ISSUE_IID not at boucle:approval (labels: $MR_LABELS) — ignoring MR approval, skipping"
+            if ! echo "$MR_LABELS" | grep -qE "boucle:(approval|human)"; then
+              echo "Issue #$MR_ISSUE_IID not at boucle:approval or boucle:human (labels: $MR_LABELS) — ignoring MR approval, skipping"
               exit 0
             fi
-            echo "MR !${MR_IID} approved (native GitLab approval) for issue #$MR_ISSUE_IID — triggering merger"
+            if echo "$MR_LABELS" | grep -q "boucle:human"; then
+              echo "MR !${MR_IID} approved (native GitLab approval) for issue #$MR_ISSUE_IID — human override of reviewer verdict, triggering merger"
+            else
+              echo "MR !${MR_IID} approved (native GitLab approval) for issue #$MR_ISSUE_IID — triggering merger"
+            fi
             curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
               -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
               -F "variables[BOUCLE_ISSUE]=$MR_ISSUE_IID" -F "variables[BOUCLE_ROLE]=merger" > /dev/null
@@ -438,7 +442,11 @@ dispatch:
         local iid="$1" new="$2" gross="$3"
         local current resp current_all
         resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        if echo "$new" | grep -q "size:"; then
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") or startswith("size:") | not)) | join(",")')
+        else
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        fi
         current_all=$(echo "$resp" | jq -r '.labels | join(",")')
         # Idempotence: skip the PUT when every label in "$new,$gross" is already
         # on the issue. GitLab records a Resource Label Event on every PUT even
@@ -635,7 +643,11 @@ triage:
         local iid="$1" new="$2" gross="$3"
         local current resp current_all
         resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        if echo "$new" | grep -q "size:"; then
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") or startswith("size:") | not)) | join(",")')
+        else
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        fi
         current_all=$(echo "$resp" | jq -r '.labels | join(",")')
         # Idempotence: skip the PUT when every label in "$new,$gross" is already
         # on the issue. GitLab records a Resource Label Event on every PUT even
@@ -1235,7 +1247,11 @@ worker:
         local iid="$1" new="$2" gross="$3"
         local current resp current_all
         resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        if echo "$new" | grep -q "size:"; then
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") or startswith("size:") | not)) | join(",")')
+        else
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        fi
         current_all=$(echo "$resp" | jq -r '.labels | join(",")')
         # Idempotence: skip the PUT when every label in "$new,$gross" is already
         # on the issue. GitLab records a Resource Label Event on every PUT even
@@ -1540,7 +1556,11 @@ reviewer:
         local iid="$1" new="$2" gross="$3"
         local current resp current_all
         resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        if echo "$new" | grep -q "size:"; then
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") or startswith("size:") | not)) | join(",")')
+        else
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        fi
         current_all=$(echo "$resp" | jq -r '.labels | join(",")')
         # Idempotence: skip the PUT when every label in "$new,$gross" is already
         # on the issue. GitLab records a Resource Label Event on every PUT even
@@ -1778,7 +1798,11 @@ merger:
         local iid="$1" new="$2" gross="$3"
         local current resp current_all
         resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        if echo "$new" | grep -q "size:"; then
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") or startswith("size:") | not)) | join(",")')
+        else
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        fi
         current_all=$(echo "$resp" | jq -r '.labels | join(",")')
         # Idempotence: skip the PUT when every label in "$new,$gross" is already
         # on the issue. GitLab records a Resource Label Event on every PUT even
@@ -1974,7 +1998,11 @@ catchup:
         local iid="$1" new="$2" gross="$3"
         local current resp current_all
         resp=$(set +e; glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null) || true
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")' 2>/dev/null) || true
+        if echo "$new" | grep -q "size:"; then
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") or startswith("size:") | not)) | join(",")' 2>/dev/null) || true
+        else
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")' 2>/dev/null) || true
+        fi
         current_all=$(echo "$resp" | jq -r '.labels | join(",")' 2>/dev/null) || true
         # Idempotence: skip the PUT when every label in "$new,$gross" is already
         # on the issue. GitLab records a Resource Label Event on every PUT even
@@ -2228,7 +2256,11 @@ e2e:
         local iid="$1" new="$2" gross="$3"
         local current resp current_all
         resp=$(set +e; glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null) || true
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")' 2>/dev/null) || true
+        if echo "$new" | grep -q "size:"; then
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") or startswith("size:") | not)) | join(",")' 2>/dev/null) || true
+        else
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")' 2>/dev/null) || true
+        fi
         current_all=$(echo "$resp" | jq -r '.labels | join(",")' 2>/dev/null) || true
         # Idempotence: skip the PUT when every label in "$new,$gross" is already
         # on the issue. GitLab records a Resource Label Event on every PUT even
@@ -2483,7 +2515,11 @@ doctor:
         local iid="$1" new="$2" gross="$3"
         local current resp current_all
         resp=$(glab api --hostname "$HOST" "/projects/$PID/issues/$iid")
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        if echo "$new" | grep -q "size:"; then
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") or startswith("size:") | not)) | join(",")')
+        else
+          current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
+        fi
         current_all=$(echo "$resp" | jq -r '.labels | join(",")')
         # Idempotence: skip the PUT when every label in "$new,$gross" is already
         # on the issue. GitLab records a Resource Label Event on every PUT even
