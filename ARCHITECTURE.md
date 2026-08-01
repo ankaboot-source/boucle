@@ -372,6 +372,9 @@ Each issue has a state file at `.boucle/<issue>/state.md`, **seeded from triage*
 ### 5b. Feedback channel (reviewer + human → worker)
 On every worker run, the worker job fetches ALL non-system notes from the issue's open MR (`boucle/<iid>` source branch) and exports them as `BOUCLE_REVIEWER_FEEDBACK`. `bin/oc` injects them into the worker's prompt as a "Prior feedback on the MR" section. This covers all 4 re-trigger paths (reviewer FAIL, human MR comment, empty MR, rebase conflict) with a single fetch — no per-path variable passing needed. On the first run, no MR exists yet, so the feedback is empty. The worker MUST address every actionable item before claiming done (see [AGENTS.md](AGENTS.md) lesson #16).
 
+### 5c. MR description refresh on re-runs
+When the worker reuses an existing MR (iteration 2+), the worker job calls `glab mr update` to refresh the title and description with the new preview URL, commit summary, and Approach. Without this, the MR description stays stale (wrong preview URL, empty Approach) and the reviewer tests the wrong deployment (see [AGENTS.md](AGENTS.md) lesson #19). The `## Approach` section of `state.md` is extracted into the MR description; if the worker leaves it as the seed placeholder, CI substitutes an explicit note so the description is never the literal seed text (see [AGENTS.md](AGENTS.md) lesson #20).
+
 ---
 
 ## 9. CI variables
