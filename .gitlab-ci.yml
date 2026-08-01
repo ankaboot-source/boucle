@@ -1398,6 +1398,12 @@ worker:
           | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | .[]' 2>/dev/null || echo "")
       fi
 
+      # Download attachments uploaded to MR comments (reviewer screenshots,
+      # human mockups). Mirrors bin/fetch-issue-attachments but for MR notes.
+      # Gated on MR_FOR_FEEDBACK being non-empty (no MR on first run).
+      export BOUCLE_MR_IID="$MR_FOR_FEEDBACK"
+      ./bin/fetch-mr-attachments || echo "[boucle] WARN: MR attachment fetch failed — continuing without MR attachments"
+
       # Download attachments uploaded to the issue (capped per BOUCLE_IMAGE_*_BYTES).
       # Makes them available to the worker agent via BOUCLE_ISSUE_ATTACHMENTS.
       ./bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
