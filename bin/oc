@@ -244,9 +244,9 @@ fi
 # ── 3. Prepare state directory ────────────────────────────────────────
 mkdir -p "$STATE_DIR"
 
-# ── 3a. Load issue image attachments (if bin/fetch-issue-images ran) ──
+# ── 3a. Load issue attachments (if bin/fetch-issue-attachments ran) ──
 # The fetch script writes .boucle/$ISSUE/.attachments.env with
-# BOUCLE_ISSUE_ATTACHMENTS="path1 path2 ...". Empty string = no images.
+# BOUCLE_ISSUE_ATTACHMENTS="path1 path2 ...". Empty string = no attachments.
 ATTACHMENTS_ENV="$STATE_DIR/.attachments.env"
 if [ -f "$ATTACHMENTS_ENV" ]; then
   # shellcheck disable=SC1090
@@ -311,11 +311,12 @@ Post your analysis as a comment with the boucle:triage marker. Use: glab issue n
 
   echo "$prompt"
 
-  # Append image attachment paths (if any) so the agent knows to Read them.
-  # bin/fetch-issue-images downloads issue images to .boucle/$ISSUE/images/.
+  # Append attachment paths (if any) so the agent knows to Read them.
+  # bin/fetch-issue-attachments downloads issue uploads to
+  # .boucle/$ISSUE/attachments/ (images, PDFs, archives, etc.).
   if [ -n "${BOUCLE_ISSUE_ATTACHMENTS:-}" ]; then
     echo ""
-    echo "Issue images are available at these local paths. Read each with the Read tool to inspect them:"
+    echo "Issue attachments are available at these local paths. Read each with the Read tool to inspect them (note: not all are images — some may be PDFs, archives, or other binary files; the Read tool handles binaries too):"
     echo "$BOUCLE_ISSUE_ATTACHMENTS"
   fi
 }
