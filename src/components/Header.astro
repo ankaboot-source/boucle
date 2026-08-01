@@ -52,7 +52,7 @@ const socialLinks = [
 ];
 ---
 
-<header class="site-header">
+<header class="site-header" data-site-header>
 	<div class="site-header__inner container">
 		<a
 			href="/"
@@ -211,6 +211,21 @@ const socialLinks = [
 		background: var(--color-flag-black);
 		color: var(--color-ink-on-dark);
 		border-bottom: 1px solid oklch(28% 0 0);
+		/* Dry transition: dry, fast, no ease-in-out lissage.
+		 * Durations are taken from tokens.css so prefers-reduced-motion
+		 * collapses them to 0ms automatically (see tokens.css). */
+		transition:
+			background-color var(--duration-base) var(--ease-out),
+			border-color var(--duration-base) var(--ease-out);
+	}
+
+	/* Scrolled state — the header shifts to the flag-red (rouge sang) accent
+	 * and compresses its inner block. The compressed height uses steps() so
+	 * the collapse snaps rather than gliding, in line with the brutalist
+	 * charter (DESIGN.md §3). */
+	.site-header.is-scrolled {
+		background: var(--color-flag-red);
+		border-bottom-color: var(--color-flag-black);
 	}
 
 	.site-header__inner {
@@ -221,6 +236,13 @@ const socialLinks = [
 		gap: var(--space-s);
 		min-height: 64px;
 		padding-block: var(--space-xs);
+		transition: min-height var(--duration-base) steps(3, end);
+	}
+
+	.site-header.is-scrolled .site-header__inner {
+		min-height: 44px;
+		padding-block: var(--space-2xs);
+		transition: min-height var(--duration-fast) steps(2, end);
 	}
 
 	.site-header__wordmark {
@@ -233,6 +255,18 @@ const socialLinks = [
 
 	.site-header__wordmark:hover {
 		color: var(--color-flag-red);
+	}
+
+	/* On the scrolled (red) surface, the red hover/focus accent would be
+	 * invisible — invert to the deep-red and add an underline so the hover
+	 * signal stays readable. Focus stays on red because the surface itself
+	 * is red, so red still reads against the white link text. */
+	.site-header.is-scrolled .site-header__wordmark:hover,
+	.site-header.is-scrolled .site-header__link:hover {
+		color: var(--color-flag-red-deep);
+		text-decoration: underline;
+		text-decoration-thickness: 2px;
+		text-underline-offset: 4px;
 	}
 
 	.site-header__title {
@@ -335,13 +369,53 @@ const socialLinks = [
 		color: var(--color-flag-red);
 	}
 
-	/* WCAG 2.1 AA focus outline on the flag-black surface. */
+	/* On the scrolled (red) surface, swap social-link hover/focus to the
+	 * deep-red so the icon still has a visible accent shift. */
+	.site-header.is-scrolled .site-header__social-link:hover,
+	.site-header.is-scrolled .site-header__social-link:focus-visible {
+		color: var(--color-flag-red-deep);
+	}
+
+	/* On the scrolled (red) surface, the .btn--primary (red bg) and
+	 * .btn--ghost (red text) would be invisible. Swap the CTAs to a black
+	 * on-white inversion that reads cleanly against the rouge sang. The
+	 * flag-red -> black inversion is itself a brutalist gesture. */
+	.site-header.is-scrolled .site-header__cta .btn--primary {
+		background: var(--color-flag-black);
+		color: var(--color-flag-white);
+	}
+
+	.site-header.is-scrolled .site-header__cta .btn--primary:hover {
+		background: var(--color-ink-soft);
+	}
+
+	.site-header.is-scrolled .site-header__cta .btn--ghost {
+		background: transparent;
+		color: var(--color-flag-white);
+		border-color: var(--color-flag-white);
+	}
+
+	.site-header.is-scrolled .site-header__cta .btn--ghost:hover {
+		background: var(--color-flag-white);
+		color: var(--color-flag-black);
+	}
+
+	/* WCAG 2.1 AA focus outline. Uses flag-red on the black surface, and
+	 * switches to deep-red on the scrolled (red) surface so the outline
+	 * stays visible against the shifted background. */
 	.site-header__link:focus-visible,
 	.site-header__wordmark:focus-visible,
 	.site-header__cta .btn:focus-visible,
 	.site-header__social-link:focus-visible {
 		outline: 2px solid var(--color-flag-red);
 		outline-offset: 2px;
+	}
+
+	.site-header.is-scrolled .site-header__link:focus-visible,
+	.site-header.is-scrolled .site-header__wordmark:focus-visible,
+	.site-header.is-scrolled .site-header__cta .btn:focus-visible,
+	.site-header.is-scrolled .site-header__social-link:focus-visible {
+		outline-color: var(--color-flag-red-deep);
 	}
 
 	@media (max-width: 40rem) {
@@ -362,3 +436,42 @@ const socialLinks = [
 		}
 	}
 </style>
+
+<script>
+	/*
+	 * Scroll-triggered brutalist transformation.
+	 * ------------------------------------------
+	 * Once the user has scrolled past `SCROLL_THRESHOLD` px, the header
+	 * receives an `is-scrolled` class that:
+	 *   - shifts the surface to the flag-red (rouge sang) accent,
+	 *   - snaps to a compressed height (no soft glide),
+	 *   - tightens the bottom border to a deeper, dryer line.
+	 *
+	 * Motion is kept dry (no `ease-in-out`), and uses ONLY the duration
+	 * tokens exposed in `tokens.css` (`--duration-fast` / `--duration-base`
+	 * / `--duration-slow`). When the user prefers reduced motion, we do not
+	 * attach the listener at all — the header stays in its static state.
+	 */
+	const SCROLL_THRESHOLD = 64;
+
+	function initHeaderScroll() {
+		const header = document.querySelector<HTMLElement>("[data-site-header]");
+		if (!header) return;
+
+		const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+		if (motionQuery.matches) return;
+
+		const apply = () => {
+			header.classList.toggle("is-scrolled", window.scrollY > SCROLL_THRESHOLD);
+		};
+
+		apply();
+		window.addEventListener("scroll", apply, { passive: true });
+	}
+
+	if (document.readyState === "loading") {
+		document.addEventListener("DOMContentLoaded", initHeaderScroll);
+	} else {
+		initHeaderScroll();
+	}
+</script>
