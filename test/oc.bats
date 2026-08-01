@@ -110,7 +110,7 @@ extract_func() {
   assert_success
   assert_output --partial "/tmp/a.png"
   assert_output --partial "/tmp/b.jpg"
-  assert_output --partial "Issue images"
+  assert_output --partial "Issue attachments"
   rm -f "$TMPF"
 }
 
@@ -119,7 +119,7 @@ extract_func() {
   extract_func build_prompt "$TMPF"
   run bash -c "ISSUE=5; unset BOUCLE_ISSUE_ATTACHMENTS; source '$TMPF'; build_prompt triage"
   assert_success
-  refute_output --partial "Issue images"
+  refute_output --partial "Issue attachments"
   rm -f "$TMPF"
 }
 
