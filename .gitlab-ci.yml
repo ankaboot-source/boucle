@@ -730,6 +730,23 @@ triage:
         echo "[boucle] WARN: could not fetch issue #$IID body — agent will fall back to glab issue view."
       fi
 
+      # Fetch the issue notes (comments) and export them so the triage
+      # agent can see prior triage Questions AND the author's answers.
+      # Without this, every re-triage re-asks questions the author already
+      # answered (issue #27: 6 repeated triage notes on up/urgence-palestine.fr).
+      # GitLab notes API returns newest-first; we reverse to oldest-first
+      # and format each note as "[<author>] <body>". We keep ALL notes
+      # (including prior triage comments) so the agent can see what it
+      # already asked and avoid re-asking. System/internal notes are
+      # excluded (type != null). The current run's about-to-be-posted
+      # note does not exist yet at fetch time, so it is naturally absent.
+      export BOUCLE_ISSUE_NOTES
+      BOUCLE_ISSUE_NOTES=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes?per_page=100" 2>/dev/null \
+        | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | reverse | .[]' 2>/dev/null || echo "")
+      if [ -z "$BOUCLE_ISSUE_NOTES" ]; then
+        echo "[boucle] INFO: no prior notes for issue #$IID (first triage run)."
+      fi
+
       # Run the agent. Use `|| rc=$?` to suppress set -e so the script
       # continues to comment parsing even if the agent exits non-zero
       # (step limit, crash, etc.).

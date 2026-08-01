@@ -215,6 +215,11 @@ build_prompt() {
       # agent does not waste steps calling glab issue view / gh issue view
       # (minimax-m3 burned 4+ steps on failed fetches before posting).
       local body="${BOUCLE_ISSUE_BODY:-}"
+      # Inject the prior discussion (fetched by CI as BOUCLE_ISSUE_NOTES) so
+      # the agent sees previous triage Questions AND the author's answers.
+      # Without this, every re-triage re-asks questions the author already
+      # answered (issue #27: 6 repeated triage notes on up/urgence-palestine.fr).
+      local notes="${BOUCLE_ISSUE_NOTES:-}"
       if [ -n "$body" ]; then
         prompt="Analyze issue #${ISSUE}.
 
@@ -222,7 +227,16 @@ Issue body (already fetched — do NOT call glab issue view or gh issue view):
 ---
 ${body}
 ---
-
+"
+        if [ -n "$notes" ]; then
+          prompt="${prompt}
+Prior discussion (issue notes, oldest first — do NOT re-ask anything already answered here):
+---
+${notes}
+---
+"
+        fi
+        prompt="${prompt}
 Post your analysis as a comment with the boucle:triage marker. Use: glab issue note ${ISSUE} --repo ${CI_PROJECT_PATH:-up/urgence-palestine.fr} --message \"\$(cat <<'EOF' ... EOF)\""
       else
         prompt="Analyze issue #${ISSUE}. Post your analysis as a comment with the boucle:triage marker."
