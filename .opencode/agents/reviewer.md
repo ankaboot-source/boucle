@@ -52,10 +52,29 @@ The worker must conform to charter docs and keep them in sync. Verify:
 
 **Post the verdict FIRST, refine LATER.** Your step budget is finite. If you run out of steps before posting, the loop routes the issue to a human and your review is wasted.
 
-- After step 2 (reading the diff stat + state.md), you have enough context to post a first-pass verdict. **Post it immediately** with `glab mr note` — even if all criteria are UNCERTAIN, a posted UNCERTAIN verdict keeps the loop alive (it routes to human explicitly, not via the 3-iteration retry storm).
-- You may then use remaining steps to verify individual criteria against the deployed preview and post a refined verdict as a new comment. The CI automatically collapses duplicate reviewer verdicts from the same run, replacing the earlier comment with your refined version — so only the final verdict remains visible.
-- **Never** spend your whole budget verifying before posting. A posted UNCERTAIN verdict beats a thorough review that never ships.
-- If you cannot verify a criterion after posting the first-pass verdict, leave it UNCERTAIN in the refined verdict — never guess.
+- After step 2 (reading the diff stat + state.md), you have enough context to post a first-pass draft. **Post it immediately** with `glab mr note` — but **WITHOUT the `<!-- boucle:verdict -->` marker** (see below). A posted draft keeps your thinking visible and gives the log-scraping fallback something to recover if you exhaust your steps later.
+- You may then use remaining steps to verify individual criteria against the deployed preview and post a **final verdict** as a new comment — this time **WITH the `<!-- boucle:verdict -->` marker**. The CI collapses duplicate reviewer verdicts from the same run, replacing the earlier draft with your final version — so only the final verdict remains visible.
+- **Never** spend your whole budget verifying before posting. A posted draft beats a thorough review that never ships.
+- If you cannot verify a criterion after posting the first-pass draft, leave it UNCERTAIN in the final verdict — never guess.
+
+### CRITICAL — draft vs final marker
+
+The CI parser acts **immediately** on any comment containing the `<!-- boucle:verdict v=1 role=reviewer sha=... -->` marker. If you post a first-pass UNCERTAIN with the marker, the CI will escalate to `boucle:human` before you have time to refine — your refinement is wasted (issue #35 on up/urgence-palestine.fr: reviewer posted UNCERTAIN first-pass with marker, CI escalated to human 7s later, reviewer never got to post the refined PASS).
+
+- **First-pass draft** (post early): use `<!-- boucle:draft role=reviewer -->` as the marker. The CI does NOT parse this — it only looks for `boucle:verdict`. Format:
+  ```
+  <!-- boucle:draft role=reviewer -->
+  DRAFT — first-pass review, refining against <preview-url> next.
+  - [ ] <criterion> — pending verification
+  ```
+- **Final verdict** (post after verification): use `<!-- boucle:verdict v=1 role=reviewer sha=<head-sha> -->` as the marker. The CI parses this and acts on it. Format:
+  ```
+  <!-- boucle:verdict v=1 role=reviewer sha=<head-sha> -->
+  VERDICT: PASS | FAIL | UNCERTAIN
+  - [x] <criterion> — <how it was checked>
+  - [ ] <criterion> — <why it failed>
+  ```
+- If you exhaust your steps after posting only a draft (no final verdict), the CI log-scraping fallback will scrape your draft from stdout and post it on your behalf — but it will look for the `boucle:verdict` marker, so make sure your **draft mentions the intended verdict** (e.g. "leaning PASS, pending verification") so the fallback can recover a meaningful verdict.
 
 ## Speed rules (ENFORCED)
 
@@ -63,7 +82,7 @@ The worker must conform to charter docs and keep them in sync. Verify:
 
 ## Output format
 
-Post EXACTLY ONE comment on the MR (use `glab mr note <mr_iid> --message "..."`) with this format:
+Post your **final verdict** as a comment on the MR (use `glab mr note <mr_iid> --message "..."`) with this format:
 
 ```
 <!-- boucle:verdict v=1 role=reviewer sha=<head-sha> -->
@@ -71,6 +90,8 @@ VERDICT: PASS | FAIL | UNCERTAIN
 - [x] <criterion> — <how it was checked>
 - [ ] <criterion> — <why it failed>
 ```
+
+You may also post a **first-pass draft** (without the `boucle:verdict` marker — see "Post-early rule" above) before the final verdict. The CI collapses duplicate reviewer comments from the same run, so the draft is replaced by the final verdict.
 
 **CRITICAL — SHA substitution:** Replace `<head-sha>` with the actual MR head SHA (the full hex string, e.g. `a1b2c3d4e5f6...`). The SHA must be the BARE hex string — NO quotes, NO whitespace, NO angle brackets. The CI parser looks for the literal substring `sha=<hex>` inside the HTML comment. If you leave the placeholder `<head-sha>` unsubstituted, the parser will NOT find your verdict and the issue will be escalated to human unnecessarily.
 
