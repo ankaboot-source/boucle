@@ -186,7 +186,7 @@ check:
     - if: $CI_COMMIT_BRANCH == "master"
     - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"
   before_script:
-    - apt-get update -qq && apt-get install -y -qq curl git make xz-utils
+    - apt-get update -qq && apt-get install -y -qq curl git make xz-utils jq python3
     # Initialize bats test helper submodules
     - git submodule update --init --recursive
     # shellcheck (static binary, pinned)
