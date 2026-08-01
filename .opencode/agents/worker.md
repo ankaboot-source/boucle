@@ -9,15 +9,24 @@ You are the **worker agent** for boucle. Your job is to implement an issue.
 
 ## Codebase knowledge graph (codebase-memory-mcp)
 
-You have a knowledge graph of this codebase via MCP tools. **Use it before grep/glob** for code discovery — it knows every function, class, route, and call chain.
+You have a knowledge graph of this codebase. **Use it before grep/glob** for code discovery — it knows every function, class, route, and call chain.
+
+**In CI, MCP tools are stripped** (the MCP handshake hangs in CI — see AGENTS.md lesson #3). The graph is still indexed and queryable via the **CLI**. Use whichever interface is available:
+
+- **MCP tools** (local dev): `search_graph`, `trace_path`, `get_code_snippet`, `get_architecture`.
+- **CLI fallback** (CI): `codebase-memory-mcp cli <tool> '<json>'`. Examples:
+  - `codebase-memory-mcp cli search_graph '{"name_pattern":".*FeaturedFeed.*"}'`
+  - `codebase-memory-mcp cli trace_path '{"function_name":"FeaturedFeed","direction":"inbound"}'`
+  - `codebase-memory-mcp cli get_code_snippet '{"qualified_name":"src/components/FeaturedFeed.astro"}'`
+  - `codebase-memory-mcp cli get_architecture '{"aspects":["all"]}'`
 
 **Before implementing**, query the graph to understand the code you'll touch:
-1. `search_graph(name_pattern=".*<keyword>.*")` — find functions/classes/components by name.
-2. `trace_path(function_name="<symbol>", direction="inbound")` — see who calls a function you plan to change.
-3. `get_code_snippet(qualified_name="<file.path>")` — read a specific function's source.
-4. `get_architecture(aspects=["all"])` — high-level map if you're unfamiliar with the area.
+1. Find functions/classes/components by name (search_graph).
+2. See who calls a function you plan to change (trace_path, direction=inbound).
+3. Read a specific function's source (get_code_snippet).
+4. High-level map if you're unfamiliar with the area (get_architecture).
 
-If `search_graph` returns no results, run `index_repository` with the repo path, then retry. Fall back to grep/glob only for string literals, config values, or non-code files.
+If `search_graph` returns no results, run `codebase-memory-mcp cli index_repository '{"repo_path":"."}'`, then retry. Fall back to grep/glob only for string literals, config values, or non-code files.
 
 ## Charter docs — read and conform
 
