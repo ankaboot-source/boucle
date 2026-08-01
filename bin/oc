@@ -77,6 +77,7 @@ START_EPOCH=$(date +%s)
 METRICS_TMP="$(mktemp -t boucle-metrics.XXXXXX 2> /dev/null || echo "")"
 RSS_SAMPLER_TMP="$(mktemp -t boucle-rss.XXXXXX 2> /dev/null || echo "")"
 RSS_SAMPLER_PID=""
+OPENCODE_CONFIG_TMP=""
 
 cleanup_metrics() {
   if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2> /dev/null; then
@@ -85,6 +86,7 @@ cleanup_metrics() {
   fi
   [ -n "$METRICS_TMP" ] && [ -f "$METRICS_TMP" ] && rm -f "$METRICS_TMP" || true
   [ -n "$RSS_SAMPLER_TMP" ] && [ -f "$RSS_SAMPLER_TMP" ] && rm -f "$RSS_SAMPLER_TMP" || true
+  [ -n "$OPENCODE_CONFIG_TMP" ] && [ -f "$OPENCODE_CONFIG_TMP" ] && rm -f "$OPENCODE_CONFIG_TMP" || true
 }
 trap cleanup_metrics EXIT
 
@@ -150,6 +152,47 @@ print_metrics_line() {
   db_size=$(stat -c %s "$OPENCODE_DB" 2> /dev/null || stat -f %z "$OPENCODE_DB" 2> /dev/null || echo 0)
   peak_rss=$(get_peak_rss_kb)
   echo "[boucle:metrics] role=$ROLE agent=$AGENT iteration=$ITERATION wall_clock=${elapsed}s peak_rss=${peak_rss}kb db_size=${db_size}b" >&2
+}
+
+# In CI, opencode launches every MCP server configured in .opencode/opencode.json
+# at boot. codebase-memory-mcp (a local stdio server) intermittently fails to
+# complete the MCP initialize handshake within opencode's 30s default timeout
+# on the shared shell runner, which hangs the entire opencode run: zero output,
+# zero session, db_size stays at the SQLite page-size baseline (4096b). This
+# caused the issue #27 silent-failure loop (job 3826534: 36s wall-clock, 827MB
+# RSS, 4096b db, no tool calls, no conversation). The successful run (job
+# 3826420) proved the triage agent ignores MCP entirely — it used bash/grep/Read
+# and made zero search_graph/trace_path/get_architecture calls. So MCP is dead
+# weight in CI that can hang the run. We strip the `mcp` key from the config
+# via OPENCODE_CONFIG pointing at a temp copy, so opencode never spawns the
+# server. Local dev (no CI_PROJECT_DIR) keeps the full config. See opencode
+# issues #36865, #3273, #13672, #8406 for the upstream hang/timeout bugs.
+strip_mcp_for_ci() {
+  # Only strip in CI; local dev keeps MCP for interactive use.
+  [ -z "${CI_PROJECT_DIR:-}" ] && return 0
+  local src="$CI_PROJECT_DIR/.opencode/opencode.json"
+  [ -f "$src" ] || return 0
+  # jq del() preserves everything except the mcp key. Falls back to a
+  # no-op copy if jq is missing (opencode still runs, just with MCP —
+  # the hang is intermittent, not guaranteed).
+  OPENCODE_CONFIG_TMP="$(mktemp -t boucle-opencode-nomcp.XXXXXX.json 2> /dev/null || echo "")"
+  if [ -z "$OPENCODE_CONFIG_TMP" ]; then
+    return 0
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    jq 'del(.mcp)' "$src" > "$OPENCODE_CONFIG_TMP" 2>/dev/null || cp "$src" "$OPENCODE_CONFIG_TMP"
+  else
+    # python3 fallback: strip the mcp key from JSON without jq.
+    python3 -c "
+import json, sys
+with open('$src') as f:
+    cfg = json.load(f)
+cfg.pop('mcp', None)
+with open('$OPENCODE_CONFIG_TMP', 'w') as f:
+    json.dump(cfg, f, indent=2)
+" 2>/dev/null || cp "$src" "$OPENCODE_CONFIG_TMP"
+  fi
+  export OPENCODE_CONFIG="$OPENCODE_CONFIG_TMP"
 }
 
 # Retry wrapper for opencode invocations. Retries transient failures
@@ -288,6 +331,10 @@ PROMPT=$(build_prompt "$ROLE")
 # variable. Redirect+cat preserves exit-code propagation with no race.
 AGENT_LOG="$STATE_DIR/agent-output.log"
 : > "$AGENT_LOG"
+
+# Strip MCP servers from opencode config in CI to avoid the 30s startup-hang
+# bug (see strip_mcp_for_ci above). No-op in local dev.
+strip_mcp_for_ci
 
 if [ "$DRY_RUN" = "true" ]; then
   echo "[boucle] DRY RUN — agent output goes to log only, nothing pushed"
