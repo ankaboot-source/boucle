@@ -2478,6 +2478,34 @@ e2e:
         | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | first | .body // empty' 2>/dev/null)
       VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
 
+      # ── Log-scraping fallback (step-limit recovery) ──────────────────
+      # If the agent drafted a verdict but ran out of steps before posting it
+      # (VERDICT empty), scrape the drafted verdict from the agent's stdout log
+      # and post it ourselves. Mirrors the reviewer job's fallback.
+      if [ -z "$VERDICT" ]; then
+        AGENT_LOG="$CI_PROJECT_DIR/.boucle/$BOUCLE_ISSUE/agent-output.log"
+        if [ -f "$AGENT_LOG" ]; then
+          DRAFTED_VERDICT=$(awk '
+            /<!-- boucle:verdict v=1 role=e2e/ { found=1 }
+            found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
+          ' "$AGENT_LOG" 2>/dev/null || echo "")
+          if [ -n "$DRAFTED_VERDICT" ] && echo "$DRAFTED_VERDICT" | grep -qiE 'VERDICT: (PASS|FAIL|UNCERTAIN)'; then
+            echo "[boucle] Recovering drafted e2e verdict from agent log (step-limit fallback)."
+            DRAFTED_VERDICT=$(echo "$DRAFTED_VERDICT" | sed '/^```$/d')
+            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+              -f body="$DRAFTED_VERDICT" > /dev/null 2>&1 || true
+            COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes?order_by=created_at&sort=desc" 2>/dev/null \
+              | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | first | .body // empty' 2>/dev/null)
+            VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+            if [ -n "$VERDICT" ]; then
+              echo "[boucle] Step-limit fallback succeeded: recovered e2e verdict=$VERDICT."
+            else
+              echo "[boucle] Step-limit fallback failed: drafted verdict had no parsable VERDICT line."
+            fi
+          fi
+        fi
+      fi
+
       case "$VERDICT" in
         PASS)
           set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
@@ -2513,10 +2541,48 @@ e2e:
           ;;
         UNCERTAIN|*)
           set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
+          # Post a human-facing explanation so the human knows why the issue
+          # landed at boucle:human. Without this, the human sees only the label
+          # change with no context.
+          E2E_TRACE=$(printf '%s' "${COMMENT:-}" | head -c 4000)
+          E2E_ESCALATION_BODY="<!-- boucle:e2e-escalation v=1 iid=$BOUCLE_ISSUE verdict=uncertain -->
+      E2E verification could not reach a confident verdict. Human review needed.
+
+      ## Live URL
+      ${BOUCLE_LIVE_URL:-unknown}
+
+      ## Agent trace (truncated)
+      \`\`\`
+      ${E2E_TRACE:-no verdict comment was posted by the agent}
+      \`\`\`"
+          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+            -f body="$E2E_ESCALATION_BODY" > /dev/null 2>&1 || true
           ;;
       esac
 
       if [ -z "$VERDICT" ]; then
+        # Post a human-facing explanation before failing the job. The agent
+        # ran but posted no parsable verdict (step limit, crash, or empty
+        # output). Without this comment the human sees only a failed pipeline.
+        E2E_LOG_TAIL=""
+        AGENT_LOG="$CI_PROJECT_DIR/.boucle/$BOUCLE_ISSUE/agent-output.log"
+        if [ -f "$AGENT_LOG" ]; then
+          E2E_LOG_TAIL=$(tail -c 4000 "$AGENT_LOG" 2>/dev/null || echo "")
+        fi
+        E2E_ESCALATION_BODY="<!-- boucle:e2e-escalation v=1 iid=$BOUCLE_ISSUE verdict=empty -->
+      E2E agent did not post a parsable verdict. Human review needed.
+
+      The agent ran against \`${BOUCLE_LIVE_URL:-the live URL}\` but exited without posting a \`VERDICT:\` comment. This usually means it hit the step limit or crashed before completing.
+
+      ## Live URL
+      ${BOUCLE_LIVE_URL:-unknown}
+
+      ## Agent log tail (last 4000 chars)
+      \`\`\`
+      ${E2E_LOG_TAIL:-no agent log was captured}
+      \`\`\`"
+        glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+          -f body="$E2E_ESCALATION_BODY" > /dev/null 2>&1 || true
         echo "FAIL: e2e verdict not parsable" >&2; exit 1
       fi
   timeout: 20m
