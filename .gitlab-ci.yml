@@ -825,6 +825,22 @@ triage:
       # new question asked — the exact "retour à une review humaine alors
       # qu'aucune question n'est posée" symptom.
       if [ -z "$DISPOSITION" ]; then
+        # ── Circuit breaker (silent-failure escalation) ─────────────────
+        # bin/oc exits 3 when the agent produced NO posted comment AND NO
+        # drafted comment (silent failure — e.g. hit OUTPUT_TOKEN_MAX
+        # mid-comment before reaching the glab tool call). If we leave the
+        # issue at boucle:triage, the doctor re-triggers it every 10 min
+        # and the agent fails identically every time → infinite loop
+        # (issue #27 on up/urgence-palestine.fr). Escalate to human instead
+        # so a human can investigate. The issue keeps its boucle:triage
+        # label for traceability but moves to boucle::status::human.
+        if [ "$rc" -eq 3 ]; then
+          echo "[boucle] Silent triage failure (bin/oc exit 3) — escalating issue #$IID to human to break doctor re-trigger loop."
+          set_boucle_label "$IID" "boucle:human" "boucle::status::human"
+          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+            -f body=":rotating_light: Triage a échoué en silence (l'agent n'a produit aucun commentaire). Passage en revue humaine pour casser la boucle de re-déclenchement. Voir les logs du job $CI_JOB_URL." > /dev/null 2>&1 || true
+          exit 1
+        fi
         echo "[boucle] No new triage comment posted by this run — leaving issue #$IID at boucle:triage, no label change."
         exit 0
       fi
