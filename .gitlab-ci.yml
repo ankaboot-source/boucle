@@ -1878,6 +1878,10 @@ reviewer:
       # (VERDICT empty), scrape the drafted verdict from the agent's stdout log
       # and post it ourselves. The agent's post-early prompt rule should
       # prevent this, but this catches the residual case.
+      # The reviewer may post a first-pass draft with the `boucle:draft` marker
+      # (no CI action) before the final `boucle:verdict` marker. If the agent
+      # exhausted its steps after the draft, we promote the draft to a verdict
+      # (replace the marker) so the loop has a parsable verdict to act on.
       if [ -z "$VERDICT" ]; then
         AGENT_LOG="$CI_PROJECT_DIR/.boucle/$BOUCLE_ISSUE/agent-output.log"
         if [ -f "$AGENT_LOG" ]; then
@@ -1895,6 +1899,21 @@ reviewer:
             ' "$AGENT_LOG" 2>/dev/null || echo "")
             if [ -n "$DRAFTED_VERDICT" ]; then
               echo "[boucle] WARN: SHA-anchored log scrape empty — used SHA-unanchored scrape."
+            fi
+          fi
+          # If no boucle:verdict found, try the boucle:draft marker (first-pass
+          # draft posted early per the post-early rule). Promote it to a verdict
+          # by replacing the draft marker with the verdict marker.
+          if [ -z "$DRAFTED_VERDICT" ]; then
+            DRAFTED_VERDICT=$(awk -v sha="$MR_HEAD" '
+              /<!-- boucle:draft role=reviewer -->/ { found=1 }
+              found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
+            ' "$AGENT_LOG" 2>/dev/null || echo "")
+            if [ -n "$DRAFTED_VERDICT" ]; then
+              echo "[boucle] WARN: no boucle:verdict in log — promoting boucle:draft to verdict (step-limit fallback)."
+              # Promote the draft marker to a verdict marker so the CI parser
+              # recognizes it when we re-fetch after posting.
+              DRAFTED_VERDICT=$(printf '%s' "$DRAFTED_VERDICT" | sed "s|<!-- boucle:draft role=reviewer -->|<!-- boucle:verdict v=1 role=reviewer sha=$MR_HEAD -->|")
             fi
           fi
           if [ -n "$DRAFTED_VERDICT" ] && echo "$DRAFTED_VERDICT" | grep -qiE 'VERDICT: (PASS|FAIL|UNCERTAIN)'; then
