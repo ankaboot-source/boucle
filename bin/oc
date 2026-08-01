@@ -179,8 +179,8 @@ strip_mcp_for_ci() {
   if [ -z "$OPENCODE_CONFIG_TMP" ]; then
     return 0
   fi
-  if command -v jq >/dev/null 2>&1; then
-    jq 'del(.mcp)' "$src" > "$OPENCODE_CONFIG_TMP" 2>/dev/null || cp "$src" "$OPENCODE_CONFIG_TMP"
+  if command -v jq > /dev/null 2>&1; then
+    jq 'del(.mcp)' "$src" > "$OPENCODE_CONFIG_TMP" 2> /dev/null || cp "$src" "$OPENCODE_CONFIG_TMP"
   else
     # python3 fallback: strip the mcp key from JSON without jq.
     python3 -c "
@@ -190,7 +190,7 @@ with open('$src') as f:
 cfg.pop('mcp', None)
 with open('$OPENCODE_CONFIG_TMP', 'w') as f:
     json.dump(cfg, f, indent=2)
-" 2>/dev/null || cp "$src" "$OPENCODE_CONFIG_TMP"
+" 2> /dev/null || cp "$src" "$OPENCODE_CONFIG_TMP"
   fi
   export OPENCODE_CONFIG="$OPENCODE_CONFIG_TMP"
 }
@@ -399,14 +399,14 @@ print_metrics_line
 # Only applies to roles that MUST post a comment (triage/reviewer/e2e).
 # worker is exempt (it commits code, not comments).
 case "$ROLE" in
-  triage|reviewer|e2e)
+  triage | reviewer | e2e)
     if [ -s "$AGENT_LOG" ]; then
       # A posted comment shows up as a glab issue note / glab api POST call.
       # A drafted-but-unposted comment shows up as the boucle:triage (or
       # boucle:verdict) marker in the log text. If neither is present, the
       # agent produced nothing actionable.
       if ! grep -qiE 'glab (issue note|api .* -X POST|api .*/notes)' "$AGENT_LOG" \
-         && ! grep -qiE '<!-- boucle:(triage|verdict)' "$AGENT_LOG"; then
+        && ! grep -qiE '<!-- boucle:(triage|verdict)' "$AGENT_LOG"; then
         echo "[boucle] ERROR: agent produced no posted comment and no drafted comment in log — silent failure (exit 3)." >&2
         echo "[boucle] This breaks the doctor re-trigger loop. CI should escalate to human." >&2
         exit 3
