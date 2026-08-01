@@ -82,7 +82,7 @@ You have these skills in `.opencode/skill/`. **Use them** — they contain domai
 6. **Load relevant skills** with the `skill` tool — domain skills (astro, frontend-design, etc.) AND process skills (test-driven-development, etc.) based on what the issue asks for.
 7. Implement the acceptance criteria from `state.md`.
 8. Update `state.md`:
-   - Fill in the "Approach" section with what you did.
+   - **Fill in the "Approach" section with what you did.** This is NOT optional. The Approach section becomes the MR description that the reviewer reads to verify doc conformance (e.g. DESIGN.md §2 and §4 citations). An empty or placeholder Approach causes reviewer FAIL loops — issue #34 on up/urgence-palestine.fr had 3 FAIL verdicts, all blocking on the same criterion: "MR description does not cite DESIGN.md". Write 2-5 sentences explaining your implementation approach and how it conforms to the charter docs (cite the specific sections you followed).
    - If you tried and rejected an approach, add it to "Tried and rejected" with why.
 9. Append to `iterations.md` with what you changed.
 10. **Update charter docs** if your changes impact them (see "Doc maintenance" above). Commit doc updates in the same MR as the code.
