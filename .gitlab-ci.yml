@@ -226,6 +226,11 @@ dispatch:
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE
       when: never
     - if: $CI_PIPELINE_SOURCE == "trigger"
+    # All other pipeline sources (push, schedule, web, etc.) → skip.
+    # Without this final guard, GitLab adds the job by default on push
+    # pipelines, creating dispatch+triage jobs that saturate the runner
+    # pool and starve the deploy job (which legitimately runs on push).
+    - when: never
   # Anti-accumulation: a no-op dispatch (bot event, MR action that chains
   # via API, unhandled event) exits 0 without writing .boucle-issue, then the
   # EXIT trap flips it to exit 1. We do NOT use allow_failure here because
@@ -618,6 +623,9 @@ triage:
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE
       when: never
     - if: $CI_PIPELINE_SOURCE == "trigger"
+    # All other pipeline sources (push, schedule, web, etc.) → skip.
+    # See dispatch rules for the rationale (runner pool starvation).
+    - when: never
   variables:
     BOUCLE_ITERATION: 1
   script:
