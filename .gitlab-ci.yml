@@ -2526,6 +2526,27 @@ e2e:
               --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
               --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || true
           fi
+          # Close the original issue: work is transferred to the follow-up.
+          # Post a link comment so the human can trace from the original →
+          # follow-up, then close the original and cascade the parent
+          # (mirrors PASS branch behavior).
+          E2E_LINK_BODY="<!-- boucle:e2e-fail v=1 iid=$BOUCLE_ISSUE followup=$E2E_NEW_IID -->
+      E2E verification FAILED. A follow-up issue #$E2E_NEW_IID has been opened in triage to fix the defect.
+
+      ## Live URL
+      ${BOUCLE_LIVE_URL:-unknown}
+
+      ## E2E trace
+      \`\`\`
+      $(printf '%s' "${COMMENT:-}" | head -c 4000)
+      \`\`\`
+
+      Closing this issue — work continues in #$E2E_NEW_IID."
+          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+            -f body="$E2E_LINK_BODY" > /dev/null 2>&1 || true
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
+          close_issue "$BOUCLE_ISSUE"
+          maybe_close_parent "$BOUCLE_ISSUE"
           ;;
         UNCERTAIN|*)
           set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
