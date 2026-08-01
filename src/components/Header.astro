@@ -27,7 +27,11 @@ const navItems = [
 	{ label: "Prises de parole", href: "/prises-de-parole" },
 	{ label: "Collectif", href: "/collectif" },
 	{ label: "Faites un don", href: "/don" },
-	{ label: "Right to Resist", href: "/right-to-resist" },
+	// `featured` opts this entry into the brutalist "Right to Resist"
+	// visual treatment (see `.site-header__link--featured` below).
+	// Kept as the 4th nav item per the existing navItems[3] contract
+	// documented in DESIGN.md and the issue #31 brief.
+	{ label: "Right to Resist", href: "/right-to-resist", featured: true },
 ];
 
 const ctaItems = [
@@ -67,7 +71,13 @@ const socialLinks = [
 				{
 					navItems.map((item) => (
 						<li>
-							<a href={item.href} class="site-header__link">
+							<a
+								href={item.href}
+								class:list={[
+									"site-header__link",
+									item.featured && "site-header__link--featured",
+								]}
+							>
 								{item.label}
 							</a>
 						</li>
@@ -309,6 +319,50 @@ const socialLinks = [
 
 	.site-header__link:hover {
 		color: var(--color-flag-red);
+	}
+
+	/*
+	 * "Right to Resist" (navItems[3]) — brutalist signature treatment.
+	 * Distinguishes the campaign-marked entry from the three standard
+	 * links via three token-driven gestures:
+	 *   1. heading-family display (instead of body) with bold weight
+	 *   2. uppercase + wide tracking (the brutalist militant stamp)
+	 *   3. a 2px flag-red underline that snaps in on hover/focus
+	 * The treatment is reversible: removing the `featured` flag from
+	 * `navItems` reverts this entry to the standard link style.
+	 */
+	.site-header__link--featured {
+		font-family: var(--font-heading);
+		font-size: var(--text-sm);
+		font-weight: var(--weight-bold);
+		letter-spacing: var(--tracking-wide);
+		text-transform: uppercase;
+		padding: 0 var(--space-xs);
+		border-left: 1px solid oklch(28% 0 0);
+		color: var(--color-flag-red);
+	}
+
+	.site-header__link--featured:hover,
+	.site-header__link--featured:focus-visible {
+		color: var(--color-flag-white);
+		text-decoration: underline;
+		text-decoration-thickness: 2px;
+		text-underline-offset: 4px;
+		text-decoration-color: var(--color-flag-red);
+	}
+
+	/* On the scrolled (red) surface, the flag-red featured text would
+	 * vanish into the background. Invert to white, and keep the red
+	 * underline as the only red accent. */
+	.site-header.is-scrolled .site-header__link--featured {
+		color: var(--color-flag-white);
+		border-left-color: var(--color-flag-red-deep);
+	}
+
+	.site-header.is-scrolled .site-header__link--featured:hover,
+	.site-header.is-scrolled .site-header__link--featured:focus-visible {
+		color: var(--color-flag-white);
+		text-decoration-color: var(--color-flag-white);
 	}
 
 	/* ----- CTA group ----- */
