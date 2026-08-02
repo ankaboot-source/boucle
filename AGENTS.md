@@ -266,7 +266,10 @@ and agent prompts); never renumber.
     - ✅ DO: when `BOUCLE_FALLBACK_PROVIDER` is set, retry with
       `$BOUCLE_FALLBACK_MODEL_<ROLE>` on the exit-4 condition; mark the
       iteration `[FALLBACK: provider/model]`. Escalate only if the fallback
-      also fails.
+      also fails. Each attempt is wrapped in `timeout` (per-role
+      `AGENT_TIMEOUT`) so a hanging primary is killed before the job
+      timeout eats the whole run — without this, the fallback block never
+      executes because `run_with_retry` never returns.
 
 ## Documentation self-maintenance
 

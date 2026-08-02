@@ -302,19 +302,22 @@ sequenceDiagram
 
 When the primary provider (`ollama-cloud`) is down — empty log / no agent activity, the exit-4 condition (AGENTS.md lesson #29) — `bin/oc` retries with a fallback provider before the exit-code guard runs. This lets the loop self-recover instead of escalating to a human.
 
+Each `opencode run` invocation is wrapped in `timeout` (per-role `AGENT_TIMEOUT`) when a fallback provider is configured, so a hanging primary (API down, credits exhausted) is killed before the job timeout eats the whole run. Without this, `run_with_retry` never returns and the fallback block never executes. Retry loops are also disabled (`BOUCLE_LLM_MAX_RETRIES=0`) to avoid wasting the timeout budget on a dead provider.
+
 ```mermaid
 flowchart LR
-    A[opencode run<br/>primary provider] --> B{is_api_down?}
+    A["timeout AGENT_TIMEOUT<br/>opencode run<br/>primary provider"] --> B{is_api_down?}
     B -- no --> C[exit-code guard<br/>proceed normally]
     B -- yes --> D{BOUCLE_FALLBACK_PROVIDER<br/>set?}
     D -- no --> C
-    D -- yes --> E[opencode run --model<br/>fallback provider/model]
+    D -- yes --> E["timeout AGENT_TIMEOUT<br/>opencode run --model<br/>fallback provider/model"]
     E --> F{is_api_down?}
     F -- no --> G[mark iteration FALLBACK<br/>proceed normally]
     F -- yes --> H[restore primary log<br/>exit-code guard escalates]
 ```
 
 - **Trigger**: empty log OR no agent activity (the exit-4 condition). NOT logic errors (exit 3 = agent ran but didn't post) — those still escalate.
+- **Timeout**: per-role `AGENT_TIMEOUT` (triage=4m, worker/reviewer/e2e=12m) wraps each attempt so a hang is killed with exit 124, leaving room for the fallback. Override with `BOUCLE_AGENT_TIMEOUT`.
 - **Config** (env vars, all optional — empty `BOUCLE_FALLBACK_PROVIDER` = disabled):
   - `BOUCLE_FALLBACK_PROVIDER` — fallback provider name (e.g. `opencode-go`).
   - `BOUCLE_FALLBACK_MODEL_{TRIAGE,WORKER,REVIEWER,E2E}` — per-role fallback model (default: same model name under the fallback provider, since `opencode-go` mirrors the `ollama-cloud` catalog).
