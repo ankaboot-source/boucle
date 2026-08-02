@@ -1479,6 +1479,53 @@ worker:
         echo "WARN: ./bin/oc worker exited $rc — proceeding to safety-net commit."
       fi
 
+      # ── Model/API failure detection (exit 4) ──────────────────────────
+      # bin/oc exits 4 when the worker agent log is empty or shows no agent
+      # activity — the model API is likely down or out of credits. opencode
+      # hangs silently in this case (no stdout, no crash) and the job appears
+      # "running" until the timeout kills it. Without this detection, the
+      # failure is misdiagnosed as "agent likely exhausted its step budget"
+      # and the loop re-triggers into the same wall (issue #35 on
+      # up/urgence-palestine.fr: worker hung 40 min with empty log because
+      # ollama-cloud credits were exhausted). Post a diagnostic comment on
+      # the issue with the available logs and escalate to human immediately
+      # — re-triggering won't help if the model is unavailable.
+      if [ "$rc" -eq 4 ]; then
+        AGENT_LOG_FILE="$CI_PROJECT_DIR/.boucle/$BOUCLE_ISSUE/agent-output.log"
+        LOG_SNIPPET="(log file not found or empty)"
+        if [ -f "$AGENT_LOG_FILE" ]; then
+          # Capture last 2000 chars of the log (enough to see the error,
+          # small enough for a GitLab comment). Strip ANSI escape codes.
+          LOG_SNIPPET=$(tail -c 2000 "$AGENT_LOG_FILE" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' || echo "(log read failed)")
+        fi
+        DIAGNOSTIC_BODY=$(cat << EOF
+## ⚠️ Worker — échec du modèle (API indisponible ou crédits épuisés)
+
+Le worker n'a produit **aucune sortie** — le log agent est vide ou ne montre aucune activité. Cela indique que l'API du modèle (\`$AGENT\`) est probablement **indisponible** ou **à court de crédits**.
+
+### Logs
+
+\`\`\`
+$LOG_SNIPPET
+\`\`\`
+
+### Action requise
+
+- Vérifiez le statut de l'API du modèle (\`$AGENT\`).
+- Vérifiez les crédits/quota restants.
+- Une fois le modèle disponible, re-déclenchez le worker en remettant le label \`boucle:todo\` et en assignant l'issue au bot.
+
+---
+*Diagnostic posté par boucle (exit 4 — model/API failure).*
+EOF
+)
+        glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+          -f body="$DIAGNOSTIC_BODY" > /dev/null 2>&1 || true
+        set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
+        echo "FAIL: worker model/API failure (exit 4) — diagnostic posted on issue #$BOUCLE_ISSUE, escalated to human." >&2
+        exit 1
+      fi
+
       # Safety-net commit: the agent may run out of steps before committing.
       # Stage and commit any uncommitted tracked changes so the index is clean
       # before the rebase (rebase refuses to run on a dirty tree).
