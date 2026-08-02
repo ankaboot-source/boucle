@@ -311,6 +311,7 @@ and agent prompts); never renumber.
       MUST be strictly greater than the longest job timeout (default
       2400s vs worker/reviewer 30 min).
 
+<<<<<<< HEAD
 34. **Dispatch MUST skip system notes**
     - ❌ DO NOT treat GitLab system notes (assignee changes, label
       changes, branch additions) as human replies. A system note has
@@ -330,7 +331,6 @@ and agent prompts); never renumber.
       codebase already filters `system == false` when fetching notes
       via the API (worker/reviewer feedback) — the webhook handler
       MUST apply the same filter.
-
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
