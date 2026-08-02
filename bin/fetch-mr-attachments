@@ -116,7 +116,7 @@ for path in "${UPLOAD_PATHS[@]}"; do
   if glab api --hostname "$HOST" --method GET \
     "/projects/$PROJECT_ID${path}" \
     -H "Accept: application/octet-stream" \
-    > "$outpath" 2>/dev/null; then
+    > "$outpath" 2> /dev/null; then
     actual_size=$(wc -c < "$outpath")
     if [ "$actual_size" -eq 0 ]; then
       rm -f "$outpath"
