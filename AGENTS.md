@@ -283,6 +283,17 @@ and agent prompts); never renumber.
       with proper token-based auth. Applies to both `bin/fetch-issue-attachments`
       and `bin/fetch-mr-attachments`.
 
+32. **Use DB-growth as the provider-agnostic "API down" signal**
+    - ❌ DO NOT rely solely on log grep patterns to detect whether a provider
+      is down — some providers (e.g. `opencode-go`) emit a transcript format
+      the grep doesn't match, so a working run is false-flagged as "down" and
+      the loop escalates to a human even though the plan still has tokens.
+    - ✅ DO: `is_api_down` MUST also check the opencode SQLite DB growth
+      delta (snapshot before the run vs. after). A dead run leaves the DB at
+      the SQLite page-size baseline (4096b); a working run grows it well
+      beyond. If the DB grew by more than 16KB, the agent did real work and
+      the provider is NOT down — regardless of log patterns.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.

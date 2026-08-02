@@ -316,7 +316,7 @@ flowchart LR
     F -- yes --> H[restore primary log<br/>exit-code guard escalates]
 ```
 
-- **Trigger**: empty log OR no agent activity (the exit-4 condition). NOT logic errors (exit 3 = agent ran but didn't post) — those still escalate.
+- **Trigger**: empty log OR no agent activity (the exit-4 condition). NOT logic errors (exit 3 = agent ran but didn't post) — those still escalate. The `is_api_down` check uses two signals: (1) log grep for tool-call markers/paths, and (2) **DB-growth delta** — the opencode SQLite DB size is snapshotted before each run; if it grew by more than 16KB, the agent did real work and the provider is NOT down, regardless of log patterns (issue #37: some providers emit a transcript format the grep doesn't match).
 - **Timeout**: per-role `AGENT_TIMEOUT` (triage=4m, worker/reviewer/e2e=12m) wraps each attempt so a hang is killed with exit 124, leaving room for the fallback. Override with `BOUCLE_AGENT_TIMEOUT`.
 - **Config** (env vars, all optional — empty `BOUCLE_FALLBACK_PROVIDER` = disabled):
   - `BOUCLE_FALLBACK_PROVIDER` — fallback provider name (e.g. `opencode-go`).

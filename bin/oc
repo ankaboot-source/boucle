@@ -295,9 +295,27 @@ run_with_retry() {
 # Role-agnostic: looks for any tool call (glab/gh for triage/reviewer/e2e,
 # file/git ops for worker) or a boucle marker. Zero activity = model never
 # responded.
+#
+# DB-growth signal (issue #37): the grep patterns below assume the opencode
+# transcript prints tool-call names/paths as literal substrings. Some
+# providers (e.g. opencode-go) emit a transcript format the grep doesn't
+# match, so a working run is false-flagged as "down" and the loop escalates
+# to a human even though the plan still has tokens. The opencode SQLite DB
+# is a provider-agnostic activity signal: a dead run leaves it at the SQLite
+# page-size baseline (4096b), while a working run grows it well beyond. We
+# accept an optional $2 = db_size_before (bytes, snapshot taken just before
+# the run); if the DB grew by more than 16KB since then, the agent did real
+# work and the provider is NOT down — regardless of log patterns.
 is_api_down() {
   local log="$1"
+  local before="${2:-0}"
   [ -s "$log" ] || return 0
+  local db_sz=0
+  db_sz=$(stat -c %s "$OPENCODE_DB" 2>/dev/null || stat -f %z "$OPENCODE_DB" 2>/dev/null || echo 0)
+  local delta=$((db_sz - before))
+  if [ "$delta" -gt 16384 ] 2>/dev/null; then
+    return 1
+  fi
   grep -qiE 'tool_use|function_call|tool_call|glab |gh |read|write|edit|bash|glob|grep|git (add|commit|diff|status|checkout)|\.astro|\.ts|\.css|\.md|src/|public/|<!-- boucle:' "$log" || return 0
   return 1
 }
@@ -492,6 +510,11 @@ fi
 AGENT_EXIT=0
 VARIANT_ARGS=()
 [ -n "$VARIANT" ] && VARIANT_ARGS+=(--variant "$VARIANT")
+# Snapshot the opencode DB size before the run so is_api_down can compute
+# the growth delta (issue #37: a working provider whose transcript format
+# the grep doesn't match is false-flagged as down; DB growth is the
+# provider-agnostic activity signal).
+DB_SIZE_BEFORE_RUN=$(stat -c %s "$OPENCODE_DB" 2>/dev/null || stat -f %z "$OPENCODE_DB" 2>/dev/null || echo 0)
 # Wrap opencode with /usr/bin/time -v when available to capture peak RSS.
 # The env-prefix assignment applies to /usr/bin/time, which inherits and
 # passes it through to the opencode child. Exit code still propagates via
@@ -525,7 +548,7 @@ print_metrics_line
 # The fallback is a transparent retry layer: if it succeeds, the exit-code
 # guard sees the fallback's output and proceeds normally; if it also fails,
 # the primary log is restored and the existing exit-3/4 logic applies.
-if [ -n "$FALLBACK_PROVIDER" ] && is_api_down "$AGENT_LOG"; then
+if [ -n "$FALLBACK_PROVIDER" ] && is_api_down "$AGENT_LOG" "$DB_SIZE_BEFORE_RUN"; then
   echo "[boucle:fallback] primary provider appears down (empty log / no agent activity) — retrying with $FALLBACK_PROVIDER/$FALLBACK_MODEL" >&2
   # Preserve the primary log for diagnosis, start fresh for the fallback.
   cp "$AGENT_LOG" "${AGENT_LOG}.primary" 2>/dev/null || true
@@ -533,13 +556,16 @@ if [ -n "$FALLBACK_PROVIDER" ] && is_api_down "$AGENT_LOG"; then
   FALLBACK_MODEL_ARG="$FALLBACK_PROVIDER/$FALLBACK_MODEL"
   VARIANT_ARGS=()
   [ -n "$VARIANT" ] && VARIANT_ARGS+=(--variant "$VARIANT")
+  # Snapshot DB size before the fallback run (primary left it at baseline
+  # if it was down; any growth here is the fallback's own activity).
+  DB_SIZE_BEFORE_FALLBACK=$(stat -c %s "$OPENCODE_DB" 2>/dev/null || stat -f %z "$OPENCODE_DB" 2>/dev/null || echo 0)
   OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
     run_with_retry -- opencode run --agent "$AGENT" --auto \
     --model "$FALLBACK_MODEL_ARG" "${VARIANT_ARGS[@]}" \
     --log-level WARN "$PROMPT" > "$AGENT_LOG" 2>&1
   cat "$AGENT_LOG"
   print_metrics_line
-  if is_api_down "$AGENT_LOG"; then
+  if is_api_down "$AGENT_LOG" "$DB_SIZE_BEFORE_FALLBACK"; then
     # Fallback also down — restore primary log so the exit-code guard and
     # CI diagnostic capture both attempts. Escalation proceeds as before.
     echo "[boucle:fallback] fallback provider ($FALLBACK_PROVIDER) also down — escalating" >&2
