@@ -1271,6 +1271,40 @@ worker:
       ITERATION="${BOUCLE_ITERATION:-1}"
       export BOUCLE_ITERATION
 
+      # ── Persist .boucle/<issue>/ across iterations ───────────────────
+      # .boucle/ is gitignored (state.md, iterations.md, agent-output.log
+      # are NOT committed) and the worker re-triggers itself via the API
+      # (new pipeline, no `needs` link → no artifact passing). On a shell
+      # executor $CI_PROJECT_DIR may be wiped between runs, so we persist
+      # the per-issue state dir to a stable path outside the workspace and
+      # restore it here before the job does anything else. Without this,
+      # every iteration starts with a fresh seed (state.md = "(to be
+      # determined by worker)", iterations.md = absent) and the worker
+      # rebuilds context from scratch — exhausting its step budget before
+      # implementing (issue #35 on up/urgence-palestine.fr: 2 iterations
+      # produced zero code changes because the worker spent all 100 steps
+      # re-discovering the codebase and re-reading charter docs).
+      BOUCLE_STATE_CACHE="${BOUCLE_STATE_CACHE:-${HOME}/.boucle-state-cache}"
+      ISSUE_STATE_CACHE="${BOUCLE_STATE_CACHE}/${BOUCLE_ISSUE}"
+      if [ -d "$ISSUE_STATE_CACHE" ]; then
+        echo "[boucle] Restoring .boucle/$BOUCLE_ISSUE/ from $ISSUE_STATE_CACHE"
+        mkdir -p ".boucle/$BOUCLE_ISSUE"
+        cp -a "$ISSUE_STATE_CACHE/." ".boucle/$BOUCLE_ISSUE/" 2>/dev/null || true
+      fi
+
+      # Persist .boucle/<issue>/ back to the stable cache on job exit (any
+      # path: success, no-changes re-trigger, rebase conflict, deploy fail).
+      # The trap fires after the script body so it captures the latest state
+      # (state.md with filled Approach, iterations.md with the new entry,
+      # agent-output.log). Best-effort: never fail the job from the trap.
+      save_state_cache() {
+        if [ -d ".boucle/$BOUCLE_ISSUE" ]; then
+          mkdir -p "$ISSUE_STATE_CACHE"
+          cp -a ".boucle/$BOUCLE_ISSUE/." "$ISSUE_STATE_CACHE/" 2>/dev/null || true
+        fi
+      }
+      trap save_state_cache EXIT
+
       # Label helper: preserve non-boucle labels when writing a boucle label.
       # The jq filter uses startswith("boucle:") which catches BOTH the detail
       # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
@@ -1392,6 +1426,19 @@ worker:
 
       ## Awaiting human
       nothing
+      EOF
+      fi
+
+      # Seed iterations.md on first run (companion to state.md). The worker
+      # appends to this file (bin/oc:488) and is instructed to read it at
+      # startup (worker.md) so it knows what previous iterations tried —
+      # without this, each re-run starts blind and repeats the same mistakes.
+      if [ ! -f ".boucle/$BOUCLE_ISSUE/iterations.md" ]; then
+        cat > ".boucle/$BOUCLE_ISSUE/iterations.md" << 'EOF'
+      # Iteration log — issue #$BOUCLE_ISSUE
+
+      Each entry: timestamp — role (agent) — iteration — result + files touched.
+      Read this BEFORE implementing to avoid repeating rejected approaches.
       EOF
       fi
 
