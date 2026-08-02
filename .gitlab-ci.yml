@@ -47,9 +47,13 @@ variables:
   # reviewer FAIL). Default 3. Override per-project if you want more/fewer retries.
   BOUCLE_MAX_ITERATIONS: "3"
   # Doctor staleness threshold (seconds): how long before a boucle:working or
-  # boucle:review issue is considered stuck and re-triggered. Default 300 (5 min).
-  # Lower = faster recovery but more false-positive re-triggers.
-  BOUCLE_STALENESS_THRESHOLD: "300"
+  # boucle:review issue is considered stuck and re-triggered. Default 2400
+  # (40 min). MUST be strictly greater than the longest job timeout
+  # (worker/reviewer = 30 min) plus a buffer, per ARCHITECTURE.md §9 —
+  # otherwise the doctor fires while a job is legitimately still running,
+  # producing parasitic duplicate triggers. Lower = faster recovery but
+  # more false-positive re-triggers.
+  BOUCLE_STALENESS_THRESHOLD: "2400"
   # Disable Chromium visual preview in triage (saves ~120 MiB per triage job).
   # true = skip preview rendering entirely. false = default (agent opt-in via RENDER_REQUEST).
   BOUCLE_PREVIEW_DISABLE: "false"
@@ -3179,6 +3183,65 @@ doctor:
         fi
       }
 
+      # Check whether an active pipeline exists for a given BOUCLE_ISSUE.
+      # Lists active pipelines (running/pending/created/waiting_for_resource/
+      # preparing) and fetches each pipeline's variables to match
+      # BOUCLE_ISSUE=<iid>. Returns 0 (true) if a matching active pipeline
+      # exists, 1 (false) otherwise. Replaces the unreliable updated_at proxy:
+      # updated_at is bumped by any issue activity (bot notes, label writes),
+      # not just pipeline runs. The pipelines API exposes per-pipeline
+      # variables via GET /projects/:id/pipelines/:pipeline_id/variables.
+      issue_has_active_pipeline() {
+        local iid="$1"
+        local status pipeline_id vars
+        for status in running pending created waiting_for_resource preparing; do
+          for pipeline_id in $(glab api --hostname "$HOST" \
+            "/projects/$PID/pipelines?status=$status&per_page=100" 2>/dev/null \
+            | jq -r '.[].id' 2>/dev/null); do
+            vars=$(glab api --hostname "$HOST" \
+              "/projects/$PID/pipelines/$pipeline_id/variables" 2>/dev/null || echo "")
+            if echo "$vars" | jq -e --arg iid "$iid" \
+              '[.[] | select(.key == "BOUCLE_ISSUE" and .value == $iid)] | length > 0' \
+              >/dev/null 2>&1; then
+              return 0
+            fi
+          done
+        done
+        return 1
+      }
+
+      # Doctor-side dedup: track the last time the doctor triggered each
+      # issue in $BOUCLE_STATE_CACHE/doctor-triggers/<iid>. Skip re-trigger
+      # if the doctor already triggered this issue within the STALENESS
+      # window — prevents the same issue from being re-fired every 10 min
+      # while waiting for a queued pipeline to start. The active-pipeline
+      # check (issue_has_active_pipeline) is the primary guard; this is a
+      # secondary backstop for the case where a triggered pipeline is still
+      # in `created`/`waiting_for_resource` but the variables API hasn't
+      # caught up, or the pipeline was triggered but hasn't yet registered.
+      doctor_should_skip_dedup() {
+        local iid="$1" now_epoch last_epoch delta
+        local cache_dir="${BOUCLE_STATE_CACHE:-.boucle-state}/doctor-triggers"
+        local stamp_file="$cache_dir/$iid"
+        now_epoch=$(date +%s)
+        if [ -f "$stamp_file" ]; then
+          last_epoch=$(cat "$stamp_file" 2>/dev/null || echo 0)
+          delta=$((now_epoch - last_epoch))
+          local staleness="${BOUCLE_STALENESS_THRESHOLD:-2400}"
+          if [ "$delta" -lt "$staleness" ]; then
+            echo "  → #$iid: doctor already triggered ${delta}s ago (< ${staleness}s) — dedup skip"
+            return 0
+          fi
+        fi
+        return 1
+      }
+      doctor_mark_triggered() {
+        local iid="$1"
+        local cache_dir="${BOUCLE_STATE_CACHE:-.boucle-state}/doctor-triggers"
+        mkdir -p "$cache_dir" 2>/dev/null || true
+        date +%s > "$cache_dir/$iid" 2>/dev/null || true
+      }
+
       # Fetch all open issues with boucle:needs-info label
       NEEDS_INFO_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:needs-info&per_page=100" \
         | jq -r '.[].iid')
@@ -3203,12 +3266,24 @@ doctor:
 
         if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ]; then
           echo "  → #$IID has a human reply after last triage comment — orphaned triage detected"
+          # Active-pipeline guard: skip if a pipeline for this issue is
+          # already running/pending/created. Prevents the doctor from
+          # firing duplicate triggers every 10 min while a previous one
+          # is still queued in resource_group.
+          if issue_has_active_pipeline "$IID"; then
+            echo "  → #$IID: active pipeline already running — skipping re-trigger"
+            continue
+          fi
+          if doctor_should_skip_dedup "$IID"; then
+            continue
+          fi
           # Re-trigger: set boucle:triage label (preserve non-boucle labels)
           set_boucle_label "$IID" "boucle:triage" "boucle::status::bot"
           # Trigger triage pipeline
           curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
             -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
             -F "variables[BOUCLE_ISSUE]=$IID" > /dev/null
+          doctor_mark_triggered "$IID"
           echo "  → re-triggered triage for #$IID"
           RECOVERED=$((RECOVERED + 1))
         else
@@ -3257,10 +3332,18 @@ doctor:
         done
         if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ] || [ "$EMOJI_APPROVAL_FOUND" = true ]; then
           echo "  → #$IID approved (reply=$HUMAN_REPLY_AFTER_TRIAGE, emoji=$EMOJI_APPROVAL_FOUND) — re-triggering worker"
+          if issue_has_active_pipeline "$IID"; then
+            echo "  → #$IID: active pipeline already running — skipping re-trigger"
+            continue
+          fi
+          if doctor_should_skip_dedup "$IID"; then
+            continue
+          fi
           set_boucle_label "$IID" "boucle:todo" "boucle::status::bot"
           curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
             -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
             -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+          doctor_mark_triggered "$IID"
           echo "  → re-triggered worker for #$IID"
           RECOVERED=$((RECOVERED + 1))
         else
@@ -3302,9 +3385,17 @@ doctor:
 
         # No recent triage comment — re-trigger
         echo "  → #$IID: boucle:triage with no recent triage comment — re-triggering"
+        if issue_has_active_pipeline "$IID"; then
+          echo "  → #$IID: active pipeline already running — skipping re-trigger"
+          continue
+        fi
+        if doctor_should_skip_dedup "$IID"; then
+          continue
+        fi
         curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
           -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
           -F "variables[BOUCLE_ISSUE]=$IID" > /dev/null
+        doctor_mark_triggered "$IID"
         echo "  → re-triggered triage for #$IID"
         RECOVERED=$((RECOVERED + 1))
       done
@@ -3347,10 +3438,18 @@ doctor:
         # label was set. Re-trigger triage so the agent can re-read the user's
         # answers and route the issue correctly this time.
         echo "  → #$IID: orphaned triage (triage comment + human reply, no boucle label) — re-triggering"
+        if issue_has_active_pipeline "$IID"; then
+          echo "  → #$IID: active pipeline already running — skipping re-trigger"
+          continue
+        fi
+        if doctor_should_skip_dedup "$IID"; then
+          continue
+        fi
         set_boucle_label "$IID" "boucle:triage" "boucle::status::bot"
         curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
           -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
           -F "variables[BOUCLE_ISSUE]=$IID" > /dev/null
+        doctor_mark_triggered "$IID"
         echo "  → re-triggered triage for #$IID"
         RECOVERED=$((RECOVERED + 1))
       done
@@ -3395,9 +3494,17 @@ doctor:
               break
             fi
             echo "  → #$IID (boucle:todo): slot available ($WORKING_COUNT/$MAX_PARALLEL) — triggering worker"
+            if issue_has_active_pipeline "$IID"; then
+              echo "  → #$IID: active pipeline already running — skipping re-trigger"
+              continue
+            fi
+            if doctor_should_skip_dedup "$IID"; then
+              continue
+            fi
             curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
               -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
               -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+            doctor_mark_triggered "$IID"
             RECOVERED=$((RECOVERED + 1))
           done
         fi
@@ -3445,21 +3552,33 @@ doctor:
           continue
         fi
 
-        # Time heuristic: check the issue's updated_at. If it was updated
-        # within the last 15 min, a pipeline may have just started — skip.
-        # We intentionally do NOT check for an active role pipeline: GitLab's
-        # jobs API doesn't expose pipeline variables, so we can't confirm a
-        # running worker/reviewer belongs to THIS issue. A global "any worker
-        # active" check would skip other stuck issues (false positive). The
-        # resource_group (boucle-issue-$BOUCLE_ISSUE) serializes per-issue
-        # runs, so a duplicate re-trigger just queues safely — no collision.
+        # Active-pipeline check: skip if a pipeline with BOUCLE_ISSUE=$IID is
+        # already running/pending/created. Replaces the unreliable updated_at
+        # proxy (bumped by any issue activity, not just pipeline runs). The
+        # pipelines API exposes per-pipeline variables, so we can confirm a
+        # running worker/reviewer belongs to THIS issue — no false positives.
+        if issue_has_active_pipeline "$IID"; then
+          echo "  → #$IID ($ROLE): active pipeline already running — skipping re-trigger"
+          continue
+        fi
+        # Staleness backstop: only re-trigger if the issue has been stuck
+        # (no active pipeline) for longer than STALENESS. This catches the
+        # case where a pipeline finished but the label was never advanced
+        # (e.g. runner crashed mid-job before the label write).
         UPDATED_AT=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID" | jq -r '.updated_at')
         UPDATED_EPOCH=$(date -d "$UPDATED_AT" +%s 2>/dev/null || echo 0)
         NOW_EPOCH=$(date +%s)
         AGE=$((NOW_EPOCH - UPDATED_EPOCH))
-        STALENESS="${BOUCLE_STALENESS_THRESHOLD:-300}"
+        STALENESS="${BOUCLE_STALENESS_THRESHOLD:-2400}"
         if [ "$AGE" -lt "$STALENESS" ]; then
           echo "  → #$IID ($ROLE): issue updated ${AGE}s ago (< ${STALENESS}s) — may still be processing, skipping"
+          continue
+        fi
+        # Doctor-side dedup: skip if the doctor already triggered this issue
+        # within the STALENESS window. Secondary backstop for the case where
+        # a triggered pipeline is in `created`/`waiting_for_resource` but the
+        # variables API hasn't caught up yet.
+        if doctor_should_skip_dedup "$IID"; then
           continue
         fi
 
@@ -3467,6 +3586,7 @@ doctor:
         curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
           -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
           -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=$ROLE" > /dev/null
+        doctor_mark_triggered "$IID"
         echo "  → re-triggered $ROLE for #$IID"
         RECOVERED=$((RECOVERED + 1))
       done
