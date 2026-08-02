@@ -5,7 +5,7 @@
 #
 # Role mapping (boucle role → project-local agent in .opencode/agents/):
 #   triage   → triage    (minimax-m3, analyzes issue)
-#   worker   → worker    (minimax-m3, implements)
+#   worker   → worker    (kimi-k2.7-code, implements)
 #   reviewer → reviewer  (glm-5.2, adversarial review)
 #   e2e      → e2e       (kimi-k2.7-code, visual verification)
 # Project-local agents are defined in .opencode/agents/*.md and travel
