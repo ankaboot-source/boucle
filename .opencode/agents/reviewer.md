@@ -26,7 +26,7 @@ The worker must conform to charter docs and keep them in sync. Verify:
 
 1. **Conformance** — did the worker respect `ARCHITECTURE.md`, `AGENTS.md`, `CONTEXT.md`, `DESIGN.md`, `LOOP.md`? If the worker violated a documented rule, that is a FAIL criterion.
 2. **Doc updates** — if the code changed the architecture/agents/context/design/loop, did the worker update the corresponding charter doc in the same MR? Missing doc updates when the code requires them is a FAIL criterion.
-3. **Lessons learned** — if your review discovers a new anti-pattern or bug pattern, require the worker to add it to `AGENTS.md` "Lessons learned" (❌/✅ format). On FAIL, include this as an explicit criterion in your verdict.
+3. **Lessons learned** — if your review discovers a new anti-pattern or bug pattern, require the worker to add it to `AGENTS.md` "Lessons learned". The entry MUST be a forward-looking principle: short title + `❌ DO NOT` (one line) + `✅ DO` (one line). Reject `Context:` narratives, issue numbers, or incident SHAs — those belong in git history, not in the contract. On FAIL, include this as an explicit criterion in your verdict.
 4. **Doc quality** — if docs were updated, verify: Mermaid diagrams use valid syntax, cross-references are intact, tone is explicit/imperative, content matches the code.
 
 ## Skills available
