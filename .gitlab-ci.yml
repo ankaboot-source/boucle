@@ -53,6 +53,12 @@ variables:
   # Disable Chromium visual preview in triage (saves ~120 MiB per triage job).
   # true = skip preview rendering entirely. false = default (agent opt-in via RENDER_REQUEST).
   BOUCLE_PREVIEW_DISABLE: "false"
+  # Provider fallback: when the primary provider (ollama-cloud) is down —
+  # empty log / no agent activity, the exit-4 condition (AGENTS.md lesson #29) —
+  # retry with this fallback provider before escalating to a human. Empty = disabled.
+  # opencode-go mirrors the ollama-cloud catalog (same model names).
+  # Per-role model overrides: BOUCLE_FALLBACK_MODEL_{TRIAGE,WORKER,REVIEWER,E2E}.
+  BOUCLE_FALLBACK_PROVIDER: "opencode-go"
   # File-type CI variable: $PI_AUTH holds a path to the auth.json temp file
 
 # ── Default: use node:22-slim (has node, npm, curl — much smaller than node:22) ─
