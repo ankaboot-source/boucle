@@ -25,7 +25,6 @@ MAX_BYTES="${BOUCLE_IMAGE_MAX_BYTES:-10485760}"
 TOTAL_MAX_BYTES="${BOUCLE_IMAGE_TOTAL_MAX_BYTES:-52428800}"
 
 HOST="${BOUCLE_FORGE_HOST:-framagit.org}"
-TOKEN="${BOUCLE_TOKEN:?BOUCLE_TOKEN must be set}"
 PROJECT_ID="${CI_PROJECT_ID:?CI_PROJECT_ID must be set}"
 
 mkdir -p "$ATT_DIR"
@@ -93,7 +92,6 @@ for path in "${UPLOAD_PATHS[@]}"; do
   [ -z "$path" ] && continue
   idx=$((idx + 1))
 
-  url="https://$HOST$path"
   filename=$(basename "$path")
   # Sanitize filename (alphanumeric, dot, dash, underscore only)
   filename=$(echo "$filename" | tr -cd '[:alnum:]._-')
@@ -112,12 +110,17 @@ for path in "${UPLOAD_PATHS[@]}"; do
   remaining=$((TOTAL_MAX_BYTES - total_size))
   per_file_cap=$((MAX_BYTES < remaining ? MAX_BYTES : remaining))
 
-  # Download with per-file size limit.
-  # --max-filesize aborts if body exceeds the limit (curl exit 63).
-  # Fallback: check actual size after download (handles chunked encoding).
-  if curl -sL --max-filesize "$per_file_cap" \
-    -H "PRIVATE-TOKEN: $TOKEN" \
-    -o "$outpath" "$url" 2> /dev/null; then
+  # Download via the GitLab API (not the raw /uploads/ URL).
+  # The raw URL (https://$HOST/uploads/...) returns a login page for private
+  # projects — the /uploads/ endpoint uses cookie-based session auth, not the
+  # PRIVATE-TOKEN header. The API endpoint
+  #   GET /projects/:id/uploads/:secret/:filename
+  # with `Accept: application/octet-stream` returns the binary blob correctly.
+  # See boucle lesson #31.
+  if glab api --hostname "$HOST" --method GET \
+    "/projects/$PROJECT_ID${path}" \
+    -H "Accept: application/octet-stream" \
+    > "$outpath" 2>/dev/null; then
     actual_size=$(wc -c < "$outpath")
     if [ "$actual_size" -eq 0 ]; then
       rm -f "$outpath"
@@ -125,7 +128,7 @@ for path in "${UPLOAD_PATHS[@]}"; do
       skipped_count=$((skipped_count + 1))
       continue
     fi
-    # Double-check against cap (in case --max-filesize was ignored: no Content-Length)
+    # Check against per-file cap (API has no --max-filesize equivalent)
     if [ "$actual_size" -gt "$per_file_cap" ]; then
       rm -f "$outpath"
       echo "[fetch-issue-attachments] $filename ($actual_size bytes) exceeds cap ($per_file_cap) — skipping"
@@ -137,7 +140,7 @@ for path in "${UPLOAD_PATHS[@]}"; do
     echo "[fetch-issue-attachments] Downloaded ${idx}_${filename} ($actual_size bytes)"
   else
     rm -f "$outpath"
-    echo "[fetch-issue-attachments] Skipped $filename (over ${per_file_cap} bytes or download failed)"
+    echo "[fetch-issue-attachments] Skipped $filename (download failed)"
     skipped_count=$((skipped_count + 1))
   fi
 done
