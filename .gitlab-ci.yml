@@ -112,15 +112,21 @@ default:
       unset _NEED_NODE
 
       # ── glab CLI ───────────────────────────────────────────────────
-      if ! command -v glab &>/dev/null; then
-        echo "Installing glab..."
+      # Install or upgrade: the shell executor caches $HOME/.local/bin across
+      # runs, so a pinned old version would otherwise never update. Reinstall
+      # when the cached version differs from GLAB_VER (cheap, ~3MB tarball).
+      GLAB_VER="1.111.0"
+      _GLAB_INSTALLED="$(glab version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)"
+      if [ -z "$_GLAB_INSTALLED" ] || [ "$_GLAB_INSTALLED" != "$GLAB_VER" ]; then
+        echo "Installing glab v${GLAB_VER} (was: ${_GLAB_INSTALLED:-MISSING})..."
         mkdir -p "$HOME/.local/bin"
-        GLAB_VER="1.50.0"
         curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VER}/downloads/glab_${GLAB_VER}_linux_amd64.tar.gz" -o /tmp/glab.tar.gz
         tar xzf /tmp/glab.tar.gz -C /tmp
         cp /tmp/bin/glab "$HOME/.local/bin/glab" 2>/dev/null || cp /tmp/glab "$HOME/.local/bin/glab"
         chmod +x "$HOME/.local/bin/glab"
+        rm -f /tmp/glab.tar.gz /tmp/bin/glab
       fi
+      unset _GLAB_INSTALLED
 
       # ── pi coding agent (npm install — pi needs node >=22.19) ──────
       # pi is a Node-based CLI: @earendil-works/pi-coding-agent is the runtime
