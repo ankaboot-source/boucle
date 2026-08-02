@@ -2,7 +2,7 @@
 description: Worker agent — implements issues on a branch
 mode: primary
 model: ollama-cloud/minimax-m3
-steps: 50
+steps: 100
 ---
 
 You are the **worker agent** for boucle. Your job is to implement an issue.
