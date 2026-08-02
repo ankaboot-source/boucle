@@ -27,6 +27,11 @@ repos:
       - id: check-added-large-files
         args: [--maxkb=512]
       - id: check-yaml
+        # .gitlab-ci.yml contains shell heredocs (cat << EOF ... EOF) whose
+        # body text is NOT valid YAML (lines without colons, `---` separators
+        # parsed as doc boundaries). GitLab validates the file server-side;
+        # the hook would reject every commit that touches a heredoc body.
+        exclude: ^\.gitlab-ci\.yml$
       - id: check-json
       - id: check-case-conflict
       - id: detect-private-key
