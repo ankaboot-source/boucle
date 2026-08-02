@@ -451,7 +451,7 @@ All boucle configuration variables are prefixed with `BOUCLE_`. No other variabl
 - `BOUCLE_TOKEN` and `BOUCLE_TRIGGER_TOKEN` MUST **always** be `masked+protected`. No boucle job MUST ever log their value.
 - `BOUCLE_DEPLOY_CMD` MUST **always** contain `$$BRANCH` (the double `$` is the GitLab CI YAML escape).
 - `BOUCLE_MAX_ITERATIONS` set to `0` means **no retry** (first failure → human).
-- `BOUCLE_STALENESS_THRESHOLD` MUST be **strictly greater** than the longest job timeout (~120s for the worker).
+- `BOUCLE_STALENESS_THRESHOLD` MUST be **strictly greater** than the longest job timeout (worker/reviewer = 30 min, so default 2400s/40 min). The doctor MUST also check for an active pipeline (via the pipelines API variables endpoint) before re-triggering, to avoid parasitic duplicate triggers while a job is legitimately still running.
 
 ---
 

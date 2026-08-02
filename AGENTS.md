@@ -294,6 +294,23 @@ and agent prompts); never renumber.
       beyond. If the DB grew by more than 16KB, the agent did real work and
       the provider is NOT down — regardless of log patterns.
 
+33. **Doctor MUST check active pipelines before re-triggering**
+    - ❌ DO NOT use issue `updated_at` as a proxy for "is a pipeline
+      running" — it is bumped by any issue activity (bot notes, label
+      writes), not just pipeline runs. DO NOT set
+      `BOUCLE_STALENESS_THRESHOLD` below the longest job timeout — the
+      doctor will fire while a worker/reviewer is legitimately still
+      running, producing parasitic duplicate triggers that queue
+      unbounded via `resource_group`.
+    - ✅ DO: the doctor MUST call `issue_has_active_pipeline` (which
+      lists active pipelines and fetches each one's variables via
+      `GET /projects/:id/pipelines/:pipeline_id/variables` to match
+      `BOUCLE_ISSUE=<iid>`) before every re-trigger, and MUST apply a
+      per-issue dedup timestamp (`$BOUCLE_STATE_CACHE/doctor-triggers/
+      <iid>`) as a secondary backstop. `BOUCLE_STALENESS_THRESHOLD`
+      MUST be strictly greater than the longest job timeout (default
+      2400s vs worker/reviewer 30 min).
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
