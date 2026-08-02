@@ -471,6 +471,32 @@ case "$ROLE" in
       exit 3
     fi
     ;;
+  worker)
+    # Worker silent-failure detection: if the agent log is empty or contains
+    # no evidence of agent activity (no tool calls, no file reads, no commits),
+    # the model API is likely down or out of credits. opencode hangs silently
+    # in this case (no stdout, no crash) — the job appears "running" until the
+    # timeout kills it. Exit 4 so the CI can post a diagnostic comment on the
+    # issue with the available logs instead of the generic "agent likely
+    # exhausted its step budget" message that misdiagnoses a model outage as
+    # a step-budget issue (issue #35 on up/urgence-palestine.fr: worker hung
+    # for 40 min with empty log because ollama-cloud credits were exhausted).
+    if [ ! -s "$AGENT_LOG" ]; then
+      echo "[boucle] ERROR: worker agent log is empty — model API likely down or out of credits (exit 4)." >&2
+      exit 4
+    fi
+    # Heuristic: if the log has content but no sign of agent activity (no
+    # tool calls, no file reads/writes, no git operations), the agent started
+    # but never received a model response. opencode logs tool calls as
+    # "tool_use" / "function_call" / file paths — if none appear, the model
+    # never responded.
+    if ! grep -qiE 'tool_use|function_call|read|write|edit|bash|glob|grep|git (add|commit|diff|status|checkout)|\.astro|\.ts|\.css|\.md|src/|public/' "$AGENT_LOG"; then
+      echo "[boucle] ERROR: worker agent log shows no agent activity — model API likely down or out of credits (exit 4)." >&2
+      echo "[boucle] Log content (first 500 chars):" >&2
+      head -c 500 "$AGENT_LOG" >&2 2> /dev/null || true
+      exit 4
+    fi
+    ;;
 esac
 
 # ── 6. Restore scrubbed secrets ───────────────────────────────────────
