@@ -434,7 +434,7 @@ All boucle configuration variables are prefixed with `BOUCLE_`. No other variabl
 | `BOUCLE_STALENESS_THRESHOLD` | Threshold in seconds before an issue is considered stuck by `doctor`. | `300` |
 | `BOUCLE_PREVIEW_DISABLE` | Disables PNG preview generation (`bin/render-preview`). | `false` |
 | `BOUCLE_SPEC_PROFILE` | Spec gate profile (determines when human validation is required). | `product` (gate for Size M) |
-| `BOUCLE_DND_ENABLED` | Enables Do-Not-Disturb mode. When `true`, the spec gate is auto-validated during the configured quiet window so the loop runs autonomously up to the MR without contacting the human. | `false` |
+| `BOUCLE_DND_ENABLED` | Enables Do-Not-Disturb mode. When `true`, the spec gate is auto-validated during the configured quiet window so the loop runs autonomously up to the MR without contacting the human. | `true` |
 | `BOUCLE_DND_START` | DND window start (`HH:MM`, 24h). | `22:00` |
 | `BOUCLE_DND_END` | DND window end (`HH:MM`, 24h). Supports overnight wrap (start > end). | `07:00` |
 | `BOUCLE_DND_TZ` | IANA timezone for the DND window. | `UTC` |

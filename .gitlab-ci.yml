@@ -468,6 +468,23 @@ dispatch:
       # .work_item.iid (work items), or .epic.iid (epics).
       # Notes on a MR live in .merge_request.iid — handled separately below.
       if [ "$OBJECT_KIND" = "note" ] || [ "$OBJECT_KIND" = "emoji" ]; then
+        # Skip system notes (assignee changes, label changes, branch
+        # additions, status changes). GitLab fires a note webhook with
+        # .object_attributes.system = true for these. They are NOT human
+        # replies and must not trigger the loop — otherwise creating an
+        # issue + assigning the bot in the same form fires BOTH an `issue`
+        # webhook (open → triage) AND a `note` webhook (system "assigned
+        # to @up-bot" → triage again), double-triggering triage. The
+        # BOT_JUST_ASSIGNED path already handles assignment via the issue
+        # update webhook, so the system note is pure redundancy. Emoji
+        # events have no `system` field and are unaffected.
+        if [ "$OBJECT_KIND" = "note" ]; then
+          NOTE_SYSTEM=$(jq -r '.object_attributes.system // false' "$TRIGGER_PAYLOAD" 2>/dev/null)
+          if [ "$NOTE_SYSTEM" = "true" ]; then
+            echo "System note (non-human) — skipping"
+            exit 0
+          fi
+        fi
         # ── Notes on a MR: human comment → re-trigger worker with feedback ──
         # When a human comments on a boucle MR, they're reviewing it and
         # providing feedback. Re-trigger the worker so it re-runs and can

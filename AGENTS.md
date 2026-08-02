@@ -311,6 +311,26 @@ and agent prompts); never renumber.
       MUST be strictly greater than the longest job timeout (default
       2400s vs worker/reviewer 30 min).
 
+34. **Dispatch MUST skip system notes**
+    - ❌ DO NOT treat GitLab system notes (assignee changes, label
+      changes, branch additions) as human replies. A system note has
+      `.object_attributes.system = true` and `.user.username` = the
+      human who triggered the system action — so the ACTOR guard
+      passes, but the note is NOT a human reply. Without a system-note
+      filter, creating an issue + assigning the bot in the same form
+      fires BOTH an `issue` webhook (open → triage) AND a `note`
+      webhook (system "assigned to @up-bot" → triage again),
+      double-triggering triage. The triage job has no `resource_group`
+      (BOUCLE_ISSUE is not available at pipeline eval time), so the two
+      pipelines run in parallel → congestion.
+    - ✅ DO: the dispatch note-event handler MUST check
+      `.object_attributes.system` and `exit 0` on system notes. The
+      `BOT_JUST_ASSIGNED` path already handles assignment via the issue
+      update webhook, so the system note is pure redundancy. The
+      codebase already filters `system == false` when fetching notes
+      via the API (worker/reviewer feedback) — the webhook handler
+      MUST apply the same filter.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
