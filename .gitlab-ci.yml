@@ -2161,7 +2161,10 @@ reviewer:
         fi
         exit 1
       fi
-  timeout: 15m
+  # 30m to accommodate provider fallback: 12m primary timeout + 12m fallback
+  # + 6m overhead (rebase, deploy, verdict post). At 15m the fallback only
+  # got 3m after the 12m primary timeout — not enough to complete a review.
+  timeout: 30m
 
 # ── Merger (serial merge after author approval) ─────────────────────────
 # Triggered by dispatch when an author approves a MR natively (GitLab
@@ -2357,7 +2360,8 @@ merger:
         -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" \
         -F "variables[BOUCLE_LIVE_URL]=$LIVE_URL" > /dev/null 2>&1 || true
       echo "Triggered e2e for issue #$BOUCLE_ISSUE with LIVE_URL=$LIVE_URL"
-  timeout: 15m
+  # 30m to accommodate provider fallback: 12m primary + 12m fallback + 6m overhead.
+  timeout: 30m
 
 # ── Catchup (direct merge recovery) ────────────────────────────────────
 # Triggered by dispatch when a human merges a boucle/<iid> MR directly
