@@ -114,6 +114,12 @@
 	--container-base: 60rem;
 	--container-wide: 78rem;
 
+	/* ---------- Layout ---------- */
+	/* Height of the compressed site header; used by sticky sections so the
+	 * pinned element clears the chrome (Header.astro collapses to 44 px).
+	 * Value is rounded up to 4 rem to leave a small safety margin. */
+	--header-height: 4rem;
+
 	/* ---------- Motion ---------- */
 	--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 	--ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
