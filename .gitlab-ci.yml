@@ -1504,27 +1504,25 @@ worker:
           # small enough for a GitLab comment). Strip ANSI escape codes.
           LOG_SNIPPET=$(tail -c 2000 "$AGENT_LOG_FILE" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' || echo "(log read failed)")
         fi
-        DIAGNOSTIC_BODY=$(cat << HEREDOC_END
-          ## ⚠️ Worker — échec du modèle (API indisponible ou crédits épuisés)
-
-          Le worker n'a produit **aucune sortie** — le log agent est vide ou ne montre aucune activité. Cela indique que l'API du modèle (\`$AGENT\`) est probablement **indisponible** ou **à court de crédits**.
-
-          ### Logs
-
-          \`\`\`
-          $LOG_SNIPPET
-          \`\`\`
-
-          ### Action requise
-
-          - Vérifiez le statut de l'API du modèle (\`$AGENT\`).
-          - Vérifiez les crédits/quota restants.
-          - Une fois le modèle disponible, re-déclenchez le worker en remettant le label \`boucle:todo\` et en assignant l'issue au bot.
-
-          ---
-          *Diagnostic posté par boucle (exit 4 — model/API failure).*
-        HEREDOC_END
-        )
+        DIAGNOSTIC_BODY=$(printf '%s\n' \
+          "## ⚠️ Worker — échec du modèle (API indisponible ou crédits épuisés)" \
+          "" \
+          "Le worker n'a produit **aucune sortie** — le log agent est vide ou ne montre aucune activité. Cela indique que l'API du modèle est probablement **indisponible** ou **à court de crédits**." \
+          "" \
+          "### Logs" \
+          "" \
+          '```' \
+          "$LOG_SNIPPET" \
+          '```' \
+          "" \
+          "### Action requise" \
+          "" \
+          "- Vérifiez le statut de l'API du modèle." \
+          "- Vérifiez les crédits/quota restants." \
+          "- Une fois le modèle disponible, re-déclenchez le worker en remettant le label \`boucle:todo\` et en assignant l'issue au bot." \
+          "" \
+          "---" \
+          "*Diagnostic posté par boucle (exit 4 — model/API failure).*")
         glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
           -f body="$DIAGNOSTIC_BODY" > /dev/null 2>&1 || true
         set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
