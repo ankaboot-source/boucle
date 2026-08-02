@@ -2029,6 +2029,13 @@ reviewer:
               # Promote the draft marker to a verdict marker so the CI parser
               # recognizes it when we re-fetch after posting.
               DRAFTED_VERDICT=$(printf '%s' "$DRAFTED_VERDICT" | sed "s|<!-- boucle:draft role=reviewer -->|<!-- boucle:verdict v=1 role=reviewer sha=$MR_HEAD -->|")
+              # If the promoted draft has no VERDICT line, default to UNCERTAIN
+              # (the agent posted a draft but ran out of steps before posting
+              # a final verdict with a VERDICT: line).
+              if ! echo "$DRAFTED_VERDICT" | grep -qiE 'VERDICT: (PASS|FAIL|UNCERTAIN)'; then
+                DRAFTED_VERDICT="$(printf '%s\n\nVERDICT: UNCERTAIN\n' "$DRAFTED_VERDICT")"
+                echo "[boucle] WARN: promoted reviewer draft had no VERDICT line — defaulting to UNCERTAIN."
+              fi
             fi
           fi
           if [ -n "$DRAFTED_VERDICT" ] && echo "$DRAFTED_VERDICT" | grep -qiE 'VERDICT: (PASS|FAIL|UNCERTAIN)'; then
@@ -2875,6 +2882,13 @@ e2e:
             if [ -n "$DRAFTED_VERDICT" ]; then
               echo "[boucle] WARN: no boucle:verdict in log — promoting boucle:draft to verdict (step-limit fallback)."
               DRAFTED_VERDICT=$(printf '%s' "$DRAFTED_VERDICT" | sed "s|<!-- boucle:draft role=e2e -->|<!-- boucle:verdict v=1 role=e2e sha=$MR_HEAD -->|")
+              # If the promoted draft has no VERDICT line, default to UNCERTAIN
+              # (the agent posted a draft checklist but ran out of steps before
+              # posting a final verdict with a VERDICT: line).
+              if ! echo "$DRAFTED_VERDICT" | grep -qiE 'VERDICT: (PASS|FAIL|UNCERTAIN)'; then
+                DRAFTED_VERDICT="$(printf '%s\n\nVERDICT: UNCERTAIN\n' "$DRAFTED_VERDICT")"
+                echo "[boucle] WARN: promoted e2e draft had no VERDICT line — defaulting to UNCERTAIN."
+              fi
             fi
           fi
           if [ -n "$DRAFTED_VERDICT" ] && echo "$DRAFTED_VERDICT" | grep -qiE 'VERDICT: (PASS|FAIL|UNCERTAIN)'; then
