@@ -88,258 +88,185 @@ known recurring bug, documented in the "Lessons learned" section.
     cross-references. **NEVER** let docs drift from code — a doc that
     describes a system that no longer exists is a bug.
 
-## Lessons learned (anti-patterns to never reproduce)
+## Lessons learned (forward-looking operating principles)
 
-This is **THE MOST IMPORTANT** section of the document. It catalogs the 15 errors
-already committed and resolved. Any new regression MUST be added here in the same
-`❌ DO NOT / ✅ DO` format.
+Each entry below is a **contract** that every agent and CI step MUST honor
+going forward. The `❌ DO NOT / ✅ DO` pair is the rule; the incident that
+produced it is not recorded here — it lives in git history. Any new
+regression MUST be added in the same format: state the principle, not the
+bug. Numbers are stable (cross-referenced from `.gitlab-ci.yml`, `bin/oc`
+and agent prompts); never renumber.
 
-1. **Step waste by iterative refinement** (issue #27)
-   - ❌ DO NOT refine the comment in a loop before posting.
-   - ✅ DO: post the comment **FIRST** (even incomplete), then refine in a second
-     comment if steps remain.
-   - Context: 6 repeated triage notes, infinite doctor re-trigger loop.
+1. **Post before refining**
+   - ❌ DO NOT refine a comment in a loop before posting it.
+   - ✅ DO: post the comment **FIRST** (even incomplete), then refine in a
+     follow-up. An incomplete post always beats a refinement never posted.
 
-2. **Silent failure undetected**
-   - ❌ DO NOT ignore an agent that produces no output.
-   - ✅ DO: `bin/oc` exit `3` → escalate to human. Breaks the doctor re-trigger loop.
+2. **Detect silent failures**
+   - ❌ DO NOT let a no-output agent pass silently.
+   - ✅ DO: treat no posted/drafted comment as a hard failure (exit `3`)
+     and escalate to a human.
 
-3. **MCP hang in CI**
-   - ❌ DO NOT rely on `codebase-memory-mcp` in CI (MCP handshake fails within 30s).
-   - ✅ DO: `bin/oc` strips MCP servers from the opencode config in CI. The agent
-     uses native `glob`/`grep`/`read` tools instead.
+3. **No MCP in CI**
+   - ❌ DO NOT rely on `codebase-memory-mcp` tools in CI (handshake hangs).
+   - ✅ DO: strip MCP in CI; use native `glob`/`grep`/`read` and the
+     `codebase-memory-mcp cli` fallback. Every prompt that cites graph tools
+     MUST document both interfaces.
 
-4. **No-op label write**
+4. **Idempotent label writes**
    - ❌ DO NOT `PUT` a label that is already present.
-   - ✅ DO: check the current state before writing. GitLab records an event on every
-     `PUT` — a no-op pollutes the history.
+   - ✅ DO: check current state before writing — GitLab records an event on
+     every `PUT`, even a no-op.
 
-5. **Log-scraping missed**
-   - ❌ DO NOT produce output only in memory.
-   - ✅ DO: the agent MUST write to stdout. CI scrapes `agent-output.log` as fallback
-     to catch unposted drafts.
+5. **Always write to stdout**
+   - ❌ DO NOT produce output only in memory or via tool calls.
+   - ✅ DO: the agent MUST write to stdout so CI can scrape
+     `agent-output.log` as a fallback for unposted drafts.
 
-6. **Verdict without SHA**
-   - ❌ DO NOT post a verdict without bare hex SHA.
-   - ✅ DO: `<!-- boucle:verdict v=1 role=reviewer sha=abc123 -->` —
+6. **SHA-anchored verdicts**
+   - ❌ DO NOT post a verdict without a bare-hex SHA.
+   - ✅ DO: `<!-- boucle:verdict v=1 role=reviewer sha=abc123def456 -->` —
      no quotes, no whitespace, no angle brackets around the SHA.
 
-7. **Webhook without work**
+7. **Webhooks must produce work**
    - ❌ DO NOT let a webhook consume a runner without producing work.
-   - ✅ DO: `dispatch` EXIT trap fails if no `.boucle-issue` is written.
+   - ✅ DO: fail `dispatch` when no `.boucle-issue` is written.
 
-8. **Parallel merge**
+8. **Serial merges only**
    - ❌ DO NOT parallelize merges (rebase against a stale `master`).
-   - ✅ DO: `resource_group: boucle-merge` serializes. Each rebase includes the
-     previously merged MRs.
+   - ✅ DO: serialize merges via `resource_group: boucle-merge` so each
+     rebase includes previously merged MRs.
 
-9. **OUTPUT_TOKEN_MAX too small**
-   - ❌ DO NOT use 1200 tokens max for triage (too small for a complete structured comment).
-   - ✅ DO: 4000 tokens (must match reviewer/e2e).
+9. **Adequate output token budget**
+   - ❌ DO NOT cap `OUTPUT_TOKEN_MAX` below what a complete structured
+     comment needs.
+   - ✅ DO: 4000 tokens for triage, matching reviewer/e2e.
 
-10. **Build before rebase**
-    - ❌ DO NOT build before rebase (`public/` dirties the tree, rebase fails).
+10. **Rebase before build**
+    - ❌ DO NOT build before rebase (`public/` dirties the tree).
     - ✅ DO: rebase **BEFORE** build, always.
 
-11. **Bot assignment detection**
-    - A human can trigger boucle by **assigning** the issue to the bot
-      (no label required). Dispatch MUST detect assignment as a valid trigger,
-      in addition to the `boucle:queued` label.
+11. **Assignment is a valid trigger**
+    - ❌ DO NOT treat only the `boucle:queued` label as a trigger.
+    - ✅ DO: dispatch MUST also detect issue **assignment** to the bot.
 
-12. **Concurrency cap**
-    - `BOUCLE_MAX_PARALLEL_ISSUES` defers the worker trigger if too many issues are
-      in progress. **NEVER** disable this cap — it prevents runner saturation and
-      race conditions on rebase.
+12. **Honor the concurrency cap**
+    - ❌ DO NOT disable `BOUCLE_MAX_PARALLEL_ISSUES`.
+    - ✅ DO: let the cap defer worker triggers to prevent runner saturation
+      and rebase races.
 
-13. **Sub-issue hierarchy**
-    - Use the work-items hierarchy API for parent-child.
-    - **Fallback**: `legacy split-parent marker` if the API is not available on
-      the target GitLab instance.
+13. **Resolve parent-child via the hierarchy API**
+    - ❌ DO NOT infer parent-child links ad hoc.
+    - ✅ DO: use the work-items hierarchy API; fall back to the
+      `legacy split-parent marker` when unavailable.
 
-14. **Safety-net commit**
-    - The agent may exhaust its steps before committing. CI stages+commits
-      automatically before rebase. **NO NEED** to panic on a missed commit — but
-      unstageable changes (binaries) will be lost.
+14. **Safety-net commit is CI's job**
+    - ❌ DO NOT panic over a missed commit before rebase.
+    - ✅ DO: CI auto-stages+commits before rebase. The agent only MUST avoid
+      unstageable changes (binaries, local configs).
 
-15. **Empty MR**
-    - The worker may produce zero changes (steps exhausted). CI detects
-      `base_sha == head_sha` → re-trigger or escalate. A worker MUST produce at
-      at least one commit to clear this guard.
+15. **A worker must produce at least one commit**
+    - ❌ DO NOT ship an empty MR (`base_sha == head_sha`).
+    - ✅ DO: land at least one commit per worker run; CI re-triggers or
+      escalates otherwise.
 
-16. **Blind re-run after reviewer FAIL** (issue #35 on up/urgence-palestine.fr)
-    - ❌ DO NOT re-trigger the worker after a reviewer FAIL without passing
-      the reviewer's verdict and human MR comments to the next run. A worker
-      that starts blind repeats the same mistakes and exhausts the iteration
-      budget (`BOUCLE_MAX_ITERATIONS`) without ever addressing the root cause.
-    - ✅ DO: the worker job fetches ALL non-system MR notes (reviewer verdicts
-      carry the `boucle:verdict` marker; human comments are plain text) and
-      exports them as `BOUCLE_REVIEWER_FEEDBACK`. `bin/oc` injects them into
-      the worker's prompt as a "Prior feedback on the MR" section. The worker
-      MUST address every actionable item before claiming done.
-    - Context: 3 reviewer FAIL verdicts on MR !31, same root cause (MR
-      description did not cite `DESIGN.md` §2 and §4), never fixed across
-      iterations. The re-trigger curl passed only `BOUCLE_ISSUE` +
-      `BOUCLE_ROLE` + `BOUCLE_ITERATION` — no feedback channel existed.
+16. **Feed reviewer feedback forward**
+    - ❌ DO NOT re-trigger the worker after a FAIL without passing the
+      verdict and human MR comments to the next run.
+    - ✅ DO: export all non-system MR notes as `BOUCLE_REVIEWER_FEEDBACK`
+      and inject them into the worker prompt; address every actionable item
+      before claiming done.
 
-17. **Parent-issue attachments not inherited** (issue #34 on up/urgence-palestine.fr)
-    - ❌ DO NOT mine only the current issue for uploads when the issue is a
-      sub-issue. Assets (logos, zips, mockups) are often uploaded to the
-      parent issue only, and a worker that cannot find them improvises
-      (fabricated monochrome logos instead of the real brand assets).
-    - ✅ DO: `bin/fetch-issue-attachments` resolves the parent IID from the
-      `## Parent issue\n#N` section (same awk pattern as `maybe_close_parent`
-      and `resolve_reporter_id`) and appends the parent's description + notes
-      to the text mined for `/uploads/...` paths. One level only, gated by
-      `BOUCLE_PARENT_ATTACHMENTS_DISABLE` (default `false` = enabled).
-    - Context: issue #34 (sub-issue of #33) needed the logo .zip uploaded to
-      #33. `fetch-issue-attachments` fetched only #34's description + notes,
-      never saw the .zip, and the worker fabricated fake logos. The parent
-      link was already parsed by 5 other call sites in `.gitlab-ci.yml` —
-      only `fetch-issue-attachments` missed it.
+17. **Inherit parent-issue attachments**
+    - ❌ DO NOT mine only the current issue for uploads when it is a
+      sub-issue.
+    - ✅ DO: resolve the parent IID and append its description + notes when
+      mining `/uploads/`. One level only; gated by
+      `BOUCLE_PARENT_ATTACHMENTS_DISABLE`.
 
-18. **bin/update requires GitHub auth (boucle not yet public)**
-    - ❌ DO NOT assume `bin/update` works out of the box on a consumer.
-      `boucle` is not yet a public GitHub repository. `bin/update` fetches a
-      tarball from `https://codeload.github.com/ankaboot-source/boucle/...`
-      without credentials, which 401s on a private repo. The consumer's
-      dispatch pipeline silently fails-open (stays on the current version)
-      and never picks up upstream fixes.
-    - ✅ DO: until boucle is public, propagate upstream fixes to consumers
-      **manually** — push the fix to `origin` on GitHub, then copy the
-      changed `SYNC_PATHS` (`bin`, `.pi`, `.gitlab-ci.yml`, `.opencode/...`)
-      into the consumer repo and bump `.boucle-version` to the upstream SHA.
-      Track this limitation here and remove the entry once boucle is public
-      and `bin/update` succeeds unauthenticated.
+18. **`bin/update` needs GitHub auth until boucle is public**
+    - ❌ DO NOT assume `bin/update` works unauthenticated on a consumer.
+    - ✅ DO: until boucle is public, propagate upstream fixes manually
+      (push to `origin`, copy `SYNC_PATHS`, bump `.boucle-version`). Remove
+      this entry once `bin/update` succeeds unauthenticated.
 
-19. **MR description not refreshed on worker re-run** (issue #34 on up/urgence-palestine.fr)
-    - ❌ DO NOT reuse an existing MR on iteration 2+ without updating its
-      description. The worker deploys to a branch-based preview URL that
-      changes between iterations, and the MR description carries the preview
-      URL the reviewer tests against. A stale description points the
-      reviewer at the wrong (old) URL — the reviewer may PASS a deployment
-      that no longer exists, or FAIL a deployment that was never tested.
-    - ✅ DO: the worker job calls `glab mr update` on the reused MR to
-      refresh both the title and the description (new preview URL + new
-      Approach + new commit summary) on every iteration. The reuse branch
-      in `.gitlab-ci.yml` now updates the MR instead of silently reusing it.
-    - Context: MR !30 iteration 2 deployed to
-      `https://boucle-34.urgence-palestine.pages.dev` but the MR description
-      still pointed at the iteration-1 URL
-      `https://b87caf91.urgence-palestine.pages.dev`. The reviewer tested the
-      stale URL and validated anyway. The user saw "logos still invisible"
-      because the URL in the MR was wrong.
+19. **Refresh the MR description on every iteration**
+    - ❌ DO NOT reuse an existing MR on iteration 2+ with a stale
+      description (preview URL, Approach, commit summary drift).
+    - ✅ DO: update title + description on every iteration via
+      `glab mr update`.
 
-20. **Worker does not fill the Approach section in state.md** (issue #34 on up/urgence-palestine.fr)
-    - ❌ DO NOT leave the `## Approach` section of `state.md` as the seed
-      placeholder `(to be determined by worker)`. The Approach section
-      becomes the MR description's `### Approach` block, which the reviewer
-      reads to verify doc conformance (e.g. DESIGN.md §2 and §4 citations).
-      An empty Approach causes repeated reviewer FAIL verdicts on the same
-      criterion, wasting the iteration budget (`BOUCLE_MAX_ITERATIONS`).
-    - ✅ DO: the worker MUST fill the Approach section with 2-5 sentences
-      explaining the implementation approach and citing the specific charter
-      doc sections it conformed to (`worker.md` step 8). The CI extraction
-      (`APPROACH=$(sed -n '/^## Approach/,/^## /p' state.md ...`) now falls
-      back to an explicit note when the section is still the placeholder, so
-      the MR description is never the literal seed text.
-    - Context: 3 reviewer FAIL verdicts on MR !30, all blocking on the same
-      criterion: "MR description does not cite DESIGN.md §2 and §4". The
-      worker (minimax-m3) understood the requirement (visible in the job
-      trace) but never wrote it into `state.md`. The reviewer eventually
-      PASSed with a lenient interpretation, but the loop wasted 2 iterations.
+20. **Fill the Approach section in state.md**
+    - ❌ DO NOT leave `## Approach` as the seed placeholder.
+    - ✅ DO: fill it with 2-5 sentences citing the charter doc sections
+      conformed to; CI falls back to an explicit note if the placeholder
+      remains.
 
-21. **Preview stale passes HTTP-200-only assertion** (issue #35 on up/urgence-palestine.fr)
-    - ❌ DO NOT trust an HTTP 200 on the preview URL as proof that the deployed
-      content matches the head commit. Three failure modes produce a 200
-      with stale content: (a) the deploy step's exit code is swallowed by a
-      `$(...) | grep | head` pipeline under `set +o pipefail`, so a failed
-      redeploy is silently treated as success; (b) the CDN edge keeps serving
-      cached content for seconds-to-minutes after a new deployment; (c) if the
-      build output is byte-identical to the previous iteration (Astro/Vite
-      cache hit on the shell executor), `wrangler pages deploy` returns the
-      same content-hash URL and the preview never updates.
-    - ✅ DO: the worker job writes a commit-SHA marker into the build output
-      (`__boucle_commit__.txt` + an HTML comment in `index.html`) right after
-      the build, captures the wrangler exit code separately from the URL
-      extraction (subshell + log file, not a swallowing pipeline), and the
-      deploy assertion fetches the marker from the preview URL with a retry
-      loop (`BOUCLE_PREVIEW_PROPAGATION_WAIT`, default 60s, 5s backoff) until
-      the deployed SHA matches the head SHA. A stale preview now FAILs the
-      worker job instead of passing through to the reviewer.
-    - Context: issue #35 iteration 3 deployed commit `6ca8aa33` but the
-      preview kept serving the iteration-2 content (cards with titles, wrong
-      grid, wrong links). The reviewer FAILed 3 times on "preview doesn't
-      match the commit" while the worker kept re-running blind. The MR
-      description refresh (lesson #19) fixed the wrong-URL path, but the
-      stale-content path remained open until this marker + retry assertion
-      was added.
+21. **Assert preview content matches the head SHA**
+    - ❌ DO NOT trust an HTTP 200 on the preview URL (swallowed exit codes,
+      CDN cache, byte-identical builds all serve stale content).
+    - ✅ DO: write a commit-SHA marker into the build, capture the deploy
+      exit code separately, and retry-fetch the marker until the deployed
+      SHA matches the head SHA. A stale preview FAILs the worker job.
 
-22. **Destructive `git reset --hard` wipes validated worker commits** (issue #35 on up/urgence-palestine.fr)
-    - ❌ DO NOT unconditionally `git reset --hard origin/master` at the start
-      of every worker iteration. When the reviewer FAILs on a non-code issue
-      (stale preview, missing doc citation, MR description placeholder), the
-      worker's code from the previous iteration is correct and committed —
-      a hard reset wipes it, forcing the next worker to re-implement from
-      scratch in its 50-step budget. The worker exhausts its steps
-      reconstituting context and produces an empty or trivial MR.
-    - ✅ DO: preserve worker commits and rebase. If
-      `git log origin/master..$BRANCH --oneline` shows worker commits, run
-      `git rebase origin/master` to keep the work on top of the latest master.
-      Fall back to `git reset --hard origin/master` ONLY when the rebase
-      conflicts or the branch has no worker commits (clean slate). This keeps
-      the anti-accumulation property (lesson #8) without destroying validated
-      work on non-code FAILs.
-    - Context: issue #35 iteration 3 produced commit `6ca8aa33` (full
-      FeaturedFeed.astro + index.astro + sections.css + tokens.css, all 5
-      tahrir comments addressed). The reviewer FAILed on a stale preview
-      (lesson #21), not on the code. The next iteration's `git reset --hard
-      origin/master` wiped `6ca8aa33` (now an orphan in the repo), leaving
-      only `fa1699f2` (a token-only commit). The next worker spent all 50
-      steps reconstituting context and produced no code changes.
+22. **Prefer rebase over hard reset**
+    - ❌ DO NOT unconditionally `git reset --hard origin/master` at the
+      start of every worker iteration — it wipes validated commits on
+      non-code FAILs.
+    - ✅ DO: `git rebase origin/master` when worker commits exist; fall back
+      to hard reset only on conflict or a clean slate.
 
-23. **Codebase graph indexed in CI but unusable by agents** (issue #35 on up/urgence-palestine.fr)
-    - ❌ DO NOT instruct agents to use MCP graph tools (`search_graph`,
-      `trace_path`, `get_code_snippet`) without documenting the CLI fallback
-      for CI. `bin/oc` strips MCP servers from the opencode config in CI
-      (lesson #3, MCP handshake hangs within 30s), so the tools the agent
-      prompts reference do not exist at runtime. The graph is built every run
-      (`codebase-memory-mcp cli index_repository`) but never queried — wasted
-      compute and blind agents that fall back to `grep`/`glob`.
-    - ✅ DO: document the CLI fallback in every agent prompt that references
-      graph tools. The CLI is available in CI as
-      `codebase-memory-mcp cli <tool> '<json>'` (e.g.
-      `codebase-memory-mcp cli search_graph '{"name_pattern":".*FeaturedFeed.*"}'`).
-      Agent prompts (`worker.md`, `triage.md`, `reviewer.md`) now list both
-      the MCP tools (local dev) and the CLI fallback (CI) with concrete
-      examples, so the agent knows how to query the graph in both
-      environments.
-    - Context: `worker.md:12-20` told the worker to use `search_graph` and
-      `trace_path`, but `bin/oc:170` (`strip_mcp_for_ci`) removed those tools
-      in CI. The worker (minimax-m3) on issue #35 iteration 4 fell back to
-      `ls`/`cat`/`git log` to reconstitute the codebase, burning steps that
-      should have gone to implementation. The graph was indexed but unused.
+23. **Document the CLI fallback for graph tools**
+    - ❌ DO NOT reference MCP graph tools in prompts without the CI fallback.
+    - ✅ DO: every prompt citing `search_graph`/`trace_path`/
+      `get_code_snippet` also documents
+      `codebase-memory-mcp cli <tool> '<json>'`.
 
-24. **MR description frozen at iteration 1 on no-changes re-runs** (issue #35 on up/urgence-palestine.fr)
-    - ❌ DO NOT skip the MR description refresh when the worker produces no
-      code changes. The "no changes" handler (`exit 1` before the build/deploy
-      block) runs BEFORE the `glab mr update` that refreshes the description
-      with the new iteration number and preview URL. When the worker exhausts
-      its step budget across iterations 2 and 3 without committing, the MR
-      description stays frozen at "iteration 1" with the original preview URL
-      — the reviewer and the user see a misleading description that does not
-      reflect the actual loop state.
-    - ✅ DO: refresh the MR description in the "no changes" handler itself,
-      before the `exit 1`. Fetch the existing MR by source branch, preserve
-      its current preview URL (if any), and update title + description to
-      reflect the current iteration and the "no code changes" status. The
-      reviewer and the user now see the real iteration count and a clear
-      "no commits this iteration" status instead of a stale "iteration 1".
-    - Context: issue #35 iterations 2 and 3 both exhausted the step budget
-      before committing (the destructive reset of lesson #22 wiped the
-      prior validated work, forcing re-implementation from scratch). The MR
-      !31 description stayed at "iteration 1" with the original preview URL
-      throughout, misleading the user who reported "la description de la MR
-      indique toujours iteration 1 avec la preview URL initiale".
+24. **Do not overwrite the MR description on no-changes runs**
+    - ❌ DO NOT replace a useful description with a "no code changes"
+      placeholder.
+    - ✅ DO: update only the MR title (iteration count); leave the last
+      successful description intact.
+
+25. **Extract MR comment attachments**
+    - ❌ DO NOT fetch MR notes as text-only and drop embedded `/uploads/`
+      links.
+    - ✅ DO: mine `/uploads/` from MR notes, download them, and export
+      `BOUCLE_MR_ATTACHMENTS` for the worker prompt.
+
+26. **Treat attachments as dual-nature**
+    - ❌ DO NOT frame all attachments as "inspect for context".
+    - ✅ DO: decide by intent — "use this file as X" → ship-as-asset
+      (`cp` to `public/`, reference in build); "this is what's wrong" →
+      inspect-for-context. Use `file <path>` for binary metadata; `cp` +
+      reference ships an image without seeing it.
+
+27. **Re-scrape logs when the found verdict is stale**
+    - ❌ DO NOT gate log-scraping on `if [ -z "$VERDICT" ]` alone — a stale
+      verdict blocks recovery of the current run's stdout.
+    - ✅ DO: track `VERDICT_SHA_MATCHED`; re-scrape when empty OR SHA
+      mismatched; let a fresher SHA-anchored stdout verdict override the
+      stale one.
+
+28. **Persist worker state across iterations**
+    - ❌ DO NOT assume `.boucle/<issue>/` survives between iterations
+      (gitignored, no artifact passing, `$CI_PROJECT_DIR` may be wiped).
+    - ✅ DO: persist `.boucle/<issue>/` to `$BOUCLE_STATE_CACHE/<issue>/`
+      and restore it at startup; the worker reads `iterations.md` to know
+      what was already tried.
+
+29. **Distinguish API outage from step exhaustion**
+    - ❌ DO NOT treat an empty worker log as "agent exhausted its step
+      budget".
+    - ✅ DO: exit `4` on empty log / no agent activity → post a diagnostic
+      naming the model, escalate to `boucle:human`, do not re-trigger.
+
+30. **Fall back to a second provider before escalating**
+    - ❌ DO NOT escalate to a human the moment the primary provider is down.
+    - ✅ DO: when `BOUCLE_FALLBACK_PROVIDER` is set, retry with
+      `$BOUCLE_FALLBACK_MODEL_<ROLE>` on the exit-4 condition; mark the
+      iteration `[FALLBACK: provider/model]`. Escalate only if the fallback
+      also fails.
 
 ## Documentation self-maintenance
 
