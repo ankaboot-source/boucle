@@ -150,22 +150,28 @@
 	transform: scale(1.04);
 }
 
+/*
+ * The overlay sits as a solid black strip at the bottom of the card so the
+ * title and meta are always visible — never hidden behind hover alone. The
+ * link already has an aria-label for screen readers, so the overlay is marked
+ * aria-hidden in the component to avoid redundant announcements.
+ */
 .featured-feed__overlay {
 	position: absolute;
-	inset: 0;
+	inset: auto 0 0 0;
 	display: flex;
 	flex-direction: column;
 	justify-content: flex-end;
 	gap: var(--space-2xs);
 	padding: var(--space-s);
 	background: var(--color-flag-black);
-	opacity: 0;
-	transition: opacity var(--duration-base) var(--ease-out);
+	color: var(--color-ink-on-dark);
+	transition: background-color var(--duration-base) var(--ease-out);
 }
 
 .featured-feed__card:hover .featured-feed__overlay,
 .featured-feed__card:focus-visible .featured-feed__overlay {
-	opacity: 1;
+	background: var(--color-ink);
 }
 
 .featured-feed__eyebrow {
