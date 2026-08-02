@@ -238,7 +238,7 @@ stateDiagram-v2
 | **triage** | `ollama-cloud/minimax-m3` | 200 | Analyzes the issue, posts a structured comment (TL;DR + Analysis + Acceptance criteria + Classification S/M/L + Questions + Disposition `READY`/`NEEDS-INFO`/`NEEDS-SPLIT`) |
 | **worker** | `ollama-cloud/minimax-m3` | 50 | Implements on a `boucle/<iid>` branch, builds, deploys the Cloudflare preview, creates the MR |
 | **reviewer** | `ollama-cloud/glm-5.2` | 35 | Adversarial review against the preview URL, verdict `PASS`/`FAIL`/`UNCERTAIN` anchored by commit SHA |
-| **e2e** | `ollama-cloud/kimi-k2.7-code` | 20 | Verifies on the production URL, verdict `PASS`/`FAIL`/`UNCERTAIN` |
+| **e2e** | `ollama-cloud/kimi-k2.7-code` | 30 | Verifies on the production URL, verdict `PASS`/`FAIL`/`UNCERTAIN` |
 
 ### Interaction sequence
 
