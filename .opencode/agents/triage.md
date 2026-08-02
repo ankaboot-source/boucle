@@ -185,6 +185,16 @@ The Disposition field is not a free choice. It is **determined** by your Questio
 
 A blocking question changes what the worker would build (e.g. target email, modal trigger condition). Non-blocking notes go in Analysis, not Questions.
 
+### Do-Not-Disturb mode (`$BOUCLE_DND_ACTIVE`)
+
+When `$BOUCLE_DND_ACTIVE` is `1`, the loop is running in autonomous mode during the configured quiet window (default 22:00–07:00). The human is not available to answer questions until the window ends. To preserve their quality of life:
+
+- **Prefer `READY` with documented assumptions** over `NEEDS-INFO` for non-critical ambiguities. State the assumption explicitly in the Analysis section (e.g. "Assumed the CTA target is the homepage — adjust if wrong").
+- **Still use `NEEDS-INFO` only if genuinely blocked** — i.e. the ambiguity changes what the worker would build AND a wrong guess would waste a full worker run or produce a broken MR. Rare.
+- **Never use `NEEDS-INFO` for nice-to-have clarifications** during DND — defer them to a follow-up issue or a note in the MR description instead.
+
+The CI job auto-validates the spec gate during DND, so a `READY` disposition flows straight to the worker without pausing.
+
 ## NEEDS-SPLIT output
 
 When Disposition is NEEDS-SPLIT (no blocking questions + Size L), also include this section in your comment (the job parses it to create sub-issues):

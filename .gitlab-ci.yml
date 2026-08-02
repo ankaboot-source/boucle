@@ -287,6 +287,19 @@ dispatch:
           exit 0
         fi
 
+        # Global guard: if the issue is already closed, skip ALL MR webhooks.
+        # A closed issue is terminal from the loop's perspective; re-triggering
+        # roles on it only produces pipeline noise (issue #35). The catchup
+        # (merge action) is idempotent on a closed issue, and all other actions
+        # are meaningless once the issue is closed.
+        if [ -n "$MR_ISSUE_IID" ]; then
+          ISSUE_STATE=$(glab api --hostname $BOUCLE_FORGE_HOST --method GET "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID" 2>/dev/null | jq -r '.state // empty' 2>/dev/null || true)
+          if [ "$ISSUE_STATE" = "closed" ]; then
+            echo "boucle: issue #$MR_ISSUE_IID is closed — skipping $MR_ACTION webhook (no-op)"
+            exit 0
+          fi
+        fi
+
         case "$MR_ACTION" in
           approved)
             # Trigger merger if the issue is at boucle:approval (reviewer
@@ -334,11 +347,47 @@ dispatch:
             exit 0
             ;;
           close)
-            # MR closed (rejected, not merged). Revert the issue to boucle:todo
-            # so the worker re-runs and produces a new MR addressing the
-            # rejection feedback. Preserve non-boucle labels.
-            echo "MR !${MR_IID} closed (rejected) — reverting issue #$MR_ISSUE_IID to boucle:todo for worker re-run"
+            # MR closed (not merged). The semantics depend on the issue's
+            # current boucle label (issue #34):
+            #   - terminal (done, human): the loop considers this issue
+            #     settled; a close webhook is a no-op.
+            #   - approval: the user closed the MR without merging while
+            #     awaiting approval — a human decision, escalate to
+            #     boucle:human rather than restarting the worker.
+            #   - any other state (todo, working, review, merging, …): a
+            #     real rejection — revert to boucle:todo and re-trigger
+            #     the worker with feedback.
             MR_LABELS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID" | jq -r '.labels | join(",")')
+            CURRENT_BOUCLE=$(echo "$MR_LABELS" | tr ',' '\n' | grep -E '^boucle:(triage|needs-info|spec-review|todo|working|review|approval|merging|done|human|split|blocked)$' | head -1)
+            case "$CURRENT_BOUCLE" in
+              boucle:done|boucle:human)
+                echo "boucle: issue #$MR_ISSUE_IID is already at $CURRENT_BOUCLE (terminal) — close webhook ignored"
+                exit 0
+                ;;
+              boucle:approval)
+                # User closed the MR without merging while it was awaiting
+                # approval. This is a human decision, not a rejection to
+                # redo. Escalate to human instead of restarting the worker
+                # loop (issue #34).
+                echo "boucle: MR !${MR_IID} closed while at $CURRENT_BOUCLE — escalating to boucle:human (user decision)"
+                NON_BOUCLE_HUMAN=$(echo "$MR_LABELS" | tr ',' '\n' | grep -v '^boucle:' | tr '\n' ',' | sed 's/,$//')
+                HUMAN_LABELS="${NON_BOUCLE_HUMAN:+$NON_BOUCLE_HUMAN,}boucle:human,boucle::status::human"
+                # Idempotence: skip the PUT when the target labels are already
+                # set (GitLab records a Resource Label Event on every PUT,
+                # even no-ops).
+                if ! (echo "$MR_LABELS" | tr ',' '\n' | grep -qx "boucle:human" && echo "$MR_LABELS" | tr ',' '\n' | grep -qx "boucle::status::human"); then
+                  glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID" \
+                    -f "labels=$HUMAN_LABELS" >/dev/null 2>&1 || true
+                fi
+                glab api --hostname $BOUCLE_FORGE_HOST --method POST "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID/notes" \
+                  -f "body=:warning: MR !${MR_IID} was closed while awaiting approval. Escalated to **boucle:human** (user decision, not auto-redo)." >/dev/null 2>&1 || true
+                exit 0
+                ;;
+            esac
+            # Legitimate rejection: revert the issue to boucle:todo so the
+            # worker re-runs and produces a new MR addressing the rejection
+            # feedback. Preserve non-boucle labels.
+            echo "MR !${MR_IID} closed (rejected) — reverting issue #$MR_ISSUE_IID to boucle:todo for worker re-run"
             NON_BOUCLE=$(echo "$MR_LABELS" | tr ',' '\n' | grep -v '^boucle:' | tr '\n' ',' | sed 's/,$//')
             # Idempotence: skip the PUT when the target labels are already set
             # (GitLab records a Resource Label Event on every PUT, even no-ops).
@@ -914,6 +963,17 @@ triage:
               *) echo "WARN: unknown BOUCLE_SPEC_PROFILE '$SPEC_PROFILE' — treating as product"
                  [ "$SIZE" = "M" ] && SHOULD_GATE=true ;;
             esac
+            # Do-Not-Disturb: during the configured quiet window the spec gate
+            # is auto-validated so the loop runs autonomously up to the MR
+            # without contacting the human. See bin/dnd + ARCHITECTURE.md.
+            if [ "$SHOULD_GATE" = "true" ] && ./bin/dnd 2>/dev/null; then
+              echo "[boucle] 🌙 DND active — auto-validating spec gate for #$IID"
+              SHOULD_GATE=false
+              glab api --hostname $BOUCLE_FORGE_HOST -X POST \
+                "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+                -f body="🌙 **Do-Not-Disturb actif** — spec auto-validé. La boucle continue jusqu'à la MR sans contact humain." \
+                > /dev/null 2>&1 || true
+            fi
             if [ "$SHOULD_GATE" = "true" ]; then
               # Pause for author to validate the spec (acceptance criteria) before
               # the worker runs. Assign to the reporter (handles sub-issues via
@@ -1893,6 +1953,25 @@ reviewer:
 
       if [ -z "$MR_IID" ]; then
         echo "FAIL: no open MR found for issue #$BOUCLE_ISSUE (branch boucle/$BOUCLE_ISSUE)" >&2
+        # The MR was likely closed or merged while the issue is at
+        # boucle:review. A bare `exit 1` would leave the issue pinned at
+        # boucle:review forever, and the doctor would re-trigger the
+        # reviewer every 5min — infinite loop (issue #34). Inspect the
+        # MR state and transition the issue instead.
+        CLOSED_MR_STATE=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?source_branch=boucle/$BOUCLE_ISSUE&state=closed" 2>/dev/null | jq -r '.[0].state // empty' 2>/dev/null || true)
+        MERGED_MR_STATE=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?source_branch=boucle/$BOUCLE_ISSUE&state=merged" 2>/dev/null | jq -r '.[0].state // empty' 2>/dev/null || true)
+        if [ -n "$MERGED_MR_STATE" ] || [ -n "$CLOSED_MR_STATE" ]; then
+          echo "boucle: a $MERGED_MR_STATE$CLOSED_MR_STATE MR exists for issue #$BOUCLE_ISSUE — transitioning to boucle:done"
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
+          glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" -f state_event=close > /dev/null 2>&1 || true
+          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+            -f body="✅ Reviewer: no open MR found, but a $MERGED_MR_STATE$CLOSED_MR_STATE MR exists for this issue. Marked boucle:done and closed." > /dev/null
+        else
+          echo "boucle: no MR at all for issue #$BOUCLE_ISSUE — escalating to boucle:human"
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
+          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+            -f body="⚠️ Reviewer: no MR found for branch boucle/$BOUCLE_ISSUE (no opened, closed, or merged MR). Escalated to **boucle:human**." > /dev/null
+        fi
         exit 1
       fi
 
@@ -3326,6 +3405,23 @@ doctor:
           | jq -r '.[0].state // empty')
         if [ "$MR_STATE" = "merged" ]; then
           echo "  → #$IID ($ROLE): MR already merged — closing issue + boucle:done"
+          set_boucle_label "$IID" "boucle:done" "boucle::status::done"
+          glab api --hostname "$HOST" -X PUT "/projects/$PID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
+          RECOVERED=$((RECOVERED + 1))
+          continue
+        fi
+
+        # Also detect closed (non-merged) MRs: the work was abandoned or
+        # the user closed the MR rather than merging it. The loop should
+        # still settle the issue rather than re-triggering the worker
+        # forever (issue #34/#35 — the dispatch's close action now
+        # escalates to boucle:human or stays terminal, but the doctor
+        # needs to land the issue at boucle:done + close if the MR is
+        # already closed at the moment of recovery).
+        MR_CLOSED_STATE=$(glab api --hostname "$HOST" "/projects/$PID/merge_requests?source_branch=boucle/$IID&state=closed" 2>/dev/null \
+          | jq -r '.[0].state // empty')
+        if [ "$MR_CLOSED_STATE" = "closed" ]; then
+          echo "  → #$IID ($ROLE): MR already closed (non-merged) — closing issue + boucle:done"
           set_boucle_label "$IID" "boucle:done" "boucle::status::done"
           glab api --hostname "$HOST" -X PUT "/projects/$PID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
           RECOVERED=$((RECOVERED + 1))
