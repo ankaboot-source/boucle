@@ -78,7 +78,7 @@ if [ -n "$FALLBACK_PROVIDER" ]; then
     e2e)      FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_E2E:-kimi-k2.7-code}" ;;
   esac
 fi
-FALLBACK_USED=false
+FALLBACK_USED=""
 
 # ── Paths ──────────────────────────────────────────────────────────────
 CI_PROJECT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
@@ -512,7 +512,7 @@ if [ -n "$FALLBACK_PROVIDER" ] && is_api_down "$AGENT_LOG"; then
       cat "${AGENT_LOG}.primary" 2>/dev/null
     } >> "$AGENT_LOG"
   else
-    FALLBACK_USED=true
+    FALLBACK_USED=1
     echo "[boucle:fallback] fallback provider ($FALLBACK_PROVIDER/$FALLBACK_MODEL) succeeded — continuing" >&2
   fi
   rm -f "${AGENT_LOG}.primary" 2>/dev/null || true
