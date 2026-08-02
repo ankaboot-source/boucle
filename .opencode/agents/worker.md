@@ -1,7 +1,7 @@
 ---
 description: Worker agent — implements issues on a branch
 mode: primary
-model: ollama-cloud/minimax-m3
+model: ollama-cloud/kimi-k2.7-code
 steps: 100
 ---
 
