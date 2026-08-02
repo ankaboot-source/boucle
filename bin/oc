@@ -80,6 +80,25 @@ if [ -n "$FALLBACK_PROVIDER" ]; then
 fi
 FALLBACK_USED=""
 
+# When a fallback provider is configured, wrap each opencode invocation in
+# `timeout` so a hanging primary (API down, credits exhausted) is killed
+# before the 30m job timeout eats the whole run — leaving room for the
+# fallback attempt. Also disable retry loops: retrying a dead provider
+# wastes the timeout budget. Per-role defaults leave ~40% for the fallback
+# and ~20% for overhead (rebase, attachments, CI setup).
+AGENT_TIMEOUT="${BOUCLE_AGENT_TIMEOUT:-}"
+if [ -n "$FALLBACK_PROVIDER" ]; then
+  export BOUCLE_LLM_MAX_RETRIES=0
+  if [ -z "$AGENT_TIMEOUT" ]; then
+    case "$ROLE" in
+      triage)   AGENT_TIMEOUT="4m"  ;;
+      worker)   AGENT_TIMEOUT="12m" ;;
+      reviewer) AGENT_TIMEOUT="12m" ;;
+      e2e)      AGENT_TIMEOUT="12m" ;;
+    esac
+  fi
+fi
+
 # ── Paths ──────────────────────────────────────────────────────────────
 CI_PROJECT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
 STATE_DIR="$CI_PROJECT_DIR/.boucle/$ISSUE"
@@ -230,7 +249,15 @@ run_with_retry() {
   local rc=0
   while [ "$attempt" -le "$total" ]; do
     # `|| rc=$?` suppresses set -e on failure so we can inspect the code.
-    "$@" || rc=$?
+    # When AGENT_TIMEOUT is set (fallback mode), wrap the call so a hanging
+    # provider is killed before the job timeout eats the whole run. Exit
+    # code 124 = timeout killed the process; treat it as a normal failure
+    # (falls through to AGENT_EXIT=$rc, then is_api_down → fallback).
+    if [ -n "$AGENT_TIMEOUT" ]; then
+      timeout "$AGENT_TIMEOUT" "$@" || rc=$?
+    else
+      "$@" || rc=$?
+    fi
     if [ "$rc" -eq 0 ] || [ "$rc" -eq 130 ]; then
       AGENT_EXIT=$rc
       return 0
