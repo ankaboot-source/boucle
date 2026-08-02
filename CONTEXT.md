@@ -29,6 +29,11 @@ happens asynchronously, driven by labels and comments.
   verifies doc conformance and completeness, and the e2e verifies docs
   match production reality. A doc that drifts from the system it describes
   is treated as a bug.
+- **Do-Not-Disturb mode** — a configurable quiet window (default 22:00–07:00)
+  during which the spec-validation gate is auto-validated, letting the loop
+  run autonomously up to the MR without contacting the human. Preserves the
+  human's quality of life; MR approval stays human-gated. See
+  [ARCHITECTURE.md](ARCHITECTURE.md) §9 (`BOUCLE_DND_*` variables).
 
 ## 3. Target audience
 

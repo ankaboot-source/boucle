@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# bin/dnd — Do-Not-Disturb window checker.
+#
+# Returns exit 0 when the current time falls inside the configured DND
+# window, exit 1 otherwise. Used by the triage CI job to auto-validate the
+# spec gate during off-hours so the loop runs autonomously up to the MR
+# without contacting the human.
+#
+# Configuration (env vars, all optional):
+#   BOUCLE_DND_ENABLED       "true"/"false" (default: false). Master switch.
+#   BOUCLE_DND_START          "HH:MM"  start of the quiet window (default: 22:00).
+#   BOUCLE_DND_END            "HH:MM"  end of the quiet window   (default: 07:00).
+#   BOUCLE_DND_TZ             IANA tz name (default: UTC).
+#   BOUCLE_DND_EXCLUDE_DAYS   comma list of weekday names to never enter DND
+#                             (default: empty). Future extension; parsed now.
+#                             Names: Mon Tue Wed Thu Fri Sat Sun.
+#   BOUCLE_DND_NOW            epoch seconds override (for deterministic tests).
+#
+# Overnight wrap is supported: if START > END the window crosses midnight
+# (e.g. 22:00 → 07:00). The script is idempotent and side-effect free.
+
+set -euo pipefail
+
+# ── Config ────────────────────────────────────────────────────────────
+ENABLED="${BOUCLE_DND_ENABLED:-false}"
+START="${BOUCLE_DND_START:-22:00}"
+END="${BOUCLE_DND_END:-07:00}"
+TZ="${BOUCLE_DND_TZ:-UTC}"
+EXCLUDE_DAYS="${BOUCLE_DND_EXCLUDE_DAYS:-}"
+
+# Master switch — disabled means never DND.
+if [ "$ENABLED" != "true" ]; then
+  exit 1
+fi
+
+# ── Resolve "now" ─────────────────────────────────────────────────────
+# BOUCLE_DND_NOW (epoch) lets tests pin the clock deterministically.
+NOW_EPOCH="${BOUCLE_DND_NOW:-}"
+
+# `date` honors TZ when set; for an explicit tz name use TZ=<name>.
+if [ -n "$NOW_EPOCH" ]; then
+  CURRENT_HM=$(TZ="$TZ" LC_ALL=C date -d "@$NOW_EPOCH" +%H:%M 2> /dev/null || TZ="$TZ" LC_ALL=C date -r "$NOW_EPOCH" +%H:%M 2> /dev/null)
+  CURRENT_DAY=$(TZ="$TZ" LC_ALL=C date -d "@$NOW_EPOCH" +%a 2> /dev/null || TZ="$TZ" LC_ALL=C date -r "$NOW_EPOCH" +%a 2> /dev/null)
+else
+  CURRENT_HM=$(TZ="$TZ" LC_ALL=C date +%H:%M)
+  CURRENT_DAY=$(TZ="$TZ" LC_ALL=C date +%a)
+fi
+
+# ── Excluded days ─────────────────────────────────────────────────────
+if [ -n "$EXCLUDE_DAYS" ]; then
+  # shellcheck disable=SC2086 # word-splitting is intentional here
+  for day in $(printf '%s' "$EXCLUDE_DAYS" | tr ',' ' '); do
+    if [ "$day" = "$CURRENT_DAY" ]; then
+      exit 1
+    fi
+  done
+fi
+
+# ── Window check ───────────────────────────────────────────────────────
+# Compare HH:MM lexicographically — valid because zero-padded 24h format.
+if [ "$START" = "$END" ]; then
+  # Degenerate: zero-length window. Treat as never DND.
+  exit 1
+fi
+
+if [ "$START" \< "$END" ]; then
+  # Same-day window (e.g. 09:00 → 17:00).
+  if [ "$CURRENT_HM" \> "$START" ] || [ "$CURRENT_HM" = "$START" ]; then
+    if [ "$CURRENT_HM" \< "$END" ]; then
+      exit 0
+    fi
+  fi
+  exit 1
+else
+  # Overnight wrap (e.g. 22:00 → 07:00): in-window if now >= START OR now < END.
+  if [ "$CURRENT_HM" \> "$START" ] || [ "$CURRENT_HM" = "$START" ]; then
+    exit 0
+  fi
+  if [ "$CURRENT_HM" \< "$END" ]; then
+    exit 0
+  fi
+  exit 1
+fi

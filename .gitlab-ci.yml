@@ -914,6 +914,17 @@ triage:
               *) echo "WARN: unknown BOUCLE_SPEC_PROFILE '$SPEC_PROFILE' — treating as product"
                  [ "$SIZE" = "M" ] && SHOULD_GATE=true ;;
             esac
+            # Do-Not-Disturb: during the configured quiet window the spec gate
+            # is auto-validated so the loop runs autonomously up to the MR
+            # without contacting the human. See bin/dnd + ARCHITECTURE.md.
+            if [ "$SHOULD_GATE" = "true" ] && ./bin/dnd 2>/dev/null; then
+              echo "[boucle] 🌙 DND active — auto-validating spec gate for #$IID"
+              SHOULD_GATE=false
+              glab api --hostname $BOUCLE_FORGE_HOST -X POST \
+                "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+                -f body="🌙 **Do-Not-Disturb actif** — spec auto-validé. La boucle continue jusqu'à la MR sans contact humain." \
+                > /dev/null 2>&1 || true
+            fi
             if [ "$SHOULD_GATE" = "true" ]; then
               # Pause for author to validate the spec (acceptance criteria) before
               # the worker runs. Assign to the reporter (handles sub-issues via
