@@ -298,13 +298,36 @@ sequenceDiagram
 - The **reviewer** and **e2e** are **adversarial**: they MUST actively look for defects, not validate.
 - The **triage** agent **MUST NEVER** modify code — it only produces a structured comment on the issue.
 
+### Provider fallback
+
+When the primary provider (`ollama-cloud`) is down — empty log / no agent activity, the exit-4 condition (AGENTS.md lesson #29) — `bin/oc` retries with a fallback provider before the exit-code guard runs. This lets the loop self-recover instead of escalating to a human.
+
+```mermaid
+flowchart LR
+    A[opencode run<br/>primary provider] --> B{is_api_down?}
+    B -- no --> C[exit-code guard<br/>proceed normally]
+    B -- yes --> D{BOUCLE_FALLBACK_PROVIDER<br/>set?}
+    D -- no --> C
+    D -- yes --> E[opencode run --model<br/>fallback provider/model]
+    E --> F{is_api_down?}
+    F -- no --> G[mark iteration FALLBACK<br/>proceed normally]
+    F -- yes --> H[restore primary log<br/>exit-code guard escalates]
+```
+
+- **Trigger**: empty log OR no agent activity (the exit-4 condition). NOT logic errors (exit 3 = agent ran but didn't post) — those still escalate.
+- **Config** (env vars, all optional — empty `BOUCLE_FALLBACK_PROVIDER` = disabled):
+  - `BOUCLE_FALLBACK_PROVIDER` — fallback provider name (e.g. `opencode-go`).
+  - `BOUCLE_FALLBACK_MODEL_{TRIAGE,WORKER,REVIEWER,E2E}` — per-role fallback model (default: same model name under the fallback provider, since `opencode-go` mirrors the `ollama-cloud` catalog).
+- **Traceability**: the iteration is marked `[FALLBACK: provider/model]` in `iterations.md` and a `[boucle:fallback]` line is emitted to stderr.
+- **Failure of fallback**: the primary log is restored (appended to the fallback log) so the CI diagnostic captures both attempts; the existing exit-3/4 escalation proceeds unchanged.
+
 ---
 
 ## 6. bin/ scripts
 
 | Script | Role |
 | --- | --- |
-| `bin/oc` | Harness entrypoint: wraps `opencode run`, role mapping (triage→m3, worker→m3, reviewer→glm-5.2, e2e→kimi-k2.7), 3x retry with exponential backoff, **empty-output guard** (empty output → exit 3 → retry), log capture to `.boucle/<issue>/`, Prometheus metrics, configurable timeout |
+| `bin/oc` | Harness entrypoint: wraps `opencode run`, role mapping (triage→m3, worker→m3, reviewer→glm-5.2, e2e→kimi-k2.7), 3x retry with exponential backoff, **empty-output guard** (empty output → exit 3 → retry), **provider fallback** (exit-4 condition → retry with `BOUCLE_FALLBACK_PROVIDER`), log capture to `.boucle/<issue>/`, Prometheus metrics, configurable timeout |
 | `bin/setup` | Day-0 infrastructure setup (**idempotent**): creates the runner tag, CI variables, `boucle:*` labels, the board, the protected `main` branch, adds the bot as a member, generates the trigger token, configures the webhook, creates the Cloudflare Pages project |
 | `bin/update` | Auto-update from upstream: fetch latest tag/commit, tarball download, extraction of `SYNC_PATHS`, **fail-open** (any error → warning + exit 0), tracking via `.boucle-version`, modes `release` (latest tag) or `dev` (latest commit on main), anti-feedback-loop guard (skip on `push-source`) |
 | `bin/doctor` | Day-0 verification and diagnostics: ~20 checks (labels present, CI variables, branch protection, runner available, agents resolvable, CF Pages reachable, `.boucle-version` up to date) |
@@ -452,13 +475,15 @@ flowchart LR
   Conforms to them. If the change requires updating a document (new state,
   new variable, new agent responsibility, new seam), the worker updates the
   document **in the same MR** as the code. When discovering a new bug or
-  anti-pattern, the worker adds an entry to `Lessons learned` in
-  [AGENTS.md](AGENTS.md).
+  anti-pattern, the worker adds a forward-looking principle to `Lessons
+  learned` in [AGENTS.md](AGENTS.md) — short title + `❌ DO NOT` (one line)
+  + `✅ DO` (one line), no incident narrative.
 - **Reviewer** — Verifies two things: (1) that the worker respected the
   charter documents during implementation (doc conformance), and (2) that
   the worker updated the documents when required (doc completeness). On
   `FAIL`, the reviewer MAY require the worker to add a `Lessons learned`
-  entry to capture the regression.
+  entry; the entry MUST be a forward-looking principle (short title +
+  `❌`/`✅`, one line each), not an incident narrative.
 - **E2E** — Verifies that charter documents match production reality: after
   deployment, the e2e agent confirms that the documented pipeline, agent
   responsibilities, and seams still hold.
