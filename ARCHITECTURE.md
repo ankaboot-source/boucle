@@ -316,7 +316,7 @@ flowchart LR
     F -- yes --> H[restore primary log<br/>exit-code guard escalates]
 ```
 
-- **Trigger**: empty log OR no agent activity (the exit-4 condition). NOT logic errors (exit 3 = agent ran but didn't post) — those still escalate.
+- **Trigger**: empty log OR no agent activity (the exit-4 condition). NOT logic errors (exit 3 = agent ran but didn't post) — those still escalate. The `is_api_down` check uses two signals: (1) log grep for tool-call markers/paths, and (2) **DB-growth delta** — the opencode SQLite DB size is snapshotted before each run; if it grew by more than 16KB, the agent did real work and the provider is NOT down, regardless of log patterns (issue #37: some providers emit a transcript format the grep doesn't match).
 - **Timeout**: per-role `AGENT_TIMEOUT` (triage=4m, worker/reviewer/e2e=12m) wraps each attempt so a hang is killed with exit 124, leaving room for the fallback. Override with `BOUCLE_AGENT_TIMEOUT`.
 - **Config** (env vars, all optional — empty `BOUCLE_FALLBACK_PROVIDER` = disabled):
   - `BOUCLE_FALLBACK_PROVIDER` — fallback provider name (e.g. `opencode-go`).
@@ -434,6 +434,11 @@ All boucle configuration variables are prefixed with `BOUCLE_`. No other variabl
 | `BOUCLE_STALENESS_THRESHOLD` | Threshold in seconds before an issue is considered stuck by `doctor`. | `300` |
 | `BOUCLE_PREVIEW_DISABLE` | Disables PNG preview generation (`bin/render-preview`). | `false` |
 | `BOUCLE_SPEC_PROFILE` | Spec gate profile (determines when human validation is required). | `product` (gate for Size M) |
+| `BOUCLE_DND_ENABLED` | Enables Do-Not-Disturb mode. When `true`, the spec gate is auto-validated during the configured quiet window so the loop runs autonomously up to the MR without contacting the human. | `true` |
+| `BOUCLE_DND_START` | DND window start (`HH:MM`, 24h). | `22:00` |
+| `BOUCLE_DND_END` | DND window end (`HH:MM`, 24h). Supports overnight wrap (start > end). | `07:00` |
+| `BOUCLE_DND_TZ` | IANA timezone for the DND window. | `UTC` |
+| `BOUCLE_DND_EXCLUDE_DAYS` | Comma list of weekday names to never enter DND (e.g. `Fri,Sat`). Names: `Mon Tue Wed Thu Fri Sat Sun`. | (empty) |
 | `BOUCLE_UPDATE_MODE` | Auto-update mode from upstream. | `release` |
 | `BOUCLE_BOT_ID` | GitLab ID of the bot account (to distinguish bot comments from human ones). | — |
 | `BOUCLE_REVIEWER_FEEDBACK` | All non-system notes from the issue's open MR (reviewer verdicts + human comments). Injected into the worker's prompt on every run so re-runs address prior feedback. Fetched by the worker job; empty on first run. | — |
@@ -446,7 +451,7 @@ All boucle configuration variables are prefixed with `BOUCLE_`. No other variabl
 - `BOUCLE_TOKEN` and `BOUCLE_TRIGGER_TOKEN` MUST **always** be `masked+protected`. No boucle job MUST ever log their value.
 - `BOUCLE_DEPLOY_CMD` MUST **always** contain `$$BRANCH` (the double `$` is the GitLab CI YAML escape).
 - `BOUCLE_MAX_ITERATIONS` set to `0` means **no retry** (first failure → human).
-- `BOUCLE_STALENESS_THRESHOLD` MUST be **strictly greater** than the longest job timeout (~120s for the worker).
+- `BOUCLE_STALENESS_THRESHOLD` MUST be **strictly greater** than the longest job timeout (worker/reviewer = 30 min, so default 2400s/40 min). The doctor MUST also check for an active pipeline (via the pipelines API variables endpoint) before re-triggering, to avoid parasitic duplicate triggers while a job is legitimately still running.
 
 ---
 

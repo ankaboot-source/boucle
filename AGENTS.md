@@ -283,6 +283,54 @@ and agent prompts); never renumber.
       with proper token-based auth. Applies to both `bin/fetch-issue-attachments`
       and `bin/fetch-mr-attachments`.
 
+32. **Use DB-growth as the provider-agnostic "API down" signal**
+    - ❌ DO NOT rely solely on log grep patterns to detect whether a provider
+      is down — some providers (e.g. `opencode-go`) emit a transcript format
+      the grep doesn't match, so a working run is false-flagged as "down" and
+      the loop escalates to a human even though the plan still has tokens.
+    - ✅ DO: `is_api_down` MUST also check the opencode SQLite DB growth
+      delta (snapshot before the run vs. after). A dead run leaves the DB at
+      the SQLite page-size baseline (4096b); a working run grows it well
+      beyond. If the DB grew by more than 16KB, the agent did real work and
+      the provider is NOT down — regardless of log patterns.
+
+33. **Doctor MUST check active pipelines before re-triggering**
+    - ❌ DO NOT use issue `updated_at` as a proxy for "is a pipeline
+      running" — it is bumped by any issue activity (bot notes, label
+      writes), not just pipeline runs. DO NOT set
+      `BOUCLE_STALENESS_THRESHOLD` below the longest job timeout — the
+      doctor will fire while a worker/reviewer is legitimately still
+      running, producing parasitic duplicate triggers that queue
+      unbounded via `resource_group`.
+    - ✅ DO: the doctor MUST call `issue_has_active_pipeline` (which
+      lists active pipelines and fetches each one's variables via
+      `GET /projects/:id/pipelines/:pipeline_id/variables` to match
+      `BOUCLE_ISSUE=<iid>`) before every re-trigger, and MUST apply a
+      per-issue dedup timestamp (`$BOUCLE_STATE_CACHE/doctor-triggers/
+      <iid>`) as a secondary backstop. `BOUCLE_STALENESS_THRESHOLD`
+      MUST be strictly greater than the longest job timeout (default
+      2400s vs worker/reviewer 30 min).
+
+34. **Dispatch MUST skip system notes**
+    - ❌ DO NOT treat GitLab system notes (assignee changes, label
+      changes, branch additions) as human replies. A system note has
+      `.object_attributes.system = true` and `.user.username` = the
+      human who triggered the system action — so the ACTOR guard
+      passes, but the note is NOT a human reply. Without a system-note
+      filter, creating an issue + assigning the bot in the same form
+      fires BOTH an `issue` webhook (open → triage) AND a `note`
+      webhook (system "assigned to @up-bot" → triage again),
+      double-triggering triage. The triage job has no `resource_group`
+      (BOUCLE_ISSUE is not available at pipeline eval time), so the two
+      pipelines run in parallel → congestion.
+    - ✅ DO: the dispatch note-event handler MUST check
+      `.object_attributes.system` and `exit 0` on system notes. The
+      `BOT_JUST_ASSIGNED` path already handles assignment via the issue
+      update webhook, so the system note is pure redundancy. The
+      codebase already filters `system == false` when fetching notes
+      via the API (worker/reviewer feedback) — the webhook handler
+      MUST apply the same filter.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
