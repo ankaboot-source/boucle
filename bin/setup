@@ -200,14 +200,15 @@ fi
 
 # BOUCLE_DND_ENABLED — enables Do-Not-Disturb mode (auto-validate spec gate
 # during the quiet window so the loop runs autonomously up to the MR).
-# Default false; opt-in. Companion vars BOUCLE_DND_START/END/TZ/EXCLUDE_DAYS
-# are optional and read with defaults at runtime — no need to seed them.
+# Default true (good default — preserves the human's quality of life). Set to
+# false to opt out. Companion vars BOUCLE_DND_START/END/TZ/EXCLUDE_DAYS are
+# optional and read with defaults at runtime — no need to seed them.
 EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_DND_ENABLED" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
 if [ -n "$EXISTING" ]; then
   log_skip "BOUCLE_DND_ENABLED already exists"
 else
-  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_DND_ENABLED -f value=false -f masked=false -f protected=false >/dev/null"
-  log_pass "BOUCLE_DND_ENABLED set (false — opt-in)"
+  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_DND_ENABLED -f value=true -f masked=false -f protected=false >/dev/null"
+  log_pass "BOUCLE_DND_ENABLED set (true — good default)"
 fi
 
 # BOUCLE_UPDATE_MODE — controls self-update behavior.
