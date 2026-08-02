@@ -107,6 +107,16 @@ ITERATIONS_FILE="$STATE_DIR/iterations.md"
 # shellcheck disable=SC2154 # CI_JOB_ID is a GitLab CI predefined env var
 OPENCODE_DB="$CI_PROJECT_DIR/.opencode-$CI_JOB_ID.db"
 
+# ── Do-Not-Disturb ─────────────────────────────────────────────────────
+# Export BOUCLE_DND_ACTIVE so the triage agent prompt can soften its
+# disposition (prefer READY with documented assumptions over NEEDS-INFO
+# for non-critical ambiguities) during the quiet window. 1 = active, 0 = off.
+if [ -x "$CI_PROJECT_DIR/bin/dnd" ] && "$CI_PROJECT_DIR/bin/dnd" 2>/dev/null; then
+  export BOUCLE_DND_ACTIVE=1
+else
+  export BOUCLE_DND_ACTIVE=0
+fi
+
 # ── Observability (lightweight, non-breaking) ──────────────────────────
 # Emit a single structured [boucle:metrics] line to stderr after each
 # opencode run so we can diagnose runner memory bottlenecks in CI.
