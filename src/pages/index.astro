@@ -6,17 +6,26 @@ import NewsletterModal from "../components/NewsletterModal.astro";
 import DonationCTA from "../components/DonationCTA.astro";
 import GeneralCTA from "../components/GeneralCTA.astro";
 import MobilisationBlock from "../components/MobilisationBlock.astro";
+import FeaturedFeed from "../components/FeaturedFeed.astro";
 ---
 
 <Layout>
 	<main id="main" class="home">
 		<!--
 		  ============================================================
-		  Top brand band: statement headline, optional symbol, and
-		  the four flag colors as a thin tri-color stripe.
+		  Home lead: two-column band at ≥ 64rem.
+		  Column 1 (2/3) = the existing hero, pinned while the reader
+		  scrolls through the feed. Column 2 (1/3) = the "À la une" feed
+		  of six curated prises de parole. The vertical keffiyeh divider
+		  sits between the two columns as a cultural/political seam.
 		  ============================================================
 		-->
-		<section class="hero" aria-labelledby="hero-title">
+		<section
+			class="home__lead"
+			aria-label="Présentation du collectif et prises de parole à la une"
+			role="region"
+		>
+			<section class="hero" aria-labelledby="hero-title">
 			<div class="hero__inner">
 				<p class="eyebrow">Urgence Palestine</p>
 				<h1 id="hero-title" class="display font-display tracking-tight text-ink">
@@ -41,6 +50,21 @@ import MobilisationBlock from "../components/MobilisationBlock.astro";
 					/>
 				</div>
 			</div>
+		</section>
+
+		<!-- Vertical keffiyeh divider between the hero and the feed. -->
+		<div class="home__divider" aria-hidden="true">
+			<img
+				src="/symbols/vertical_keffiyeh.png"
+				alt=""
+				width="52"
+				height="100"
+				loading="eager"
+				decoding="async"
+			/>
+		</div>
+
+		<FeaturedFeed />
 		</section>
 
 		<!--
