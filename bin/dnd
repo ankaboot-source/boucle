@@ -7,7 +7,7 @@
 # without contacting the human.
 #
 # Configuration (env vars, all optional):
-#   BOUCLE_DND_ENABLED       "true"/"false" (default: false). Master switch.
+#   BOUCLE_DND_ENABLED       "true"/"false" (default: true). Master switch.
 #   BOUCLE_DND_START          "HH:MM"  start of the quiet window (default: 22:00).
 #   BOUCLE_DND_END            "HH:MM"  end of the quiet window   (default: 07:00).
 #   BOUCLE_DND_TZ             IANA tz name (default: UTC).
@@ -18,11 +18,14 @@
 #
 # Overnight wrap is supported: if START > END the window crosses midnight
 # (e.g. 22:00 → 07:00). The script is idempotent and side-effect free.
+#
+# Default ON (enabled) — preserves the human's quality of life. Set
+# BOUCLE_DND_ENABLED=false to opt out.
 
 set -euo pipefail
 
 # ── Config ────────────────────────────────────────────────────────────
-ENABLED="${BOUCLE_DND_ENABLED:-false}"
+ENABLED="${BOUCLE_DND_ENABLED:-true}"
 START="${BOUCLE_DND_START:-22:00}"
 END="${BOUCLE_DND_END:-07:00}"
 TZ="${BOUCLE_DND_TZ:-UTC}"
