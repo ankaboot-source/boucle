@@ -60,6 +60,26 @@ case "$ROLE" in
     ;;
 esac
 
+# ── Provider fallback config ───────────────────────────────────────────
+# When the primary provider is down (empty log / no agent activity = the
+# exit-4 condition, AGENTS.md lesson #29), retry with a fallback provider
+# before the exit-code guard runs. This lets the loop self-recover when
+# ollama-cloud is unavailable (credits exhausted, API down) instead of
+# escalating to a human. Gated by BOUCLE_FALLBACK_PROVIDER (empty = disabled).
+# opencode-go mirrors the ollama-cloud catalog, so the default fallback
+# model per role is the same model name under the fallback provider.
+FALLBACK_PROVIDER="${BOUCLE_FALLBACK_PROVIDER:-}"
+FALLBACK_MODEL=""
+if [ -n "$FALLBACK_PROVIDER" ]; then
+  case "$ROLE" in
+    triage)   FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_TRIAGE:-minimax-m3}" ;;
+    worker)   FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_WORKER:-kimi-k2.7-code}" ;;
+    reviewer) FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_REVIEWER:-glm-5.2}" ;;
+    e2e)      FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_E2E:-kimi-k2.7-code}" ;;
+  esac
+fi
+FALLBACK_USED=false
+
 # ── Paths ──────────────────────────────────────────────────────────────
 CI_PROJECT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
 STATE_DIR="$CI_PROJECT_DIR/.boucle/$ISSUE"
@@ -229,6 +249,20 @@ run_with_retry() {
   done
   AGENT_EXIT=$rc
   return 0
+}
+
+# Detect "API down" condition: empty log OR no agent activity. This is the
+# exit-4 signal (AGENTS.md lesson #29): opencode hangs silently when the model
+# API is down or out of credits — no stdout, no crash, no tool calls in the
+# log. Returns 0 (true) if API-down is detected, 1 (false) otherwise.
+# Role-agnostic: looks for any tool call (glab/gh for triage/reviewer/e2e,
+# file/git ops for worker) or a boucle marker. Zero activity = model never
+# responded.
+is_api_down() {
+  local log="$1"
+  [ -s "$log" ] || return 0
+  grep -qiE 'tool_use|function_call|tool_call|glab |gh |read|write|edit|bash|glob|grep|git (add|commit|diff|status|checkout)|\.astro|\.ts|\.css|\.md|src/|public/|<!-- boucle:' "$log" || return 0
+  return 1
 }
 
 # ── 1. Isolate opencode DB (required, not optional) ───────────────────
@@ -445,6 +479,45 @@ fi
 cat "$AGENT_LOG"
 print_metrics_line
 
+# ── 5b. Provider fallback (API-down recovery) ─────────────────────────
+# If the primary provider is down (empty log / no agent activity = the
+# exit-4 condition, AGENTS.md lesson #29), retry with the fallback provider
+# before the exit-code guard runs. This lets the loop self-recover when
+# ollama-cloud is unavailable (credits exhausted, API down) instead of
+# escalating to a human. Gated by BOUCLE_FALLBACK_PROVIDER.
+# The fallback is a transparent retry layer: if it succeeds, the exit-code
+# guard sees the fallback's output and proceeds normally; if it also fails,
+# the primary log is restored and the existing exit-3/4 logic applies.
+if [ -n "$FALLBACK_PROVIDER" ] && is_api_down "$AGENT_LOG"; then
+  echo "[boucle:fallback] primary provider appears down (empty log / no agent activity) — retrying with $FALLBACK_PROVIDER/$FALLBACK_MODEL" >&2
+  # Preserve the primary log for diagnosis, start fresh for the fallback.
+  cp "$AGENT_LOG" "${AGENT_LOG}.primary" 2>/dev/null || true
+  : > "$AGENT_LOG"
+  FALLBACK_MODEL_ARG="$FALLBACK_PROVIDER/$FALLBACK_MODEL"
+  VARIANT_ARGS=()
+  [ -n "$VARIANT" ] && VARIANT_ARGS+=(--variant "$VARIANT")
+  OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
+    run_with_retry -- opencode run --agent "$AGENT" --auto \
+    --model "$FALLBACK_MODEL_ARG" "${VARIANT_ARGS[@]}" \
+    --log-level WARN "$PROMPT" > "$AGENT_LOG" 2>&1
+  cat "$AGENT_LOG"
+  print_metrics_line
+  if is_api_down "$AGENT_LOG"; then
+    # Fallback also down — restore primary log so the exit-code guard and
+    # CI diagnostic capture both attempts. Escalation proceeds as before.
+    echo "[boucle:fallback] fallback provider ($FALLBACK_PROVIDER) also down — escalating" >&2
+    {
+      echo ""
+      echo "--- [boucle:fallback] primary attempt log ---"
+      cat "${AGENT_LOG}.primary" 2>/dev/null
+    } >> "$AGENT_LOG"
+  else
+    FALLBACK_USED=true
+    echo "[boucle:fallback] fallback provider ($FALLBACK_PROVIDER/$FALLBACK_MODEL) succeeded — continuing" >&2
+  fi
+  rm -f "${AGENT_LOG}.primary" 2>/dev/null || true
+fi
+
 # ── 5a. Empty-output guard (silent-failure detection) ─────────────────
 # If the agent produced NO posted comment AND NO drafted triage comment
 # in its log, it failed silently (e.g. hit OUTPUT_TOKEN_MAX mid-comment
@@ -513,7 +586,7 @@ fi
 
 cat >> "$ITERATIONS_FILE" << EOF
 
-## $TIMESTAMP — $ROLE (agent=$AGENT) — iteration $ITERATION
+## $TIMESTAMP — $ROLE (agent=$AGENT) — iteration $ITERATION${FALLBACK_USED:+ [FALLBACK: $FALLBACK_PROVIDER/$FALLBACK_MODEL]}
 - Result: <see agent output>
 - Files touched: ${FILES_TOUCHED:-none}
 - Side effect asserted: <see job assertion>
