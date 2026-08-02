@@ -266,7 +266,22 @@ and agent prompts); never renumber.
     - ✅ DO: when `BOUCLE_FALLBACK_PROVIDER` is set, retry with
       `$BOUCLE_FALLBACK_MODEL_<ROLE>` on the exit-4 condition; mark the
       iteration `[FALLBACK: provider/model]`. Escalate only if the fallback
-      also fails.
+      also fails. Each attempt is wrapped in `timeout` (per-role
+      `AGENT_TIMEOUT`) so a hanging primary is killed before the job
+      timeout eats the whole run — without this, the fallback block never
+      executes because `run_with_retry` never returns.
+
+31. **Download uploads via the GitLab API, not the raw /uploads/ URL**
+    - ❌ DO NOT `curl -H "PRIVATE-TOKEN: $TOKEN" "https://$HOST/uploads/..."`
+      to download attachments from issue/MR notes. The `/uploads/` endpoint
+      uses cookie-based session auth — the `PRIVATE-TOKEN` header is ignored
+      and the response is a GitLab login page (HTML), not the binary blob.
+      The worker sees `file <path>` → "HTML document" and correctly refuses
+      to ship it, falling back to a synthetic asset.
+    - ✅ DO: use `glab api --method GET "/projects/$PROJECT_ID/uploads/:secret/:filename"
+      -H "Accept: application/octet-stream"` which returns the binary blob
+      with proper token-based auth. Applies to both `bin/fetch-issue-attachments`
+      and `bin/fetch-mr-attachments`.
 
 ## Documentation self-maintenance
 
