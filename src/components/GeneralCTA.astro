@@ -21,40 +21,62 @@
  *                                 wrapped in an <a>.
  *  - tone      (literal, optional) Stripe order. The only supported value
  *                                 today is "green-then-red" (default).
+ *  - variant   (literal, optional) Visual layout. "default" keeps the
+ *                                 original full-width stripes;
+ *                                 "angled-split" renders a text-hugging
+ *                                 green headline above an inclined,
+ *                                 ascending red label stripe.
  */
+import AngledSplitCTA from "./AngledSplitCTA.astro";
+
 interface Props {
 	title: string;
 	ctaLabel: string;
 	tone?: "green-then-red";
+	variant?: "default" | "angled-split";
 }
 
-const { title, ctaLabel, tone = "green-then-red" } = Astro.props;
+const {
+	title,
+	ctaLabel,
+	tone = "green-then-red",
+	variant = "default",
+} = Astro.props;
 
 // `tone` is reserved for future variants (e.g. red-then-green) — keeping
 // the value in a const makes that future branch trivial without re-doing
 // the markup below.
 void tone;
 
+const isAngledSplit = variant === "angled-split";
+
 // Stable, predictable id so the section's aria-labelledby always resolves.
 // Astro scopes styles by class, so we don't need a unique selector here.
 const headingId = "general-cta-title";
 ---
 
-	<section class="general-cta" aria-labelledby={headingId}>
+{isAngledSplit ? (
+	<AngledSplitCTA title={title} ctaLabel={ctaLabel} headingId={headingId} />
+) : (
+	<section
+		class="general-cta"
+		aria-labelledby={headingId}
+	>
 		<div class="general-cta__stripe general-cta__stripe--headline">
-			<h2 id={headingId} class="general-cta__title">{title}</h2>
+			<h2 id={headingId} class="general-cta__title"><span>{title}</span></h2>
 		</div>
 		<div class="general-cta__stripe general-cta__stripe--label" aria-hidden="true">
-		<p class="general-cta__label">{ctaLabel}</p>
-	</div>
-</section>
+			<p class="general-cta__label"><span>{ctaLabel}</span></p>
+		</div>
+	</section>
+)}
 
 <style>
 	/*
 	 * Component-scoped styles. Astro rewrites the class selectors below
 	 * with a per-instance hash, so they cannot leak to the rest of the
-	 * page. The block intentionally uses no animation: a static visual
-	 * harness is what the issue asks for.
+	 * page. The default variant is a static visual harness; the angled-split
+	 * variant lives in AngledSplitCTA.astro.
 	 */
 
 	.general-cta {
@@ -104,6 +126,12 @@ const headingId = "general-cta-title";
 		border-radius: 0;
 	}
 
+	.general-cta__title span {
+		display: inline;
+		box-decoration-break: clone;
+		-webkit-box-decoration-break: clone;
+	}
+
 	.general-cta__label {
 		margin: 0;
 		font-family: var(--font-heading);
@@ -113,5 +141,11 @@ const headingId = "general-cta-title";
 		color: var(--color-flag-white);
 		text-transform: uppercase;
 		border-radius: 0;
+	}
+
+	.general-cta__label span {
+		display: inline;
+		box-decoration-break: clone;
+		-webkit-box-decoration-break: clone;
 	}
 </style>
