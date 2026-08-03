@@ -49,18 +49,6 @@ const groupMeta: Record<GroupKey, { label: string; tagline: string }> = {
 	},
 };
 
-const order: GroupKey[] = [
-	"kit-militant",
-	"boycott",
-	"prisonniers",
-	"evenements",
-];
-
-// Two-digit prefix used as the eyebrow above each section heading
-// (01, 02, 03, 04). Pre-computed once so the template stays readable.
-const sectionIndex = (key: GroupKey) =>
-	String(order.indexOf(key) + 1).padStart(2, "0");
-
 const grouped: Record<GroupKey, typeof entries> = {
 	"kit-militant": [],
 	boycott: [],
@@ -89,19 +77,6 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 >
 	<main id="main" class="mobilisation">
 		<header class="mobilisation__hero">
-			<p class="eyebrow">
-				<img
-					class="accent-inline"
-					src="/symbols/slignshot_-_ancala_nusantara.png"
-					alt=""
-					loading="lazy"
-					decoding="async"
-					width="32"
-					height="32"
-					aria-hidden="true"
-				/>
-				Mobilisation
-			</p>
 			<h1 class="display">
 				Agir<br />sur tous les fronts.
 			</h1>
@@ -113,31 +88,16 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 		</header>
 
 		{
-			order.map((key) =>
-				grouped[key].length === 0 ? null : (
+			Object.keys(groupMeta).map((key) =>
+				grouped[key as GroupKey].length === 0 ? null : (
 					<section
 						class="mobilisation__group"
 						aria-labelledby={`group-${key}`}
 					>
 						<header class="section-head">
-							<p class="eyebrow">
-								{key === "kit-militant" && (
-									<img
-										class="accent-inline"
-										src="/symbols/red_riangle.png"
-										alt=""
-										loading="lazy"
-										decoding="async"
-										width="28"
-										height="28"
-										aria-hidden="true"
-									/>
-								)}
-								{sectionIndex(key)}
-							</p>
-							<h2 id={`group-${key}`}>{groupMeta[key].label}</h2>
+							<h2 id={`group-${key}`}>{groupMeta[key as GroupKey].label}</h2>
 							<p class="mobilisation__group-tagline">
-								{groupMeta[key].tagline}
+								{groupMeta[key as GroupKey].tagline}
 							</p>
 						</header>
 

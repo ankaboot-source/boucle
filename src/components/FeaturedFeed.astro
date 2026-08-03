@@ -115,7 +115,6 @@ const items: FeedItem[] = [
 								decoding="async"
 							/>
 							<span class="featured-feed__overlay" aria-hidden="true">
-								<span class="featured-feed__eyebrow">{categoryLabel[item.category]}</span>
 								<span class="featured-feed__title">{item.title}</span>
 								<time class="featured-feed__date" datetime={item.date}>
 									{dateFormatter.format(parseDate(item.date))}
