@@ -324,14 +324,28 @@ const ctaItems = [
 	/*
 	 * "Right to Resist" (navItems[3]) — brutalist signature treatment.
 	 * Distinguishes the campaign-marked entry from the three standard
-	 * links via three token-driven gestures:
+	 * links via four token-driven gestures:
 	 *   1. heading-family display (instead of body) with bold weight
 	 *   2. uppercase + wide tracking (the brutalist militant stamp)
-	 *   3. a 2px flag-red underline that snaps in on hover/focus
+	 *   3. a rough marker-stroke highlight behind the text on hover/focus
+	 *   4. a white-on-black / red-on-white / red-on-white contrast logic
+	 *      for the three possible header surfaces (default, light, scrolled)
+	 *
+	 * The highlight is implemented with a generated ::after pseudo-element
+	 * using a double-layer linear-gradient plus a slight rotation. It does
+	 * NOT use text-decoration: underline, and it must vanish when the hover
+	 * or focus state ends. Surface-specific colours are controlled through
+	 * the two CSS variables below.
+	 *
 	 * The treatment is reversible: removing the `featured` flag from
 	 * `navItems` reverts this entry to the standard link style.
 	 */
 	.site-header__link--featured {
+		--featured-highlight-bg: var(--color-flag-white);
+		--featured-text-on-highlight: var(--color-flag-red);
+
+		position: relative;
+		z-index: 0;
 		font-family: var(--font-heading);
 		font-size: var(--text-sm);
 		font-weight: var(--weight-bold);
@@ -342,18 +356,58 @@ const ctaItems = [
 		color: var(--color-flag-red);
 	}
 
+	/* Rough marker-stroke highlight behind the text.
+	 * Two stacked gradients (104deg and 183deg) create a washed, dry-brush
+	 * texture with deliberately hard edges and a slight rotation.
+	 * The pseudo-element is clipped to zero width by default and revealed on
+	 * hover/focus via a clip-path transition; when the interaction ends the
+	 * clip-path reverts and the highlight disappears. */
+	.site-header__link--featured::after {
+		content: "";
+		position: absolute;
+		left: -2px;
+		right: -2px;
+		bottom: 2px;
+		height: 70%;
+		z-index: -1;
+		pointer-events: none;
+		background:
+			linear-gradient(
+				104deg,
+				color-mix(in oklch, var(--featured-highlight-bg), transparent 100%) 0.9%,
+				color-mix(in oklch, var(--featured-highlight-bg), transparent 10%) 2.4%,
+				color-mix(in oklch, var(--featured-highlight-bg), transparent 25%) 5.8%,
+				color-mix(in oklch, var(--featured-highlight-bg), transparent 55%) 93%,
+				color-mix(in oklch, var(--featured-highlight-bg), transparent 15%) 96%,
+				color-mix(in oklch, var(--featured-highlight-bg), transparent 100%) 98%
+			),
+			linear-gradient(
+				183deg,
+				color-mix(in oklch, var(--featured-highlight-bg), transparent 100%) 0%,
+				color-mix(in oklch, var(--featured-highlight-bg), transparent 35%) 7.9%,
+				color-mix(in oklch, var(--featured-highlight-bg), transparent 100%) 15%
+			);
+		transform: rotate(-1deg);
+		clip-path: inset(0 100% 0 0);
+		transition: clip-path var(--duration-base) var(--ease-out);
+	}
+
 	.site-header__link--featured:hover,
 	.site-header__link--featured:focus-visible {
-		color: var(--color-flag-white);
-		text-decoration: underline;
-		text-decoration-thickness: 2px;
-		text-underline-offset: 4px;
-		text-decoration-color: var(--color-flag-red);
+		color: var(--featured-text-on-highlight);
+		text-decoration: none;
+	}
+
+	.site-header__link--featured:hover::after,
+	.site-header__link--featured:focus-visible::after {
+		clip-path: inset(0 0 0 0);
 	}
 
 	/* On the scrolled (red) surface, the flag-red featured text would
-	 * vanish into the background. Invert to white, and keep the red
-	 * underline as the only red accent. */
+	 * vanish into the background. Invert to white text and flip the hover
+	 * text to red over the still-white highlight, keeping the contrast
+	 * above 4.5:1 for small text (white-on-red at this font size is below
+	 * AA, so we deliberately abandoned that combination). */
 	.site-header.is-scrolled .site-header__link--featured {
 		color: var(--color-flag-white);
 		border-left-color: var(--color-flag-red-deep);
@@ -361,8 +415,33 @@ const ctaItems = [
 
 	.site-header.is-scrolled .site-header__link--featured:hover,
 	.site-header.is-scrolled .site-header__link--featured:focus-visible {
+		color: var(--color-flag-red);
+	}
+
+	/* Future light-header surface: the highlight inverts to red and the
+	 * hover/focus text becomes white. */
+	.site-header--light .site-header__link--featured,
+	.is-light .site-header__link--featured {
+		--featured-highlight-bg: var(--color-flag-red);
+		--featured-text-on-highlight: var(--color-flag-white);
+		color: var(--color-flag-red);
+	}
+
+	.site-header--light .site-header__link--featured:hover,
+	.site-header--light .site-header__link--featured:focus-visible,
+	.is-light .site-header__link--featured:hover,
+	.is-light .site-header__link--featured:focus-visible {
 		color: var(--color-flag-white);
-		text-decoration-color: var(--color-flag-white);
+	}
+
+	/* Motion must not leak for users who prefer reduced motion. The
+	 * highlight simply stays hidden; the link still changes colour via
+	 * the inherited instant colour transition. */
+	@media (prefers-reduced-motion: reduce) {
+		.site-header__link--featured::after {
+			transition: none;
+			clip-path: inset(0 100% 0 0);
+		}
 	}
 
 	/* ----- CTA group ----- */
