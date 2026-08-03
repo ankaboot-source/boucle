@@ -2,7 +2,7 @@
 import "../styles/sections.css";
 import Layout from "../layouts/Layout.astro";
 import NewsletterSignup from "../components/NewsletterSignup.astro";
-import NewsletterModal from "../components/NewsletterModal.astro";
+import SocialCTA from "../components/SocialCTA.astro";
 import DonationCTA from "../components/DonationCTA.astro";
 import GeneralCTA from "../components/GeneralCTA.astro";
 import MobilisationBlock from "../components/MobilisationBlock.astro";
@@ -73,22 +73,11 @@ import FeaturedFeed from "../components/FeaturedFeed.astro";
 		  the upcoming CTA migrations. Pure Astro, no client JS.
 		  ============================================================
 		-->
-		<GeneralCTA
-			eyebrow="S'informer"
-			title="S'informer, c'est déjà résister"
-			ctaLabel="Lire les derniers articles"
-		/>
-
-		<!--
-		  ============================================================
-		  Tailwind utility callout: exercises the Palestinian flag color
-		  tokens (bg-palestine-red) and the font-display utility, proving
-		  that the Tailwind integration is wired into the build. Kept
-		  intentionally small: page content beyond the placeholder is
-		  owned by parent issue #1.
-		  ============================================================
-		-->
-		<DonationCTA />
+			<GeneralCTA
+				eyebrow="S'informer"
+				title="S'informer, c'est déjà résister"
+				ctaLabel="Lire les derniers articles"
+			/>
 
 		<!--
 		  ============================================================
@@ -180,18 +169,26 @@ import FeaturedFeed from "../components/FeaturedFeed.astro";
 
 		<!--
 		  ============================================================
-		  Newsletter: a dedicated content section that re-uses the
-		  <NewsletterSignup /> component.
+		  Newsletter + social: two-column block sharing a single militant
+		  title. Each column is a hard-edged brutalist card with a heavy
+		  border. The donation CTA lives as its own separate section below.
 		  ============================================================
 		-->
 		<section class="newsletter-section" aria-labelledby="newsletter-section-title">
-			<header class="section-head">
-				<p class="eyebrow">Newsletter</p>
-				<h2 id="newsletter-section-title">Suivez nos actions.</h2>
-			</header>
-			<NewsletterSignup variant="block" />
+			<h2 id="newsletter-section-title" class="visually-hidden">
+				Restons en contact. Poursuivons la mobilisation.
+			</h2>
+			<div class="newsletter-section__grid">
+				<NewsletterSignup id="newsletter-home" variant="block" />
+				<SocialCTA id="social-home" />
+			</div>
 		</section>
-	</main>
 
-	<NewsletterModal slot="modal" />
+		<!--
+		  ============================================================
+		  Donation CTA: stands alone outside the newsletter flow.
+		  ============================================================
+		-->
+		<DonationCTA />
+	</main>
 </Layout>
