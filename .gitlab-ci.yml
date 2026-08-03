@@ -55,7 +55,7 @@ variables:
   # more false-positive re-triggers.
   BOUCLE_STALENESS_THRESHOLD: "2400"
   # Disable Chromium visual preview in triage (saves ~120 MiB per triage job).
-  # true = skip preview rendering entirely. false = default (agent opt-in via RENDER_REQUEST).
+  # true = skip preview rendering entirely. false = default (mandatory for UI/UX issues via RENDER_REQUEST).
   BOUCLE_PREVIEW_DISABLE: "false"
   # Provider fallback: when the primary provider (ollama-cloud) is down —
   # empty log / no agent activity, the exit-4 condition (AGENTS.md lesson #29) —
