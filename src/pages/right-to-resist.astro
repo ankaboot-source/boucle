@@ -77,19 +77,6 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 		-->
 		<header class="rtr-header">
 			<div class="rtr-header__inner">
-				<p class="eyebrow rtr-header__eyebrow">
-					<img
-						class="accent-inline"
-						src="/symbols/slignshot_-_ancala_nusantara.png"
-						alt=""
-						loading="lazy"
-						decoding="async"
-						width="32"
-						height="32"
-						aria-hidden="true"
-					/>
-					Right to Resist
-				</p>
 				<h1 class="rtr-header__title">
 					Right<br />to Resist.
 				</h1>
@@ -266,16 +253,6 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 </Layout>
 
 <style>
-	.eyebrow {
-		font-family: var(--font-body);
-		font-size: var(--text-xs);
-		font-weight: var(--weight-bold);
-		letter-spacing: var(--tracking-mega);
-		text-transform: uppercase;
-		color: var(--color-accent);
-		margin: 0;
-	}
-
 	/* ---------- Page wrapper ---------- */
 	.right-to-resist {
 		display: flex;
@@ -321,15 +298,6 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-m);
-	}
-
-	.rtr-header__eyebrow {
-		color: var(--color-flag-red);
-		/* Subtle entrance micro-animation: a 240 ms fade-up using the
-		 * brand's irregular --ease-out cubic-bezier. Disabled entirely
-		 * under prefers-reduced-motion (see override at the bottom of
-		 * this <style> block). */
-		animation: rtr-rise var(--duration-base) var(--ease-out) both;
 	}
 
 	.rtr-header__title {
@@ -714,7 +682,6 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 		.featured-card__link,
 		.card__inner,
 		.card__cta span,
-		.rtr-header__eyebrow,
 		.rtr-header__title,
 		.rtr-header__lede,
 		.featured-card {
