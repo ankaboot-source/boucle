@@ -199,7 +199,14 @@ if [ -s "$RENDER_REQUEST_FILE" ] && [ -s "$PREVIEW_HTML" ]; then
           EXISTING_BODY=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
             "/projects/$CI_PROJECT_ID/issues/$IID/notes/$TRIAGE_NOTE_ID" 2>/dev/null \
             | jq -r '.body' 2>/dev/null)
-          NEW_BODY=$(printf '%s\n\n## Aperçu\n%s\n' "$EXISTING_BODY" "$IMG_URL")
+          NEW_BODY=$(printf '%s\n' "$EXISTING_BODY" | awk -v img="$IMG_URL" '
+            /^## TL;DR/ { in_tldr=1; print; next }
+            in_tldr && /^## / && !inserted {
+              print "## Aperçu"; print img; print ""; inserted=1; in_tldr=0
+            }
+            { print }
+            END { if (!inserted) { print ""; print "## Aperçu"; print img } }
+          ')
           glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT \
             "/projects/$CI_PROJECT_ID/issues/$IID/notes/$TRIAGE_NOTE_ID" \
             -f body="$NEW_BODY" >/dev/null 2>&1
@@ -281,7 +288,7 @@ Vérification minimale, ciblée :
 - **SPEC_MSG repointé** : le message posté par la CI mentionne « TL;DR » et les réactions d'approbation.
 - **Chemin par défaut (non-UI/UX)** : une issue non-UI/UX ne déclenche ni `RENDER_REQUEST` ni install Chromium (vérifier l'absence de log `[boucle] RENDER_REQUEST found`).
 - **Chemin visuel (UI/UX, Size S non-gated)** : une issue UI/UX Size S avec `RENDER_REQUEST` + `preview.html` produit un commentaire édité avec `## Aperçu` contenant une image markdown — même sans spec gate (SHOULD_GATE=false).
-- **Chemin visuel (UI/UX, Size M gated)** : une issue UI/UX Size M avec `RENDER_REQUEST` + `preview.html` produit un commentaire édité avec `## Aperçu` après le `SPEC_MSG` de validation.
+- **Chemin visuel (UI/UX, Size M gated)** : une issue UI/UX Size M avec `RENDER_REQUEST` + `preview.html` produit un commentaire édité avec `## Aperçu` inséré juste après le `## TL;DR` (avant le `## Validation`).
 - **Idempotence** : un retry du job triage après succès rendu ne re-render pas (RENDER_REQUEST supprimé).
 - **Échec isolé** : si Chromium indisponible, note fallback postée, exit code du job triage inchangé.
 
