@@ -998,6 +998,20 @@ triage:
             # Do-Not-Disturb: during the configured quiet window the spec gate
             # is auto-validated so the loop runs autonomously up to the MR
             # without contacting the human. See bin/dnd + ARCHITECTURE.md.
+            # Two paths flip SHOULD_GATE=false:
+            #   1. boucle:autonomous label on the issue (per-issue opt-in,
+            #      applied at creation — takes precedence, intentional).
+            #   2. DND window active (time-based, global).
+            AUTONOMOUS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID" 2>/dev/null \
+              | jq -r '(.labels // []) | map(select(. == "boucle:autonomous")) | length' 2>/dev/null || echo 0)
+            if [ "$SHOULD_GATE" = "true" ] && [ "${AUTONOMOUS:-0}" -gt 0 ] 2>/dev/null; then
+              echo "[boucle] 🤖 Issue flagged autonomous — auto-validating spec gate for #$IID"
+              SHOULD_GATE=false
+              glab api --hostname $BOUCLE_FORGE_HOST -X POST \
+                "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+                -f body="🤖 **Issue flaguée autonome** — spec auto-validé. La boucle continue jusqu'à la MR sans contact humain." \
+                > /dev/null 2>&1 || true
+            fi
             if [ "$SHOULD_GATE" = "true" ] && ./bin/dnd 2>/dev/null; then
               echo "[boucle] 🌙 DND active — auto-validating spec gate for #$IID"
               SHOULD_GATE=false
@@ -1018,9 +1032,38 @@ triage:
                   --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
                   --data-urlencode "assignee_ids[]=$AUTHOR_ID"
               fi
-              SPEC_MSG=$(printf 'Review the **TL;DR** above. If it matches what you want:\n- React with 👍 ✅ ☑️ ✔️ 🆗 or 👌 on this comment to approve, OR\n- Reply to this issue with any comment.\nIf not, reply with corrections.')
-              glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-                -f body="$SPEC_MSG" > /dev/null
+              # Append validation instructions to the triage comment itself so
+              # the human has ONE message to read/approve (instead of a separate
+              # note). Falls back to a standalone POST if the triage note cannot
+              # be resolved or the PUT fails — approval detection tolerates both
+              # shapes (doctor polls "React with" across all notes).
+              SPEC_MSG=$(printf '## Validation\n\nReview the **TL;DR** above. If it matches what you want:\n- React with 👍 ✅ ☑️ ✔️ 🆗 or 👌 on this comment to approve, OR\n- Reply to this issue with any comment.\nIf not, reply with corrections.')
+              TRIAGE_NOTE_ID=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
+                "/projects/$CI_PROJECT_ID/issues/$IID/notes" 2>/dev/null \
+                | jq -r '[.[] | select(.body | contains("<!-- boucle:triage") and contains("## Disposition"))]
+                    | sort_by(.created_at) | last | .id' 2>/dev/null || echo "")
+              SPEC_MSG_APPENDED=false
+              if [ -n "$TRIAGE_NOTE_ID" ]; then
+                EXISTING_BODY=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
+                  "/projects/$CI_PROJECT_ID/issues/$IID/notes/$TRIAGE_NOTE_ID" 2>/dev/null \
+                  | jq -r '.body' 2>/dev/null)
+                # Idempotency guard: skip if the validation section is already
+                # present (re-runs of triage on the same issue).
+                if [ -n "$EXISTING_BODY" ] && ! echo "$EXISTING_BODY" | grep -q "## Validation"; then
+                  UPDATED_BODY=$(printf '%s\n\n%s' "$EXISTING_BODY" "$SPEC_MSG")
+                  if glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT \
+                    "/projects/$CI_PROJECT_ID/issues/$IID/notes/$TRIAGE_NOTE_ID" \
+                    -f body="$UPDATED_BODY" > /dev/null 2>&1; then
+                    SPEC_MSG_APPENDED=true
+                  fi
+                elif [ -n "$EXISTING_BODY" ]; then
+                  SPEC_MSG_APPENDED=true
+                fi
+              fi
+              if [ "$SPEC_MSG_APPENDED" != "true" ]; then
+                glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+                  -f body="$SPEC_MSG" > /dev/null
+              fi
 
               # ── Aperçu visuel (opt-in, exceptionnel) ────────────────────────
               # Ne s'exécute QUE si l'agent a écrit RENDER_REQUEST + preview.html.
@@ -3320,10 +3363,12 @@ doctor:
           [.[] | select(.author.username != "up-bot") | select(.id > ($tid | tonumber))]
           | length
         ')
-        # Check for an approval emoji on the spec-review invitation comment
-        # AND the triage comment. The spec-review invitation (the comment
-        # containing "React with") is where users are told to react, but some
-        # users react on the triage comment instead — poll both to be safe.
+        # Check for an approval emoji on the triage comment AND any standalone
+        # spec-review note. The validation instructions are appended to the
+        # triage comment itself (single message to read/approve), so the
+        # "React with" lookup usually resolves to the same note as the triage
+        # comment. The fallback path (triage note unresolved / PUT failed)
+        # posts a standalone note — poll both to cover that case too.
         # Polls the award_emoji API — recovers even if the emoji webhook was
         # missed (emoji_events disabled or webhook delivery failed).
         SPEC_INVITE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("React with"))] | last | .id // 0')
