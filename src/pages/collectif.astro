@@ -97,7 +97,7 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 						aria-hidden="true"
 					/>
 					Créer un collectif
-					<span aria-hidden="true" class="cta-card__arrow">→</span>
+					<svg class="cta-card__arrow arrow-icon" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 8h14M9 2l6 6-6 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>
 				</a>
 			</article>
 
@@ -114,7 +114,7 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 					target="_blank"
 				>
 					Je m'engage
-					<span aria-hidden="true" class="cta-card__arrow">→</span>
+					<svg class="cta-card__arrow arrow-icon" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 8h14M9 2l6 6-6 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>
 				</a>
 			</article>
 		</section>
@@ -223,7 +223,7 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 									</p>
 								)}
 								<span class="locale-card__cta" aria-hidden="true">
-									Voir la fiche <span>→</span>
+									Voir la fiche <svg class="arrow-icon" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 8h14M9 2l6 6-6 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>
 								</span>
 							</li>
 						);
@@ -279,9 +279,9 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 												rel="noopener external"
 												target="_blank"
 											>
-												Annuaire des campus
-												<span aria-hidden="true">→</span>
-											</a>
+											Annuaire des campus
+											<svg class="arrow-icon" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 8h14M9 2l6 6-6 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+										</a>
 											<a
 												class="etudiante-card__btn etudiante-card__btn--ghost"
 												href={JE_MENGAGE_URL}
@@ -459,11 +459,21 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		flex-direction: column;
 		gap: var(--space-xs);
 		padding: var(--space-l);
-		border-radius: var(--radius-l);
+		border-radius: var(--radius-sharp);
 		border: 1.5px solid var(--color-border);
 		background: var(--color-bg-soft);
 		position: relative;
 		overflow: hidden;
+		transition:
+			transform var(--duration-base) var(--ease-out),
+			border-color var(--duration-base) var(--ease-out),
+			box-shadow var(--duration-base) var(--ease-out);
+	}
+
+	.cta-card:hover {
+		transform: translateY(-2px);
+		border-color: var(--color-accent);
+		box-shadow: var(--shadow-lift);
 	}
 
 	.cta-card::after {

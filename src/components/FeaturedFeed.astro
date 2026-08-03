@@ -11,9 +11,10 @@
  * picks the collectif wants to highlight.
  *
  * Each card is a single link (one tab stop) with a visible border, the image
- * and a solid black strip that always shows the title, date and category.
- * The strip darkens on hover/focus so keyboard and touch users get the same
- * information as mouse users.
+ * and a solid black strip anchored at the bottom. Title and date are hidden
+ * by default and revealed on hover/focus so the visual stays fully visible
+ * at rest. The link has a full aria-label for screen readers, so the overlay
+ * is marked aria-hidden to avoid redundant announcements.
  */
 
 type FeedItem = {
@@ -100,7 +101,7 @@ const items: FeedItem[] = [
 			items.map((item) => {
 				const label = `${item.title} — ${categoryLabel[item.category]} · ${dateFormatter.format(parseDate(item.date))}`;
 				return (
-					<li class="featured-feed__item">
+					<li class="featured-feed__item" data-reveal>
 						<a
 							class={`featured-feed__card featured-feed__card--ratio-${item.ratio}`}
 							href={`/prises-de-parole/${item.slug}/`}
@@ -126,3 +127,23 @@ const items: FeedItem[] = [
 		}
 	</ul>
 </section>
+
+<script>
+	(function revealFeatured() {
+		if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+		const items = document.querySelectorAll<HTMLElement>(".featured-feed__item[data-reveal]");
+		if (!items.length) return;
+		const observer = new IntersectionObserver(
+			(entries) => {
+				entries.forEach((entry) => {
+					if (entry.isIntersecting) {
+						entry.target.classList.add("is-revealed");
+						observer.unobserve(entry.target);
+					}
+				});
+			},
+			{ threshold: 0.1, rootMargin: "0px 0px -40px 0px" }
+		);
+		items.forEach((item) => observer.observe(item));
+	})();
+</script>
