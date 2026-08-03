@@ -77,9 +77,7 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 
 		<article class="entry__article">
 			<header class="entry__header">
-				<p class="eyebrow">
-					<span class="entry__category-tag">{group.tag}</span>
-				</p>
+				<p class="entry__category-tag">{group.tag}</p>
 				<h1 class="entry__title">{d.title}</h1>
 				<p class="entry__meta">
 					<time datetime={d.date.toISOString()}>
@@ -147,16 +145,6 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 </Layout>
 
 <style>
-	.eyebrow {
-		font-family: var(--font-body);
-		font-size: var(--text-xs);
-		font-weight: var(--weight-bold);
-		letter-spacing: var(--tracking-mega);
-		text-transform: uppercase;
-		color: var(--color-accent);
-		margin: 0;
-	}
-
 	/* ---------- Page wrapper ---------- */
 	.entry {
 		display: flex;
@@ -197,7 +185,9 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 	}
 
 	.entry__category-tag {
-		display: inline-block;
+		display: inline-flex;
+		align-self: flex-start;
+		margin: 0;
 		padding: 0.2em 0.7em;
 		background: var(--color-ink);
 		color: var(--color-ink-on-dark);

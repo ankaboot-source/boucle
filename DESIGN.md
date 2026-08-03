@@ -88,8 +88,9 @@ revu avant publication.
   traitement. Ces familles signalent immédiatement un site générique.
 - ❌ **Structure « tout en MAJUSCULES AVEC LETTER-SPACING ÉNORME »** —
   la combinaison « H1 gras + uppercase + tracking 0.2em + 36px » est un
-  marqueur IA bien documenté. On l'utilise **avec parcimonie**, jamais par
-  défaut sur tout.
+  marqueur IA bien documenté. **Petits sous-titres en majuscules + tracking
+  0.18em+ au-dessus des titres (`.eyebrow` et équivalents) sont interdits
+  par défaut, proscrits.**
 - ❌ **Centrage systématique** des titres et paragraphes.
 - ❌ **Hiérarchie molle** : si on ne sait pas distinguer H1 / H2 / H3 du
   premier coup d'œil, on refait.

@@ -97,10 +97,6 @@ const wrapperStyle = `background-image: url(${backgroundImage}); --mobilisation-
 	  "no body / no CTA on the photo" rule from issue #31.
 	-->
 	<div class="mobilisation-block__content">
-		<p class="mobilisation-block__eyebrow">
-			<span aria-hidden="true" class="mobilisation-block__eyebrow-bar"></span>
-			Mobilisation
-		</p>
 		<p class="mobilisation-block__lede">
 			Trois campagnes de fond&nbsp;— kit militant, boycott,
 			prisonnier·es&nbsp;— et les rassemblements des sections locales.
@@ -220,28 +216,6 @@ const wrapperStyle = `background-image: url(${backgroundImage}); --mobilisation-
 		background: var(--color-paper);
 		color: var(--color-ink);
 		border-top: 1px solid var(--color-paper-edge);
-	}
-
-	.mobilisation-block__eyebrow {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--space-2xs);
-		margin: 0;
-		font-family: var(--font-body);
-		font-size: var(--text-xs);
-		font-weight: var(--weight-bold);
-		letter-spacing: var(--tracking-mega);
-		text-transform: uppercase;
-		color: var(--color-flag-red);
-	}
-
-	/* A short red bar before the eyebrow label, set in the brand red.
-	 * Inexpensive visual anchor that does not need its own component. */
-	.mobilisation-block__eyebrow-bar {
-		display: inline-block;
-		width: 28px;
-		height: 4px;
-		background: var(--color-flag-red);
 	}
 
 	.mobilisation-block__lede {
