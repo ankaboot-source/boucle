@@ -396,8 +396,10 @@ All GitLab calls go through `glab` (official CLI). To support another forge (Git
 ### 5. Work state (.boucle/<issue>/state.md)
 Each issue has a state file at `.boucle/<issue>/state.md`, **seeded from triage**. Agents read/write their progress, assumptions, and discoveries there. To add a field (e.g. `## Testing strategy`), document the schema in this file (section 5) and update the triage prompt.
 
-### 5b. Feedback channel (reviewer + human → worker)
+### 5b. Feedback channel (reviewer + human → worker, human → reviewer)
 On every worker run, the worker job fetches ALL non-system notes from the issue's open MR (`boucle/<iid>` source branch) and exports them as `BOUCLE_REVIEWER_FEEDBACK`. `bin/oc` injects them into the worker's prompt as a "Prior feedback on the MR" section. This covers all 4 re-trigger paths (reviewer FAIL, human MR comment, empty MR, rebase conflict) with a single fetch — no per-path variable passing needed. On the first run, no MR exists yet, so the feedback is empty. The worker MUST address every actionable item before claiming done (see [AGENTS.md](AGENTS.md) lesson #16).
+
+The **reviewer job fetches the same notes** and exports them as `BOUCLE_REVIEWER_FEEDBACK`; `bin/oc` injects them into the reviewer's prompt as a "Prior MR discussion" section. This is REQUIRED because the acceptance criteria in `state.md` are seeded once from the triage comment and never refreshed — they freeze the spec at triage time. Humans amend the spec via MR comments mid-loop; without the same channel on the reviewer side, the reviewer grades against the frozen triage spec and FAILs implementations that correctly follow the human's amended spec — directly contradicting the human. Rule: **human MR comments take precedence over the frozen criteria in `state.md`**; the worker MUST reflect human amendments in the `## Acceptance criteria` section of `state.md` (marked `(amended via MR comment)`).
 
 ### 5b'. MR comment attachment extraction
 In addition to the text-only feedback above, [`bin/fetch-mr-attachments`](bin/fetch-mr-attachments) mines the same MR notes for `/uploads/...` paths (reviewer screenshots, human mockups attached as image/PDF/etc. uploads) and downloads them to `.boucle/<issue>/mr-attachments/`. `bin/oc` sources the resulting `BOUCLE_MR_ATTACHMENTS` and appends the local paths to the agent prompt so the worker can `Read` reviewer/human attachments. Mirrors [bin/fetch-issue-attachments](#6-bin-scripts) but for MR notes (no parent-issue inheritance — MRs have no parent). Gated on `MR_FOR_FEEDBACK` being non-empty (no MR on first run).
@@ -441,7 +443,7 @@ All boucle configuration variables are prefixed with `BOUCLE_`. No other variabl
 | `BOUCLE_DND_EXCLUDE_DAYS` | Comma list of weekday names to never enter DND (e.g. `Fri,Sat`). Names: `Mon Tue Wed Thu Fri Sat Sun`. | (empty) |
 | `BOUCLE_UPDATE_MODE` | Auto-update mode from upstream. | `release` |
 | `BOUCLE_BOT_ID` | GitLab ID of the bot account (to distinguish bot comments from human ones). | — |
-| `BOUCLE_REVIEWER_FEEDBACK` | All non-system notes from the issue's open MR (reviewer verdicts + human comments). Injected into the worker's prompt on every run so re-runs address prior feedback. Fetched by the worker job; empty on first run. | — |
+| `BOUCLE_REVIEWER_FEEDBACK` | All non-system notes from the issue's open MR (reviewer verdicts + human comments). Injected into the worker's prompt (re-runs address prior feedback) and the reviewer's prompt (human comments amend the frozen `state.md` spec — see §5b). Fetched by the worker and reviewer jobs; empty on the worker's first run. | — |
 | `BOUCLE_MR_IID` | The issue's open MR IID (the `boucle/<iid>` source branch). Resolved by the worker job from `MR_FOR_FEEDBACK` and passed to `bin/fetch-mr-attachments`. Empty on first run (no MR yet). | — |
 | `BOUCLE_PREVIEW_PROPAGATION_WAIT` | Max seconds to wait for the preview CDN to propagate the new deployment before failing the worker job. The deploy assertion retries every 5s until the deployed SHA marker matches the head SHA. | `60` |
 | `BOUCLE_RUNNER_TAG` | Tag of the GitLab runner that executes boucle jobs. | — |
