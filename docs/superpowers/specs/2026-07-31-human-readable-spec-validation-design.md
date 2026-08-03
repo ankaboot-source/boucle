@@ -148,6 +148,12 @@ Review the **TL;DR** above. If it matches what you want: react with 👍 ✅ ☑
 
 Le critères d'acceptation restent pour le worker — le TL;DR ne les remplace pas.
 
+> **Évolution (2026-08)** : le `SPEC_MSG` est désormais **ajouté au commentaire
+> de triage** (PUT sur la note existante, section `## Validation`) plutôt que
+> posté comme note séparée — l'humain n'a qu'un seul message à lire/approuver.
+> Fallback : note séparée si la note de triage est introuvable ou le PUT échoue.
+> Garde d'idempotence : skip si `## Validation` déjà présent (re-runs triage).
+
 #### 4.3.2 Bloc rendu visuel (inline, après `SPEC_MSG`)
 
 Inséré dans la branche `SHOULD_GATE=true`, juste après le post du `SPEC_MSG`. Structure :
