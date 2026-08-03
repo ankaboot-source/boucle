@@ -1072,86 +1072,6 @@ triage:
                 glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
                   -f body="$SPEC_MSG" > /dev/null
               fi
-
-              # ── Aperçu visuel (opt-in, exceptionnel) ────────────────────────
-              # Ne s'exécute QUE si l'agent a écrit RENDER_REQUEST + preview.html.
-              # Défaut: skip total, zéro coût Chromium. Échec isolé: ne bloque
-              # jamais la boucle (note fallback postée, exit code inchangé).
-              PREVIEW_HTML="$CI_PROJECT_DIR/.boucle/$IID/preview.html"
-              RENDER_REQUEST_FILE="$CI_PROJECT_DIR/.boucle/$IID/RENDER_REQUEST"
-
-              if [ "${BOUCLE_PREVIEW_DISABLE:-false}" != "true" ] && [ -s "$RENDER_REQUEST_FILE" ] && [ -s "$PREVIEW_HTML" ]; then
-                echo "[boucle] RENDER_REQUEST found — attempting visual preview"
-
-                # 1. Résoudre le note_id du commentaire de triage (fetch séparé
-                #    pour ne pas perturber le parse existant du commentaire).
-                TRIAGE_NOTE_ID=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
-                  "/projects/$CI_PROJECT_ID/issues/$IID/notes" 2>/dev/null \
-                  | jq -r '[.[] | select(.body | contains("<!-- boucle:triage") and contains("## Disposition"))]
-                      | sort_by(.created_at) | last | .id' 2>/dev/null || echo "")
-
-                if [ -z "$TRIAGE_NOTE_ID" ]; then
-                  echo "[boucle] WARN: triage comment not found — cannot embed preview"
-                else
-                  # 2. Installer Chromium + puppeteer-core (uniquement maintenant, /tmp).
-                  if npm install --prefix /tmp puppeteer-core @sparticuz/chromium >/dev/null 2>&1; then
-                    # 3. Rendre preview.html → preview.png (1280x800, fullPage).
-                    #    NODE_PATH=/tmp/node_modules pour que le script (bin/)
-                    #    résolve les modules installés dans /tmp.
-                    PREVIEW_PNG="$CI_PROJECT_DIR/.boucle/$IID/preview.png"
-                    if NODE_PATH=/tmp/node_modules node "$CI_PROJECT_DIR/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2>/dev/null; then
-                      # 4. Uploader le PNG via l'API uploads GitLab.
-                      UPLOAD_RESP=$(curl -s --request POST \
-                        --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-                        --form "file=@$PREVIEW_PNG" \
-                        "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/uploads" 2>/dev/null)
-                      IMG_URL=$(echo "$UPLOAD_RESP" | jq -r '.markdown // empty' 2>/dev/null)
-
-                      if [ -n "$IMG_URL" ]; then
-                        # 5. Fetch du commentaire existant, append section Aperçu, PUT.
-                        #    Garde: si EXISTING_BODY est vide (échec fetch), ne PAS PUT —
-                        #    sinon on écrase le commentaire de triage entier (perte du
-                        #    marqueur boucle:triage + critères + disposition).
-                        EXISTING_BODY=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
-                          "/projects/$CI_PROJECT_ID/issues/$IID/notes/$TRIAGE_NOTE_ID" 2>/dev/null \
-                          | jq -r '.body' 2>/dev/null)
-                        if [ -n "$EXISTING_BODY" ]; then
-                          NEW_BODY=$(printf '%s\n\n## Aperçu\n%s\n' "$EXISTING_BODY" "$IMG_URL")
-                          if glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT \
-                            "/projects/$CI_PROJECT_ID/issues/$IID/notes/$TRIAGE_NOTE_ID" \
-                            -f body="$NEW_BODY" >/dev/null 2>&1; then
-                            # 6. Idempotence: supprimer RENDER_REQUEST (pas de re-render au retry).
-                            rm -f "$RENDER_REQUEST_FILE"
-                            echo "[boucle] Visual preview embedded in triage comment #$TRIAGE_NOTE_ID"
-                          else
-                            echo "[boucle] WARN: PUT notes failed — RENDER_REQUEST kept for retry"
-                          fi
-                        else
-                          echo "[boucle] WARN: existing comment body empty — posting fallback note"
-                          glab api --hostname "$BOUCLE_FORGE_HOST" -X POST \
-                            "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-                            -f body="Aperçu indisponible (échec lecture commentaire) — validez sur le TL;DR." >/dev/null 2>&1
-                        fi
-                      else
-                        echo "[boucle] WARN: PNG upload failed — posting fallback note"
-                        glab api --hostname "$BOUCLE_FORGE_HOST" -X POST \
-                          "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-                          -f body="Aperçu indisponible (échec upload) — validez sur le TL;DR." >/dev/null 2>&1
-                      fi
-                    else
-                      echo "[boucle] WARN: Chromium render failed — posting fallback note"
-                      glab api --hostname "$BOUCLE_FORGE_HOST" -X POST \
-                        "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-                        -f body="Aperçu indisponible (échec rendu) — validez sur le TL;DR." >/dev/null 2>&1
-                    fi
-                  else
-                    echo "[boucle] WARN: Chromium install failed — posting fallback note"
-                    glab api --hostname "$BOUCLE_FORGE_HOST" -X POST \
-                      "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-                      -f body="Aperçu indisponible (Chromium indisponible) — validez sur le TL;DR." >/dev/null 2>&1
-                  fi
-                fi
-              fi
             else
               set_boucle_label "$IID" "boucle:todo,size:$(echo $SIZE | tr '[:upper:]' '[:lower:]')" "boucle::status::bot"
               # Concurrency cap: defer worker trigger if too many issues are already working.
@@ -1175,6 +1095,89 @@ triage:
                 curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
                   -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
                   -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+              fi
+            fi
+          fi
+
+          # ── Aperçu visuel (systematic for UI/UX issues) ────────────────
+          # Fires for ALL READY dispositions (Size S/M/L, gated or not).
+          # The triage agent writes RENDER_REQUEST + preview.html for
+          # UI/UX issues (mandatory per triage.md). Non-UI/UX issues have
+          # no RENDER_REQUEST → block is a no-op (zero Chromium cost).
+          # Failure is isolated: fallback note, never blocks the loop.
+          # Idempotent: RENDER_REQUEST deleted after successful embed.
+          PREVIEW_HTML="$CI_PROJECT_DIR/.boucle/$IID/preview.html"
+          RENDER_REQUEST_FILE="$CI_PROJECT_DIR/.boucle/$IID/RENDER_REQUEST"
+
+          if [ "${BOUCLE_PREVIEW_DISABLE:-false}" != "true" ] && [ -s "$RENDER_REQUEST_FILE" ] && [ -s "$PREVIEW_HTML" ]; then
+            echo "[boucle] RENDER_REQUEST found — attempting visual preview"
+
+            # 1. Resolve the triage comment note_id (separate fetch so we
+            #    don't disturb the existing comment parse).
+            TRIAGE_NOTE_ID=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
+              "/projects/$CI_PROJECT_ID/issues/$IID/notes" 2>/dev/null \
+              | jq -r '[.[] | select(.body | contains("<!-- boucle:triage") and contains("## Disposition"))]
+                  | sort_by(.created_at) | last | .id' 2>/dev/null || echo "")
+
+            if [ -z "$TRIAGE_NOTE_ID" ]; then
+              echo "[boucle] WARN: triage comment not found — cannot embed preview"
+            else
+              # 2. Install Chromium + puppeteer-core (only now, in /tmp).
+              if npm install --prefix /tmp puppeteer-core @sparticuz/chromium >/dev/null 2>&1; then
+                # 3. Render preview.html → preview.png (1280x800, fullPage).
+                #    NODE_PATH=/tmp/node_modules so the script (bin/) resolves
+                #    the modules installed in /tmp.
+                PREVIEW_PNG="$CI_PROJECT_DIR/.boucle/$IID/preview.png"
+                if NODE_PATH=/tmp/node_modules node "$CI_PROJECT_DIR/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2>/dev/null; then
+                  # 4. Upload the PNG via the GitLab uploads API.
+                  UPLOAD_RESP=$(curl -s --request POST \
+                    --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+                    --form "file=@$PREVIEW_PNG" \
+                    "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/uploads" 2>/dev/null)
+                  IMG_URL=$(echo "$UPLOAD_RESP" | jq -r '.markdown // empty' 2>/dev/null)
+
+                  if [ -n "$IMG_URL" ]; then
+                    # 5. Fetch the existing comment, append Aperçu section, PUT.
+                    #    Guard: if EXISTING_BODY is empty (fetch failed), do NOT
+                    #    PUT — otherwise we overwrite the entire triage comment
+                    #    (losing the boucle:triage marker + criteria + disposition).
+                    EXISTING_BODY=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
+                      "/projects/$CI_PROJECT_ID/issues/$IID/notes/$TRIAGE_NOTE_ID" 2>/dev/null \
+                      | jq -r '.body' 2>/dev/null)
+                    if [ -n "$EXISTING_BODY" ]; then
+                      NEW_BODY=$(printf '%s\n\n## Aperçu\n%s\n' "$EXISTING_BODY" "$IMG_URL")
+                      if glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT \
+                        "/projects/$CI_PROJECT_ID/issues/$IID/notes/$TRIAGE_NOTE_ID" \
+                        -f body="$NEW_BODY" >/dev/null 2>&1; then
+                        # 6. Idempotence: delete RENDER_REQUEST (no re-render on retry).
+                        rm -f "$RENDER_REQUEST_FILE"
+                        echo "[boucle] Visual preview embedded in triage comment #$TRIAGE_NOTE_ID"
+                      else
+                        echo "[boucle] WARN: PUT notes failed — RENDER_REQUEST kept for retry"
+                      fi
+                    else
+                      echo "[boucle] WARN: existing comment body empty — posting fallback note"
+                      glab api --hostname "$BOUCLE_FORGE_HOST" -X POST \
+                        "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+                        -f body="Aperçu indisponible (échec lecture commentaire) — validez sur le TL;DR." >/dev/null 2>&1
+                    fi
+                  else
+                    echo "[boucle] WARN: PNG upload failed — posting fallback note"
+                    glab api --hostname "$BOUCLE_FORGE_HOST" -X POST \
+                      "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+                      -f body="Aperçu indisponible (échec upload) — validez sur le TL;DR." >/dev/null 2>&1
+                  fi
+                else
+                  echo "[boucle] WARN: Chromium render failed — posting fallback note"
+                  glab api --hostname "$BOUCLE_FORGE_HOST" -X POST \
+                    "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+                    -f body="Aperçu indisponible (échec rendu) — validez sur le TL;DR." >/dev/null 2>&1
+                fi
+              else
+                echo "[boucle] WARN: Chromium install failed — posting fallback note"
+                glab api --hostname "$BOUCLE_FORGE_HOST" -X POST \
+                  "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+                  -f body="Aperçu indisponible (Chromium indisponible) — validez sur le TL;DR." >/dev/null 2>&1
               fi
             fi
           fi
@@ -2130,7 +2133,7 @@ reviewer:
       # `approved` accepting boucle:human) handles the residual risk.
       COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
         | jq -r --arg sha "$MR_HEAD" '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer") and contains("sha=\($sha)"))] | first | .body // empty')
-      VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+      VERDICT=$(echo "$COMMENT" | grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
       # Track whether the verdict we found matches the current MR head SHA.
       # The SHA-anchored parse above filters on sha=$MR_HEAD, so if VERDICT is
       # non-empty here, the verdict is fresh (matches the current head).
@@ -2142,7 +2145,7 @@ reviewer:
       if [ -z "$VERDICT" ]; then
         COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
           | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer"))] | first | .body // empty')
-        VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+        VERDICT=$(echo "$COMMENT" | grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
         # SHA-unanchored fallback → the verdict may be stale (different SHA).
         # Flag it so the log-scraping fallback below gets a chance to find the
         # current run's drafted verdict in stdout, which is fresher.
@@ -2205,13 +2208,13 @@ reviewer:
               # If the promoted draft has no VERDICT line, default to UNCERTAIN
               # (the agent posted a draft but ran out of steps before posting
               # a final verdict with a VERDICT: line).
-              if ! echo "$DRAFTED_VERDICT" | grep -qiE 'VERDICT: (PASS|FAIL|UNCERTAIN)'; then
+              if ! echo "$DRAFTED_VERDICT" | grep -qiE '^VERDICT: (PASS|FAIL|UNCERTAIN)'; then
                 DRAFTED_VERDICT="$(printf '%s\n\nVERDICT: UNCERTAIN\n' "$DRAFTED_VERDICT")"
                 echo "[boucle] WARN: promoted reviewer draft had no VERDICT line — defaulting to UNCERTAIN."
               fi
             fi
           fi
-          if [ -n "$DRAFTED_VERDICT" ] && echo "$DRAFTED_VERDICT" | grep -qiE 'VERDICT: (PASS|FAIL|UNCERTAIN)'; then
+          if [ -n "$DRAFTED_VERDICT" ] && echo "$DRAFTED_VERDICT" | grep -qiE '^VERDICT: (PASS|FAIL|UNCERTAIN)'; then
             echo "[boucle] Recovering drafted reviewer verdict from agent log (step-limit fallback)."
             # Strip leading/trailing ``` fences if the agent wrapped the comment.
             DRAFTED_VERDICT=$(echo "$DRAFTED_VERDICT" | sed '/^```$/d')
@@ -2221,11 +2224,11 @@ reviewer:
             # SHA-unanchored fallback — same logic as the primary parse above).
             NEW_COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
               | jq -r --arg sha "$MR_HEAD" '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer") and contains("sha=\($sha)"))] | first | .body // empty')
-            NEW_VERDICT=$(echo "$NEW_COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+            NEW_VERDICT=$(echo "$NEW_COMMENT" | grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
             if [ -z "$NEW_VERDICT" ]; then
               NEW_COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
                 | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer"))] | first | .body // empty')
-              NEW_VERDICT=$(echo "$NEW_COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+              NEW_VERDICT=$(echo "$NEW_COMMENT" | grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
             fi
             if [ -n "$NEW_VERDICT" ]; then
               # The log-scraping found a fresher verdict — override the stale one.
@@ -2486,19 +2489,42 @@ merger:
 
       # Wait for GitLab to recompute mergeability after the force-push (poll).
       # detailed_merge_status can be "checking" for several seconds after a
-      # force-push while GitLab recomputes. Poll up to ~2 min, tolerating
+      # force-push while GitLab recomputes. If the project has "Pipelines must
+      # succeed" enabled, the force-push triggers a new pipeline on the MR
+      # branch and GitLab refuses to merge until it completes — the status
+      # stays at "pipeline_status_must_pass" (or "checking") until the pipeline
+      # finishes. Poll up to ~10 min to accommodate a full CI run, tolerating
       # transient glab/jq failures (set +e around the poll).
       sleep 5
       MERGE_STATUS="unknown"
-      for i in $(seq 1 12); do
+      MWPS=false
+      for i in $(seq 1 60); do
         MERGE_STATUS=$(set +e; glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID" 2>/dev/null \
           | jq -r '.detailed_merge_status // .merge_status // "unknown"' 2>/dev/null) || MERGE_STATUS="unknown"
-        if [ "$MERGE_STATUS" = "mergeable" ]; then break; fi
-        echo "MR !${MR_IID} merge status: $MERGE_STATUS — waiting 10s... (attempt $i/12)"
+        case "$MERGE_STATUS" in
+          mergeable) break ;;
+          checking|pipeline_status_must_pass|pipeline_blocked)
+            # Pipeline still running or GitLab recomputing — keep polling.
+            ;;
+          *)
+            # Hard block (conflict, broken, etc.) — no point waiting.
+            echo "MR !${MR_IID} merge status: $MERGE_STATUS — hard block, not waiting." >&2
+            break
+            ;;
+        esac
+        echo "MR !${MR_IID} merge status: $MERGE_STATUS — waiting 10s... (attempt $i/60)"
         sleep 10
       done
 
-      if [ "$MERGE_STATUS" != "mergeable" ]; then
+      # If the pipeline is still running after the poll window, use
+      # merge-when-pipeline-succeeds (MWPS) instead of failing. GitLab will
+      # merge automatically once the pipeline passes. This handles the
+      # "Pipelines must succeed" project setting without requiring the merger
+      # to outlast the entire CI run.
+      if [ "$MERGE_STATUS" = "checking" ] || [ "$MERGE_STATUS" = "pipeline_status_must_pass" ] || [ "$MERGE_STATUS" = "pipeline_blocked" ]; then
+        echo "MR !${MR_IID} pipeline still running (status: $MERGE_STATUS) — using merge-when-pipeline-succeeds."
+        MWPS=true
+      elif [ "$MERGE_STATUS" != "mergeable" ]; then
         echo "FAIL: MR !${MR_IID} not mergeable after rebase (status: $MERGE_STATUS)" >&2
         set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
         glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
@@ -2510,6 +2536,21 @@ merger:
       # glab may return non-zero even when the merge succeeds server-side
       # (e.g. 409/405 on an already-merged MR, or transient API errors), so
       # tolerate the exit code and verify via MERGE_SHA below instead.
+      # When MWPS=true, the merge is deferred until the pipeline succeeds —
+      # GitLab returns merge_commit_sha=null immediately, so skip the SHA check
+      # and let the deploy (triggered by the eventual merge) handle e2e.
+      if [ "$MWPS" = true ]; then
+        MERGE_RESULT=$(glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/merge" \
+          -f merge_when_pipeline_succeeds=true 2>&1 || true)
+        echo "MWPS enabled for MR !${MR_IID} — GitLab will merge when the pipeline succeeds."
+        glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+          -f body="⏳ MR !${MR_IID} merge scheduled (merge-when-pipeline-succeeds). GitLab will merge automatically once the CI pipeline passes." > /dev/null
+        # MWPS merge: no merge_commit_sha yet. The deploy triggered by the
+        # eventual merge will run e2e with BOUCLE_ISSUE unset (no issue
+        # context). The doctor's staleness check will close the loop if the
+        # MWPS merge lands but no issue-context e2e runs.
+        exit 0
+      fi
       MERGE_RESULT=$(glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/merge" \
         -f merge_when_pipeline_succeeds=false 2>&1 || true)
       MERGE_SHA=$(echo "$MERGE_RESULT" | jq -r '.merge_commit_sha // .sha // empty' 2>/dev/null)
@@ -3045,7 +3086,7 @@ e2e:
       # → UNCERTAIN branch, which is safe.
       COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes?order_by=created_at&sort=desc" 2>/dev/null \
         | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | first | .body // empty' 2>/dev/null)
-      VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+      VERDICT=$(echo "$COMMENT" | grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
 
       # ── Log-scraping fallback (step-limit recovery) ──────────────────
       # If the agent drafted a verdict but ran out of steps before posting it
@@ -3072,20 +3113,20 @@ e2e:
               # If the promoted draft has no VERDICT line, default to UNCERTAIN
               # (the agent posted a draft checklist but ran out of steps before
               # posting a final verdict with a VERDICT: line).
-              if ! echo "$DRAFTED_VERDICT" | grep -qiE 'VERDICT: (PASS|FAIL|UNCERTAIN)'; then
+              if ! echo "$DRAFTED_VERDICT" | grep -qiE '^VERDICT: (PASS|FAIL|UNCERTAIN)'; then
                 DRAFTED_VERDICT="$(printf '%s\n\nVERDICT: UNCERTAIN\n' "$DRAFTED_VERDICT")"
                 echo "[boucle] WARN: promoted e2e draft had no VERDICT line — defaulting to UNCERTAIN."
               fi
             fi
           fi
-          if [ -n "$DRAFTED_VERDICT" ] && echo "$DRAFTED_VERDICT" | grep -qiE 'VERDICT: (PASS|FAIL|UNCERTAIN)'; then
+          if [ -n "$DRAFTED_VERDICT" ] && echo "$DRAFTED_VERDICT" | grep -qiE '^VERDICT: (PASS|FAIL|UNCERTAIN)'; then
             echo "[boucle] Recovering drafted e2e verdict from agent log (step-limit fallback)."
             DRAFTED_VERDICT=$(echo "$DRAFTED_VERDICT" | sed '/^```$/d')
             glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
               -f body="$DRAFTED_VERDICT" > /dev/null 2>&1 || true
             COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes?order_by=created_at&sort=desc" 2>/dev/null \
               | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | first | .body // empty' 2>/dev/null)
-            VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+            VERDICT=$(echo "$COMMENT" | grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
             if [ -n "$VERDICT" ]; then
               echo "[boucle] Step-limit fallback succeeded: recovered e2e verdict=$VERDICT."
             else
