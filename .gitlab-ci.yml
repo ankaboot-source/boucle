@@ -909,7 +909,7 @@ triage:
       # re-parse the OLD triage comment and re-apply its disposition, causing
       # a label bounce with no new question asked.
       PRE_RUN_TRIAGE_ID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-        | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## Disposition"))] | first | .id // 0')
+        | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## TL;DR")) | select(.body | test("## Disposition"))] | first | .id // 0')
       rc=0
       ./bin/oc triage || rc=$?
       if [ "$rc" -ne 0 ]; then
@@ -924,7 +924,7 @@ triage:
       # boucle:triage instead of re-applying the OLD disposition.
       COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
         | jq -r --argjson pre "$PRE_RUN_TRIAGE_ID" \
-          '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## Disposition")) | select(.id > $pre)] | first | .body // ""')
+          '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## TL;DR")) | select(.body | test("## Disposition")) | select(.id > $pre)] | first | .body // ""')
 
       # Parse Disposition and Size from their SECTIONS only, not the whole body.
       # Scoping prevents false matches: e.g. "already" in an acceptance criterion
@@ -973,7 +973,7 @@ triage:
             # the pre-run one (the just-posted fallback comment qualifies).
             COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
               | jq -r --argjson pre "$PRE_RUN_TRIAGE_ID" \
-                '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## Disposition")) | select(.id > $pre)] | first | .body // ""')
+                '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## TL;DR")) | select(.body | test("## Disposition")) | select(.id > $pre)] | first | .body // ""')
             DISPOSITION=$(echo "$COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
             SIZE=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
             if [ -n "$DISPOSITION" ]; then
@@ -1078,7 +1078,7 @@ triage:
               SPEC_MSG=$(printf '## Validation\n\nReview the **TL;DR** above. If it matches what you want:\n- React with 👍 ✅ ☑️ ✔️ 🆗 or 👌 on this comment to approve, OR\n- Reply to this issue with any comment.\nIf not, reply with corrections.')
               TRIAGE_NOTE_ID=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
                 "/projects/$CI_PROJECT_ID/issues/$IID/notes" 2>/dev/null \
-                | jq -r '[.[] | select(.body | contains("<!-- boucle:triage") and contains("## Disposition"))]
+                | jq -r '[.[] | select(.body | contains("<!-- boucle:triage") and contains("## TL;DR") and contains("## Disposition"))]
                     | sort_by(.created_at) | last | .id' 2>/dev/null || echo "")
               SPEC_MSG_APPENDED=false
               if [ -n "$TRIAGE_NOTE_ID" ]; then
@@ -1146,7 +1146,7 @@ triage:
             #    don't disturb the existing comment parse).
             TRIAGE_NOTE_ID=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
               "/projects/$CI_PROJECT_ID/issues/$IID/notes" 2>/dev/null \
-              | jq -r '[.[] | select(.body | contains("<!-- boucle:triage") and contains("## Disposition"))]
+              | jq -r '[.[] | select(.body | contains("<!-- boucle:triage") and contains("## TL;DR") and contains("## Disposition"))]
                   | sort_by(.created_at) | last | .id' 2>/dev/null || echo "")
 
             if [ -z "$TRIAGE_NOTE_ID" ]; then
