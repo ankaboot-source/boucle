@@ -538,6 +538,36 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       any open zombie MRs and setting `boucle:done`. This is the safety net
       for the case where a guard was missing or bypassed.
 
+45. **Distinguish draft from final by structure, not body text**
+    - ❌ DO NOT detect a draft triage/reviewer comment by grepping the body
+      for the word "DRAFT". The word "DRAFT" can legitimately appear in
+      website content being triaged (e.g. a draft page the author wants
+      reviewed), so a body-text grep produces false positives.
+    - ❌ DO NOT post a first-pass draft with the FINAL marker
+      (`<!-- boucle:triage v=1 -->` or `<!-- boucle:verdict v=1 ... -->`).
+      The CI parser acts immediately on the final marker — it sets the
+      disposition label, assigns the issue/MR, and pauses the loop before
+      the agent can refine. The refinement is wasted. This was issue #42
+      on a consumer repo: the triage agent posted a NEEDS-INFO draft with
+      the final `<!-- boucle:triage v=1 -->` marker, the CI immediately
+      set `boucle:needs-info` + `boucle::status::human` and assigned the
+      issue to the reporter, before the agent could post its refined
+      comment with the actual blocking questions.
+    - ✅ DO: use the dedicated draft marker (`<!-- boucle:draft role=triage -->`
+      / `<!-- boucle:draft role=reviewer -->`) for first-pass drafts. The
+      CI parser does NOT match `boucle:draft` — it only matches `boucle:triage`
+      / `boucle:verdict`. The log-scraping fallback promotes `boucle:draft`
+      to the final marker when the agent exhausts its steps.
+    - ✅ DO: make the CI parser require a STRUCTURAL section that only
+      final comments have. For triage, the final comment starts with
+      `## TL;DR` (per the prompt format spec); a draft only has
+      `## Disposition`. The jq filter is
+      `select(.body | test("## TL;DR")) and select(.body | test("## Disposition"))`.
+      This is structural (section header), not body-text — it will not
+      false-match website content. This is defense-in-depth: even if the
+      agent uses the wrong marker, the parser won't act on a draft that
+      lacks `## TL;DR`.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.

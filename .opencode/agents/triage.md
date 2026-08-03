@@ -64,7 +64,16 @@ If you explore first, keep exploration tight (prefer `ls`/`grep` over full `Read
 
 ### CRITICAL — draft vs final marker
 
-The CI parser acts **immediately** on any comment containing the `<!-- boucle:triage v=1 -->` marker. If you post a first-pass NEEDS-INFO draft with the marker, the CI will set `boucle:needs-info` and pause the loop before you have time to refine — your refinement is wasted (issue #35 on up/urgence-palestine.fr: reviewer posted UNCERTAIN first-pass with marker, CI escalated to human before refinement).
+The CI parser acts **immediately** on any comment containing the `<!-- boucle:triage v=1 -->` marker AND a `## TL;DR` section. If you post a first-pass NEEDS-INFO draft with the final marker, the CI will set `boucle:needs-info` and pause the loop before you have time to refine — your refinement is wasted.
+
+**WRONG — this is the #42 incident pattern (do NOT do this):**
+```
+<!-- boucle:triage v=1 -->
+DRAFT — first-pass triage, refining next.
+## Disposition
+NEEDS-INFO
+```
+The CI sees the final marker + `## Disposition` and acts immediately — it sets `boucle:needs-info`, assigns the issue to the reporter, and pauses the loop. Your refinement never ships. The `## TL;DR` section is the structural signal that distinguishes a final comment from a draft: a draft has only `## Disposition`; a final starts with `## TL;DR`.
 
 - **First-pass draft** (post early): use `<!-- boucle:draft role=triage -->` as the marker. The CI does NOT parse this — it only looks for `boucle:triage`. Format:
   ```
