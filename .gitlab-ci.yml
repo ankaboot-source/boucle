@@ -2084,6 +2084,20 @@ reviewer:
       PREVIEW_URL=$(echo "$MR_DATA" | jq -r '.description' | grep -oE 'https://[a-z0-9.-]+\.pages\.dev' | head -1)
       MR_URL=$(echo "$MR_DATA" | jq -r '.web_url')
 
+      # ── Feedback channel: inject human MR comments into the reviewer ──
+      # state.md acceptance criteria are seeded ONCE from the triage comment
+      # and never refreshed — they freeze the spec at triage time. Humans
+      # amend the spec via MR comments mid-loop, and the worker sees those
+      # comments (BOUCLE_REVIEWER_FEEDBACK in the worker job). Without the
+      # same channel here, the reviewer grades against the frozen triage
+      # spec and FAILs implementations that correctly follow the human's
+      # amended spec — directly contradicting the human. Fetch ALL non-system
+      # MR notes (same query as the worker job) so the reviewer can weigh
+      # human amendments over the frozen criteria.
+      export BOUCLE_REVIEWER_FEEDBACK
+      BOUCLE_REVIEWER_FEEDBACK=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?per_page=100&order_by=created_at&sort=asc" 2>/dev/null \
+        | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | .[]' 2>/dev/null || echo "")
+
       # Detect empty MR (worker shipped zero commits — base_sha == head_sha).
       # Re-trigger the worker instead of running the reviewer uselessly.
       MR_BASE=$(echo "$MR_DATA" | jq -r '.diff_refs.base_sha // empty')

@@ -397,7 +397,24 @@ ${feedback}
       fi
       ;;
     reviewer)
-      prompt="Review the MR for issue #${ISSUE}. Test the deployed preview at \$BOUCLE_PREVIEW_URL. Post your verdict with the boucle:verdict marker."
+      # Inject the same MR discussion the worker received (fetched by CI as
+      # BOUCLE_REVIEWER_FEEDBACK). state.md acceptance criteria are frozen at
+      # triage time; humans amend the spec via MR comments mid-loop. Without
+      # this injection the reviewer grades against the stale triage spec and
+      # contradicts the human — FAILing implementations that correctly follow
+      # the amended spec. Human comments MUST take precedence over state.md.
+      local feedback="${BOUCLE_REVIEWER_FEEDBACK:-}"
+      if [ -n "$feedback" ]; then
+        prompt="Review the MR for issue #${ISSUE}. Test the deployed preview at \$BOUCLE_PREVIEW_URL. Post your verdict with the boucle:verdict marker.
+
+Prior MR discussion (reviewer verdicts + human comments, oldest first — human comments AMEND the spec and take precedence over the frozen acceptance criteria in state.md):
+---
+${feedback}
+---
+"
+      else
+        prompt="Review the MR for issue #${ISSUE}. Test the deployed preview at \$BOUCLE_PREVIEW_URL. Post your verdict with the boucle:verdict marker."
+      fi
       ;;
     e2e)
       prompt="Verify issue #${ISSUE} on the live URL \$BOUCLE_LIVE_URL. Post your verdict with the boucle:verdict marker."
