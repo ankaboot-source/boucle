@@ -21,31 +21,47 @@
  *                                 wrapped in an <a>.
  *  - tone      (literal, optional) Stripe order. The only supported value
  *                                 today is "green-then-red" (default).
+ *  - variant   (literal, optional) Visual layout. "default" keeps the
+ *                                 original full-width stripes;
+ *                                 "angled-split" renders a text-hugging
+ *                                 green headline above an inclined,
+ *                                 ascending red label stripe.
  */
 interface Props {
 	title: string;
 	ctaLabel: string;
 	tone?: "green-then-red";
+	variant?: "default" | "angled-split";
 }
 
-const { title, ctaLabel, tone = "green-then-red" } = Astro.props;
+const {
+	title,
+	ctaLabel,
+	tone = "green-then-red",
+	variant = "default",
+} = Astro.props;
 
 // `tone` is reserved for future variants (e.g. red-then-green) — keeping
 // the value in a const makes that future branch trivial without re-doing
 // the markup below.
 void tone;
 
+const isAngledSplit = variant === "angled-split";
+
 // Stable, predictable id so the section's aria-labelledby always resolves.
 // Astro scopes styles by class, so we don't need a unique selector here.
 const headingId = "general-cta-title";
 ---
 
-	<section class="general-cta" aria-labelledby={headingId}>
-		<div class="general-cta__stripe general-cta__stripe--headline">
-			<h2 id={headingId} class="general-cta__title">{title}</h2>
-		</div>
-		<div class="general-cta__stripe general-cta__stripe--label" aria-hidden="true">
-		<p class="general-cta__label">{ctaLabel}</p>
+<section
+	class:list={["general-cta", { "general-cta--angled-split": isAngledSplit }]}
+	aria-labelledby={headingId}
+>
+	<div class="general-cta__stripe general-cta__stripe--headline">
+		<h2 id={headingId} class="general-cta__title"><span>{title}</span></h2>
+	</div>
+	<div class="general-cta__stripe general-cta__stripe--label" aria-hidden="true">
+		<p class="general-cta__label"><span>{ctaLabel}</span></p>
 	</div>
 </section>
 
@@ -113,5 +129,99 @@ const headingId = "general-cta-title";
 		color: var(--color-flag-white);
 		text-transform: uppercase;
 		border-radius: 0;
+	}
+
+	/* Variant "angled-split": the coloured background hugs the text,
+	 * not the container. The green headline stripe keeps a straight,
+	 * horizontal bottom edge and sits in front. The red CTA-label stripe
+	 * is inclined by `transform: skewY(-6deg)` so its bottom edge forms
+	 * an ascending slope toward the right. The label text is
+	 * counter-skewed (`skewY(6deg)`) so it stays horizontal and readable.
+	 *
+	 * The title uses an inline <span> with `box-decoration-break: clone`
+	 * (and the -webkit- prefix) so wrapped lines keep a tight background
+	 * with no full-width band between fragments. Both stripes use
+	 * `inline-block` + `width: fit-content` so their computed width equals
+	 * the longest text line plus tight padding.
+	 */
+	.general-cta--angled-split {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		width: min(100% - 2 * var(--space-s), var(--container-wide));
+		margin-inline: auto;
+		border-radius: 0;
+		overflow: visible;
+		--cta-angle: 6deg;
+	}
+
+	.general-cta--angled-split .general-cta__stripe {
+		display: inline-block;
+		width: fit-content;
+		min-height: 44px;
+		padding-inline: 0;
+		overflow: visible;
+	}
+
+	/* Green headline stripe: stable, horizontal, text-hugging. The span
+	 * carries the background and tight padding; the wrapper is only a
+	 * sizing/accessibility box. */
+	.general-cta--angled-split .general-cta__stripe--headline {
+		background: transparent;
+		padding-block: 0;
+		position: relative;
+		z-index: 2;
+	}
+
+	.general-cta--angled-split .general-cta__title {
+		margin: 0;
+	}
+
+	.general-cta--angled-split .general-cta__title span {
+		display: inline;
+		background: var(--color-flag-green);
+		padding-inline: var(--space-xs);
+		padding-block: var(--space-2xs) var(--space-xs);
+		box-decoration-break: clone;
+		-webkit-box-decoration-break: clone;
+	}
+
+	/* Red label stripe: inclined, ascending slope. The label element
+	 * carries the red background and the skew; the inner span holds the
+	 * text and is counter-skewed back to horizontal. */
+	.general-cta--angled-split .general-cta__stripe--label {
+		background: transparent;
+		padding-block: 0;
+		position: relative;
+		z-index: 1;
+		margin-top: -1px;
+	}
+
+	.general-cta--angled-split .general-cta__label {
+		display: inline-block;
+		width: fit-content;
+		min-height: 44px;
+		margin: 0;
+		background: var(--color-flag-red);
+		padding-inline: var(--space-xs);
+		padding-block: var(--space-s);
+		transform: skewY(calc(-1 * var(--cta-angle)));
+		transform-origin: top left;
+		font-family: var(--font-heading);
+		font-size: var(--text-lg);
+		line-height: var(--leading-snug);
+		letter-spacing: var(--tracking-normal);
+		color: var(--color-flag-white);
+		text-transform: uppercase;
+		border-radius: 0;
+		max-width: 100%;
+	}
+
+	.general-cta--angled-split .general-cta__label span {
+		display: inline-block;
+		transform: skewY(var(--cta-angle));
+		transform-origin: top left;
+		max-width: 100%;
+		overflow-wrap: break-word;
 	}
 </style>
