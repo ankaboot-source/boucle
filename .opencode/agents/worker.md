@@ -63,7 +63,8 @@ You have these skills in `.opencode/skill/`. **Use them** — they contain domai
 
 **Domain skills** (load before working in that domain):
 - **astro** — before writing/editing `.astro` components, pages, or content collections.
-- **frontend-design** — before building UI components or visual layouts.
+- **ui-ux-pro-max** — before ANY UI/visual work. This is the PRIMARY design skill. It bundles a searchable database (84 styles, 192 color palettes, 74 font pairings, 98 UX guidelines, 22 stacks) and a `--design-system` command that returns a complete design system with reasoning. Run `python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "<query>" --design-system` FIRST, then cross-reference the output with `DESIGN.md` (the charter overrides generic recommendations). This skill is self-contained — it does NOT require `.impeccable.md` or any external setup.
+- **frontend-design** — before building UI components or visual layouts. NOTE: this skill requires a `.impeccable.md` file at the project root OR the `teach-impeccable` skill. If neither exists, skip it and use **ui-ux-pro-max** + `DESIGN.md` instead.
 - **effective-ui-design** — before styling (accessibility, spacing, typography, responsive).
 - **web-design-guidelines** — before HTML/CSS work (WCAG, semantic HTML, best practices).
 - **typescript-magician** — before writing TypeScript types or fixing type errors.
