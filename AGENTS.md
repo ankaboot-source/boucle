@@ -331,6 +331,34 @@ and agent prompts); never renumber.
       via the API (worker/reviewer feedback) — the webhook handler
       MUST apply the same filter.
 
+35. **MR-note dispatch MUST pass BOUCLE_ITERATION**
+    - ❌ DO NOT re-trigger the worker from a human MR comment without
+      passing `BOUCLE_ITERATION`. The MR-note dispatch path was the
+      only re-trigger path that omitted it (reviewer FAIL, empty-MR,
+      and rebase-conflict paths all pass `BOUCLE_ITERATION=$((N+1))`).
+      Without it, the worker defaults to `ITERATION=1` (line 1782:
+      `ITERATION="${BOUCLE_ITERATION:-1}"`) and the MR description
+      always shows "iteration 1" + "boucle worker run 1" even after
+      multiple feedback rounds — the human cannot tell which
+      iteration they're reviewing.
+    - ✅ DO: the MR-note dispatch MUST count reviewer verdicts on the
+      MR (`boucle:verdict` markers in MR notes) and pass
+      `BOUCLE_ITERATION=$((verdicts + 1))` to the worker trigger. Each
+      verdict = one completed worker+reviewer cycle, so the next run
+      is verdicts + 1.
+
+36. **Approach MUST use bullet points, not sentences**
+    - ❌ DO NOT write the `## Approach` section as a paragraph of
+      2-5 sentences. GitLab markdown renders single newlines (soft
+      breaks) as spaces, so a paragraph becomes an unreadable wall of
+      text in the MR description. The worker prompt said "Write 2-5
+      sentences" — the worker wrote one long paragraph, and the MR
+      description was a single 500-char block with no visual structure.
+    - ✅ DO: write the Approach as 3-6 bullet points (`- item`), one
+      per aspect of the implementation. Each bullet cites the charter
+      doc section it conforms to (e.g. "Conforms to DESIGN.md §2 —
+      sharp corners via `--radius-sharp`"). Bullet points and blank
+      lines render properly in GitLab markdown.
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
