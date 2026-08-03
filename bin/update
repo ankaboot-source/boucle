@@ -12,7 +12,7 @@ UPSTREAM_REPO="ankaboot-source/boucle"
 UPSTREAM_API="https://api.github.com/repos/$UPSTREAM_REPO"
 UPSTREAM_TARBALL="https://codeload.github.com/$UPSTREAM_REPO/tarball"
 VERSION_FILE=".boucle-version"
-SYNC_PATHS="bin .pi .gitlab-ci.yml .opencode/opencode.json .opencode/agents"
+SYNC_PATHS="bin .pi .gitlab-ci.yml .opencode/opencode.json .opencode/agents .opencode/skill"
 
 # ── Pure functions (testable, no network) ──────────────────────────────
 

@@ -18,7 +18,7 @@ Four opencode agents in `.opencode/agents/`:
 | Agent | Model | Purpose |
 |-------|-------|---------|
 | `triage` | ollama-cloud/minimax-m3 | Analyzes issues, drafts acceptance criteria |
-| `worker` | ollama-cloud/minimax-m3 | Implements on a branch |
+| `worker` | ollama-cloud/kimi-k2.7-code | Implements on a branch |
 | `reviewer` | ollama-cloud/glm-5.2 | Adversarial review against deployed preview |
 | `e2e` | ollama-cloud/kimi-k2.7-code | Verifies on live production URL |
 
