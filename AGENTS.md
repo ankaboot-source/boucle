@@ -474,6 +474,37 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       human knows the merge is scheduled, and exit 0 (the deploy triggered
       by the eventual merge + the doctor's staleness check close the loop).
 
+43. **Never use `UNCERTAIN|*)` as a case catch-all**
+    - ❌ DO NOT use `UNCERTAIN|*)` as the catch-all branch in a bash `case`
+      statement that switches on `$VERDICT`. In bash, `*)` matches the empty
+      string, so when the agent posted no verdict (step-exhausted, crashed,
+      or only a draft with no `VERDICT:` line), `VERDICT` is empty and the
+      `UNCERTAIN|*)` branch fires — prematurely escalating to
+      `boucle:human`, assigning the MR to the human, and posting the
+      "unparsable" note. This happens BEFORE the post-case assertion (which
+      would have re-triggered the reviewer/e2e for another attempt). The
+      result: the MR is assigned to the human while the re-triggered
+      reviewer is still running, and 3 duplicate "unparsable" notes appear
+      on the issue (one per iteration, because each iteration's case block
+      fires the catch-all before the assertion re-triggers). This was
+      MR !40 on up/urgence-palestine.fr: the reviewer posted only drafts
+      on iterations 1-2, the catch-all fired each time, and the human saw
+      "assigned mid-review" + a cascade of failed trigger pipelines.
+    - ❌ DO NOT conflate "genuinely UNCERTAIN verdict" (agent posted
+      `VERDICT: UNCERTAIN`) with "no verdict found" (agent posted nothing
+      parsable). These are two different conditions requiring different
+      actions: UNCERTAIN is a terminal human escalation; empty VERDICT is
+      a retryable failure that should re-trigger the agent.
+    - ✅ DO: use `UNCERTAIN)` (no `|*`) as an explicit branch for the
+      genuine UNCERTAIN verdict. Let empty VERDICT fall through the `case`
+      without side effects, and handle it exclusively in the post-case
+      assertion (`if [ -z "$VERDICT" ]; then ... re-trigger or escalate`).
+      The assertion already has the iteration logic (`iter < MAX_ITER` →
+      re-trigger, else → escalate to human with MR assignment + note).
+      This applies to BOTH the reviewer job and the e2e job — they share
+      the same `case "$VERDICT" in ... UNCERTAIN|*) ... esac` +
+      `if [ -z "$VERDICT" ]` pattern.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
