@@ -492,6 +492,16 @@ dispatch:
             exit 0
           fi
           echo "Note on MR !${MR_NOTE_IID} (issue #$MR_NOTE_ISSUE_IID) — re-triggering worker with feedback"
+          # Count reviewer verdicts on the MR to determine the next iteration
+          # number. Each verdict = one completed worker+reviewer cycle, so the
+          # next worker run is verdicts + 1. Without this, the MR-note dispatch
+          # was the only re-trigger path that omitted BOUCLE_ITERATION, so the
+          # worker defaulted to 1 and the MR description always showed
+          # "iteration 1" even after multiple feedback rounds.
+          MR_NOTE_VERDICTS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_NOTE_IID/notes?per_page=100" 2>/dev/null \
+            | jq '[.[] | select(.body | contains("boucle:verdict"))] | length' 2>/dev/null || echo 0)
+          MR_NOTE_ITERATION=$((MR_NOTE_VERDICTS + 1))
+          echo "MR !${MR_NOTE_IID} has $MR_NOTE_VERDICTS verdict(s) — re-triggering worker as iteration $MR_NOTE_ITERATION"
           # Revert to boucle:todo so the worker re-runs (preserving non-boucle labels)
           MR_NOTE_LABELS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$MR_NOTE_ISSUE_IID" | jq -r '.labels | join(",")')
           NON_BOUCLE=$(echo "$MR_NOTE_LABELS" | tr ',' '\n' | grep -v '^boucle:' | tr '\n' ',' | sed 's/,$//')
@@ -503,7 +513,8 @@ dispatch:
           fi
           curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
             -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-            -F "variables[BOUCLE_ISSUE]=$MR_NOTE_ISSUE_IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+            -F "variables[BOUCLE_ISSUE]=$MR_NOTE_ISSUE_IID" -F "variables[BOUCLE_ROLE]=worker" \
+            -F "variables[BOUCLE_ITERATION]=$MR_NOTE_ITERATION" > /dev/null
           exit 0
         fi
         IID=$(jq -r '.issue.iid // .work_item.iid // .epic.iid // empty' "$TRIGGER_PAYLOAD")
