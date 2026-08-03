@@ -1479,11 +1479,6 @@ worker:
       # re-discovering the codebase and re-reading charter docs).
       BOUCLE_STATE_CACHE="${BOUCLE_STATE_CACHE:-${HOME}/.boucle-state-cache}"
       ISSUE_STATE_CACHE="${BOUCLE_STATE_CACHE}/${BOUCLE_ISSUE}"
-      if [ -d "$ISSUE_STATE_CACHE" ]; then
-        echo "[boucle] Restoring .boucle/$BOUCLE_ISSUE/ from $ISSUE_STATE_CACHE"
-        mkdir -p ".boucle/$BOUCLE_ISSUE"
-        cp -a "$ISSUE_STATE_CACHE/." ".boucle/$BOUCLE_ISSUE/" 2>/dev/null || true
-      fi
 
       # Persist .boucle/<issue>/ back to the stable cache on job exit (any
       # path: success, no-changes re-trigger, rebase conflict, deploy fail).
@@ -1601,6 +1596,19 @@ worker:
         fi
       else
         git checkout -b "$BRANCH"
+      fi
+
+      # Restore .boucle/<issue>/ from the stable cache AFTER checkout.
+      # MUST be after `git checkout`/`git reset` — otherwise the cp -a creates
+      # local modifications to tracked .boucle/ files (some repos have .boucle/
+      # tracked despite .gitignore) and `git checkout` refuses to overwrite
+      # them, failing the worker with "Your local changes would be overwritten".
+      # After checkout, .boucle/ is either absent (untracked, gitignored) or
+      # at the master version (tracked) — either way, cp -a overwrites safely.
+      if [ -d "$ISSUE_STATE_CACHE" ]; then
+        echo "[boucle] Restoring .boucle/$BOUCLE_ISSUE/ from $ISSUE_STATE_CACHE"
+        mkdir -p ".boucle/$BOUCLE_ISSUE"
+        cp -a "$ISSUE_STATE_CACHE/." ".boucle/$BOUCLE_ISSUE/" 2>/dev/null || true
       fi
 
       # Configure git credentials for push
@@ -1732,8 +1740,12 @@ worker:
       # Safety-net commit: the agent may run out of steps before committing.
       # Stage and commit any uncommitted tracked changes so the index is clean
       # before the rebase (rebase refuses to run on a dirty tree).
+      # NEVER stage .boucle/ — it is runtime state (state.md, iterations.md,
+      # agent-output.log), not source code. Some repos have .boucle/ tracked
+      # from a past `git add -A` (gitignore doesn't untrack); staging it here
+      # re-commits stale state and causes checkout conflicts on the next run.
       if ! git diff --quiet || ! git diff --cached --quiet; then
-        git add -A
+        git add -A -- ':!.boucle'
         git commit -m "feat: worker changes for #$BOUCLE_ISSUE [skip ci]" --no-verify
       fi
 
