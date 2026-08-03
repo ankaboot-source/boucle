@@ -24,7 +24,7 @@ and [LOOP.md](LOOP.md).
 | Agent   | Model                       | Steps | Temp | Role                                                                                                                |
 | ------- | ---------------------------- | ----- | ---- | ------------------------------------------------------------------------------------------------------------------- |
 | triage  | ollama-cloud/minimax-m3      | 200   | 0.3  | Analyzes issue, posts structured comment (TL;DR + Analysis + Acceptance criteria + Classification S/M/L + Questions + Disposition) |
-| worker  | ollama-cloud/minimax-m3      | 50    | —    | Implements on branch `boucle/<iid>`, reads `state.md`, uses codebase-memory-mcp, conventional commit                 |
+| worker  | ollama-cloud/kimi-k2.7-code  | 100   | —    | Implements on branch `boucle/<iid>`, reads `state.md`, uses codebase-memory-mcp, conventional commit                 |
 | reviewer| ollama-cloud/glm-5.2         | 35    | 0.2  | Adversarial review against preview URL, SHA-anchored verdict                                                       |
 | e2e     | ollama-cloud/kimi-k2.7-code  | 30    | —    | Verifies on production URL, SHA-anchored verdict                                                                    |
 
@@ -157,8 +157,14 @@ and agent prompts); never renumber.
 
 13. **Resolve parent-child via the hierarchy API**
     - ❌ DO NOT infer parent-child links ad hoc.
-    - ✅ DO: use the work-items hierarchy API; fall back to the
-      `legacy split-parent marker` when unavailable.
+    - ❌ DO NOT assume the hierarchy PATCH succeeded — on self-managed
+      GitLab with `work_item_rest_api` disabled it returns 403 and the
+      parent-child relationship becomes invisible in the UI.
+    - ✅ DO: use the work-items hierarchy API; check the PATCH HTTP status
+      and on non-2xx fall back to a REST `relates_to` issue link (visible
+      under "Linked items" on the parent); fall back to the
+      `legacy split-parent marker` comment for machine-readable recovery
+      when neither API is available.
 
 14. **Safety-net commit is CI's job**
     - ❌ DO NOT panic over a missed commit before rebase.
@@ -311,7 +317,6 @@ and agent prompts); never renumber.
       MUST be strictly greater than the longest job timeout (default
       2400s vs worker/reviewer 30 min).
 
-<<<<<<< HEAD
 34. **Dispatch MUST skip system notes**
     - ❌ DO NOT treat GitLab system notes (assignee changes, label
       changes, branch additions) as human replies. A system note has
@@ -415,6 +420,38 @@ and agent prompts); never renumber.
       nothing or a generic `(consumer)` when pushed upstream.
     - ✅ DO: ask the human explicitly if a consumer name MUST be
       shared upstream for context — otherwise it stays private.
+
+39. **Sync skills to consumers**
+    - ❌ DO NOT omit `.opencode/skill/` from the `SYNC_PATHS` in
+      `bin/update`. The worker prompt references design skills
+      (`frontend-design`, `effective-ui-design`, `ui-ux-pro-max`,
+      etc.) that live in `.opencode/skill/` — but if that directory
+      is not synced to the consumer repo, the worker cannot load
+      them and implements UI without any design expertise. The
+      skills are discovered by opencode via the filesystem, not via
+      `opencode.json`, so they must be physically present on the
+      consumer.
+    - ✅ DO: keep `.opencode/skill` in `SYNC_PATHS` so every
+      `bin/update` copies the skill directory to the consumer repo.
+      Verify after sync that `.opencode/skill/` exists on the
+      consumer with at least the design skills referenced in
+      `worker.md`.
+
+40. **Split bookkeeping MUST be atomic and label-first**
+    - ❌ DO NOT post the human "Split into" comment, the
+      `boucle:split-parent` marker, and the `boucle:split` label as
+      separate steps in that order — a job failure between steps leaves
+      a human comment without its marker, so the retry re-splits:
+      duplicate sub-issues and duplicate "Split into" comments.
+    - ❌ DO NOT format the sub-issue list with `sed 's/,/#, #/g'` — it
+      produces `#38#, #39#, #40` (broken issue links). Use
+      `sed 's/,/, #/g'` → `#38, #39, #40`.
+    - ✅ DO: set the `boucle:split` label FIRST (dispatch and doctor stop
+      re-triaging even if later steps fail), then post ONE merged comment
+      containing both the human-readable list and the
+      `<!-- boucle:split-parent iids=... -->` marker — a single POST is
+      atomic.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
