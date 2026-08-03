@@ -45,7 +45,7 @@ Before implementing, read the charter docs at the repo root. They are **imperati
 After implementing, check whether your changes require doc updates. **Doc updates go in the same commit/MR as the code change — never a separate MR.**
 
 - Changed CI pipeline / agents / bin scripts / state machine → update `ARCHITECTURE.md` (use Mermaid syntax for diagrams, keep them in sync with the code).
-- Discovered a bug or anti-pattern → add an entry to `AGENTS.md` "Lessons learned" section. Write a **forward-looking principle**, not a bug report: short title + `❌ DO NOT` (one line) + `✅ DO` (one line). No `Context:` narrative, no issue numbers, no incident SHAs — those live in git history. Capture the lesson at the moment you learn it.
+- Discovered a bug or anti-pattern → **first** check whether it is a lesson at all. A lesson prevents a *class* of mistakes from recurring — not a one-off bug now fixed in code, not a preference change, not a missing-directory discovery. Run the four-point admission test in `AGENTS.md` ("Lessons learned" → "Admission test"): class-not-instance, recurrence-without-the-doc, stable, not-already-covered. **State on stdout which tests it passes and why.** If it fails any test, fix the code and move on — do not add a lesson. If it passes, add an entry: short title + `❌ DO NOT` (one line) + `✅ DO` (one line). No `Context:` narrative, no issue numbers, no incident SHAs, no line numbers — those live in git history. Capture the lesson at the moment you learn it.
 - Changed project scope / tech stack / constraints → update `CONTEXT.md`.
 - Changed visual conventions (consumer site) → update `DESIGN.md`.
 - Changed loop config / cadence / gates → update `LOOP.md`.
