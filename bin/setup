@@ -266,6 +266,18 @@ for size in s m l; do
   fi
 done
 
+# boucle:autonomous — flag label (not a state). Applied at issue creation to
+# mark an issue as autonomous: the triage job auto-validates the spec gate
+# regardless of the DND window, so the loop runs up to the MR without
+# contacting the human. Distinct color (purple) to separate flags from states.
+EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:autonomous" 2> /dev/null | jq -r '.[0].name // empty')
+if [ -n "$EXISTING" ]; then
+  log_skip "boucle:autonomous already exists"
+else
+  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/labels -f name=boucle:autonomous -f color=#6927C5 -f 'description=Flag: issue runs autonomously (spec gate auto-validated at triage)' >/dev/null"
+  log_pass "boucle:autonomous created"
+fi
+
 echo ""
 
 # ── 3. Issue Board ────────────────────────────────────────────────────
