@@ -157,8 +157,14 @@ and agent prompts); never renumber.
 
 13. **Resolve parent-child via the hierarchy API**
     - ❌ DO NOT infer parent-child links ad hoc.
-    - ✅ DO: use the work-items hierarchy API; fall back to the
-      `legacy split-parent marker` when unavailable.
+    - ❌ DO NOT assume the hierarchy PATCH succeeded — on self-managed
+      GitLab with `work_item_rest_api` disabled it returns 403 and the
+      parent-child relationship becomes invisible in the UI.
+    - ✅ DO: use the work-items hierarchy API; check the PATCH HTTP status
+      and on non-2xx fall back to a REST `relates_to` issue link (visible
+      under "Linked items" on the parent); fall back to the
+      `legacy split-parent marker` comment for machine-readable recovery
+      when neither API is available.
 
 14. **Safety-net commit is CI's job**
     - ❌ DO NOT panic over a missed commit before rebase.
