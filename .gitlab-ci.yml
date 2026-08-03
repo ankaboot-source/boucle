@@ -2348,7 +2348,18 @@ reviewer:
               -f body="$ESCALATION_MSG" > /dev/null
           fi
           ;;
-        UNCERTAIN|*)
+        UNCERTAIN)
+          # Genuinely UNCERTAIN verdict (agent posted VERDICT: UNCERTAIN).
+          # This branch is NOT a catch-all for empty VERDICT — empty VERDICT
+          # (agent crashed / step-exhausted before posting a verdict) is
+          # handled by the post-case assertion below, which re-triggers the
+          # reviewer instead of prematurely escalating to human. Conflating
+          # the two caused MR !40 on up/urgence-palestine.fr: the reviewer
+          # posted only drafts on iterations 1-2 (no VERDICT line), the
+          # catch-all fired, assigned the MR to the human and set
+          # boucle:human BEFORE the re-triggered reviewer could finish —
+          # creating the appearance of "assigned mid-review" and 3 duplicate
+          # "unparsable" notes. See AGENTS.md lesson #43.
           set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
           # Assign the MR to the issue author on escalation (same rationale as
           # the FAIL-after-max branch above).
@@ -2362,6 +2373,11 @@ reviewer:
       # If the agent ran but didn't post a verdict for this SHA (ran out of
       # steps, crashed, etc.), re-trigger the reviewer instead of leaving the
       # issue stuck at boucle:review for the doctor to pick up 15 min later.
+      # This runs AFTER the case block — but the case block no longer has a
+      # catch-all, so empty VERDICT falls through the case without side
+      # effects and reaches this assertion. On iter < MAX_ITER we re-trigger
+      # the reviewer; on iter == MAX_ITER we escalate to human (with MR
+      # assignment + note, matching the FAIL-after-max behavior).
       if [ -z "$VERDICT" ]; then
         ITERATION="${BOUCLE_ITERATION:-1}"
         MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
@@ -2375,8 +2391,9 @@ reviewer:
         else
           echo "Max iterations reached — escalating to human."
           set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
+          assign_mr_to_author
           glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-            -f body="⚠️ Reviewer agent failed to post a verdict after $MAX_ITER attempts. Human review needed." > /dev/null
+            -f body="⚠️ Reviewer agent failed to post a verdict after $MAX_ITER attempts. Human review needed. The MR has been assigned to you." > /dev/null
         fi
         exit 1
       fi
@@ -3228,7 +3245,11 @@ e2e:
           close_issue "$BOUCLE_ISSUE"
           maybe_close_parent "$BOUCLE_ISSUE"
           ;;
-        UNCERTAIN|*)
+        UNCERTAIN)
+          # Genuinely UNCERTAIN verdict (agent posted VERDICT: UNCERTAIN).
+          # NOT a catch-all for empty VERDICT — see reviewer job + AGENTS.md
+          # lesson #43. Empty VERDICT is handled by the post-case assertion
+          # below (re-trigger e2e or escalate to human).
           set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
           # Post a human-facing explanation so the human knows why the issue
           # landed at boucle:human. Without this, the human sees only the label
@@ -3253,13 +3274,23 @@ e2e:
         # Post a human-facing explanation before failing the job. The agent
         # ran but posted no parsable verdict (step limit, crash, or empty
         # output). Without this comment the human sees only a failed pipeline.
+        ITERATION="${BOUCLE_ITERATION:-1}"
+        MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
         E2E_LOG_TAIL=""
         AGENT_LOG="$CI_PROJECT_DIR/.boucle/$BOUCLE_ISSUE/agent-output.log"
         if [ -f "$AGENT_LOG" ]; then
           E2E_LOG_TAIL=$(tail -c 4000 "$AGENT_LOG" 2>/dev/null || echo "")
         fi
-        E2E_ESCALATION_BODY="<!-- boucle:e2e-escalation v=1 iid=$BOUCLE_ISSUE verdict=empty -->
-      E2E agent did not post a parsable verdict. Human review needed.
+        if [ "$ITERATION" -lt "$MAX_ITER" ]; then
+          echo "Re-triggering e2e (iteration $((ITERATION+1))/$MAX_ITER)."
+          curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
+            -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+            -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=e2e" \
+            -F "variables[BOUCLE_ITERATION]=$((ITERATION+1))" > /dev/null
+        else
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
+          E2E_ESCALATION_BODY="<!-- boucle:e2e-escalation v=1 iid=$BOUCLE_ISSUE verdict=empty -->
+      E2E agent did not post a parsable verdict after $MAX_ITER attempts. Human review needed.
 
       The agent ran against \`${BOUCLE_LIVE_URL:-the live URL}\` but exited without posting a \`VERDICT:\` comment. This usually means it hit the step limit or crashed before completing.
 
@@ -3270,8 +3301,9 @@ e2e:
       \`\`\`
       ${E2E_LOG_TAIL:-no agent log was captured}
       \`\`\`"
-        glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-          -f body="$E2E_ESCALATION_BODY" > /dev/null 2>&1 || true
+          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+            -f body="$E2E_ESCALATION_BODY" > /dev/null 2>&1 || true
+        fi
         echo "FAIL: e2e verdict not parsable" >&2; exit 1
       fi
   timeout: 20m
