@@ -426,8 +426,8 @@ justification on stdout); the reviewer MUST reject entries that fail it.
     - ✅ DO: set the `boucle:split` label FIRST (dispatch and doctor stop
       re-triaging even if later steps fail), then post ONE merged comment
       containing both the human-readable list and the
-      `<!-- boucle:split-parent iids=... -->` marker — a single POST is
-      atomic.
+`<!-- boucle:split-parent iids=... -->` marker — a single POST is
+atomic.
 
 41. **Anchor VERDICT greps to start-of-line**
     - ❌ DO NOT use `grep -E 'VERDICT: (PASS|FAIL|UNCERTAIN)'` without a
