@@ -289,14 +289,41 @@ Conteneurs (largeurs max) :
 `@media (prefers-reduced-motion: reduce)` ramène toutes les durées à
 `0 ms` — toujours.
 
-### 3.7 Le « vibe » en une phrase
+### 3.7 Variante « angled-split » des CTA
+
+La variante `angled-split` du composant `GeneralCTA` impose deux règles
+supplémentaires, en complément de la charte brute du collectif :
+
+1. **Le fond coloré épouse la largeur du texte**, pas celle du conteneur.
+   Chaque stripe est rendu avec `display: inline-block; width: fit-content`.
+   Le texte est enveloppé dans un `<span>` inline portant le fond et le
+   padding ; `box-decoration-break: clone` (y compris le préfixe WebKit)
+   garantit que chaque fragment de ligne wrap garde son propre fond serré,
+   sans bandeau plein-largeur entre les lignes.
+
+2. **Coupe diagonale discrète entre la stripe verte (titre, en haut) et la
+   stripe rouge (label CTA, en bas).** L'angle visible doit rester discret,
+   compris **entre 6° et 10°**. La stripe verte conserve un bord inférieur
+   **strictement horizontal** — c'est un fond de texte stable. La stripe
+   rouge, située juste en dessous, est inclinée vers le haut à droite
+   (`transform: skewY(-6°)`), créant une pente ascendante. Le texte rouge
+   est contre-incliné (`skewY(6°)`) pour rester horizontal et lisible.
+   Cette règle évite l'effet « deux triangles » où les deux blocs
+   seraient coupés en biais.
+
+Ces deux contraintes préservent les exigences d'accessibilité existantes :
+hit-area vertical ≥ 44 px sur les deux stripes, texte blanc sur fond vert
+ou rouge du drapeau (contraste AA), et `aria-labelledby` pointant vers
+le `<h2>` du titre.
+
+### 3.8 Le « vibe » en une phrase
 
 **Le site ressemble à un tract imprime sur du papier offset noir et
 rouge par un comité de rédaction qui sait ce qu'il fait.** Pas un tract
 agressif pour autant — un tract **tenu**, lisible, qui assume son sujet
 sans crier plus fort que nécessaire.
 
-### 3.8 « Grunge highlight » du lien featured
+### 3.9 « Grunge highlight » du lien featured
 
 Le lien **« Right to Resist »** dans le header principal (`navItems[3]`
 dans [`src/components/Header.astro`](src/components/Header.astro))
