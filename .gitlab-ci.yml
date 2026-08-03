@@ -541,6 +541,41 @@ dispatch:
         fi
       fi
 
+      # Closed-issue guard for issue webhooks (update/note/emoji). A closed
+      # issue is terminal — label changes and notes on it must NOT re-trigger
+      # the loop, otherwise the dispatch no-ops and the EXIT trap flips the
+      # exit 0 to exit 1, producing a cascade of failed pipelines. The one
+      # exception is BOT_JUST_ASSIGNED: a human assigning the bot to a closed
+      # issue is an explicit re-trigger signal (the human wants to reopen and
+      # resume work), so we let that path through and check state there.
+      # MR webhooks already have their own guard at lines 307-313.
+      if [ "$OBJECT_KIND" != "merge_request" ]; then
+        ISSUE_STATE_FOR_GUARD=$(glab api --hostname $BOUCLE_FORGE_HOST --method GET "/projects/$CI_PROJECT_ID/issues/$IID" 2>/dev/null | jq -r '.state // "unknown"' 2>/dev/null || echo "unknown")
+        if [ "$ISSUE_STATE_FOR_GUARD" = "closed" ]; then
+          # Check if this is a BOT_JUST_ASSIGNED event — if so, let it through
+          # (the human explicitly assigned the bot to reopen the issue).
+          GUARD_ACTION=$(jq -r '.object_attributes.action // empty' "$TRIGGER_PAYLOAD")
+          GUARD_BOT_ASSIGNED=false
+          if [ "$OBJECT_KIND" = "issue" ] && [ "$GUARD_ACTION" = "update" ]; then
+            if [ -n "${BOUCLE_BOT_ID:-}" ] && [[ "$BOUCLE_BOT_ID" =~ ^[0-9]+$ ]]; then
+              GUARD_BOT_IN_CURRENT=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.current // [] | map(.id | tostring) | index($bid) != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
+              GUARD_BOT_IN_PREVIOUS=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.previous // [] | map(.id | tostring) | index($bid) != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
+            else
+              GUARD_BOT_IN_CURRENT=$(jq -r '.changes.assignees.current // [] | map(.username) | index("up-bot") != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
+              GUARD_BOT_IN_PREVIOUS=$(jq -r '.changes.assignees.previous // [] | map(.username) | index("up-bot") != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
+            fi
+            if [ "$GUARD_BOT_IN_CURRENT" = "true" ] && [ "$GUARD_BOT_IN_PREVIOUS" != "true" ]; then
+              GUARD_BOT_ASSIGNED=true
+            fi
+          fi
+          if [ "$GUARD_BOT_ASSIGNED" != "true" ]; then
+            echo "boucle: issue #$IID is closed — skipping $OBJECT_KIND webhook (no-op on closed issue)"
+            exit 0
+          fi
+          echo "boucle: issue #$IID is closed but bot was just assigned — letting through (human re-trigger)"
+        fi
+      fi
+
       # Label helper: preserve non-boucle labels when writing a boucle label.
       # The jq filter uses startswith("boucle:") which catches BOTH the detail
       # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
@@ -1533,6 +1568,18 @@ worker:
         echo "$reporter_id"
       }
 
+      # Closed-issue guard: if the issue was closed (e.g. by catchup after a
+      # human merged the MR directly), the worker MUST NOT re-run — it would
+      # create a zombie MR on a closed issue, and the reviewer FAIL handler
+      # would keep re-triggering the worker on the corpse forever (the doctor
+      # can't recover it because it filters state=opened). Exit 0 so the
+      # resource_group releases and no spurious failure is recorded.
+      WORKER_ISSUE_STATE=$(glab api --hostname $BOUCLE_FORGE_HOST --method GET "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" 2>/dev/null | jq -r '.state // "unknown"' 2>/dev/null || echo "unknown")
+      if [ "$WORKER_ISSUE_STATE" = "closed" ]; then
+        echo "boucle: issue #$BOUCLE_ISSUE is closed — worker cannot run on a closed issue (no-op)"
+        exit 0
+      fi
+
       # Set working label
       set_boucle_label "$BOUCLE_ISSUE" "boucle:working" "boucle::status::bot"
 
@@ -1766,6 +1813,15 @@ worker:
         ITERATION="${BOUCLE_ITERATION:-1}"
         MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
         if [ "$ITERATION" -lt "$MAX_ITER" ]; then
+          # Closed-issue guard: if the issue was closed while this worker was
+          # running (e.g. catchup closed it after a human merged another MR),
+          # do NOT re-trigger — the re-trigger would create a zombie worker on
+          # a closed issue. Exit 1 (the rebase failed) without chaining.
+          REBASE_ISSUE_STATE=$(glab api --hostname $BOUCLE_FORGE_HOST --method GET "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" 2>/dev/null | jq -r '.state // "unknown"' 2>/dev/null || echo "unknown")
+          if [ "$REBASE_ISSUE_STATE" = "closed" ]; then
+            echo "boucle: issue #$BOUCLE_ISSUE is closed — not re-triggering worker after rebase conflict (no-op on closed issue)"
+            exit 1
+          fi
           echo "Re-triggering worker (iteration $((ITERATION+1))/$MAX_ITER) — next run resets branch to origin/master, no rebase needed." >&2
           set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
           glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
@@ -2326,6 +2382,15 @@ reviewer:
         FAIL)
           ITERATION="${BOUCLE_ITERATION:-1}"
           MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
+          # Closed-issue guard: if the issue was closed (e.g. by catchup after
+          # a human merged the MR directly), do NOT re-trigger the worker —
+          # it would run on a closed issue and create zombie MRs. The reviewer
+          # FAIL is a dead end on a closed issue; just exit.
+          REVIEW_FAIL_ISSUE_STATE=$(glab api --hostname $BOUCLE_FORGE_HOST --method GET "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" 2>/dev/null | jq -r '.state // "unknown"' 2>/dev/null || echo "unknown")
+          if [ "$REVIEW_FAIL_ISSUE_STATE" = "closed" ]; then
+            echo "boucle: issue #$BOUCLE_ISSUE is closed — not re-triggering worker after reviewer FAIL (no-op on closed issue)"
+            exit 0
+          fi
           if [ "$ITERATION" -lt "$MAX_ITER" ]; then
             set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
             # Chain back to worker with incremented iteration
@@ -3772,6 +3837,29 @@ doctor:
           -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=$ROLE" > /dev/null
         doctor_mark_triggered "$IID"
         echo "  → re-triggered $ROLE for #$IID"
+        RECOVERED=$((RECOVERED + 1))
+      done
+
+      # ── Recover CLOSED issues stuck at boucle:working/boucle:review ──
+      # The doctor's main scan filters state=opened, so a closed issue that
+      # still has boucle:working or boucle:review is invisible. This happens
+      # when a human merges the MR directly (catchup closes the issue) while
+      # a worker iteration is in flight — the worker's rebase-conflict
+      # re-trigger or the reviewer FAIL handler re-triggers the worker on
+      # the closed issue, creating zombie MRs and failed pipeline cascades.
+      # Recovery: set boucle:done + close any open zombie MRs.
+      ZOMBIE_WORKING=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=closed&labels=boucle:working&per_page=100" 2>/dev/null | jq -r '.[].iid' 2>/dev/null)
+      ZOMBIE_REVIEW=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=closed&labels=boucle:review&per_page=100" 2>/dev/null | jq -r '.[].iid' 2>/dev/null)
+      for IID in $ZOMBIE_WORKING $ZOMBIE_REVIEW; do
+        echo "  → #$IID: closed but stuck at working/review — zombie recovery"
+        # Close any open MR on the boucle/$IID branch (zombie MR created by
+        # the worker running on the closed issue).
+        ZOMBIE_MR_IID=$(glab api --hostname "$HOST" "/projects/$PID/merge_requests?source_branch=boucle/$IID&state=opened" 2>/dev/null | jq -r '.[0].iid // empty')
+        if [ -n "$ZOMBIE_MR_IID" ]; then
+          echo "  → #$IID: closing zombie MR !${ZOMBIE_MR_IID}"
+          glab api --hostname "$HOST" -X PUT "/projects/$PID/merge_requests/$ZOMBIE_MR_IID" -f state_event=close > /dev/null 2>&1 || true
+        fi
+        set_boucle_label "$IID" "boucle:done" "boucle::status::done"
         RECOVERED=$((RECOVERED + 1))
       done
 

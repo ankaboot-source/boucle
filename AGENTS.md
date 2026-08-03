@@ -505,6 +505,39 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       the same `case "$VERDICT" in ... UNCERTAIN|*) ... esac` +
       `if [ -z "$VERDICT" ]` pattern.
 
+44. **Never run the loop on a closed issue**
+    - ❌ DO NOT let the worker, reviewer, or dispatch re-trigger a role on a
+      closed issue. A closed issue is terminal — the catchup job closed it
+      after a merge (or a human closed it manually). Running the worker on a
+      closed issue creates a zombie MR; the reviewer then FAILs the zombie MR
+      and re-triggers the worker, which runs again on the closed issue — an
+      infinite loop on a corpse. The doctor cannot recover it because its
+      main scan filters `state=opened`, so the closed issue with
+      `boucle:working` is invisible.
+    - ❌ DO NOT assume the worker is safe from closure mid-run. A human can
+      merge another MR for the same issue while a worker iteration is in
+      flight — the catchup closes the issue, then the worker's
+      rebase-conflict handler (master advanced) re-triggers itself on the
+      now-closed issue. The rebase-conflict re-trigger path MUST check issue
+      state before chaining.
+    - ❌ DO NOT let issue webhooks (update/note/emoji) re-trigger the loop on
+      a closed issue. Only MR webhooks had a closed-issue guard — issue
+      webhooks did not. A label change on a closed issue (e.g. the reviewer
+      FAIL setting `boucle:todo`) fires an issue update webhook → dispatch
+      no-ops → the EXIT trap flips exit 0 to exit 1 → a cascade of failed
+      pipelines. The one exception is `BOT_JUST_ASSIGNED`: a human assigning
+      the bot to a closed issue is an explicit re-trigger signal (the human
+      wants to reopen and resume work).
+    - ✅ DO: add a closed-issue guard at the START of the worker job (before
+      `set_boucle_label boucle:working`), in the worker's rebase-conflict
+      re-trigger path, in the reviewer FAIL handler (before re-triggering the
+      worker), and in the dispatch issue-webhook handler (before label-based
+      routing). Each guard fetches the issue state and exits 0 if closed.
+    - ✅ DO: extend the doctor to scan `state=closed` issues with
+      `boucle:working` or `boucle:review` labels — recover them by closing
+      any open zombie MRs and setting `boucle:done`. This is the safety net
+      for the case where a guard was missing or bypassed.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
