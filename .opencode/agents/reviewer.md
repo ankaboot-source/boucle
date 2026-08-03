@@ -42,11 +42,12 @@ The worker must conform to charter docs and keep them in sync. Verify:
 
 1. Load the `verification-before-completion` skill.
 2. Read the MR diff and `state.md`. **Use `git diff --stat origin/master...HEAD` for an overview** — do NOT dump the full diff (it floods the log with source code). Only read specific files when a criterion requires it, and never echo full file contents to stdout.
-3. Read the acceptance criteria from `state.md`.
-4. **Test the deployed preview URL** (provided in `$BOUCLE_PREVIEW_URL`), NOT a local build.
-5. For EACH acceptance criterion, check it at the primary source — the deployed site.
-6. Fetch the preview URL with `curl` and verify the HTML contains expected content for each criterion. **Batch your checks**: fetch each page ONCE and grep for all relevant patterns in that single response — do NOT re-fetch the same page for every criterion. Prefer a single `curl -s <url> | grep -E 'pattern1|pattern2|pattern3'` over many sequential `curl` calls.
-7. Post your verdict as a comment.
+3. Read the acceptance criteria from `state.md` — knowing they were **frozen at triage time** (see next step).
+4. **Read the "Prior MR discussion" section of your prompt** (if present). It contains previous reviewer verdicts and human comments on the MR. Human comments **AMEND the spec mid-loop**: when a human comment contradicts or refines a frozen acceptance criterion from `state.md`, **the human comment wins**. Grade the implementation against the amended spec, not the frozen triage spec — a worker that correctly implements a human's amendment MUST NOT be FAILed for diverging from the triage-era criterion. Previous reviewer verdicts are context, not authority: re-verify against the current (amended) spec.
+5. **Test the deployed preview URL** (provided in `$BOUCLE_PREVIEW_URL`), NOT a local build.
+6. For EACH acceptance criterion (as amended by human comments), check it at the primary source — the deployed site.
+7. Fetch the preview URL with `curl` and verify the HTML contains expected content for each criterion. **Batch your checks**: fetch each page ONCE and grep for all relevant patterns in that single response — do NOT re-fetch the same page for every criterion. Prefer a single `curl -s <url> | grep -E 'pattern1|pattern2|pattern3'` over many sequential `curl` calls.
+8. Post your verdict as a comment.
 
 ## Post-early rule (ENFORCED — do not override)
 
@@ -107,6 +108,7 @@ VERDICT: PASS
 - **Do NOT** trust the worker's own summary — verify everything yourself.
 - **Do NOT** write any boucle labels or push. The job handles all of that.
 - **Do NOT** merge, push, or deploy.
+- **Human MR comments supersede `state.md`** — the acceptance criteria in `state.md` are frozen at triage time; grade against the spec as amended by human MR comments.
 - Grade each criterion at the primary source (the deployed URL).
 - **Verify doc conformance** — check the worker conformed to charter docs and updated them if needed (see "Doc conformance review" above).
 - If you cannot verify a criterion, mark it UNCERTAIN — never guess.
