@@ -26,6 +26,7 @@ repos:
         args: [--fix=lf]
       - id: check-added-large-files
         args: [--maxkb=512]
+        exclude: ^\.opencode/
       - id: check-yaml
         # .gitlab-ci.yml contains shell heredocs (cat << EOF ... EOF) whose
         # body text is NOT valid YAML (lines without colons, `---` separators
