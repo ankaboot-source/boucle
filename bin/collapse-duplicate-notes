@@ -45,8 +45,8 @@ fi
 case "$TYPE" in
   triage)
     ENDPOINT="projects/${PROJECT_ID}/issues/${NOTE_IID}/notes"
-    # boucle:triage marker + ## Disposition section
-    FILTER='.[] | select(.body | test("<!-- boucle:triage")) | select(.body | test("(?m)^## Disposition"))'
+    # boucle:triage marker + ## TL;DR (final only) + ## Disposition section
+    FILTER='.[] | select(.body | test("<!-- boucle:triage")) | select(.body | test("(?m)^## TL;DR")) | select(.body | test("(?m)^## Disposition"))'
     DRAFT_FILTER='.[] | select(.body | test("<!-- boucle:draft role=triage"))'
     ;;
   reviewer)
