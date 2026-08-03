@@ -510,9 +510,35 @@ img.hero__symbol {
 	color: oklch(70% 0 0);
 }
 
-/* ---------- Newsletter section (homepage) ---------- */
+/* ---------- Newsletter + social section (homepage) ---------- */
 
 .newsletter-section {
-	width: min(100% - 2 * var(--space-s), var(--container-base));
+	width: min(100% - 2 * var(--space-s), var(--container-wide));
 	margin-inline: auto;
+}
+
+.newsletter-section__grid {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: var(--space-s);
+	align-items: stretch;
+}
+
+@media (min-width: 48rem) {
+	.newsletter-section__grid {
+		grid-template-columns: 1fr 1fr;
+		gap: var(--space-l);
+	}
+}
+
+.newsletter-section .visually-hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
 }

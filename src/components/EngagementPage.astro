@@ -11,7 +11,6 @@ import "../styles/sections.css";
 import Layout from "../layouts/Layout.astro";
 import EngagementForm from "../components/EngagementForm.astro";
 import NewsletterSignup from "../components/NewsletterSignup.astro";
-import NewsletterModal from "../components/NewsletterModal.astro";
 
 interface Props {
 	formId: string;
@@ -120,8 +119,6 @@ const { formId, pageSymbol } = Astro.props;
 			/>
 		</aside>
 	</main>
-
-	<NewsletterModal slot="modal" />
 </Layout>
 
 <style>
