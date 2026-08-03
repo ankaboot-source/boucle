@@ -157,8 +157,14 @@ and agent prompts); never renumber.
 
 13. **Resolve parent-child via the hierarchy API**
     - ❌ DO NOT infer parent-child links ad hoc.
-    - ✅ DO: use the work-items hierarchy API; fall back to the
-      `legacy split-parent marker` when unavailable.
+    - ❌ DO NOT assume the hierarchy PATCH succeeded — on self-managed
+      GitLab with `work_item_rest_api` disabled it returns 403 and the
+      parent-child relationship becomes invisible in the UI.
+    - ✅ DO: use the work-items hierarchy API; check the PATCH HTTP status
+      and on non-2xx fall back to a REST `relates_to` issue link (visible
+      under "Linked items" on the parent); fall back to the
+      `legacy split-parent marker` comment for machine-readable recovery
+      when neither API is available.
 
 14. **Safety-net commit is CI's job**
     - ❌ DO NOT panic over a missed commit before rebase.
@@ -358,7 +364,23 @@ and agent prompts); never renumber.
       per aspect of the implementation. Each bullet cites the charter
       doc section it conforms to (e.g. "Conforms to DESIGN.md §2 —
       sharp corners via `--radius-sharp`"). Bullet points and blank
-      lines render properly in GitLab markdown.
+       lines render properly in GitLab markdown.
+
+40. **Split bookkeeping MUST be atomic and label-first**
+    - ❌ DO NOT post the human "Split into" comment, the
+      `boucle:split-parent` marker, and the `boucle:split` label as
+      separate steps in that order — a job failure between steps leaves
+      a human comment without its marker, so the retry re-splits:
+      duplicate sub-issues and duplicate "Split into" comments.
+    - ❌ DO NOT format the sub-issue list with `sed 's/,/#, #/g'` — it
+      produces `#38#, #39#, #40` (broken issue links). Use
+      `sed 's/,/, #/g'` → `#38, #39, #40`.
+    - ✅ DO: set the `boucle:split` label FIRST (dispatch and doctor stop
+      re-triaging even if later steps fail), then post ONE merged comment
+      containing both the human-readable list and the
+      `<!-- boucle:split-parent iids=... -->` marker — a single POST is
+      atomic.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.

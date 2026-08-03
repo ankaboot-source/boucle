@@ -1298,18 +1298,31 @@ triage:
                   # Set the parent via the work-items hierarchy API (child-items).
                   # This creates the real "Éléments enfants" relationship visible
                   # in the GitLab UI. Requires the parent's GLOBAL work-item ID
-                  # (not its project-scoped IID). Best-effort: if the PATCH fails,
-                  # the ## Parent issue body text still provides navigation.
+                  # (not its project-scoped IID). If the hierarchy API is
+                  # unavailable (work_item_rest_api feature flag disabled on
+                  # self-managed GitLab), fall back to a REST relates_to issue
+                  # link (visible under "Linked items" on the parent). Final
+                  # fallback: the ## Parent issue body text provides navigation.
                   PARENT_GLOBAL_ID=$(get_work_item_global_id "$PARENT_IID")
+                  HIERARCHY_STATUS=""
                   if [ -n "$PARENT_GLOBAL_ID" ] && [ "$PARENT_GLOBAL_ID" != "null" ]; then
-                    curl -s -o /dev/null -X PATCH \
+                    HIERARCHY_STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH \
                       "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/-/work_items/$NEW_IID" \
                       --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
                       --header "Content-Type: application/json" \
-                      --data "{\"features\":{\"hierarchy\":{\"parent_id\":$PARENT_GLOBAL_ID}}}" 2>/dev/null || true
-                  else
-                    echo "  → WARN: could not fetch parent global ID — hierarchy link not set (body text fallback active)"
+                      --data "{\"features\":{\"hierarchy\":{\"parent_id\":$PARENT_GLOBAL_ID}}}" 2>/dev/null || echo "000")
                   fi
+                  case "$HIERARCHY_STATUS" in
+                    2*) : ;; # hierarchy link set — nothing more to do
+                    *)
+                      echo "  → hierarchy API unavailable (HTTP ${HIERARCHY_STATUS:-no-global-id}) — falling back to relates_to issue link"
+                      curl -s -o /dev/null -X POST \
+                        "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$PARENT_IID/links" \
+                        --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+                        --header "Content-Type: application/json" \
+                        --data "{\"target_project_id\":$CI_PROJECT_ID,\"target_issue_iid\":$NEW_IID,\"link_type\":\"relates_to\"}" 2>/dev/null || true
+                      ;;
+                  esac
                   # Trigger triage directly via trigger API (bot-created issues would
                   # hit the anti-loop guard in dispatch because ACTOR=up-bot).
                   curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
@@ -1350,24 +1363,22 @@ triage:
             glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
               -f body="Triage requested NEEDS-SPLIT but no sub-issues could be created from the triage comment. Please split this issue manually." > /dev/null
           else
-            # Post a comment listing the new sub-issues. The parent→children
-            # relationship is now tracked via the work-items hierarchy API
-            # (GET .../work_items/:iid/children), so no machine-readable marker
-            # comment is needed. The comment is kept for human readability.
-            SPLIT_MSG=$(printf 'Split into: #%s.\n\nParent stays open until all sub-issues close. The loop closes this parent automatically when the last sub-issue completes.' "$(echo "$CREATED_IIDS" | sed 's/,/#, #/g')")
+            # Mark the parent boucle:split FIRST so dispatch and doctor stop
+            # re-triaging it even if the comment POST below fails. The parent
+            # stays open and is closed by maybe_close_parent() (e2e) or the
+            # doctor's split-parent cascade when all sub-issues close.
+            set_boucle_label "$IID" "boucle:split" "boucle::status::bot"
+            # Post ONE merged comment: human-readable sub-issue list + the
+            # machine-readable split-parent marker. Merging makes the two
+            # atomic (single POST) — a job failure cannot leave a human
+            # comment without its marker, which caused duplicate "Split into"
+            # comments and duplicate sub-issues on retry. The marker is parsed
+            # by maybe_close_parent's legacy fallback path when the work-items
+            # hierarchy API is unavailable (feature flag disabled on
+            # self-managed GitLab).
+            SPLIT_MSG=$(printf 'Split into: #%s.\n\nParent stays open until all sub-issues close. The loop closes this parent automatically when the last sub-issue completes.\n\n<!-- boucle:split-parent iids=%s -->' "$(echo "$CREATED_IIDS" | sed 's/,/, #/g')" "$CREATED_IIDS")
             glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
               -f body="$SPLIT_MSG" > /dev/null
-            # Post a machine-readable marker comment as a fallback for
-            # maybe_close_parent() when the work-items hierarchy API is
-            # unavailable (e.g. work_item_rest_api feature flag disabled on
-            # self-managed GitLab like Framagit). The marker is parsed by
-            # maybe_close_parent's legacy fallback path.
-            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-              -f body="<!-- boucle:split-parent iids=$CREATED_IIDS -->" > /dev/null 2>&1 || true
-            # Mark the parent boucle:split so dispatch and doctor stop re-triaging it.
-            # The parent stays open and is closed by maybe_close_parent() (e2e) or
-            # the doctor's split-parent cascade when all sub-issues close.
-            set_boucle_label "$IID" "boucle:split" "boucle::status::bot"
             echo "Split parent #$IID into $SUBISSUE_COUNT sub-issue(s): $CREATED_IIDS (parent marked boucle:split)"
             if [ "$PARSE_FAILURES" -gt 0 ]; then
               echo "WARN: $PARSE_FAILURES sub-issue(s) failed to create"
