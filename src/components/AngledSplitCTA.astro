@@ -33,7 +33,7 @@ const { title, ctaLabel, headingId = "general-cta-title" } = Astro.props;
 		<h2 id={headingId} class="angled-split-cta__title"><span>{title}</span></h2>
 	</div>
 	<div class="angled-split-cta__stripe angled-split-cta__stripe--label" aria-hidden="true">
-		<p class="angled-split-cta__label"><span>{ctaLabel}</span></p>
+		<p class="angled-split-cta__label"><span class="angled-split-cta__label-slope"><span class="angled-split-cta__label-text">{ctaLabel}</span></span></p>
 	</div>
 </section>
 
@@ -45,7 +45,7 @@ const { title, ctaLabel, headingId = "general-cta-title" } = Astro.props;
 		border-radius: 0;
 		overflow: visible;
 		/* subtle ascending slope for the red stripe only */
-		--cta-angle: 2.5deg;
+		--cta-angle: 2deg;
 	}
 
 	.angled-split-cta__stripe {
@@ -82,8 +82,8 @@ const { title, ctaLabel, headingId = "general-cta-title" } = Astro.props;
 	.angled-split-cta__title span {
 		display: inline;
 		background: var(--color-flag-green);
-		padding-inline: var(--space-xs);
-		padding-block: var(--space-2xs) var(--space-xs);
+		padding-inline: var(--space-2xs);
+		padding-block: 0.125em 0.25em;
 		box-decoration-break: clone;
 		-webkit-box-decoration-break: clone;
 	}
@@ -94,7 +94,7 @@ const { title, ctaLabel, headingId = "general-cta-title" } = Astro.props;
 		padding-block: 0;
 		position: relative;
 		z-index: 1;
-		margin-top: var(--space-3xs);
+		margin-top: 0.35em;
 	}
 
 	.angled-split-cta__label {
@@ -104,7 +104,7 @@ const { title, ctaLabel, headingId = "general-cta-title" } = Astro.props;
 		margin: 0;
 		background: var(--color-flag-red);
 		padding-inline: var(--space-xs);
-		padding-block: var(--space-s);
+		padding-block: var(--space-2xs) var(--space-xs);
 		transform: skewY(calc(-1 * var(--cta-angle)));
 		transform-origin: top left;
 		font-family: var(--font-heading);
@@ -117,11 +117,18 @@ const { title, ctaLabel, headingId = "general-cta-title" } = Astro.props;
 		max-width: 100%;
 	}
 
-	.angled-split-cta__label span {
+	/* The label's inner slope keeps the text itself on the ascending line;
+	 * the text is counter-skewed so it remains readable, but visually it sits
+	 * on the same rising axis as the red background. */
+	.angled-split-cta__label-slope {
 		display: inline-block;
-		transform: skewY(calc(-1 * var(--cta-angle)));
+		transform: skewY(var(--cta-angle));
 		transform-origin: top left;
 		max-width: 100%;
+	}
+
+	.angled-split-cta__label-text {
+		display: inline;
 		overflow-wrap: break-word;
 	}
 
