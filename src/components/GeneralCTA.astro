@@ -19,18 +19,16 @@
  *  - ctaLabel  (string, required)  Short label shown on the lower (red)
  *                                 stripe. Rendered as plain text — never
  *                                 wrapped in an <a>.
- *  - eyebrow   (string, optional)  Small uppercase tag above the title.
  *  - tone      (literal, optional) Stripe order. The only supported value
  *                                 today is "green-then-red" (default).
  */
 interface Props {
 	title: string;
 	ctaLabel: string;
-	eyebrow?: string;
 	tone?: "green-then-red";
 }
 
-const { title, ctaLabel, eyebrow, tone = "green-then-red" } = Astro.props;
+const { title, ctaLabel, tone = "green-then-red" } = Astro.props;
 
 // `tone` is reserved for future variants (e.g. red-then-green) — keeping
 // the value in a const makes that future branch trivial without re-doing
@@ -42,12 +40,11 @@ void tone;
 const headingId = "general-cta-title";
 ---
 
-<section class="general-cta" aria-labelledby={headingId}>
-	<div class="general-cta__stripe general-cta__stripe--headline">
-		{eyebrow && <p class="general-cta__eyebrow">{eyebrow}</p>}
-		<h2 id={headingId} class="general-cta__title">{title}</h2>
-	</div>
-	<div class="general-cta__stripe general-cta__stripe--label" aria-hidden="true">
+	<section class="general-cta" aria-labelledby={headingId}>
+		<div class="general-cta__stripe general-cta__stripe--headline">
+			<h2 id={headingId} class="general-cta__title">{title}</h2>
+		</div>
+		<div class="general-cta__stripe general-cta__stripe--label" aria-hidden="true">
 		<p class="general-cta__label">{ctaLabel}</p>
 	</div>
 </section>
@@ -94,16 +91,6 @@ const headingId = "general-cta-title";
 	.general-cta__stripe--label {
 		background: var(--color-flag-red);
 		padding-block: clamp(var(--space-s), 2vw, var(--space-m));
-	}
-
-	.general-cta__eyebrow {
-		margin: 0;
-		font-family: var(--font-body);
-		font-size: var(--text-xs);
-		font-weight: var(--weight-semibold);
-		letter-spacing: var(--tracking-mega);
-		color: var(--color-flag-white);
-		opacity: 0.9;
 	}
 
 	.general-cta__title {
