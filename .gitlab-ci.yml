@@ -2264,6 +2264,20 @@ reviewer:
           APPROVAL_MSG=$(printf '✅ Reviewer verdict: **PASS**. MR !%s is ready to merge.\n\nThe MR has been assigned to you for approval. To approve and merge, click the **Approve** button on [MR !%s](%s). The merger will then rebase the MR onto master and merge it serially (avoiding conflicts with other approved MRs).' "$MR_IID" "$MR_IID" "$MR_URL")
           glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
             -f body="$APPROVAL_MSG" > /dev/null
+          # Race condition recovery: the human may have approved the MR
+          # BEFORE the reviewer finished (the dispatch `approved` handler
+          # silently skips when the issue is at boucle:review, not
+          # boucle:approval). Check if the MR is already approved natively
+          # — if so, trigger the merger immediately instead of waiting for
+          # an approval webhook that was already silently dropped.
+          MR_APPROVALS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/approvals" 2>/dev/null)
+          MR_APPROVED_COUNT=$(echo "$MR_APPROVALS" | jq -r '[.approved_by[].user.username] | length' 2>/dev/null || echo 0)
+          if [ "${MR_APPROVED_COUNT:-0}" -gt 0 ]; then
+            echo "MR !${MR_IID} was already approved ($MR_APPROVED_COUNT) before reviewer PASS — triggering merger (race condition recovery)"
+            curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
+              -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+              -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=merger" > /dev/null
+          fi
           ;;
         FAIL)
           ITERATION="${BOUCLE_ITERATION:-1}"
@@ -3647,19 +3661,33 @@ doctor:
         RECOVERED=$((RECOVERED + 1))
       done
 
-      # ── Recover boucle:human issues with approved+mergeable MRs ────────
+      # ── Recover boucle:human AND boucle:approval issues with approved MRs ──
       # The reviewer agent may escalate to boucle:human after 3 failed
       # verdict attempts (agent step budget exhausted). But if a human has
       # manually approved the MR, the loop should still merge it — the
-      # work is done, it just needs the merger to run. Scan boucle:human
-      # issues for an open MR that is both approved and mergeable, and
-      # trigger the merger for those.
-      echo "Scanning boucle:human issues for approved+mergeable MRs..."
-      HUMAN_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:human&per_page=100" \
-        | jq -r '.[].iid')
+      # work is done, it just needs the merger to run. Also scan
+      # boucle:approval: a race condition can occur where the human approves
+      # the MR BEFORE the reviewer finishes (the dispatch `approved` handler
+      # silently skips when the issue is at boucle:review, not boucle:approval).
+      # When the reviewer then PASSes and sets boucle:approval, the already-
+      # existing approval is stranded — the loop waits for an approval that
+      # already happened. This recovery path catches that race.
+      # Accept both `mergeable` and `conflict` MRs: the merger handles rebase
+      # conflicts by re-triggering the worker (rebase conflict → boucle:todo
+      # → worker iteration 1), so triggering the merger on a conflicted MR
+      # is safe — it either merges (after successful rebase) or re-runs the
+      # worker on fresh master.
+      echo "Scanning boucle:human + boucle:approval issues for approved MRs..."
+      RECOVERY_IIDS=""
+      for RECOV_LABEL in boucle:human boucle:approval; do
+        RECOV_IIDS=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=$RECOV_LABEL&per_page=100" \
+          | jq -r '.[].iid' 2>/dev/null)
+        RECOVERY_IIDS="$RECOVERY_IIDS $RECOV_IIDS"
+      done
 
-      for IID in $HUMAN_ISSUES; do
-        echo "Checking #$IID (boucle:human) for approved MR..."
+      for IID in $RECOVERY_IIDS; do
+        [ -z "$IID" ] && continue
+        echo "Checking #$IID (boucle:human/approval) for approved MR..."
         # Find an open MR for this issue (branch boucle/$IID)
         MR_DATA=$(glab api --hostname "$HOST" "/projects/$PID/merge_requests?state=opened" \
           | jq -c --arg branch "boucle/$IID" '[.[] | select(.source_branch == $branch)] | first // empty' 2>/dev/null)
@@ -3672,8 +3700,8 @@ doctor:
         # Check approvals on the MR
         APPROVALS=$(glab api --hostname "$HOST" "/projects/$PID/merge_requests/$MR_IID/approvals" 2>/dev/null)
         APPROVED_COUNT=$(echo "$APPROVALS" | jq -r '[.approved_by[].user.username] | length' 2>/dev/null || echo 0)
-        if [ "$MR_MERGE_STATUS" = "mergeable" ] && [ "$APPROVED_COUNT" -gt 0 ]; then
-          echo "  → #$IID: MR !$MR_IID is approved ($APPROVED_COUNT) + mergeable — triggering merger"
+        if [ "$APPROVED_COUNT" -gt 0 ] && { [ "$MR_MERGE_STATUS" = "mergeable" ] || [ "$MR_MERGE_STATUS" = "conflict" ]; }; then
+          echo "  → #$IID: MR !$MR_IID is approved ($APPROVED_COUNT) + $MR_MERGE_STATUS — triggering merger"
           set_boucle_label "$IID" "boucle:merging" "boucle::status::bot"
           curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
             -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
