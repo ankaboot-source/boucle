@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Collapse duplicate boucle comments posted in the same run.
 # When an agent posts a second "v2" comment, replace the first with the v2
-# content and delete the redundant copies. Best-effort: always exits 0.
+# content and delete the redundant copies. Also delete any draft comments
+# (<!-- boucle:draft role=<type> -->) that are superseded by a final.
+# Best-effort: always exits 0.
 #
 # Usage:
 #   bin/collapse-duplicate-notes <type> <project_id> <note_iid> <pre_id> [host] [sha]
@@ -15,11 +17,15 @@
 #
 # Behavior:
 #   1. Fetch all notes for the issue/MR.
-#   2. Filter to boucle comments of <type> with id > pre_id.
-#   3. If 0 or 1 match: nothing to collapse, exit 0.
-#   4. If 2+ matches: PUT the newest body onto the FIRST (oldest) note_id,
-#      then DELETE every other matching note_id.
-#   5. Any API failure is logged to stderr but does not change exit code.
+#   2. Filter to final comments of <type> with id > pre_id.
+#   3. Filter to draft comments of <type> with id > pre_id.
+#   4. If no finals exist: exit 0 (the log-scraping fallback may promote a
+#      draft to a final; deleting it here would lose the only output).
+#   5. If 2+ finals: PUT the newest body onto the FIRST (oldest) note_id,
+#      then DELETE every other final note_id.
+#   6. If any drafts exist and at least one final exists: DELETE all drafts
+#      (they are superseded by the final).
+#   7. Any API failure is logged to stderr but does not change exit code.
 set -u
 
 TYPE="${1:-}"
@@ -41,15 +47,18 @@ case "$TYPE" in
     ENDPOINT="projects/${PROJECT_ID}/issues/${NOTE_IID}/notes"
     # boucle:triage marker + ## Disposition section
     FILTER='.[] | select(.body | test("<!-- boucle:triage")) | select(.body | test("(?m)^## Disposition"))'
+    DRAFT_FILTER='.[] | select(.body | test("<!-- boucle:draft role=triage"))'
     ;;
   reviewer)
     ENDPOINT="projects/${PROJECT_ID}/merge_requests/${NOTE_IID}/notes"
     FILTER='.[] | select(.body | test("<!-- boucle:verdict")) | select(.body | test("role=reviewer"))'
+    DRAFT_FILTER='.[] | select(.body | test("<!-- boucle:draft role=reviewer"))'
     [[ -n "$SHA" ]] && FILTER="${FILTER} | select(.body | test(\"${SHA}\"))"
     ;;
   e2e)
     ENDPOINT="projects/${PROJECT_ID}/issues/${NOTE_IID}/notes"
     FILTER='.[] | select(.body | test("<!-- boucle:verdict")) | select(.body | test("role=e2e"))'
+    DRAFT_FILTER='.[] | select(.body | test("<!-- boucle:draft role=e2e"))'
     [[ -n "$SHA" ]] && FILTER="${FILTER} | select(.body | test(\"${SHA}\"))"
     ;;
   *)
@@ -65,44 +74,66 @@ if [[ -z "$NOTES_JSON" ]]; then
   exit 0
 fi
 
-# Filter to matching note IDs only (one per line, sorted oldest→newest).
+# Filter to matching final note IDs only (one per line, sorted oldest→newest).
 # IDs are integers with no embedded newlines, so wc/head/tail are safe here.
 # Note bodies DO contain newlines, so they are fetched separately below.
 # pre_id=0 selects all (first run).
-IDS="$(printf '%s' "$NOTES_JSON" | jq -r "${FILTER} | select(.id > ${PRE_ID}) | .id" 2> /dev/null | sort -n)"
-if [[ -z "$IDS" ]]; then
-  log "collapse-duplicate-notes: no matching notes to collapse (type=$TYPE pre_id=$PRE_ID)"
+FINAL_IDS="$(printf '%s' "$NOTES_JSON" | jq -r "${FILTER} | select(.id > ${PRE_ID}) | .id" 2> /dev/null | sort -n)"
+
+# Filter to matching draft note IDs (superseded by any final from this run).
+DRAFT_IDS="$(printf '%s' "$NOTES_JSON" | jq -r "${DRAFT_FILTER} | select(.id > ${PRE_ID}) | .id" 2> /dev/null | sort -n)"
+
+# If no finals exist, exit without touching drafts — the log-scraping
+# fallback may promote a draft to a final, and deleting it here would lose
+# the only output the agent produced.
+if [[ -z "$FINAL_IDS" ]]; then
+  log "collapse-duplicate-notes: no final $TYPE notes (pre_id=$PRE_ID) — leaving drafts untouched"
   exit 0
 fi
 
-COUNT="$(printf '%s\n' "$IDS" | wc -l | tr -d ' ')"
-if [[ "$COUNT" -le 1 ]]; then
-  log "collapse-duplicate-notes: only $COUNT match(es), nothing to collapse"
-  exit 0
+# ── Collapse duplicate finals (2+ from the same run) ──────────────────
+FINAL_COUNT="$(printf '%s\n' "$FINAL_IDS" | wc -l | tr -d ' ')"
+if [[ "$FINAL_COUNT" -ge 2 ]]; then
+  log "collapse-duplicate-notes: collapsing $FINAL_COUNT duplicate $TYPE finals (pre_id=$PRE_ID)"
+
+  # Oldest note = keep this id, overwrite body. Newest note = source of body.
+  FIRST_ID="$(printf '%s\n' "$FINAL_IDS" | head -n1)"
+  NEWEST_ID="$(printf '%s\n' "$FINAL_IDS" | tail -n1)"
+
+  # Fetch the newest note's body via a separate jq query (bodies contain newlines).
+  NEWEST_BODY="$(printf '%s' "$NOTES_JSON" | jq -r "${FILTER} | select(.id > ${PRE_ID}) | select(.id == ${NEWEST_ID}) | .body" 2> /dev/null)"
+
+  # PUT newest body onto first (oldest) note id.
+  if [[ -n "$FIRST_ID" && -n "$NEWEST_BODY" ]]; then
+    log "collapse-duplicate-notes: PUT $ENDPOINT/$FIRST_ID (newest body onto oldest id)"
+    printf '%s' "$NEWEST_BODY" | glab api -X PUT "$ENDPOINT/$FIRST_ID" -F "body=@-" 2> /dev/null \
+      || log "collapse-duplicate-notes: PUT failed for note $FIRST_ID (continuing)"
+  fi
+
+  # DELETE every other matching final note id (all except the first/oldest).
+  printf '%s\n' "$FINAL_IDS" | tail -n +2 | while IFS= read -r DEL_ID; do
+    [[ -z "$DEL_ID" ]] && continue
+    log "collapse-duplicate-notes: DELETE $ENDPOINT/$DEL_ID (duplicate final)"
+    glab api -X DELETE "$ENDPOINT/$DEL_ID" 2> /dev/null \
+      || log "collapse-duplicate-notes: DELETE failed for note $DEL_ID (continuing)"
+  done
+else
+  log "collapse-duplicate-notes: $FINAL_COUNT final(s), nothing to collapse"
 fi
 
-log "collapse-duplicate-notes: collapsing $COUNT duplicate $TYPE notes (pre_id=$PRE_ID)"
-
-# Oldest note = keep this id, overwrite body. Newest note = source of body.
-FIRST_ID="$(printf '%s\n' "$IDS" | head -n1)"
-NEWEST_ID="$(printf '%s\n' "$IDS" | tail -n1)"
-
-# Fetch the newest note's body via a separate jq query (bodies contain newlines).
-NEWEST_BODY="$(printf '%s' "$NOTES_JSON" | jq -r "${FILTER} | select(.id > ${PRE_ID}) | select(.id == ${NEWEST_ID}) | .body" 2> /dev/null)"
-
-# PUT newest body onto first (oldest) note id.
-if [[ -n "$FIRST_ID" && -n "$NEWEST_BODY" ]]; then
-  log "collapse-duplicate-notes: PUT $ENDPOINT/$FIRST_ID (newest body onto oldest id)"
-  printf '%s' "$NEWEST_BODY" | glab api -X PUT "$ENDPOINT/$FIRST_ID" -F "body=@-" 2> /dev/null \
-    || log "collapse-duplicate-notes: PUT failed for note $FIRST_ID (continuing)"
+# ── Delete superseded drafts ──────────────────────────────────────────
+# A final exists (we passed the empty-check above), so any drafts from this
+# run are obsolete — the agent posted an early draft, then refined it into
+# a final. Delete the drafts to keep the issue/MR clean.
+if [[ -n "$DRAFT_IDS" ]]; then
+  DRAFT_COUNT="$(printf '%s\n' "$DRAFT_IDS" | wc -l | tr -d ' ')"
+  log "collapse-duplicate-notes: deleting $DRAFT_COUNT superseded $TYPE draft(s) (pre_id=$PRE_ID)"
+  printf '%s\n' "$DRAFT_IDS" | while IFS= read -r DEL_ID; do
+    [[ -z "$DEL_ID" ]] && continue
+    log "collapse-duplicate-notes: DELETE $ENDPOINT/$DEL_ID (superseded draft)"
+    glab api -X DELETE "$ENDPOINT/$DEL_ID" 2> /dev/null \
+      || log "collapse-duplicate-notes: DELETE failed for note $DEL_ID (continuing)"
+  done
 fi
-
-# DELETE every other matching note id (all except the first/oldest).
-printf '%s\n' "$IDS" | tail -n +2 | while IFS= read -r DEL_ID; do
-  [[ -z "$DEL_ID" ]] && continue
-  log "collapse-duplicate-notes: DELETE $ENDPOINT/$DEL_ID"
-  glab api -X DELETE "$ENDPOINT/$DEL_ID" 2> /dev/null \
-    || log "collapse-duplicate-notes: DELETE failed for note $DEL_ID (continuing)"
-done
 
 exit 0
