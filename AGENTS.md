@@ -92,10 +92,37 @@ known recurring bug, documented in the "Lessons learned" section.
 
 Each entry below is a **contract** that every agent and CI step MUST honor
 going forward. The `❌ DO NOT / ✅ DO` pair is the rule; the incident that
-produced it is not recorded here — it lives in git history. Any new
-regression MUST be added in the same format: state the principle, not the
-bug. Numbers are stable (cross-referenced from `.gitlab-ci.yml`, `bin/oc`
-and agent prompts); never renumber.
+produced it is not recorded here — it lives in git history. Numbers are
+stable (a few are cross-referenced from `.gitlab-ci.yml`, `bin/oc` and
+agent prompts); never renumber — a pruned entry leaves a gap, not a shift.
+
+### What is NOT a lesson
+
+A lesson prevents a **class** of mistakes from recurring. It is NOT:
+
+- A bug report for an incident now fixed in code — the code fix prevents
+  recurrence, not the doc.
+- A change of mind or preference shift — that belongs in the relevant
+  charter doc, not here.
+- A one-off discovery ("directory X was missing from `SYNC_PATHS`") — if
+  the fix is a one-line code change, the doc adds noise.
+
+### Admission test (a new entry MUST pass all four)
+
+1. **Class, not instance** — it describes a *class* of mistakes, not one
+   incident. If it only makes sense with the incident's specifics (line
+   numbers, variable names, SHAs), it is a bug report.
+2. **Recurrence without the doc** — an agent or CI step would plausibly
+   repeat this mistake *without* reading this doc. If the code fix alone
+   prevents recurrence, do not add a lesson.
+3. **Stable** — true regardless of current code state. No line numbers, no
+   transient config values, no "until X" clauses.
+4. **Not already covered** — not a restatement of an existing lesson or a
+   charter-doc rule.
+
+If an entry fails any test, fix the code and move on — do not add a
+lesson. The worker MUST justify a new entry against this test (state the
+justification on stdout); the reviewer MUST reject entries that fail it.
 
 1. **Post before refining**
    - ❌ DO NOT refine a comment in a loop before posting it.
@@ -190,25 +217,13 @@ and agent prompts); never renumber.
       mining `/uploads/`. One level only; gated by
       `BOUCLE_PARENT_ATTACHMENTS_DISABLE`.
 
-18. **`bin/update` needs GitHub auth until boucle is public**
-    - ❌ DO NOT assume `bin/update` works unauthenticated on a consumer.
-    - ✅ DO: until boucle is public, propagate upstream fixes manually
-      (push to `origin`, copy `SYNC_PATHS`, bump `.boucle-version`). Remove
-      this entry once `bin/update` succeeds unauthenticated.
-
-19. **Refresh the MR description on every iteration**
+ 19. **Refresh the MR description on every iteration**
     - ❌ DO NOT reuse an existing MR on iteration 2+ with a stale
       description (preview URL, Approach, commit summary drift).
     - ✅ DO: update title + description on every iteration via
       `glab mr update`.
 
-20. **Fill the Approach section in state.md**
-    - ❌ DO NOT leave `## Approach` as the seed placeholder.
-    - ✅ DO: fill it with 2-5 sentences citing the charter doc sections
-      conformed to; CI falls back to an explicit note if the placeholder
-      remains.
-
-21. **Assert preview content matches the head SHA**
+ 21. **Assert preview content matches the head SHA**
     - ❌ DO NOT trust an HTTP 200 on the preview URL (swallowed exit codes,
       CDN cache, byte-identical builds all serve stale content).
     - ✅ DO: write a commit-SHA marker into the build, capture the deploy
@@ -234,13 +249,7 @@ and agent prompts); never renumber.
     - ✅ DO: update only the MR title (iteration count); leave the last
       successful description intact.
 
-25. **Extract MR comment attachments**
-    - ❌ DO NOT fetch MR notes as text-only and drop embedded `/uploads/`
-      links.
-    - ✅ DO: mine `/uploads/` from MR notes, download them, and export
-      `BOUCLE_MR_ATTACHMENTS` for the worker prompt.
-
-26. **Treat attachments as dual-nature**
+ 26. **Treat attachments as dual-nature**
     - ❌ DO NOT frame all attachments as "inspect for context".
     - ✅ DO: decide by intent — "use this file as X" → ship-as-asset
       (`cp` to `public/`, reference in build); "this is what's wrong" →
@@ -451,6 +460,51 @@ and agent prompts); never renumber.
       containing both the human-readable list and the
       `<!-- boucle:split-parent iids=... -->` marker — a single POST is
       atomic.
+
+41. **Anchor VERDICT greps to start-of-line**
+    - ❌ DO NOT use `grep -E 'VERDICT: (PASS|FAIL|UNCERTAIN)'` without a
+      `^` start-of-line anchor in the verdict parsing pipeline. opencode's
+      bash tool traces commands with `set -x`-style output (ANSI color +
+      `$ ` PS4 prompt) in `agent-output.log`. A trace line like
+      `[0m$ [0mglab mr note 36 --message "VERDICT: PASS"` contains the
+      substring `VERDICT: PASS` — an unanchored grep matches it inside the
+      trace, and the log-scraping fallback posts the trace as a verdict
+      note. The result: a malformed note (containing shell trace output)
+      appears on the MR, and CI may parse a phantom VERDICT from a command
+      the agent echoed but never actually posted as a real verdict.
+    - ❌ DO NOT assume the awk `^VERDICT:` exit guard is sufficient. The
+      awk exits on `^VERDICT:` (start-of-line), but the trace line starts
+      with `[0m$` (ANSI reset + PS4), so awk keeps printing past it. The
+      downstream `grep -qiE 'VERDICT: ...'` validation then matches the
+      substring inside the trace line — because it is NOT anchored.
+    - ✅ DO: anchor EVERY `grep` that validates or extracts a VERDICT with
+      `^`: `grep -qiE '^VERDICT: (PASS|FAIL|UNCERTAIN)'` for validation
+      and `grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)'` for extraction.
+      This applies to both the reviewer and e2e jobs, in both the primary
+      note-parse and the log-scraping fallback. The `^` anchor ensures the
+      grep only matches a real `VERDICT:` line (posted by the agent as a
+      verdict), never a substring inside a shell trace or quoted command.
+
+42. **Merger MUST handle "Pipelines must succeed" via MWPS**
+    - ❌ DO NOT fail the merger when `detailed_merge_status` is
+      `pipeline_status_must_pass` or `checking` after a short poll. The
+      force-push (rebase) triggers a new pipeline on the MR branch. If the
+      GitLab project has "Pipelines must succeed" enabled, GitLab refuses
+      to merge until that pipeline completes — and a 2-minute poll window
+      is far too short for a full CI run. The merger fails → `boucle:human`
+      → the MR sits approved-but-unmerged even though everything is fine.
+    - ❌ DO NOT assume `merge_when_pipeline_succeeds=false` is always the
+      right merge mode. It only works when the MR is immediately
+      `mergeable`. When a pipeline is running, GitLab rejects the immediate
+      merge with a 405 and the merger treats the empty `merge_commit_sha`
+      as a hard failure.
+    - ✅ DO: poll `detailed_merge_status` for up to 10 min (60×10s),
+      tolerating `checking`/`pipeline_status_must_pass`/`pipeline_blocked`
+      as transient states. If the pipeline is still running after the poll
+      window, switch to `merge_when_pipeline_succeeds=true` (MWPS) — GitLab
+      merges automatically once the pipeline passes. Post a note so the
+      human knows the merge is scheduled, and exit 0 (the deploy triggered
+      by the eventual merge + the doctor's staleness check close the loop).
 
 ## Documentation self-maintenance
 
