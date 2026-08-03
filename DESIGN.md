@@ -291,8 +291,9 @@ Conteneurs (largeurs max) :
 
 ### 3.7 Variante « angled-split » des CTA
 
-La variante `angled-split` du composant `GeneralCTA` impose deux règles
-supplémentaires, en complément de la charte brute du collectif :
+La variante `angled-split` du composant `GeneralCTA` (implémentée dans
+[`src/components/AngledSplitCTA.astro`](src/components/AngledSplitCTA.astro))
+impose les règles suivantes, en complément de la charte brute du collectif :
 
 1. **Le fond coloré épouse la largeur du texte**, pas celle du conteneur.
    Chaque stripe est rendu avec `display: inline-block; width: fit-content`.
@@ -301,20 +302,32 @@ supplémentaires, en complément de la charte brute du collectif :
    garantit que chaque fragment de ligne wrap garde son propre fond serré,
    sans bandeau plein-largeur entre les lignes.
 
-2. **Coupe diagonale discrète entre la stripe verte (titre, en haut) et la
-   stripe rouge (label CTA, en bas).** L'angle visible doit rester discret,
-   compris **entre 6° et 10°**. La stripe verte conserve un bord inférieur
-   **strictement horizontal** — c'est un fond de texte stable. La stripe
-   rouge, située juste en dessous, est inclinée vers le haut à droite
-   (`transform: skewY(-6°)`), créant une pente ascendante. Le texte rouge
-   est contre-incliné (`skewY(6°)`) pour rester horizontal et lisible.
-   Cette règle évite l'effet « deux triangles » où les deux blocs
-   seraient coupés en biais.
+2. **Composition en deux bandes centrées, l'une au-dessus de l'autre.**
+   La stripe verte porte le titre principal et conserve un bord inférieur
+   **strictement horizontal** — c'est un fond de texte stable, pas un bloc
+   plein-largeur. La stripe rouge, située juste en dessous, est inclinée
+   vers le haut à droite avec une pente ascendante. L'angle visible doit
+   rester discret, compris **entre 2° et 4°** ; la valeur retenue est
+   `--cta-angle: 2.5deg`.
 
-Ces deux contraintes préservent les exigences d'accessibilité existantes :
+3. **Le texte rouge suit la pente du fond rouge.** Contrairement à une
+   contre-inclinaison qui garderait le texte horizontal, le label CTA est
+   transformé avec le même `skewY` que sa bande. Cela crée la dynamique de
+   progression visuelle attendue : le sous-titre « monte » avec son fond.
+
+4. **Entrée animée des deux blocs.** Au premier rendu, les deux stripes
+   apparaissent par un léger glissement vers le haut accompagné d'un fondu
+   (`transform: translateY(18px)` → `0`, `opacity: 0` → `1`). La stripe
+   verte démarre en premier, la stripe rouge suit avec un délai. L'animation
+   utilise uniquement `transform` et `opacity` (propriétés composites),
+   reste dans `--duration-slow` (420 ms), et est annulée sous
+   `@media (prefers-reduced-motion: reduce)`.
+
+Ces contraintes préservent les exigences d'accessibilité existantes :
 hit-area vertical ≥ 44 px sur les deux stripes, texte blanc sur fond vert
 ou rouge du drapeau (contraste AA), et `aria-labelledby` pointant vers
-le `<h2>` du titre.
+le `<h2>` du titre. La stripe rouge décorative porte `aria-hidden="true"`
+pour ne pas ajouter de bruit au lecteur d'écran.
 
 ### 3.8 Le « vibe » en une phrase
 
