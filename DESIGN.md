@@ -295,6 +295,61 @@ rouge par un comité de rédaction qui sait ce qu'il fait.** Pas un tract
 agressif pour autant — un tract **tenu**, lisible, qui assume son sujet
 sans crier plus fort que nécessaire.
 
+### 3.8 « Grunge highlight » du lien featured
+
+Le lien **« Right to Resist »** dans le header principal (`navItems[3]`
+dans [`src/components/Header.astro`](src/components/Header.astro))
+bénéficie d'un surligné *rough marker stroke* qui apparaît **derrière**
+le texte au `:hover` et `:focus-visible`, et **disparaît** lorsque
+l'interaction se termine. Il ne faut jamais se substituer à un
+`text-decoration: underline`.
+
+#### Contrastes par surface
+
+| Surface du header | Fond du surligné | Texte au hover/focus | Contraste |
+| --- | --- | --- | --- |
+| Étendu (fond noir) | `--color-flag-white` | `--color-flag-red` | Rouge sur blanc ≥ 4.5:1 (AA) |
+| Défilé (fond rouge sang) | `--color-flag-white` | `--color-flag-red` | Rouge sur blanc ≥ 4.5:1 (AA) |
+| Clair (fond blanc, futur) | `--color-flag-red` | `--color-flag-white` | Blanc sur rouge ≥ 4.5:1 (AA) |
+
+> Le cas blanc-sur-rouge au hover a été abandonné pour le header
+> scrollé : le blanc sur le rouge sang `--color-flag-red`
+> (`oklch(53% 0.21 27)`) n'atteint pas 4.5:1 à la taille de texte
+> `--text-sm`. On garde donc le surligné **blanc** et on inverse
+> le texte en rouge.
+
+#### Règles d'implémentation
+
+- Le surligné est un pseudo-élément `::after` positionné en arrière-plan
+  (`z-index: -1`) avec `left: -2px; right: -2px; bottom: 2px; height: 70%`.
+- La texture est produite par **deux gradients linéaires superposés**
+  (angles 104deg et 183deg) et une légère rotation (`transform:
+  rotate(-1deg)`), créant des bords irréguliers sans recourir à une
+  image externe.
+- La couleur du surligné est pilotée par `--featured-highlight-bg`,
+  la couleur du texte au hover/focus par
+  `--featured-text-on-highlight`. Les deux tokens changent en fonction
+  de la surface (default / scrolled / light).
+- La révélation se fait par `clip-path: inset(0 100% 0 0)` →
+  `clip-path: inset(0 0 0 0)`, avec `transition: clip-path
+  var(--duration-base) var(--ease-out)`. Lorsque le pointeur quitte
+  l'élément ou que le focus disparaît, le surligné retombe dans son
+  état masqué.
+- Sous `@media (prefers-reduced-motion: reduce)`, la transition du
+  pseudo-élément est annulée (`transition: none`) et le surligné reste
+  masqué. Les tokens de durée étant déjà réduits à `0ms`, aucune
+  animation ne persiste.
+
+#### Accessibilité
+
+- La hit-area verticale du lien reste ≥ 44 px héritée de
+  `.site-header__link` (`min-height: 44px`).
+- L'outline `:focus-visible` de 2 px
+  (`outline: 2px solid var(--color-flag-red)`) est préservée sur le
+  lien featured.
+- Aucune information n'est véhiculée par la couleur seule : le texte
+  reste lisible même sans surligné.
+
 ---
 
 ## 4. Les trois règles d'or
