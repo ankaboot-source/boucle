@@ -168,15 +168,6 @@
 	opacity: 1;
 }
 
-.featured-feed__eyebrow {
-	font-family: var(--font-body);
-	font-size: var(--text-xs);
-	font-weight: var(--weight-bold);
-	letter-spacing: var(--tracking-mega);
-	text-transform: uppercase;
-	color: var(--color-flag-red);
-}
-
 .featured-feed__title {
 	font-family: var(--font-heading);
 	font-size: var(--text-base);
@@ -260,7 +251,7 @@ img.hero__symbol {
 
 /*
  * `.accent-inline` — a 32-48 px decorative image nestled inside a line of
- * text (eyebrow, lede, etc.). Sized so it never dominates the line.
+ * body text (lede, intro, etc.). Sized so it never dominates the line.
  */
 .accent-inline {
 	display: inline-block;
@@ -442,10 +433,6 @@ img.hero__symbol {
 	display: flex;
 	flex-direction: column;
 	gap: var(--space-2xs);
-}
-
-.site-footer__eyebrow {
-	color: var(--color-flag-red);
 }
 
 .site-footer__title {

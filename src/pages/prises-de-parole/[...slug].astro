@@ -53,7 +53,6 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 
 		<article class="entry__article">
 			<header class="entry__header">
-				<p class="eyebrow">Prise de parole</p>
 				<h1 class="entry__title">{d.title}</h1>
 				<p class="entry__meta">
 					<time datetime={d.date.toISOString()}>
@@ -108,16 +107,6 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 </Layout>
 
 <style>
-	.eyebrow {
-		font-family: var(--font-body);
-		font-size: var(--text-xs);
-		font-weight: var(--weight-bold);
-		letter-spacing: var(--tracking-mega);
-		text-transform: uppercase;
-		color: var(--color-accent);
-		margin: 0;
-	}
-
 	/* ---------- Page wrapper ---------- */
 	.entry {
 		display: flex;

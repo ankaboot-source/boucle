@@ -55,19 +55,6 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		  ====================================================================
 		-->
 		<header class="collectif__header">
-			<p class="eyebrow">
-				<img
-					class="accent-inline"
-					src="/symbols/35374425-dome-rocher-jerusalem-aquarelle.jpg"
-					alt=""
-					loading="lazy"
-					decoding="async"
-					width="32"
-					height="32"
-					aria-hidden="true"
-				/>
-				Le collectif
-			</p>
 			<h1 class="collectif__title">S'organiser, près de chez soi.</h1>
 			<p class="collectif__lede">
 				Le Collectif Urgence Palestine s'appuie sur des <strong>sections
@@ -88,7 +75,6 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 			<h2 id="cta-strip-title" class="visually-hidden">Rejoindre le collectif</h2>
 
 			<article class="cta-card cta-card--primary">
-				<p class="cta-card__eyebrow">Pas encore de section près de chez toi&nbsp;?</p>
 				<h3 class="cta-card__title">Créer un collectif local</h3>
 				<p class="cta-card__body">
 					Remplis le formulaire du collectif national, on te recontacte
@@ -116,7 +102,6 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 			</article>
 
 			<article class="cta-card cta-card--secondary">
-				<p class="cta-card__eyebrow">Étudiante, étudiant&nbsp;?</p>
 				<h3 class="cta-card__title">Je m'engage</h3>
 				<p class="cta-card__body">
 					Rejoins la mobilisation étudiante en solidarité avec la
@@ -141,7 +126,6 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		-->
 		<section class="locales" aria-labelledby="locales-title">
 			<header class="section-head">
-				<p class="eyebrow">Sections locales</p>
 				<h2 id="locales-title">{sections.length} villes, un même combat.</h2>
 				<p class="section-head__lede">
 					Clique sur une ville pour voir les coordonnées complètes
@@ -257,7 +241,6 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 			mobilisationWithBody.length > 0 && (
 				<section class="etudiantes" aria-labelledby="etudiantes-title">
 					<header class="section-head">
-						<p class="eyebrow">Mobilisation étudiante</p>
 						<h2 id="etudiantes-title">Sur les campus, en lien avec le national.</h2>
 						<p class="section-head__lede">
 							La coordination étudiante du collectif relaie les appels
@@ -423,17 +406,7 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		border: 0;
 	}
 
-	.eyebrow {
-		font-family: var(--font-body);
-		font-size: var(--text-xs);
-		font-weight: var(--weight-bold);
-		letter-spacing: var(--tracking-mega);
-		text-transform: uppercase;
-		color: var(--color-accent);
-		margin: 0;
-	}
-
-	/* ---------- Page wrapper ---------- */
+/* ---------- Page wrapper ---------- */
 	.collectif {
 		display: flex;
 		flex-direction: column;
@@ -520,21 +493,6 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 
 	.cta-card--secondary::after {
 		background: var(--color-flag-green);
-	}
-
-	.cta-card__eyebrow {
-		font-family: var(--font-body);
-		font-size: var(--text-xs);
-		font-weight: var(--weight-semibold);
-		letter-spacing: var(--tracking-mega);
-		text-transform: uppercase;
-		opacity: 0.7;
-		margin: 0;
-	}
-
-	.cta-card--primary .cta-card__eyebrow {
-		color: var(--color-flag-red);
-		opacity: 1;
 	}
 
 	.cta-card__title {
