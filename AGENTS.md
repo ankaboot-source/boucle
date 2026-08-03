@@ -364,7 +364,78 @@ and agent prompts); never renumber.
       per aspect of the implementation. Each bullet cites the charter
       doc section it conforms to (e.g. "Conforms to DESIGN.md §2 —
       sharp corners via `--radius-sharp`"). Bullet points and blank
-       lines render properly in GitLab markdown.
+      lines render properly in GitLab markdown.
+
+37. **Push consumer fixes upstream in the SAME session**
+    - ❌ DO NOT land a fix on the consumer repo (`master`) and defer the
+      upstream push to "later". The upstream-first workflow
+      (`.opencode/UPSTREAM-FIX-WORKFLOW.md`) says "fix upstream FIRST,
+      then update consumer" — but in practice fixes land on consumer
+      `master` first (that's where the work happens) and the upstream
+      push is forgotten. This grows the divergence between consumer
+      `master` and upstream `main` (100+ commits behind/ahead on a
+      consumer repo as of 2026-08) until the two lines become
+      unmanageable.
+    - ❌ DO NOT push consumer `master` directly to upstream
+      (`origin/main`). The two repos use different default branches
+      (`master` vs `main`) and have divergent histories — a direct
+      push is non-fast-forward and will be rejected (or worse,
+      force-pushed, destroying upstream history).
+    - ❌ DO NOT trust the commit-count divergence as a measure of
+      real drift. `bin/update` syncs upstream → consumer via
+      `cp -r` (file replacement, not git merge), so each sync creates
+      a new commit SHA on consumer that doesn't match the upstream
+      SHA. Git then reports upstream commits as "not present" even
+      though their **content** is already there. Check file content,
+      not commit count, to assess real drift.
+    - ✅ DO: when a fix lands on consumer `master`, push it upstream
+      **in the same session**: branch from `origin/main`, cherry-pick
+      the consumer commit(s), push the branch, open a PR. This is
+      mandatory — not optional, not "later".
+    - ✅ DO: accept that consumer `master` and upstream `main` are
+      **intentionally divergent** — consumer has consumer-specific
+      features (`feat:` commits) that will never go upstream, and
+      upstream has its own commit history. The goal is not zero
+      divergence but **no unpushed fixes** — every fix on consumer
+      must have a corresponding upstream PR (merged or open).
+
+38. **Never leak consumer information in upstream contributions**
+    - ❌ DO NOT include consumer-identifying information in upstream
+      (boucle) contributions — PRs, issues, commits, branch names,
+      or any artifact visible on the upstream repo. The upstream
+      boucle repo is shared/public; consumer project information is
+      private. This includes:
+      - Consumer project names (e.g. the consumer domain or repo name)
+      - Consumer GitLab hostnames or project paths
+      - Consumer issue/MR IIDs (e.g. "#35" on the consumer repo)
+      - Consumer-specific configuration values
+    - ❌ DO NOT write "fixes from work on <consumer-name>" or
+      "found on <consumer-domain>" in PR descriptions. This leaks
+      the consumer identity to anyone reading the upstream repo.
+    - ✅ DO: use generic language in upstream contributions:
+      "consumer work", "a consumer repo", "discovered during
+      consumer testing" — never the actual consumer name.
+    - ✅ DO: strip consumer issue references from commit messages
+      before cherry-picking upstream. A consumer issue `(#35)` becomes
+      nothing or a generic `(consumer)` when pushed upstream.
+    - ✅ DO: ask the human explicitly if a consumer name MUST be
+      shared upstream for context — otherwise it stays private.
+
+39. **Sync skills to consumers**
+    - ❌ DO NOT omit `.opencode/skill/` from the `SYNC_PATHS` in
+      `bin/update`. The worker prompt references design skills
+      (`frontend-design`, `effective-ui-design`, `ui-ux-pro-max`,
+      etc.) that live in `.opencode/skill/` — but if that directory
+      is not synced to the consumer repo, the worker cannot load
+      them and implements UI without any design expertise. The
+      skills are discovered by opencode via the filesystem, not via
+      `opencode.json`, so they must be physically present on the
+      consumer.
+    - ✅ DO: keep `.opencode/skill` in `SYNC_PATHS` so every
+      `bin/update` copies the skill directory to the consumer repo.
+      Verify after sync that `.opencode/skill/` exists on the
+      consumer with at least the design skills referenced in
+      `worker.md`.
 
 40. **Split bookkeeping MUST be atomic and label-first**
     - ❌ DO NOT post the human "Split into" comment, the
@@ -380,6 +451,21 @@ and agent prompts); never renumber.
       containing both the human-readable list and the
       `<!-- boucle:split-parent iids=... -->` marker — a single POST is
       atomic.
+
+41. **Bot merge webhooks MUST trigger catchup**
+    - ❌ DO NOT filter ALL up-bot events in the dispatch ACTOR guard.
+      When the merger job (running as up-bot) merges a MR, the merge
+      webhook fires with `ACTOR=up-bot`. If the guard exits before
+      reaching the `merge` case, no catchup is triggered and the issue
+      stays stuck at `boucle:merging` forever. The merger job's e2e
+      close path is unreliable — it can fail (pipeline error, runner
+      outage), leaving no fallback close path.
+    - ✅ DO: the ACTOR guard MUST allow up-bot merge webhooks through:
+      `if [ "$ACTOR" = "up-bot" ] && [ "$MR_ACTION" != "merge" ]; then
+      exit 0; fi`. Extract `MR_ACTION` BEFORE the guard so the exception
+      can be evaluated. This ensures the `merge` case triggers catchup
+      to close the issue + cascade the parent, even when the merger
+      job's e2e path failed.
 
 ## Documentation self-maintenance
 
