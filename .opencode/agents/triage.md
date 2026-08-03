@@ -148,11 +148,11 @@ You may also post a **first-pass draft** (with the `<!-- boucle:draft role=triag
 - Describes the **user-visible result**, not the implementation mechanism.
 - If you cannot summarize the issue in 4 plain phrases, the issue is probably NEEDS-SPLIT or NEEDS-INFO — flag it accordingly.
 
-### Visual preview rules (optional, exceptional)
+### Visual preview rules (mandatory for UI/UX issues)
 
-- The default is to **do nothing**. Most issues get only the TL;DR.
-- Only for UI/UX issues where a mockup genuinely helps the human validate the spec.
-- If justified, write two files to `.boucle/<issue>/`:
+- **For any UI/UX issue, you MUST produce a visual mockup.** A UI/UX issue is one where the user-visible result involves layout, visual design, interaction, or frontend rendering. When in doubt, produce the mockup — the cost is low and the human benefits from seeing the proposed outcome before any code is written.
+- For non-UI/UX issues (pure backend, config, CI, tooling, dependencies), the mockup is not needed — the TL;DR suffices.
+- Write two files to `.boucle/<issue>/`:
   - `preview.html` — self-contained HTML mockup (inline CSS, no external dependencies, mobile + desktop in one file).
   - `RENDER_REQUEST` — one line of justification (why this mockup helps for this issue).
 - An empty or generic `RENDER_REQUEST` → the CI ignores the request.

@@ -336,7 +336,7 @@ flowchart LR
 | `bin/doctor` | Day-0 verification and diagnostics: ~20 checks (labels present, CI variables, branch protection, runner available, agents resolvable, CF Pages reachable, `.boucle-version` up to date) |
 | `bin/fetch-issue-attachments` | Downloads issue attachments to `.boucle/<issue>/attachments/` with quotas `BOUCLE_IMAGE_MAX_BYTES` and `BOUCLE_IMAGE_TOTAL_MAX_BYTES`. Inherits attachments from the parent issue (one level) when the issue is a sub-issue carrying a `## Parent issue` section; disable with `BOUCLE_PARENT_ATTACHMENTS_DISABLE` |
 | `bin/fetch-mr-attachments` | Downloads attachments uploaded to MR comments (reviewer screenshots, human mockups) to `.boucle/<issue>/mr-attachments/` with the same `BOUCLE_IMAGE_MAX_BYTES` and `BOUCLE_IMAGE_TOTAL_MAX_BYTES` quotas as `bin/fetch-issue-attachments`. No parent inheritance (MRs have no parent). Gated on `BOUCLE_MR_IID` being non-empty (no MR on first run). Mirrors `bin/fetch-issue-attachments` for the feedback channel |
-| `bin/render-preview.cjs` | Renders `preview.html` → `preview.png` via `@sparticuz/chromium` + `puppeteer-core` (visual preview layer attached to MRs) |
+| `bin/render-preview.cjs` | Renders `preview.html` → `preview.png` via `@sparticuz/chromium` + `puppeteer-core` (visual preview layer attached to triage comments; systematic for UI/UX issues, fires for all READY dispositions regardless of spec gate) |
 | `bin/collapse-duplicate-notes` | Collapses duplicate comments: if an agent posts v2, CI replaces the first one (stable Note ID) |
 
 ---
