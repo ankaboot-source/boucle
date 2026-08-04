@@ -583,6 +583,39 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       commit sequence. The files are staged correctly; only the exit code
       is the problem. Verify with `git status` after staging if needed.
 
+47. **Anchor log-scraping awk marker patterns to start-of-line**
+    - ❌ DO NOT use an unanchored awk regex like
+      `$0 ~ "<!-- boucle:verdict v=1 role=reviewer sha=... -->"` to detect
+      the start of a drafted verdict in `agent-output.log`. When an agent
+      exhausts its step budget mid-draft, its stdout often contains
+      **meta-instructions to itself** that quote the marker in prose, e.g.
+      `**Post the final verdict** with the \`<!-- boucle:verdict v=1
+      role=reviewer sha=abc -->\` marker.` An unanchored `$0 ~` matches
+      the marker substring inside that prose sentence, sets `found=1`, and
+      the awk scrapes everything from the prose line through the trailing
+      `VERDICT: PASS` — promoting a self-referential draft (containing
+      instructions like "The next step is to post this final verdict") into
+      a real verdict note. This was MR !40 on a consumer repo: the reviewer
+      drafted a PASS verdict with the marker quoted in its own
+      recommendation prose, the log-scraping fallback matched the prose
+      marker, and a malformed PASS verdict was posted — merging a change
+      that had NOT addressed the human's latest feedback.
+    - ❌ DO NOT assume lesson #41 (anchor `VERDICT:` greps) covers this.
+      Lesson #41 anchors the `VERDICT:` extraction/validation greps; this
+      lesson anchors the **marker-detection** awk pattern that gates the
+      whole scrape. A marker matched in prose feeds a `VERDICT:` line that
+      IS at start-of-line (so #41's guard passes), but the surrounding
+      block is still prose, not a real verdict.
+    - ✅ DO: anchor EVERY awk marker-detection pattern with `^` (start of
+      line): `$0 ~ "^<!-- boucle:verdict v=1 role=reviewer sha=" sha " -->"`
+      and `/^<!-- boucle:verdict v=1 role=reviewer/` and
+      `/^<!-- boucle:draft role=reviewer -->/`. A real marker is always the
+      first token on its line (the agent posts it as a bare HTML comment);
+      a marker quoted in prose is always preceded by other text. This
+      applies to ALL five log-scraping fallbacks: reviewer `boucle:verdict`
+      + `boucle:draft`, e2e `boucle:verdict` + `boucle:draft`, and triage
+      `boucle:triage` + `boucle:draft`.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.

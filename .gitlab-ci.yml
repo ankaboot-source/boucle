@@ -953,7 +953,7 @@ triage:
           # to the end of the fenced block. The agent prints the full comment
           # (often inside a ``` fence) in its stdout when it can't call glab.
           DRAFTED_COMMENT=$(awk '
-            /<!-- boucle:triage v=1 -->/ { found=1 }
+            /^<!-- boucle:triage v=1 -->/ { found=1 }
             found { print; if (/^## Disposition/) { disp=1 } }
             disp && /^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$/ { exit }
           ' "$AGENT_LOG" 2>/dev/null || echo "")
@@ -962,7 +962,7 @@ triage:
           # triage comment by replacing the draft marker with the triage marker.
           if [ -z "$DRAFTED_COMMENT" ]; then
             DRAFTED_COMMENT=$(awk '
-              /<!-- boucle:draft role=triage -->/ { found=1 }
+              /^<!-- boucle:draft role=triage -->/ { found=1 }
               found { print; if (/^## Disposition/) { disp=1 } }
               disp && /^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$/ { exit }
             ' "$AGENT_LOG" 2>/dev/null || echo "")
@@ -2271,12 +2271,12 @@ reviewer:
           # to the VERDICT line. Try SHA-anchored first, then SHA-unanchored
           # (tolerates agent omitting/malforming the SHA in the drafted marker).
           DRAFTED_VERDICT=$(awk -v sha="$MR_HEAD" '
-            $0 ~ "<!-- boucle:verdict v=1 role=reviewer sha=" sha " -->" { found=1 }
+            $0 ~ "^<!-- boucle:verdict v=1 role=reviewer sha=" sha " -->" { found=1 }
             found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
           ' "$AGENT_LOG" 2> /dev/null || echo "")
           if [ -z "$DRAFTED_VERDICT" ]; then
             DRAFTED_VERDICT=$(awk '
-              /<!-- boucle:verdict v=1 role=reviewer/ { found=1 }
+              /^<!-- boucle:verdict v=1 role=reviewer/ { found=1 }
               found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
             ' "$AGENT_LOG" 2> /dev/null || echo "")
             if [ -n "$DRAFTED_VERDICT" ]; then
@@ -2288,7 +2288,7 @@ reviewer:
           # by replacing the draft marker with the verdict marker.
           if [ -z "$DRAFTED_VERDICT" ]; then
             DRAFTED_VERDICT=$(awk -v sha="$MR_HEAD" '
-              /<!-- boucle:draft role=reviewer -->/ { found=1 }
+              /^<!-- boucle:draft role=reviewer -->/ { found=1 }
               found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
             ' "$AGENT_LOG" 2> /dev/null || echo "")
             if [ -n "$DRAFTED_VERDICT" ]; then
@@ -3226,7 +3226,7 @@ e2e:
         AGENT_LOG="$CI_PROJECT_DIR/.boucle/$BOUCLE_ISSUE/agent-output.log"
         if [ -f "$AGENT_LOG" ]; then
           DRAFTED_VERDICT=$(awk '
-            /<!-- boucle:verdict v=1 role=e2e/ { found=1 }
+            /^<!-- boucle:verdict v=1 role=e2e/ { found=1 }
             found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
           ' "$AGENT_LOG" 2>/dev/null || echo "")
           # If no boucle:verdict found, try the boucle:draft marker (first-pass
@@ -3234,7 +3234,7 @@ e2e:
           # verdict by replacing the draft marker with the verdict marker.
           if [ -z "$DRAFTED_VERDICT" ]; then
             DRAFTED_VERDICT=$(awk '
-              /<!-- boucle:draft role=e2e -->/ { found=1 }
+              /^<!-- boucle:draft role=e2e -->/ { found=1 }
               found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
             ' "$AGENT_LOG" 2>/dev/null || echo "")
             if [ -n "$DRAFTED_VERDICT" ]; then
