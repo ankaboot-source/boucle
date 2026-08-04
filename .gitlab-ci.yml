@@ -1754,7 +1754,12 @@ worker:
       # from a past `git add -A` (gitignore doesn't untrack); staging it here
       # re-commits stale state and causes checkout conflicts on the next run.
       if ! git diff --quiet || ! git diff --cached --quiet; then
-        git add -A -- ':!.boucle'
+        # `|| true`: git exits 1 when an excluded pathspec matches a gitignored
+        # entry (e.g. .boucle/), even though the non-ignored files ARE staged
+        # correctly. Without `|| true`, that non-fatal warning aborts the
+        # script under `set -e` before `git commit` runs — changes are staged
+        # but never committed, and lost when CI destroys the environment.
+        git add -A -- ':!.boucle' || true
         git commit -m "feat: worker changes for #$BOUCLE_ISSUE [skip ci]" --no-verify
       fi
 

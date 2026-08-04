@@ -568,6 +568,21 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       agent uses the wrong marker, the parser won't act on a draft that
       lacks `## TL;DR`.
 
+46. **Tolerate non-fatal `git add` warnings under `set -e`**
+    - ❌ DO NOT use `git add -A -- ':!<path>'` without a `|| true` guard when
+      `<path>` may be gitignored. Git exits 1 when an excluded pathspec
+      matches a gitignored entry (e.g. `.boucle/`), even though the
+      non-ignored files ARE staged correctly. The warning is non-fatal
+      to the staging, but fatal to the script: under `set -e`, that exit 1
+      aborts before the next command (`git commit`) runs — changes are
+      staged but never committed, and lost when CI destroys the
+      environment. This silently defeats the safety-net commit (lesson 14)
+      and produces an empty MR (lesson 15).
+    - ✅ DO: append `|| true` to any `git add` that uses an exclusion
+      pathspec (`':!<path>'`) so a non-fatal git warning cannot abort the
+      commit sequence. The files are staged correctly; only the exit code
+      is the problem. Verify with `git status` after staging if needed.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
