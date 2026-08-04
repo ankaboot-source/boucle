@@ -33,7 +33,7 @@ const { title, ctaLabel, headingId = "general-cta-title" } = Astro.props;
 		<h2 id={headingId} class="angled-split-cta__title"><span>{title}</span></h2>
 	</div>
 	<div class="angled-split-cta__stripe angled-split-cta__stripe--label" aria-hidden="true">
-		<p class="angled-split-cta__label"><span class="angled-split-cta__label-slope"><span class="angled-split-cta__label-text">{ctaLabel}</span></span></p>
+		<p class="angled-split-cta__label"><span>{ctaLabel}</span></p>
 	</div>
 </section>
 
@@ -65,7 +65,7 @@ const { title, ctaLabel, headingId = "general-cta-title" } = Astro.props;
 		background: transparent;
 		padding-block: 0;
 		position: relative;
-		z-index: 2;
+		z-index: 1;
 	}
 
 	.angled-split-cta__title {
@@ -88,13 +88,15 @@ const { title, ctaLabel, headingId = "general-cta-title" } = Astro.props;
 		-webkit-box-decoration-break: clone;
 	}
 
-	/* Red label stripe: rises toward the right; text follows the slope. */
+	/* Red label stripe: rises toward the right; text follows the slope.
+	 * It overlaps slightly on top of the green headline stripe so the
+	 * composition reads as one ascending block rather than two separate bands. */
 	.angled-split-cta__stripe--label {
 		background: transparent;
 		padding-block: 0;
 		position: relative;
-		z-index: 1;
-		margin-top: 0.35em;
+		z-index: 2;
+		margin-top: -0.35em;
 	}
 
 	.angled-split-cta__label {
@@ -117,17 +119,7 @@ const { title, ctaLabel, headingId = "general-cta-title" } = Astro.props;
 		max-width: 100%;
 	}
 
-	/* The label's inner slope keeps the text itself on the ascending line;
-	 * the text is counter-skewed so it remains readable, but visually it sits
-	 * on the same rising axis as the red background. */
-	.angled-split-cta__label-slope {
-		display: inline-block;
-		transform: skewY(var(--cta-angle));
-		transform-origin: top left;
-		max-width: 100%;
-	}
-
-	.angled-split-cta__label-text {
+	.angled-split-cta__label span {
 		display: inline;
 		overflow-wrap: break-word;
 	}
