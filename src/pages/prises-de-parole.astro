@@ -132,7 +132,7 @@ const totalLabel = `${entries.length} prise${entries.length > 1 ? "s" : ""} de p
 						const thumb = firstImage(entry);
 						const cat = (entry.data.category ?? "communique") as Category;
 						return (
-							<li class="entry-card">
+														<li class="entry-card" data-reveal>
 								<a class="entry-card__link" href={`/prises-de-parole/${slug}/`}>
 									<div class="entry-card__media">
 										{thumb ? (
@@ -167,9 +167,9 @@ const totalLabel = `${entries.length} prise${entries.length > 1 ? "s" : ""} de p
 												{entry.data.description}
 											</p>
 										)}
-										<span class="entry-card__cta" aria-hidden="true">
-											Lire <span>→</span>
-										</span>
+																		<span class="entry-card__cta" aria-hidden="true">
+																			Lire <svg class="arrow-icon" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 8h14M9 2l6 6-6 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+																		</span>
 									</div>
 								</a>
 							</li>
@@ -287,7 +287,7 @@ const totalLabel = `${entries.length} prise${entries.length > 1 ? "s" : ""} de p
 		width: 100%;
 		background: var(--color-bg-soft);
 		border: 1px solid var(--color-border);
-		border-radius: var(--radius-m);
+		border-radius: var(--radius-sharp);
 		overflow: hidden;
 		text-decoration: none;
 		color: var(--color-ink);
@@ -421,11 +421,14 @@ const totalLabel = `${entries.length} prise${entries.length > 1 ? "s" : ""} de p
 		color: var(--color-accent);
 	}
 
-	.entry-card__cta span {
+	.entry-card__cta .arrow-icon {
+		width: 1em;
+		height: 1em;
 		transition: transform var(--duration-base) var(--ease-out);
 	}
 
-	.entry-card__link:hover .entry-card__cta span {
+	.entry-card__link:hover .entry-card__cta .arrow-icon,
+	.entry-card__link:focus-visible .entry-card__cta .arrow-icon {
 		transform: translateX(4px);
 	}
 
@@ -435,11 +438,51 @@ const totalLabel = `${entries.length} prise${entries.length > 1 ? "s" : ""} de p
 		color: var(--color-text-muted);
 	}
 
+	/* ---------- Reveal animation ---------- */
+	.entry-card[data-reveal] {
+		opacity: 0;
+		transform: translateY(12px);
+		transition:
+			opacity var(--duration-slow) var(--ease-out),
+			transform var(--duration-slow) var(--ease-out);
+	}
+
+	.entry-card[data-reveal].is-revealed {
+		opacity: 1;
+		transform: translateY(0);
+	}
+
 	/* ---------- Reduced motion ---------- */
 	@media (prefers-reduced-motion: reduce) {
+		.entry-card[data-reveal],
 		.entry-card__link,
-		.entry-card__cta span {
+		.entry-card__cta .arrow-icon {
 			transition: none;
+		}
+
+		.entry-card[data-reveal] {
+			opacity: 1;
+			transform: none;
 		}
 	}
 </style>
+
+																							<script>
+	(function revealCards() {
+		if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+		const cards = document.querySelectorAll<HTMLElement>(".entry-card[data-reveal]");
+		if (!cards.length) return;
+		const observer = new IntersectionObserver(
+			(entries) => {
+				entries.forEach((entry) => {
+					if (entry.isIntersecting) {
+						entry.target.classList.add("is-revealed");
+						observer.unobserve(entry.target);
+					}
+				});
+			},
+			{ threshold: 0.1, rootMargin: "0px 0px -40px 0px" }
+		);
+		cards.forEach((card) => observer.observe(card));
+	})();
+</script>

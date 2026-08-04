@@ -110,18 +110,20 @@
 	text-decoration: none;
 	transition:
 		border-color var(--duration-base) var(--ease-out),
-		transform var(--duration-fast) var(--ease-out);
+		box-shadow var(--duration-base) var(--ease-out),
+		transform var(--duration-base) var(--ease-out);
 }
 
 .featured-feed__card:hover,
 .featured-feed__card:focus-visible {
-	border-color: var(--color-accent);
+	border-color: var(--color-ink);
 	transform: translateY(-2px);
+	box-shadow: var(--shadow-lift);
 }
 
 .featured-feed__card:focus-visible {
 	outline: 2px solid var(--color-accent);
-	outline-offset: -2px;
+	outline-offset: 3px;
 }
 
 .featured-feed__card--ratio-1-1 {
@@ -142,19 +144,17 @@
 	width: 100%;
 	height: 100%;
 	object-fit: cover;
-	transition: transform var(--duration-base) var(--ease-out);
-}
-
-.featured-feed__card:hover .featured-feed__image,
-.featured-feed__card:focus-visible .featured-feed__image {
-	transform: scale(1.04);
+	/* No scale transform on hover: the card animates like the others (translateY
+	 * + border + shadow) and the image stays still so the visual remains fully
+	 * visible and stable. */
 }
 
 /*
- * The overlay sits as a solid black strip at the bottom of the card so the
- * title and meta are always visible — never hidden behind hover alone. The
- * link already has an aria-label for screen readers, so the overlay is marked
- * aria-hidden in the component to avoid redundant announcements.
+ * The overlay is a solid black strip anchored at the bottom of the card.
+ * It covers at most ~40% of the card height; title and date are hidden by
+ * default and revealed on hover/focus so the visual stays fully visible at
+ * rest. The link already has an aria-label for screen readers, so the overlay
+ * is marked aria-hidden in the component to avoid redundant announcements.
  */
 .featured-feed__overlay {
 	position: absolute;
@@ -163,15 +163,41 @@
 	flex-direction: column;
 	justify-content: flex-end;
 	gap: var(--space-2xs);
+	min-height: 30%;
+	max-height: 40%;
 	padding: var(--space-s);
 	background: var(--color-flag-black);
 	color: var(--color-ink-on-dark);
-	transition: background-color var(--duration-base) var(--ease-out);
+	clip-path: inset(100% 0 0 0);
+	transform: translateY(0);
+	transition:
+		clip-path var(--duration-slow) var(--ease-out),
+		transform var(--duration-slow) var(--ease-out),
+		background-color var(--duration-base) var(--ease-out);
 }
 
 .featured-feed__card:hover .featured-feed__overlay,
 .featured-feed__card:focus-visible .featured-feed__overlay {
+	clip-path: inset(0 0 0 0);
 	background: var(--color-ink);
+	transform: translateY(0);
+}
+
+.featured-feed__title,
+.featured-feed__date {
+	transform: translateY(12px);
+	opacity: 0;
+	transition:
+		transform var(--duration-slow) var(--ease-out),
+		opacity var(--duration-slow) var(--ease-out);
+}
+
+.featured-feed__card:hover .featured-feed__title,
+.featured-feed__card:focus-visible .featured-feed__title,
+.featured-feed__card:hover .featured-feed__date,
+.featured-feed__card:focus-visible .featured-feed__date {
+	transform: translateY(0);
+	opacity: 1;
 }
 
 .featured-feed__title {
@@ -186,7 +212,26 @@
 	font-family: var(--font-body);
 	font-size: var(--text-xs);
 	color: var(--color-ink-on-dark);
+	opacity: 0;
+}
+
+.featured-feed__card:hover .featured-feed__date,
+.featured-feed__card:focus-visible .featured-feed__date {
 	opacity: 0.85;
+}
+
+/* Reveal animation for featured cards. */
+.featured-feed__item[data-reveal] {
+	opacity: 0;
+	transform: translateY(12px);
+	transition:
+		opacity var(--duration-slow) var(--ease-out),
+		transform var(--duration-slow) var(--ease-out);
+}
+
+.featured-feed__item[data-reveal].is-revealed {
+	opacity: 1;
+	transform: translateY(0);
 }
 
 /* ---------- Hero ---------- */
@@ -387,8 +432,19 @@ img.hero__symbol {
 	gap: var(--space-2xs);
 	padding: var(--space-l);
 	background: var(--color-bg-soft);
-	border-radius: var(--radius-l);
+	border-radius: var(--radius-sharp);
 	border: 1px solid var(--color-border);
+	transition:
+		transform var(--duration-base) var(--ease-out),
+		border-color var(--duration-base) var(--ease-out),
+		box-shadow var(--duration-base) var(--ease-out);
+}
+
+.pillar:hover,
+.pillar:focus-within {
+	transform: translateY(-2px);
+	border-color: var(--color-ink);
+	box-shadow: var(--shadow-lift);
 }
 
 .pillar__index {
@@ -534,4 +590,47 @@ img.hero__symbol {
 	clip: rect(0, 0, 0, 0);
 	white-space: nowrap;
 	border: 0;
+}
+
+/* Respect users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+	.featured-feed__card,
+	.featured-feed__overlay,
+	.featured-feed__title,
+	.featured-feed__date,
+	.featured-feed__item[data-reveal],
+	.featured-feed__image,
+	.pillar,
+	.pillar:hover,
+	.pillar:focus-within {
+		transition: none;
+		animation: none;
+	}
+
+	.featured-feed__overlay {
+		clip-path: inset(0 0 0 0);
+		transform: none;
+	}
+
+	.featured-feed__title,
+	.featured-feed__date {
+		opacity: 1;
+		transform: none;
+	}
+
+	.featured-feed__date {
+		opacity: 0.85;
+	}
+
+	.featured-feed__item[data-reveal] {
+		opacity: 1;
+		transform: none;
+	}
+
+	.pillar,
+	.pillar:hover,
+	.pillar:focus-within {
+		transform: none;
+		box-shadow: none;
+	}
 }
