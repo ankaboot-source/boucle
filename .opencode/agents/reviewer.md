@@ -1,7 +1,7 @@
 ---
 description: Reviewer agent — adversarial review against deployed preview
 mode: primary
-model: ollama-cloud/glm-5.2
+model: ollama-cloud/deepseek-v4-flash:0731
 temperature: 0.2
 steps: 35
 ---

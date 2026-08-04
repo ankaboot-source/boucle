@@ -25,14 +25,14 @@ DRY_RUN="${BOUCLE_DRY_RUN:-false}"
 # STEPS_CAP="${BOUCLE_STEPS_CAP:-50}"
 
 # ── Map boucle roles to project-local agents (.opencode/agents/*.md) ──
-# Token economy: VARIANT lowers reasoning effort for bounded tasks (triage/reviewer).
+# Token economy: THINKING sets reasoning effort per role (high for triage/e2e, MAX for worker/reviewer).
 # OUTPUT_TOKEN_MAX caps the model response size per turn (env: OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX).
-VARIANT=""
+THINKING=""
 OUTPUT_TOKEN_MAX=""
 case "$ROLE" in
   triage)
     AGENT="triage"
-    VARIANT="low"
+    THINKING="high"
     # 1200 was too small: the triage comment format (TL;DR + Analysis +
     # Draft acceptance criteria + Classification + Questions + Disposition
     # + optional Sub-issues) routinely exceeds 1200 tokens. On issue #27
@@ -44,14 +44,15 @@ case "$ROLE" in
     # full comment + the glab tool call.
     OUTPUT_TOKEN_MAX="4000"
     ;;
-  worker) AGENT="worker" ;;
+  worker) AGENT="worker" ; THINKING="MAX" ;;
   reviewer)
     AGENT="reviewer"
-    VARIANT="low"
+    THINKING="MAX"
     OUTPUT_TOKEN_MAX="4000"
     ;;
   e2e)
     AGENT="e2e"
+    THINKING="high"
     OUTPUT_TOKEN_MAX="4000"
     ;;
   *)
@@ -72,10 +73,10 @@ FALLBACK_PROVIDER="${BOUCLE_FALLBACK_PROVIDER:-}"
 FALLBACK_MODEL=""
 if [ -n "$FALLBACK_PROVIDER" ]; then
   case "$ROLE" in
-    triage)   FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_TRIAGE:-minimax-m3}" ;;
-    worker)   FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_WORKER:-kimi-k2.7-code}" ;;
-    reviewer) FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_REVIEWER:-glm-5.2}" ;;
-    e2e)      FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_E2E:-kimi-k2.7-code}" ;;
+    triage)   FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_TRIAGE:-deepseek-v4-flash:0731}" ;;
+    worker)   FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_WORKER:-deepseek-v4-flash:0731}" ;;
+    reviewer) FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_REVIEWER:-deepseek-v4-flash:0731}" ;;
+    e2e)      FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_E2E:-glm-5.2}" ;;
   esac
 fi
 FALLBACK_USED=""
@@ -481,9 +482,9 @@ strip_mcp_for_ci
 
 if [ "$DRY_RUN" = "true" ]; then
   echo "[boucle] DRY RUN — agent output goes to log only, nothing pushed"
-  # Token economy: --variant low for bounded roles, OUTPUT_TOKEN_MAX caps response size.
-  VARIANT_ARGS=()
-  [ -n "$VARIANT" ] && VARIANT_ARGS+=(--variant "$VARIANT")
+  # Token economy: --thinking sets reasoning effort per role, OUTPUT_TOKEN_MAX caps response size.
+  THINKING_ARGS=()
+  [ -n "$THINKING" ] && THINKING_ARGS=(--thinking "$THINKING")
   # Start RSS sampler; /usr/bin/time wrapper is skipped in dry-run to keep
   # output untouched. Sampler will be stopped below.
   start_rss_sampler 2> /dev/null || true
@@ -493,7 +494,7 @@ if [ "$DRY_RUN" = "true" ]; then
   # echoed to the job log. AGENT_EXIT is set by run_with_retry in this
   # shell (no pipe → no subshell → global propagates). Final exit ignored.
   OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
-    run_with_retry -- opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" > "$AGENT_LOG" 2>&1 || true
+    run_with_retry -- opencode run --agent "$AGENT" --auto "${THINKING_ARGS[@]}" --log-level WARN "$PROMPT" > "$AGENT_LOG" 2>&1 || true
   cat "$AGENT_LOG"
   # Stop the RSS sampler so it stops writing to the tmp file.
   if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2> /dev/null; then
@@ -507,8 +508,8 @@ if [ "$DRY_RUN" = "true" ]; then
 fi
 
 AGENT_EXIT=0
-VARIANT_ARGS=()
-[ -n "$VARIANT" ] && VARIANT_ARGS+=(--variant "$VARIANT")
+THINKING_ARGS=()
+[ -n "$THINKING" ] && THINKING_ARGS=(--thinking "$THINKING")
 # Wrap opencode with /usr/bin/time -v when available to capture peak RSS.
 # The env-prefix assignment applies to /usr/bin/time, which inherits and
 # passes it through to the opencode child. Exit code still propagates via
@@ -518,12 +519,12 @@ VARIANT_ARGS=()
 if [ "$HAVE_GNU_TIME" = "1" ] && [ -n "$METRICS_TMP" ]; then
   OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
     run_with_retry -- /usr/bin/time -v -o "$METRICS_TMP" \
-    opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" > "$AGENT_LOG" 2>&1
+    opencode run --agent "$AGENT" --auto "${THINKING_ARGS[@]}" --log-level WARN "$PROMPT" > "$AGENT_LOG" 2>&1
 else
   # Fall back to /proc poller if /usr/bin/time is missing.
   start_rss_sampler 2> /dev/null || true
   OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
-    run_with_retry -- opencode run --agent "$AGENT" --auto "${VARIANT_ARGS[@]}" --log-level WARN "$PROMPT" > "$AGENT_LOG" 2>&1
+    run_with_retry -- opencode run --agent "$AGENT" --auto "${THINKING_ARGS[@]}" --log-level WARN "$PROMPT" > "$AGENT_LOG" 2>&1
   if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2> /dev/null; then
     kill "$RSS_SAMPLER_PID" 2> /dev/null || true
     wait "$RSS_SAMPLER_PID" 2> /dev/null || true
@@ -548,11 +549,11 @@ if [ -n "$FALLBACK_PROVIDER" ] && is_api_down "$AGENT_LOG"; then
   cp "$AGENT_LOG" "${AGENT_LOG}.primary" 2>/dev/null || true
   : > "$AGENT_LOG"
   FALLBACK_MODEL_ARG="$FALLBACK_PROVIDER/$FALLBACK_MODEL"
-  VARIANT_ARGS=()
-  [ -n "$VARIANT" ] && VARIANT_ARGS+=(--variant "$VARIANT")
+  THINKING_ARGS=()
+  [ -n "$THINKING" ] && THINKING_ARGS=(--thinking "$THINKING")
   OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="$OUTPUT_TOKEN_MAX" \
     run_with_retry -- opencode run --agent "$AGENT" --auto \
-    --model "$FALLBACK_MODEL_ARG" "${VARIANT_ARGS[@]}" \
+    --model "$FALLBACK_MODEL_ARG" "${THINKING_ARGS[@]}" \
     --log-level WARN "$PROMPT" > "$AGENT_LOG" 2>&1
   cat "$AGENT_LOG"
   print_metrics_line
