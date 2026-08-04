@@ -7,6 +7,7 @@ import DonationCTA from "../components/DonationCTA.astro";
 import GeneralCTA from "../components/GeneralCTA.astro";
 import MobilisationBlock from "../components/MobilisationBlock.astro";
 import FeaturedFeed from "../components/FeaturedFeed.astro";
+import AlliesSummary from "../components/AlliesSummary.astro";
 ---
 
 <Layout>
@@ -120,6 +121,15 @@ import FeaturedFeed from "../components/FeaturedFeed.astro";
 			<span class="flag-stripe__band flag-stripe__band--green"></span>
 			<span class="flag-stripe__band flag-stripe__band--red"></span>
 		</div>
+
+		<!--
+		  ============================================================
+		  Alliés summary: a compact band on the home page that links to
+		  the detailed mosaic on /right-to-resist/. Mirrors the amended
+		  spec: logos + mobilizing name + link to the full section.
+		  ============================================================
+		-->
+		<AlliesSummary />
 
 		<!--
 		  ============================================================
