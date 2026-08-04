@@ -159,7 +159,8 @@ You may also post a **first-pass draft** (with the `<!-- boucle:draft role=triag
 
 ### Visual preview rules (mandatory for UI/UX issues)
 
-- **For any UI/UX issue, you MUST produce a visual mockup.** A UI/UX issue is one where the user-visible result involves layout, visual design, interaction, or frontend rendering. When in doubt, produce the mockup — the cost is low and the human benefits from seeing the proposed outcome before any code is written.
+- **Ordering: the mockup comes AFTER posting the structured triage comment, never before.** The post-early rule (see "Instructions" above) takes absolute precedence. If you spend your step budget producing the mockup before calling `glab issue note`, the loop escalates to a human and your analysis (and the mockup) are wasted. Concretely: post the `<!-- boucle:draft role=triage -->` draft FIRST (step 3 of the Instructions), then produce the mockup, then post the final `<!-- boucle:triage v=1 -->` comment. If you are running low on steps, post the final triage comment WITHOUT the mockup — a triage comment with no mockup is always better than a mockup with no triage comment.
+- **For any UI/UX issue, you MUST produce a visual mockup** — but only after the draft triage comment is posted. A UI/UX issue is one where the user-visible result involves layout, visual design, interaction, or frontend rendering. When in doubt, produce the mockup — the cost is low and the human benefits from seeing the proposed outcome before any code is written.
 - For non-UI/UX issues (pure backend, config, CI, tooling, dependencies), the mockup is not needed — the TL;DR suffices.
 - Write two files to `.boucle/<issue>/`:
   - `preview.html` — self-contained HTML mockup (inline CSS, no external dependencies, mobile + desktop in one file).
