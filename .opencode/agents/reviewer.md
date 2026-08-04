@@ -51,12 +51,21 @@ The worker must conform to charter docs and keep them in sync. Verify:
 
 ## Post-early rule (ENFORCED — do not override)
 
-**Post the verdict FIRST, refine LATER.** Your step budget is finite. If you run out of steps before posting, the loop routes the issue to a human and your review is wasted.
+**Post the verdict FIRST, refine LATER.** Your step budget is finite (35 steps). If you run out of steps before posting, the loop routes the issue to a human and your review is wasted.
 
-- After step 2 (reading the diff stat + state.md), you have enough context to post a first-pass draft. **Post it immediately** with `glab mr note` — but **WITHOUT the `<!-- boucle:verdict -->` marker** (see below). A posted draft keeps your thinking visible and gives the log-scraping fallback something to recover if you exhaust your steps later.
-- You may then use remaining steps to verify individual criteria against the deployed preview and post a **final verdict** as a new comment — this time **WITH the `<!-- boucle:verdict -->` marker**. The CI collapses duplicate reviewer verdicts from the same run, replacing the earlier draft with your final version — so only the final verdict remains visible.
-- **Never** spend your whole budget verifying before posting. A posted draft beats a thorough review that never ships.
+### Hard deadline: post by step 5
+
+**You MUST post your first-pass draft by step 5 at the latest.** If you reach step 5 without having posted, STOP verifying immediately and post your draft NOW — even if you have verified nothing yet. A draft with all criteria marked "pending verification" is ALWAYS better than a thorough review that never ships.
+
+- Steps 1-2: Read the MR diff stat + `state.md` + prior discussion.
+- **Step 3-5: Post your first-pass draft** with `glab mr note` — but **WITHOUT the `<!-- boucle:verdict -->` marker** (use `<!-- boucle:draft role=reviewer -->` instead, see below). List all acceptance criteria as `- [ ] pending verification` and state your lean (PASS/FAIL/UNCERTAIN) based on the diff alone.
+- Steps 6+: Verify individual criteria against the deployed preview (one `curl` per page, batch your greps) and post a **final verdict** as a new comment — this time **WITH the `<!-- boucle:verdict -->` marker**. The CI collapses duplicate reviewer verdicts from the same run, replacing the earlier draft with your final version — so only the final verdict remains visible.
 - If you cannot verify a criterion after posting the first-pass draft, leave it UNCERTAIN in the final verdict — never guess.
+
+**WRONG — this is the #42 incident pattern (do NOT do this):**
+Spending all 35 steps running `curl`/`grep` against the preview, verifying each criterion thoroughly, then hitting the step limit before ever calling `glab mr note`. The log-scraping fallback recovers only the marker + `VERDICT: UNCERTAIN` — your detailed checklist (6 verified items, 4 unconfirmed) is lost. The issue escalates to `boucle:human` even though you actually verified most criteria successfully. A posted draft with "pending verification" beats a perfect verification that never ships.
+
+**Never** spend your whole budget verifying before posting. The post-early rule takes absolute precedence over thoroughness.
 
 ### CRITICAL — draft vs final marker
 
