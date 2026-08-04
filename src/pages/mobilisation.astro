@@ -88,16 +88,16 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 		</header>
 
 		{
-			Object.keys(groupMeta).map((key) =>
-				grouped[key as GroupKey].length === 0 ? null : (
+			(Object.keys(groupMeta) as GroupKey[]).map((key) =>
+				grouped[key].length === 0 ? null : (
 					<section
 						class="mobilisation__group"
 						aria-labelledby={`group-${key}`}
 					>
 						<header class="section-head">
-							<h2 id={`group-${key}`}>{groupMeta[key as GroupKey].label}</h2>
+							<h2 id={`group-${key}`}>{groupMeta[key].label}</h2>
 							<p class="mobilisation__group-tagline">
-								{groupMeta[key as GroupKey].tagline}
+								{groupMeta[key].tagline}
 							</p>
 						</header>
 

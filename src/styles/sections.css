@@ -111,7 +111,7 @@
 	transition:
 		border-color var(--duration-base) var(--ease-out),
 		box-shadow var(--duration-base) var(--ease-out),
-		transform var(--duration-fast) var(--ease-out);
+		transform var(--duration-base) var(--ease-out);
 }
 
 .featured-feed__card:hover,
@@ -169,8 +169,10 @@
 	background: var(--color-flag-black);
 	color: var(--color-ink-on-dark);
 	clip-path: inset(100% 0 0 0);
+	transform: translateY(0);
 	transition:
 		clip-path var(--duration-slow) var(--ease-out),
+		transform var(--duration-slow) var(--ease-out),
 		background-color var(--duration-base) var(--ease-out);
 }
 
@@ -178,6 +180,7 @@
 .featured-feed__card:focus-visible .featured-feed__overlay {
 	clip-path: inset(0 0 0 0);
 	background: var(--color-ink);
+	transform: translateY(0);
 }
 
 .featured-feed__title,
@@ -606,6 +609,7 @@ img.hero__symbol {
 
 	.featured-feed__overlay {
 		clip-path: inset(0 0 0 0);
+		transform: none;
 	}
 
 	.featured-feed__title,
