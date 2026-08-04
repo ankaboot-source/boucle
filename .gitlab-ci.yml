@@ -2923,6 +2923,19 @@ catchup:
 
       echo "Catchup: issue #$BOUCLE_ISSUE was boucle:$CURRENT_BOUCLE → now boucle:$TARGET"
 
+      # If there is an OPEN MR with the same branch, the issue was reopened
+      # for a new iteration (e.g. human requested changes after approval, or
+      # a new MR was created after the first one was merged). Do NOT close —
+      # the open MR is the active work. This prevents the catchup from
+      # re-closing a reopened issue when an old merged MR exists alongside
+      # the new open one.
+      MR_OPEN_STATE=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?source_branch=boucle/$BOUCLE_ISSUE&state=opened" 2>/dev/null \
+        | jq -r '.[0].state // empty')
+      if [ "$MR_OPEN_STATE" = "opened" ]; then
+        echo "Catchup: open MR exists for branch boucle/$BOUCLE_ISSUE — issue reopened for new iteration, skipping close."
+        exit 0
+      fi
+
       # Post an audit comment (with hidden tag for idempotence/audit).
       # The MR IID isn't passed as a variable (dispatch only forwards
       # BOUCLE_ISSUE + BOUCLE_ROLE); reference the issue + branch instead.
@@ -3773,9 +3786,20 @@ doctor:
         # If so, the issue should be closed + boucle:done, NOT re-triggered.
         # This happens when a human merged the MR manually (bypassing the
         # merger job), leaving the issue stuck at working/review forever.
+        #
+        # BUT: if there is also an OPEN MR with the same branch, the issue was
+        # reopened for a new iteration (e.g. human requested changes after
+        # approval, or a new MR was created after the first one was merged).
+        # In that case, do NOT close — the open MR is the active work.
         MR_STATE=$(glab api --hostname "$HOST" "/projects/$PID/merge_requests?source_branch=boucle/$IID&state=merged" 2>/dev/null \
           | jq -r '.[0].state // empty')
         if [ "$MR_STATE" = "merged" ]; then
+          MR_OPEN_STATE=$(glab api --hostname "$HOST" "/projects/$PID/merge_requests?source_branch=boucle/$IID&state=opened" 2>/dev/null \
+            | jq -r '.[0].state // empty')
+          if [ "$MR_OPEN_STATE" = "opened" ]; then
+            echo "  → #$IID ($ROLE): merged MR exists but an open MR also exists — issue reopened for new iteration, skipping close"
+            continue
+          fi
           echo "  → #$IID ($ROLE): MR already merged — closing issue + boucle:done"
           set_boucle_label "$IID" "boucle:done" "boucle::status::done"
           glab api --hostname "$HOST" -X PUT "/projects/$PID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
@@ -3793,6 +3817,12 @@ doctor:
         MR_CLOSED_STATE=$(glab api --hostname "$HOST" "/projects/$PID/merge_requests?source_branch=boucle/$IID&state=closed" 2>/dev/null \
           | jq -r '.[0].state // empty')
         if [ "$MR_CLOSED_STATE" = "closed" ]; then
+          MR_OPEN_STATE=$(glab api --hostname "$HOST" "/projects/$PID/merge_requests?source_branch=boucle/$IID&state=opened" 2>/dev/null \
+            | jq -r '.[0].state // empty')
+          if [ "$MR_OPEN_STATE" = "opened" ]; then
+            echo "  → #$IID ($ROLE): closed MR exists but an open MR also exists — issue reopened for new iteration, skipping close"
+            continue
+          fi
           echo "  → #$IID ($ROLE): MR already closed (non-merged) — closing issue + boucle:done"
           set_boucle_label "$IID" "boucle:done" "boucle::status::done"
           glab api --hostname "$HOST" -X PUT "/projects/$PID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
