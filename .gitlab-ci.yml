@@ -1758,7 +1758,10 @@ worker:
       # from a past `git add -A` (gitignore doesn't untrack); staging it here
       # re-commits stale state and causes checkout conflicts on the next run.
       if ! git diff --quiet || ! git diff --cached --quiet; then
-        git add -A -- ':!.boucle'
+        # || true: git exits 1 when the excluded pathspec matches a gitignored
+        # entry (.boucle/), even though non-ignored files ARE staged correctly.
+        # Under set -e that aborts before the commit — defeating the safety-net.
+        git add -A -- ':!.boucle' || true
         git commit -m "feat: worker changes for #$BOUCLE_ISSUE [skip ci]" --no-verify
       fi
 
