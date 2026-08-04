@@ -256,6 +256,62 @@ où elles portent un signal politique** :
 | `--color-secondary`, `--color-secondary-strong` | `--color-flag-green*` |
 | `--color-link`, `--color-link-hover` | ink → flag-red |
 
+> **Note sémantique** : lorsque la palette du drapeau sert à différencier deux
+> sous-ensembles d'une même page (par exemple les deux groupes de la section
+> `Nos alliés dans la résistance.` dans `/right-to-resist/`), on peut utiliser
+> `--color-flag-red` pour le premier groupe (front de libération / accent
+> principal) et `--color-flag-green` pour le second (sœurs et frères de lutte /
+> accent secondaire). Cette distinction reste un accent de 4 px ou un
+> marqueur de section, jamais un fond de carte colorée à grande surface.
+
+### 3.4.1 Section « Alliés »
+
+La section alliées est intégrée dans `/right-to-resist/` (l'ancienne URL
+`/allies/` redirige vers `/right-to-resist/`). Son titre mobilisateur est
+**« Nos alliés dans la résistance. »**. Elle obéit aux règles suivantes :
+
+1. **Mosaïque irrégulière**. Les organisations sont disposées dans une grille
+   dense avec des cellules de largeurs variables (jamais une grille bento
+   uniforme). Les coins sont droits, les fonds restent monochrome ou noir,
+   aucune carte SaaS, aucun gradient décoratif.
+
+2. **Hover / focus reveal**. Chaque cellule affiche le logo et le nom par
+   défaut ; au survol ou au focus clavier, un volet noir glisse par-dessus
+   pour révéler la présentation complète et le CTA « Visiter → ». Sous
+   `@media (prefers-reduced-motion: reduce)`, le volet est statique et
+   toujours visible en partie inférieure de la cellule : aucun contenu ne
+   dépend de l'interaction pour être lu.
+
+3. **Logos, aplat et présentations**. Chaque entrée de la collection
+   `allies` expose un champ `logo` (chemin d'actif statique root-rel), un
+   champ optionnel `aplat` (grande image de fond de cellule) et un champ
+   `presentation` (texte long). Le résumé sur la page d'accueil montre
+   seulement les logos et un lien d'ancrage vers la section détaillée. Les
+   logos doivent être les vrais logos des organisations (téléchargés depuis
+   leur site ou réseau social) ; aucun SVG généré artificiellement n'est
+   accepté.
+
+4. **Différenciation des groupes**. Les trois groupes éditoriaux (« Notre front
+   pour la libération et la dignité », « Nos sœurs et frères de lutte » et
+   « Nos voix palestinien·nes ») sont différenciés par une barre verticale de
+   4 px à gauche de chaque cellule : rouge pour le front, vert pour les sœurs
+   et frères de lutte, noir pour les voix palestinien·nes.
+
+5. **Aplat d'image par collectif**. Chaque cellule de la mosaïque porte un
+   grand aplat d'image : photo iconique du collectif quand un champ `aplat`
+   est renseigné ; en son absence, un motif keffieh façon scanline en
+   arrière-plan. L'aplat est désaturé et assombri par défaut pour garantir
+   la lisibilité du nom et du logo ; au survol ou au focus clavier la couleur
+   et la luminosité reviennent.
+
+6. **Restauration de la couleur au survol**. Les logos de la page d'accueil
+   (résumé) et de la mosaïque `/right-to-resist/` sont affichés en niveaux
+   de gris par défaut. Au survol ou au focus, le logo (et l'aplat de la
+   cellule) retrouvent leurs couleurs d'origine. Sur la page d'accueil, le
+   fond de l'item reste clair (paper-soft) au survol afin qu'un logo foncé
+   (ex. Agir Collectif) reste visible une fois sa couleur restaurée — le
+   fond ne passe pas au noir.
+
 ### 3.5 Espacement et grille
 
 Grille **8 pt** classique, avec rampes fluides pour les grands

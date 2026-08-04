@@ -176,6 +176,45 @@ const mobilisation = defineCollection({
 });
 
 // =============================================================================
+// Alliés
+// =============================================================================
+//
+// Organisations partenaires et alliées du collectif, regroupées en trois
+// sous-ensembles éditoriaux : le front de libération, les sœurs/frères
+// de lutte et les voix palestinien·nes. Chaque entrée est un lien externe
+// avec un nom, une description et un ordre d'affichage au sein de son groupe.
+//
+// The `group` enum matches the one declared in `sveltia-cms.config.yml` for
+// the `allies` collection — keep both in sync.
+const allyGroup = z.enum([
+	"front-liberation",
+	"lutte-siblings",
+	"palestinian-voices",
+]);
+
+const allies = defineCollection({
+	loader: glob({ pattern: "**/*.md", base: "./src/content/allies" }),
+	schema: z.object({
+		name: requiredString,
+		url: z.string().url(),
+		description: optionalString,
+		// Longer per-organisation presentation shown in the detailed
+		// mosaic view on /right-to-resist/.
+		presentation: optionalString,
+		// Root-relative path to a static logo asset (e.g.
+		// `/allies/tyre-call.svg`). Kept optional so the build does
+		// not break if an editor omits it.
+		logo: optionalImagePath,
+		// Root-relative path to a per-organisation large image aplat
+		// shown behind the mosaic cell (iconic photo, or keffieh
+		// scanline motif fallback). Optional.
+		aplat: optionalImagePath,
+		group: allyGroup,
+		order: z.number().default(0),
+	}),
+});
+
+// =============================================================================
 // Global social handles
 // =============================================================================
 // Single-file collection backed by `src/content/social.yaml`, mirrored by
@@ -204,5 +243,6 @@ export const collections = {
 	prisesDeParole,
 	collectif,
 	mobilisation,
+	allies,
 	social,
 };

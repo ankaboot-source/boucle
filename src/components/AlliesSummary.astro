@@ -1,0 +1,216 @@
+---
+/*
+ * AlliesSummary
+ * -------------
+ * Compact home-page preview of the allies section. Shows a short strip of
+ * organisation logos and a CTA that anchors to the detailed mosaic on
+ * /right-to-resist/. Pure Astro, no client JS.
+ */
+import { getCollection } from "astro:content";
+
+const allies = (await getCollection("allies")).sort(
+	(a, b) => a.data.order - b.data.order
+);
+
+const firstAllies = allies.slice(0, 5);
+---
+
+<section class="allies-summary" aria-labelledby="allies-summary-title">
+	<header class="allies-summary__header">
+		<h2 id="allies-summary-title" class="allies-summary__title">
+			Nos alliés dans la résistance.
+		</h2>
+		<p class="allies-summary__lede">
+			Des collectifs, des organisations et des fronts qui portent avec
+			nous la même exigence de libération et de dignité.
+		</p>
+	</header>
+
+	<ul class="allies-summary__logos" role="list">
+		{
+			firstAllies.map((entry) => (
+				<li class="allies-summary__item">
+					{entry.data.logo ? (
+						<img
+							class="allies-summary__logo"
+							src={entry.data.logo}
+							alt={entry.data.name}
+							loading="lazy"
+							decoding="async"
+							width="80"
+							height="80"
+						/>
+					) : (
+						<span class="allies-summary__initial" aria-hidden="true">
+							{entry.data.name.charAt(0).toUpperCase()}
+						</span>
+					)}
+				</li>
+			))
+		}
+	</ul>
+
+	<a class="allies-summary__cta" href="/right-to-resist#allies-section-title">
+		Voir les alliés
+		<span aria-hidden="true">→</span>
+	</a>
+</section>
+
+<style>
+	.allies-summary {
+		width: min(100% - 2 * var(--space-s), var(--container-wide));
+		margin-inline: auto;
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-m);
+		padding-block: var(--space-xl);
+		border-block: 1px solid var(--color-ink);
+	}
+
+	.allies-summary__header {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2xs);
+	}
+
+	.allies-summary__title {
+		font-family: var(--font-heading);
+		font-size: var(--text-2xl);
+		line-height: var(--leading-tight);
+		letter-spacing: var(--tracking-tight);
+		margin: 0;
+		position: relative;
+		padding-bottom: var(--space-2xs);
+	}
+
+	.allies-summary__title::after {
+		content: "";
+		display: block;
+		position: absolute;
+		left: 0;
+		bottom: 0;
+		width: 64px;
+		height: 4px;
+		background: var(--color-flag-green);
+	}
+
+	.allies-summary__lede {
+		margin: 0;
+		font-size: var(--text-base);
+		line-height: var(--leading-relaxed);
+		color: var(--color-text-muted);
+		max-width: 56ch;
+	}
+
+	.allies-summary__logos {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-m);
+	}
+
+	.allies-summary__item {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 80px;
+		height: 80px;
+		background: var(--color-paper);
+		border: 1px solid var(--color-ink);
+	}
+
+	.allies-summary__logo {
+		width: 56px;
+		height: 56px;
+		object-fit: contain;
+		display: block;
+		filter: grayscale(100%) contrast(1.2);
+		transition:
+			filter var(--duration-base) var(--ease-out),
+			transform var(--duration-base) var(--ease-out);
+	}
+
+	/* Hover/focus restores the logo to its original colours. The item
+	 * background stays light (paper) so even dark logos — e.g. Agir
+	 * Collectif — remain clearly visible once their colours return,
+	 * rather than vanishing into a black background. */
+	.allies-summary__item:hover .allies-summary__logo,
+	.allies-summary__item:focus-within .allies-summary__logo {
+		filter: grayscale(0%) contrast(1);
+		transform: scale(1.08);
+	}
+
+	.allies-summary__item {
+		transition:
+			background-color var(--duration-base) var(--ease-out),
+			border-color var(--duration-base) var(--ease-out);
+	}
+
+	.allies-summary__item:hover,
+	.allies-summary__item:focus-within {
+		background: var(--color-paper-soft);
+		border-color: var(--color-ink);
+	}
+
+	.allies-summary__item:hover .allies-summary__initial,
+	.allies-summary__item:focus-within .allies-summary__initial {
+		color: var(--color-ink);
+	}
+
+	.allies-summary__initial {
+		font-family: var(--font-heading);
+		font-size: var(--text-xl);
+		line-height: 1;
+		color: var(--color-ink);
+	}
+
+	.allies-summary__cta {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2xs);
+		align-self: flex-start;
+		padding: var(--space-xs) var(--space-s);
+		background: var(--color-flag-black);
+		color: var(--color-ink-on-dark);
+		font-family: var(--font-body);
+		font-size: var(--text-sm);
+		font-weight: var(--weight-semibold);
+		text-decoration: none;
+		text-transform: uppercase;
+		letter-spacing: var(--tracking-wide);
+		border: 1px solid var(--color-ink);
+		transition:
+			background-color var(--duration-base) var(--ease-out),
+			color var(--duration-base) var(--ease-out);
+	}
+
+	.allies-summary__cta:hover,
+	.allies-summary__cta:focus-visible {
+		background: var(--color-flag-red);
+		color: var(--color-flag-white);
+	}
+
+	.allies-summary__cta:focus-visible {
+		outline: 2px solid var(--color-flag-red);
+		outline-offset: 2px;
+	}
+
+	.allies-summary__cta span {
+		transition: transform var(--duration-base) var(--ease-out);
+	}
+
+	.allies-summary__cta:hover span,
+	.allies-summary__cta:focus-visible span {
+		transform: translateX(4px);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.allies-summary__cta,
+		.allies-summary__cta span {
+			transition: none;
+		}
+	}
+</style>

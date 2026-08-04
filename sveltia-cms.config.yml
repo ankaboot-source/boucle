@@ -50,10 +50,11 @@ singletons:
 # =============================================================================
 # Collections
 # =============================================================================
-# Three content streams:
+# Four content streams:
 #   - communiques  → Communiqués / Prises de parole
 #   - collectif    → Collectif (sections locales par ville + mobilisation étudiante)
 #   - mobilisation → Événements / Mobilisation
+#   - allies       → Organisations partenaires et alliées
 #
 # The `folder` path is relative to the repository root, so it matches the
 # `src/content/<name>/` path used by Astro's `glob()` loader in
@@ -90,6 +91,54 @@ collections:
           - { label: Analyse, value: analyse }
           - { label: Appel à mobilisation, value: appel-a-mobilisation }
       - { name: body, label: Contenu, widget: markdown }
+
+  # ---------------------------------------------------------------------------
+  # Alliés — organisations partenaires du collectif
+  # ---------------------------------------------------------------------------
+  # One collection that holds both partner groups exposed in the
+  # /right-to-resist/ allies section: the liberation front and the sibling
+  # struggle collectives. The `group` discriminator mirrors the Zod enum in
+  # `src/content.config.ts` — keep both in sync. The `order` field controls
+  # display order inside a group.
+  - name: allies
+    label: Alliés
+    label_singular: Allié
+    description: Organisations partenaires et alliées du collectif, regroupées par front.
+    folder: src/content/allies
+    create: true
+    delete: true
+    slug: "{{slug}}"
+    identifier_field: name
+    fields:
+      - { name: name, label: Nom, widget: string }
+      - { name: url, label: URL, widget: string }
+      - { name: description, label: Description, widget: text, required: false }
+      - { name: presentation, label: Présentation, widget: text, required: false }
+      - name: logo
+        label: Logo
+        widget: image
+        required: false
+        allow_none: true
+        choose_url: true
+        media_folder: /static/allies
+        public_folder: /allies
+      - name: aplat
+        label: Aplat (image de fond de la cellule)
+        widget: image
+        required: false
+        allow_none: true
+        choose_url: true
+        media_folder: /static/allies
+        public_folder: /allies
+      - name: group
+        label: Groupe
+        widget: select
+        options:
+          - { label: "Notre front pour la libération et la dignité", value: front-liberation }
+          - { label: "Nos sœurs et frères de lutte", value: lutte-siblings }
+          - { label: "Nos voix palestinien·nes", value: palestinian-voices }
+      - { name: order, label: Ordre, widget: number, required: false, default: 0 }
+      - { name: body, label: Contenu, widget: markdown, required: false }
 
   # ---------------------------------------------------------------------------
   # Collectif — sections locales + mobilisation étudiante
