@@ -305,14 +305,16 @@ impose les règles suivantes, en complément de la charte brute du collectif :
 2. **Composition en deux bandes centrées, l'une au-dessus de l'autre.**
    La stripe verte porte le titre principal et conserve un bord inférieur
    **strictement horizontal** — c'est un fond de texte stable, pas un bloc
-   plein-largeur. La stripe rouge, située juste en dessous, est inclinée
-   vers le haut à droite avec une pente ascendante. L'angle visible doit
-   rester discret, compris **entre 2° et 4°** ; la valeur retenue est
-   `--cta-angle: 2.5deg`.
+   plein-largeur. La stripe rouge est inclinée vers le haut à droite avec
+   une pente ascendante et **déborde légèrement au-dessus du bord inférieur
+   de la stripe verte** : elle porte un `z-index` supérieur et un
+   `margin-top` négatif, ce qui crée un chevauchement visuel au lieu d'un
+   empilement séparé. L'angle visible doit rester discret, compris **entre
+   2° et 4°** ; la valeur retenue est `--cta-angle: 2deg`.
 
-3. **Le texte rouge suit la pente du fond rouge.** Contrairement à une
-   contre-inclinaison qui garderait le texte horizontal, le label CTA est
-   transformé avec le même `skewY` que sa bande. Cela crée la dynamique de
+3. **Le texte rouge suit la pente du fond rouge.** Le label CTA est
+   transformé avec le **même `skewY`** que sa bande ; il n'est jamais
+   contre-incliné pour redevenir horizontal. Cela crée la dynamique de
    progression visuelle attendue : le sous-titre « monte » avec son fond.
 
 4. **Entrée animée des deux blocs.** Au premier rendu, les deux stripes
