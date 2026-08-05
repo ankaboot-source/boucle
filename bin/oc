@@ -378,6 +378,20 @@ Post your analysis as a comment with the boucle:triage marker. Use: glab issue n
       fi
       ;;
     worker)
+      # Inject the issue body (fetched by CI as BOUCLE_ISSUE_BODY) so the
+      # worker has the instructed content (URLs, citations, texts) at hand
+      # and does not invent placeholders or rewrite the instructed texts.
+      # Without this, the worker must call glab issue view itself (costs
+      # steps, can fail/skip) and tends to fabricate content (issue #42 on
+      # up/urgence-palestine.fr: Rickroll video IDs, rewritten citations).
+      local body="${BOUCLE_ISSUE_BODY:-}"
+      # Inject the full issue notes (fetched by CI as BOUCLE_ISSUE_NOTES) so
+      # the worker sees the FULL discussion history — including early
+      # preservation instructions that the latest amendments must NOT
+      # override. Without this, the worker only sees the latest amendments
+      # via BOUCLE_REVIEWER_FEEDBACK and applies them literally, degrading
+      # validated layouts (issue #42 iteration 7).
+      local notes="${BOUCLE_ISSUE_NOTES:-}"
       # Inject reviewer verdicts + human MR comments (fetched by CI as
       # BOUCLE_REVIEWER_FEEDBACK) so re-runs after a reviewer FAIL or a human
       # MR comment actually address the feedback. Without this, each re-run
@@ -385,19 +399,47 @@ Post your analysis as a comment with the boucle:triage marker. Use: glab issue n
       # up/urgence-palestine.fr: 3 FAIL verdicts, same root cause, never fixed).
       # Empty on the first run (no MR exists yet) — that's fine.
       local feedback="${BOUCLE_REVIEWER_FEEDBACK:-}"
-      if [ -n "$feedback" ]; then
-        prompt="Implement issue #${ISSUE}. Read state.md first. Commit your changes with [skip ci].
+      prompt="Implement issue #${ISSUE}. Read state.md first. Commit your changes with [skip ci].
 
+Preserve instructed content: the issue body below contains the EXACT content the human instructed (URLs, citations, texts, images). You MUST use them verbatim. DO NOT generate placeholders (e.g. generic video IDs), DO NOT rewrite the instructed texts, DO NOT substitute URLs. If a field is missing from the issue, fetch the issue body via \`glab issue view\` rather than inventing. Recent amendments (in the feedback section below) AMEND the spec — they do NOT replace earlier preservation instructions. Conciliate them: e.g. \"fill empty spaces with keffiyeh\" means fill the empty space, not replace the video.
+"
+      if [ -n "$body" ]; then
+        prompt="${prompt}
+Issue body (already fetched — do NOT call glab issue view):
+---
+${body}
+---
+"
+      else
+        prompt="${prompt}
+Issue body: NOT available in the prompt — fetch it via \`glab issue view ${ISSUE}\` before doing anything else.
+"
+      fi
+      if [ -n "$notes" ]; then
+        prompt="${prompt}
+Prior issue discussion (issue notes, oldest first — early preservation instructions STAND alongside later amendments):
+---
+${notes}
+---
+"
+      fi
+      if [ -n "$feedback" ]; then
+        prompt="${prompt}
 Prior feedback on the MR (reviewer verdicts + human comments, oldest first — you MUST address every actionable item before claiming done):
 ---
 ${feedback}
 ---
 "
-      else
-        prompt="Implement issue #${ISSUE}. Read state.md first. Commit your changes with [skip ci]."
       fi
       ;;
     reviewer)
+      # Inject the issue body (fetched by CI as BOUCLE_ISSUE_BODY) so the
+      # reviewer can verify the MR content (texts, video URLs, citations)
+      # matches what the issue actually instructed. Without this, the
+      # reviewer only grades against the MR diff + human amendments and
+      # cannot detect content regressions vs. the original issue (issue #42
+      # on up/urgence-palestine.fr: "Leaning PASS" on Rickroll placeholders).
+      local body="${BOUCLE_ISSUE_BODY:-}"
       # Inject the same MR discussion the worker received (fetched by CI as
       # BOUCLE_REVIEWER_FEEDBACK). state.md acceptance criteria are frozen at
       # triage time; humans amend the spec via MR comments mid-loop. Without
@@ -405,16 +447,29 @@ ${feedback}
       # contradicts the human — FAILing implementations that correctly follow
       # the amended spec. Human comments MUST take precedence over state.md.
       local feedback="${BOUCLE_REVIEWER_FEEDBACK:-}"
-      if [ -n "$feedback" ]; then
-        prompt="Review the MR for issue #${ISSUE}. Test the deployed preview at \$BOUCLE_PREVIEW_URL. Post your verdict with the boucle:verdict marker.
+      prompt="Review the MR for issue #${ISSUE}. Test the deployed preview at \$BOUCLE_PREVIEW_URL. Post your verdict with the boucle:verdict marker.
 
+Verify content fidelity: the issue body below is the original spec. Check that the MR preserves the instructed content (URLs, citations, texts) verbatim — no placeholders, no rewrites, no substitutions. A MR that degrades instructed content is a FAIL even if it satisfies the latest amendments.
+"
+      if [ -n "$body" ]; then
+        prompt="${prompt}
+Issue body (original spec — verify the MR matches it):
+---
+${body}
+---
+"
+      else
+        prompt="${prompt}
+Issue body: NOT available — fetch it via \`glab issue view ${ISSUE}\` if you need to verify content fidelity.
+"
+      fi
+      if [ -n "$feedback" ]; then
+        prompt="${prompt}
 Prior MR discussion (reviewer verdicts + human comments, oldest first — human comments AMEND the spec and take precedence over the frozen acceptance criteria in state.md):
 ---
 ${feedback}
 ---
 "
-      else
-        prompt="Review the MR for issue #${ISSUE}. Test the deployed preview at \$BOUCLE_PREVIEW_URL. Post your verdict with the boucle:verdict marker."
       fi
       ;;
     e2e)
