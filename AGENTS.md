@@ -846,6 +846,35 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       to `boucle:human` with "Verdict unparsable or uncertain" instead of
       acting on the FAIL verdict that was sitting in stdout.
 
+28. **Worker state not persisted between iterations** (issue #35 on up/urgence-palestine.fr)
+    - ❌ DO NOT assume `.boucle/<issue>/` survives between worker iterations.
+      `.boucle/` is gitignored (state.md, iterations.md, agent-output.log
+      are NOT committed), and the worker re-triggers itself via the API
+      (new pipeline, no `needs` link → no artifact passing). On a shell
+      executor `$CI_PROJECT_DIR` may be wiped between runs. Each iteration
+      then starts with a fresh seed: `state.md` = "(to be determined by
+      worker)", `iterations.md` = absent. The worker rebuilds context from
+      scratch — re-discovering the codebase, re-reading charter docs,
+      re-trying rejected approaches — and exhausts its step budget before
+      implementing. Issue #35 had 2 consecutive iterations produce zero
+      code changes for exactly this reason.
+    - ✅ DO: the worker job persists `.boucle/<issue>/` to a stable path
+      outside `$CI_PROJECT_DIR` (`$BOUCLE_STATE_CACHE/<issue>/`, default
+      `$HOME/.boucle-state-cache/<issue>/`) and restores it at startup via
+      an EXIT trap. `state.md` and `iterations.md` now survive across
+      iterations. The worker is instructed (`worker.md` step 2) to read
+      `iterations.md` at startup so it knows what previous iterations
+      tried. `iterations.md` is seeded on first run (companion to
+      `state.md`).
+    - Context: issue #35 iterations 1 and 2 both produced zero code changes.
+      The worker (kimi-k2.7-code, 100 steps) spent all its steps
+      reconstituting context — re-reading DESIGN.md, AGENTS.md,
+      ARCHITECTURE.md, re-discovering the codebase via grep — because
+      `state.md` was re-seeded to "(to be determined by worker)" and
+      `iterations.md` did not exist. The "Tried and rejected" section was
+      always "(none yet)". The worker had no memory of what iteration 1
+      had already attempted.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
