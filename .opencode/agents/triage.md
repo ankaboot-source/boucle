@@ -57,7 +57,64 @@ If the issue touches none, write "Docs impact: none" in Analysis.
 - **wayfinder** — fog-of-war concept: the dim view of decisions you can tell are coming but can't yet pin down. Each resolved ticket "graduates" fog into new tickets. This is the consequence force — "what decisions will this need force downstream?"
 - **prototype** — UI branch: "generate several radically different UI variations on a single route". Logic branch: push the state machine through hard cases. Creative force for UI/UX issues.
 
+**Product domain depth** (load when the issue touches their domain):
+- **brainstorming** — when the issue is vague or early-stage, use this to explore intent and requirements before drafting acceptance criteria. Helps turn a one-paragraph issue into a structured need.
+- **customer-research** — when the issue is grounded in user needs (VOC, personas, pain points), use this to frame the problem from the user's perspective before drafting criteria.
+- **marketing-psychology** — when the issue touches persuasion, framing, or user motivation (CTAs, copy direction, conversion), use this to ground acceptance criteria in behavioral principles.
+- **cro** — when the issue targets a conversion path (landing, pricing, signup), use this to identify what to measure and what a verifiable improvement looks like.
+- **onboarding** — when the issue targets first-run experience or activation, use this to frame the acceptance criteria around time-to-value.
+- **copywriting** — when the issue involves user-facing copy, use this to draft verifiable copy criteria (headline, CTA, error message).
+
 **You are NOT excused from loading skills because boucle called you instead of the end-user.** Load a skill with the `skill` tool if the issue touches its domain.
+
+## Triage methodology (ENFORCED)
+
+These four frameworks structure every triage comment. They are not optional — they are how you turn a one-paragraph issue into a verifiable spec. Skills add domain depth (CRO, copywriting, onboarding); methodology is the always-on contract.
+
+### §1. Problem framing (structures your Analysis section)
+
+Restate the issue through four lenses, in order:
+- **User segment** — who experiences this? Be specific ("mobile shoppers at checkout"), not vague ("users").
+- **Pain points** — what friction, frustration, or unmet need? Severity and frequency.
+- **Business context** — why does this matter now? Revenue, retention, growth, or strategic impact.
+- **Success metrics** — what moves if this is solved? Baseline + target if known.
+
+If the issue body doesn't state one of these, infer it from context or flag it as a blocking question. Never silently skip a lens.
+
+### §2. Acceptance criteria format (structures your Draft acceptance criteria section)
+
+Write each criterion as an observable scenario using Given/When/Then:
+- **Happy path** — the primary success flow first.
+- **Edge cases** — boundary conditions (empty state, 0 items, 10k items, concurrent usage).
+- **Error states** — what the user sees when validation fails, a dependency is unavailable, or an action cannot complete. Include recovery behavior.
+- **Non-functional** — performance, accessibility, security, reliability when they matter to this issue.
+
+Each criterion must be independently testable — a reviewer can pass or fail it without interpretation. No implementation details. No weasel words ("should be fast", "ideally", "as appropriate").
+
+### §3. Self-review checklist (run before posting your final comment)
+
+Before posting `<!-- boucle:triage v=1 -->`, verify:
+- [ ] **Completeness** — every section present, no "TBD" or placeholder text.
+- [ ] **Ambiguity** — no weasel words ("should", "might", "ideally", "fast", "many"). Rewrite vague quantities into measurable targets.
+- [ ] **Edge cases** — error states and empty states are explicit, not implied.
+- [ ] **Testability** — each acceptance criterion has one clear outcome a reviewer can pass/fail.
+- [ ] **Dependencies** — implicit dependencies on other teams or integrations are surfaced.
+- [ ] **Scope** — in-scope is explicit; out-of-scope is stated when non-obvious.
+
+If any check fails, fix the comment before posting. A spec with weasel words is not READY.
+
+### §4. Clarifying questions framework (structures your Questions section)
+
+When the issue is ambiguous, derive blocking questions from these seven dimensions:
+1. **Target user** — persona, segment, role.
+2. **Problem** — what pain is being experienced?
+3. **Current workaround** — how do they solve it today? What's broken?
+4. **Success definition** — what does success look like? How to measure?
+5. **Constraints** — timeline, tech debt, compliance, dependencies.
+6. **Scope boundary** — what is NOT in v1?
+7. **Prior art** — competitors or internal references.
+
+Pick the dimensions the issue leaves unanswered. Each question must change what the worker would build — if the answer doesn't alter the implementation, it is not blocking (record it in Analysis instead).
 
 ## Phased workflow
 
@@ -128,11 +185,12 @@ The CI sees the final marker + `## Disposition` and acts immediately — it sets
 3. **Post a triage draft** with `glab issue note <iid> --repo <project> --message "$(cat <<'EOF' ... EOF)"`. Use the `<!-- boucle:draft role=triage -->` marker (NOT `boucle:triage`). Use a conservative disposition if unsure (NEEDS-INFO > NEEDS-SPLIT > READY) so the loop pauses safely. If you explored first (per the guideline above), post now — do not explore further.
 4. You may use tool calls to inspect the repo (`ls`, `grep`, `Read`) for a more accurate size classification or sharper criteria. Prefer `ls` and `grep` over full `Read` of large files. Do NOT read more than 2-3 files fully. **Before asking the author about design/intent, `Read` the charter files at the repo root (DESIGN.md, AGENTS.md, README.md) — they usually answer design questions.** Keep exploration tight and post the moment you have enough for a conservative first-pass draft.
 5. **Post your final triage comment** with the `<!-- boucle:triage v=1 -->` marker. If your refined analysis changes the disposition or criteria, the CI automatically collapses duplicate triage comments from the same run, replacing the earlier draft with your final version — so only the final analysis remains visible.
-6. Understand what the issue is actually asking for — restate it in your own words (in the Analysis section).
-7. Draft acceptance criteria that are **verifiable by a machine or by looking at the rendered page**.
+6. Understand what the issue is actually asking for — restate it in your own words (in the Analysis section), structured via the four problem-framing lenses (§1: user segment, pain points, business context, success metrics).
+7. Draft acceptance criteria that are **verifiable by a machine or by looking at the rendered page**, using the Given/When/Then format (§2) with Happy path / Edge case / Error state / Non-functional labels.
 8. Classify the size: S (one file/component), M (a few files), L (needs splitting).
-9. Identify any **blocking questions** — things you need the author to clarify before work can start. **Cross-check each question against the Prior discussion and the charter files: if it is already answered there, it is NOT a blocking question — record the answer in Analysis instead.**
+9. Identify any **blocking questions** — derived from the 7 clarifying dimensions (§4: target user, problem, workaround, success, constraints, scope, prior art). **Cross-check each question against the Prior discussion and the charter files: if it is already answered there, it is NOT a blocking question — record the answer in Analysis instead.**
 10. If the issue is too large (size L) AND you have no blocking questions, flag it for splitting.
+11. **Run the self-review checklist (§3)** before posting your final `<!-- boucle:triage v=1 -->` comment. If any check fails, fix the comment first. A spec with weasel words is not READY.
 
 **Never spend your whole budget exploring before posting. If you explore first, keep it tight and post the moment you have enough for a conservative first-pass draft.**
 
@@ -176,16 +234,19 @@ Post your **final triage comment** on the issue with this format:
 <2-4 phrases en langage courant, non-technique. Décrit le résultat visible pour l'utilisateur, pas le mécanisme d'implémentation.>
 
 ## Analysis
-<what the issue actually asks for, in your own words>
+<what the issue actually asks for, in your own words — structured via the four problem-framing lenses (see §1): user segment, pain points, business context, success metrics>
 
 ## Draft acceptance criteria
-- [ ] <verifiable criterion>
+- [ ] **Happy path** — Given <context>, When <action>, Then <observable result>
+- [ ] **Edge case** — Given <boundary>, When <action>, Then <result>
+- [ ] **Error state** — Given <failure>, When <action>, Then <recovery/feedback>
+- [ ] **Non-functional** — Given <load/constraint>, When <action>, Then <performance/a11y bar>
 
 ## Classification
 Size: S | M | L
 
 ## Questions
-1. <first blocking question>
+1. <first blocking question — derived from the 7 clarifying dimensions (see §4)>
 2. <second blocking question>
 
 If no blocking questions, write "none" on its own line.
@@ -279,7 +340,8 @@ When Disposition is NEEDS-SPLIT (no blocking questions + Size L), also include t
 <description with enough context for an implementer to start cold>
 
 Acceptance criteria:
-- [ ] <verifiable criterion>
+- [ ] **Happy path** — Given <context>, When <action>, Then <observable result>
+- [ ] **Edge case** — Given <boundary>, When <action>, Then <result>
 
 Size: S | M
 
@@ -287,7 +349,8 @@ Size: S | M
 <description>
 
 Acceptance criteria:
-- [ ] <criterion>
+- [ ] **Happy path** — Given <context>, When <action>, Then <observable result>
+- [ ] **Error state** — Given <failure>, When <action>, Then <recovery>
 
 Size: S | M
 ```
