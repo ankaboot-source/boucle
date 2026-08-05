@@ -1,673 +1,907 @@
-# ARCHITECTURE.md
+# ARCHITECTURE.md — Urgence Palestine
 
-> Documentation technique du projet **urgence-palestine.fr** — site statique
-> Astro 5 du Collectif Urgence Palestine. Ce fichier décrit l'architecture
-> générale, les collections de contenu, les composants, le flux de données,
-> les dépendances et les patterns réutilisables. Il est fondé sur la lecture
-> exhaustive des fichiers sous `src/`, des configs racines et des scripts.
+> Architecture technique complète du site `urgence-palestine.fr`.
+> Document maintenu par la boucle autonome (voir [AGENTS.md](AGENTS.md)).
+
+## Sommaire
+
+1. [Architecture générale et choix techniques](#1-architecture-générale-et-choix-techniques)
+2. [Structure des collections de contenu et schémas Zod](#2-structure-des-collections-de-contenu-et-schémas-zod)
+3. [Composants Astro et leurs responsabilités](#3-composants-astro-et-leurs-responsabilités)
+4. [Flux de données entre collections, composants et pages](#4-flux-de-données-entre-collections-composants-et-pages)
+5. [Dépendances externes et leur rôle](#5-dépendances-externes-et-leur-rôle)
+6. [Patterns réutilisables identifiés](#6-patterns-réutilisables-identifiés)
 
 ---
 
 ## 1. Architecture générale et choix techniques
 
-### 1.1 Stack
+### Stack
 
-Le projet est un **site statique** généré par **Astro 5.6+** (SSG), sans
-framework UI de rendu côté client (pas de React/Vue/Svelte pour le contenu).
-Le HTML est produit à la build-time ; le peu de JavaScript est écrit
-« à la main » dans des balises `<script>` des composants Astro (vanilla
-TypeScript, IIFE), bundlé et typé par Astro.
+| Couche | Technologie | Rôle |
+|--------|-------------|------|
+| Framework | **Astro 5.6+** (`astro.config.mjs`) | Génération de site statique (SSG), routage fichier, content collections |
+| Styling | **Tailwind CSS 3.4** (`tailwind.config.mjs`) via `@astrojs/tailwind` | Utilities + preflight ; tokens maison en CSS custom properties |
+| CMS | **Sveltia CMS** (`sveltia-cms.config.yml`) | Back-office Git-based pour éditer le contenu Markdown |
+| Typage | **TypeScript 5.9** + `@astrojs/check` | Vérification de types des `.astro` et `.ts` |
+| Migration | `turndown` (devDep) | HTML → Markdown pour le script `scripts/migrate.mjs` |
 
-**Configuration clé** (`astro.config.mjs`) :
+### Mode de rendu
+
+Le site est **100% statique (SSG)**. Aucun adaptateur SSR n'est configuré dans `astro.config.mjs`. Toutes les pages sont pré-rendues au build dans `public/` (`outDir: 'public'`). Le répertoire `static/` sert de `publicDir` (assets statiques copiés tels quels).
+
+### Configuration Astro (`astro.config.mjs`)
 
 ```js
 export default defineConfig({
-  outDir: 'public',          // le build écrase le dossier ./public
-  publicDir: 'static',       // assets statiques servis depuis ./static
-  i18n: {
-    defaultLocale: 'fr',
-    locales: ['fr'],
-    routing: { prefixDefaultLocale: false }, // /fr/ non préfixé
-  },
-  integrations: [tailwind()],
+    outDir: 'public',
+    publicDir: 'static',
+    redirects: {
+        '/mobilisation': '/right-to-resist',
+    },
+    i18n: {
+        defaultLocale: 'fr',
+        locales: ['fr'],
+        routing: { prefixDefaultLocale: false },
+    },
+    integrations: [tailwind()],
 });
 ```
 
-- `outDir: 'public'` — la sortie du build Astro va dans `public/` (qui
-  contient déjà le build courant, servant de preview).
-- `publicDir: 'static'` — les assets bruts (polices, images, favicon,
-  `admin/`, `symbols/`, `media/`, symlink `sveltia-cms.config.yml`) vivent
-  dans `static/` et sont copiés tels quels à la racine du site déployé.
-- **i18n** mono-locale `fr`, sans préfixe → les URLs sont `/`, `/collectif/`,
-  `/prises-de-parole/`, etc.
-- **Tailwind CSS 3** est intégré via `@astrojs/tailwind` ; les layers
-  `@tailwind base/components/utilities` sont injectés dans
-  `src/styles/global.css`.
+- **`outDir: 'public'`** — Le build écrit directement dans `public/`, qui est aussi servi en production.
+- **`publicDir: 'static'`** — Les assets statiques (logos, fonts, symboles, images de communiqués) vivent dans `static/` et sont copiés vers `public/` au build.
+- **`redirects`** — Une redirection statique `/mobilisation` → `/right-to-resist` (les URLs par entrée `/mobilisation/<slug>/` sont inchangées).
+- **`i18n`** — Localisation `fr` uniquement, sans préfixe d'URL.
+- **`integrations`** — Tailwind uniquement, aucun autre plugin.
 
-### 1.2 Système de design
+### Structure des répertoires
 
-Le design system repose sur **deux sources de tokens synchronisées** :
+```
+.
+├── astro.config.mjs          # Config Astro
+├── tailwind.config.mjs       # Config Tailwind (palette + fonts)
+├── sveltia-cms.config.yml    # Config Sveltia CMS (collections + singleton)
+├── package.json              # Dépendances et scripts
+├── static/                   # Assets statiques (publicDir)
+│   ├── admin/index.html      # Page d'admin Sveltia CMS
+│   ├── fonts/                # Webfonts self-hosted (woff2, ttf)
+│   ├── logos/                # Variantes du logo UP
+│   ├── media/                # Médias uploadés via Sveltia
+│   ├── symbols/              # Illustrations CC-BY (keffieh, olivier, etc.)
+│   ├── communiques/          # Images des prises de parole
+│   └── mobilisation/         # Images des campagnes et événements
+├── src/
+│   ├── content.config.ts     # Définition des collections (Zod)
+│   ├── content/              # Fichiers Markdown des collections
+│   │   ├── prises-de-parole/ # 34+ fichiers .md
+│   │   ├── collectif/        # 27 fichiers .md (sections locales)
+│   │   ├── mobilisation/     # 5 fichiers .md (campagnes + événements)
+│   │   └── social.yaml       # Singleton des réseaux sociaux
+│   ├── components/           # 12 composants .astro
+│   ├── layouts/
+│   │   └── Layout.astro      # Layout racine (head, header, footer, reveal JS)
+│   ├── pages/                # Routage fichier Astro
+│   │   ├── index.astro       # Page d'accueil
+│   │   ├── agir.astro        # Alias /agir → EngagementPage
+│   │   ├── engagement.astro  # /engagement → EngagementPage
+│   │   ├── collectif.astro   # Index des sections locales
+│   │   ├── collectif/[...slug].astro   # Détail section locale
+│   │   ├── mobilisation.astro         # Index mobilisation (legacy)
+│   │   ├── mobilisation/[...slug].astro # Détail mobilisation
+│   │   ├── right-to-resist.astro      # Index mobilisation (nouveau)
+│   │   ├── prises-de-parole.astro     # Index prises de parole
+│   │   ├── prises-de-parole/[...slug].astro # Détail prise de parole
+│   │   └── credits.astro    # Crédits des illustrations
+│   ├── data/
+│   │   └── social-links.ts  # Source de vérité des liens réseaux sociaux
+│   └── styles/
+│       ├── tokens.css       # Design tokens (couleurs, type, spacing, motion)
+│       ├── global.css       # @font-face, reset, typographie globale
+│       ├── sections.css     # Styles des sections de page (hero, cards, etc.)
+│       └── CTA.md           # Spécification visuelle des CTA
+├── scripts/
+│   ├── migrate.mjs          # Migration WordPress → Markdown
+│   └── verify-migration.mjs # Vérification post-migration
+└── bin/                     # Scripts CI de la boucle autonome
+```
 
-1. **`src/styles/tokens.css`** — source de vérité canonique, en **OKLCH**.
-   Définit surfaces (ink/paper), palette du drapeau palestinien
-   (`--color-flag-red/green/white/black` + variantes `-deep`), tokens
-   sémantiques (`--color-text`, `--color-accent`, `--color-link`…), échelle
-   typographique fluide (`clamp()` sur `--text-xs`…`--text-display`),
-   familles `--font-heading` (The Bold Font) et `--font-body` (Poppins),
-   grille d'espacement 8pt fluide (`--space-3xs`…`--space-3xl`), rayons,
-   ombres, easing (`--ease-out`), durées (`--duration-fast/base/slow`) et
-   **désactivation automatique du motion** via
-   `@media (prefers-reduced-motion: reduce)`.
+### Scripts npm (`package.json`)
 
-2. **`tailwind.config.mjs`** — expose les mêmes couleurs et familles en
-   hex sRGB pour les utilitaires Tailwind (`bg-palestine-red`,
-   `font-display`, etc.). Le commentaire du fichier précise que les valeurs
-   sont « kept in sync with the OKLCH tokens ».
-
-**Charte CTA** (`src/styles/CTA.md`) : deux variantes canoniques —
-**A** (clic, bloc rouge unique, `--radius-sharp`) et **B** (non-clic, deux
-blocs empilés vert + rouge). `GeneralCTA.astro` implémente la variante B.
-
-**Feuilles globales** chargées par `Layout.astro` :
-- `src/styles/global.css` → `@import "./tokens.css"` + layers Tailwind +
-  `@font-face` (The Bold Font, Poppins 400/500/600/700, self-hostés sous
-  `/fonts/`) + reset + typographie site-wide (h1…h6, `.display`, `.eyebrow`,
-  `.container`).
-- `src/styles/sections.css` → styles de sections (`.hero`, `.btn`,
-  `.btn--primary`, `.btn--ghost`, `.flag-stripe`, `.section-head`,
-  `.pillars`, `.symbol-card`, `.site-footer`, `.newsletter-section`).
-
-### 1.3 CMS Headless : Sveltia CMS
-
-L'édition de contenu est déléguée à **Sveltia CMS** (fork léger de
-Decap/Netlify CMS), chargé côté client depuis un CDN :
-
-- `public/admin/index.html` — SPA d'admin minimale : `<link
-  rel="cms-config-url" href="/sveltia-cms.config.yml">` +
-  `<script src="https://unpkg.com/@sveltia/cms/dist/sveltia-cms.js">`.
-  `noindex,nofollow`.
-- `sveltia-cms.config.yml` (racine) — **configuration canonique** du CMS,
-  exposée à `/sveltia-cms.config.yml` via le symlink
-  `static/sveltia-cms.config.yml -> ../sveltia-cms.config.yml`.
-- Backend `test-repo` (dev), `media_folder: /static/media`,
-  `public_folder: /media`.
-
-### 1.4 Build, scripts et tooling
-
-`package.json` (type: module) — scripts :
-
-| Script | Rôle |
-| --- | --- |
-| `dev` | `astro dev` — serveur de dev |
-| `build` | `astro build` — génère `public/` |
-| `preview` | `astro preview` |
-| `build:symbols` | `node scripts/build-symbols.mjs` — génère les 9 PNG de symboles via `sharp` (SVG → PNG 512×512 avec filtre « wobble » main levée) |
-| `migrate` | `node scripts/migrate.mjs` — migration WordPress → collections Astro (REST API, Turndown, ré-hébergement d'images) |
-| `verify:migration` | `node scripts/verify-migration.mjs` — contrôle post-migration |
-
-`tsconfig.json` — `extends: "astro/tsconfigs/strict"`, inclut
-`.astro/types.d.ts`.
-
-Dépendances : `astro`, `@astrojs/tailwind`, `tailwindcss`.
-DevDeps : `@astrojs/check`, `typescript`, `turndown` (HTML→Markdown pour la
-migration). `sharp` est utilisé par `build-symbols.mjs` (transitif via
-Astro).
+| Script | Commande | Rôle |
+|--------|----------|------|
+| `dev` | `astro dev` | Serveur de développement |
+| `build` | `astro build` | Build statique → `public/` |
+| `preview` | `astro preview` | Prévisualisation du build |
+| `migrate` | `node scripts/migrate.mjs` | Migration WordPress → Markdown |
+| `verify:migration` | `node scripts/verify-migration.mjs` | Vérification de la migration |
+| `test` | `make test` | Tests (Makefile) |
 
 ---
 
-## 2. Collections de contenu et schémas Zod
+## 2. Structure des collections de contenu et schémas Zod
 
-### 2.1 Configuration — `src/content.config.ts`
-
-Trois collections déclarées avec le loader **`glob()`** d'Astro 5
-(`pattern: "**/*.md"` + `base: "./src/content/<name>"`). Les schémas Zod
-sont **miroir 1:1** des `fields` Sveltia de `sveltia-cms.config.yml`.
-
-Helpers Zod réutilisables (haut du fichier) :
+Les collections sont définies dans `src/content.config.ts` et reflètent la configuration Sveltia CMS dans `sveltia-cms.config.yml`. Quatre collections sont exportées :
 
 ```ts
-const requiredString = z.string().min(1);
-const optionalString = z.string().optional();
-const optionalDate = z.coerce.date().optional();
-const optionalUrl = z.string().url().optional();
-const optionalImagePath = z.string()
-  .regex(/^\//, { message: "image must start with '/' (static asset path)" })
-  .optional();
-const entryKind = z.enum(["section-locale", "mobilisation-etudiante"]);
+export const collections = {
+    prisesDeParole,
+    collectif,
+    mobilisation,
+    social,
+};
 ```
 
-### 2.2 Collection `communiques` — Prises de parole
+### 2.1 `prisesDeParole` — Communiqués, analyses et appels
 
-- **Dossier** : `src/content/communiques/` (39 fichiers
-  `YYYY-MM-DD-<slug>.md`, de 2023-10-28 à 2026-04-15).
-- **Sveltia** : `name: communiques`, `slug: "{{year}}-{{month}}-{{slug}}"`,
-  champs `title`, `date` (datetime), `description` (text, optionnel),
-  `body` (markdown).
-- **Schéma Zod** :
-  ```ts
-  { title: requiredString, date: z.coerce.date(), description: optionalString }
-  ```
-- Le `body` Markdown n'est pas dans le schéma (Astro l'expose via
-  `entry.body` / `render(entry)`).
+**Dossier** : `src/content/prises-de-parole/` (34+ fichiers `.md`)
+**Loader** : `glob({ pattern: "**/*.md", base: "./src/content/prises-de-parole" })`
 
-Exemple de frontmatter (`2025-01-16-cessez-le-feu-a-gaza.md`) :
+#### Schéma Zod
+
+```ts
+const priseCategory = z.enum(["communique", "analyse", "appel-a-mobilisation"]);
+
+const prisesDeParole = defineCollection({
+    loader: glob({ pattern: "**/*.md", base: "./src/content/prises-de-parole" }),
+    schema: z.object({
+        title: requiredString,                    // z.string().min(1)
+        date: z.coerce.date(),                    // ISO-8601, requis
+        description: optionalString,              // z.string().optional()
+        category: priseCategory.default("communique"),
+    }),
+});
+```
+
+#### Stratégie de slug
+
+Les fichiers sont nommés `YYYY-MM-DD-<slug>.md`. L'`id` Astro (nom de fichier sans `.md`) inclut donc le préfixe date. Les pages d'index et de détail stripent ce préfixe :
+
+```ts
+// Index et détail :
+entry.id.replace(/^\d{4}-\d{2}-\d{2}-/, "")
+```
+
+Cela produit des URLs `/prises-de-parole/<slug>/` identiques aux slugs WordPress d'origine.
+
+#### Taxonomie éditoriale
+
+| Valeur `category` | Badge affiché | Couleur du badge |
+|---|---|---|
+| `communique` (défaut) | « Communiqué » | `.entry-card__badge--communique` |
+| `analyse` | « Analyse » | `.entry-card__badge--analyse` |
+| `appel-a-mobilisation` | « Appel » | `.entry-card__badge--appel` |
+
+La catégorie est optionnelle avec défaut `communique` pour la rétro-compatibilité des entrées pré-taxonomie.
+
+#### Exemple de frontmatter
+
 ```yaml
+---
 title: "Cessez-le-feu à Gaza"
+category: communique
 date: 2025-01-16
-description: "Une victoire pour le peuple palestinien…"
+description: "Une victoire pour le peuple palestinien..."
+---
 ```
-Le corps commence par `![Featured image](/communiques/.../…jpeg)` — image
-ré-hébergée sous `static/communiques/<slug>/`.
 
-### 2.3 Collection `collectif` — Sections locales + mobilisation étudiante
+Le corps Markdown contient des images inline pointant vers `/communiques/<slug>/...` (assets rehébergés dans `static/`).
 
-- **Dossier** : `src/content/collectif/` (28 fichiers : 27 villes +
-  `mobilisation-etudiante.md`).
-- **Sveltia** : `name: collectif`, `identifier_field: city`,
-  `slug: "{{slug}}"`, discriminateur `kind` (select :
-  `section-locale` | `mobilisation-etudiante`, défaut `section-locale`).
-- **Schéma Zod** :
-  ```ts
-  {
-    city: requiredString,                 // "Paris" ou "Étudiants"
-    title: optionalString,
-    contact_email: z.string().email().optional(),
-    description: optionalString,
-    image: optionalImagePath,             // ex. "/collectif/...png"
-    instagram: optionalUrl,
-    telegram: optionalUrl,
-    twitter: optionalUrl,
-    facebook: optionalUrl,
-    website: optionalUrl,
-    kind: entryKind.default("section-locale"),
-    date: optionalDate,                   // pas dans Sveltia, réservé
-  }
-  ```
-- **Rationale** (commentaire) : une seule collection homogène pour les deux
-  « saveurs » du Collectif héritées de WordPress ; `city` est l'identifiant
-  stable, `kind` permet à la page d'index de splitter en deux onglets. Pour
-  la mobilisation étudiante, `city` vaut `"Étudiants"`.
+### 2.2 `collectif` — Sections locales et mobilisation étudiante
 
-Exemple (`paris.md`) : `title`, `city`, `description` + corps Markdown avec
-coordonnées. Exemple étudiant (`mobilisation-etudiante.md`) :
-`city: "Étudiants"`, `kind: "mobilisation-etudiante"`,
-`image: "/collectif/collectif-urgence-palestine.png"`.
+**Dossier** : `src/content/collectif/` (27 fichiers `.md`)
+**Loader** : `glob({ pattern: "**/*.md", base: "./src/content/collectif" })`
 
-### 2.4 Collection `mobilisation` — Événements & campagnes
-
-- **Dossier** : `src/content/mobilisation/` (5 fichiers : 3 campagnes
-  `kit-militant`/`boycott`/`prisonniers` + 2 événements).
-- **Sveltia** : `name: mobilisation`, `slug: "{{year}}-{{month}}-{{slug}}"`,
-  champs `title`, `date`, `location`, `description`, `featured_image`
-  (image, optionnel), `category` (select : `evenement` | `kit-militant` |
-  `boycott` | `prisonniers`, défaut `evenement`), `body`.
-- **Schéma Zod** :
-  ```ts
-  {
-    title: requiredString,
-    date: z.coerce.date(),
-    location: requiredString,             // ex. "En ligne — national"
-    description: optionalString,
-    featured_image: optionalString,       // ex. "/mobilisation/kit-militant/affiche.jpg"
-    category: z.enum(["evenement","kit-militant","boycott","prisonniers"])
-                 .default("evenement"),
-  }
-  ```
-- **Rationale** : mélange deux formes — (1) événements datés
-  (rassemblements) et (2) landing pages de campagnes migrées depuis
-  `urgence-palestine.com`. `category` optionnel pour garder valides les
-  événements ad-hoc sans regroupement.
-
-Exemple (`2025-05-kit-militant.md`) : `category: kit-militant`,
-`featured_image: "/mobilisation/kit-militant/affiche.jpg"`, corps avec
-listes de liens PDF/JPG vers `/mobilisation/kit-militant/...`.
-
-### 2.5 Export
+#### Schéma Zod
 
 ```ts
-export const collections = { communiques, collectif, mobilisation };
+const entryKind = z.enum(["section-locale", "mobilisation-etudiante"]);
+
+const collectif = defineCollection({
+    loader: glob({ pattern: "**/*.md", base: "./src/content/collectif" }),
+    schema: z.object({
+        city: requiredString,                     // Identifiant stable (slug source)
+        title: optionalString,
+        contact_email: z.string().email().optional(),
+        description: optionalString,
+        image: optionalImagePath,                 // z.string().regex(/^\//).optional()
+        instagram: optionalUrl,                   // z.string().url().optional()
+        telegram: optionalUrl,
+        twitter: optionalUrl,
+        facebook: optionalUrl,
+        website: optionalUrl,
+        kind: entryKind.default("section-locale"),
+        date: optionalDate,                       // z.coerce.date().optional()
+    }),
+});
 ```
 
+#### Discriminateur `kind`
+
+- **`section-locale`** (défaut) — Fiche d'une antenne locale par ville. L'`id` est le slug de la ville (ex: `paris`, `marseille`, `lyon`).
+- **`mobilisation-etudiante`** — Hub de mobilisation étudiante. La page de détail affiche « Mobilisation étudiante » au lieu de « Section locale » et propose des CTA différents (annuaire des campus, formulaire « Je m'engage »).
+
+La page d'index `/collectif` sépare les deux types en deux onglets/tabs :
+
+```ts
+const sections = entries.filter(e => (e.data.kind ?? "section-locale") === "section-locale")
+    .sort((a, b) => a.data.city.localeCompare(b.data.city, "fr"));
+const mobilisation = entries.filter(e => e.data.kind === "mobilisation-etudiante")
+    .sort((a, b) => a.data.city.localeCompare(b.data.city, "fr"));
+```
+
+#### Stratégie de slug
+
+Pas de préfixe date. L'`id` Astro est directement le nom du fichier (ex: `paris.md` → `id: "paris"`). Les URLs sont `/collectif/<slug>/`.
+
+#### Exemple de frontmatter
+
+```yaml
+---
+title: "Collectif Urgence Palestine — Paris"
+city: "Paris"
+description: "Section parisienne du collectif : réunions hebdomadaires..."
+---
+```
+
+### 2.3 `mobilisation` — Campagnes et événements
+
+**Dossier** : `src/content/mobilisation/` (5 fichiers `.md`)
+**Loader** : `glob({ pattern: "**/*.md", base: "./src/content/mobilisation" })`
+
+#### Schéma Zod
+
+```ts
+const mobilisationCategory = z.enum(["kit-militant", "boycott", "prisonniers"]);
+
+const mobilisation = defineCollection({
+    loader: glob({ pattern: "**/*.md", base: "./src/content/mobilisation" }),
+    schema: z.object({
+        title: requiredString,
+        date: z.coerce.date(),
+        location: requiredString,                 // Lieu physique ou "En ligne — national"
+        description: optionalString,
+        featured_image: optionalString,            // Chemin local sous /mobilisation/
+        category: z.enum(["evenement", "kit-militant", "boycott", "prisonniers"])
+            .default("evenement"),
+    }),
+});
+```
+
+#### Deux formes d'entrées
+
+1. **Événements ponctuels** (`category: "evenement"`, défaut) — Rassemblements, marches, actions datées. `date` et `location` sont requis.
+2. **Pages de campagne** (`category: "kit-militant" | "boycott" | "prisonniers"`) — Landing pages migrées du site WordPress legacy. Contiennent visuels, tracts téléchargeables, arguments.
+
+#### Stratégie de slug
+
+Fichiers nommés `YYYY-MM-<slug>.md`. Le préfixe `YYYY-MM-` est strippé :
+
+```ts
+entry.id.replace(/^\d{4}-\d{2}-/, "")
+```
+
+URLs : `/mobilisation/<slug>/` (inchangées entre l'ancien et le nouveau routeur).
+
+#### Exemple de frontmatter
+
+```yaml
+---
+title: "Boycott — page de campagne"
+date: 2025-03-25
+location: "En ligne — national"
+description: "Page de campagne Boycott..."
+featured_image: "/mobilisation/boycott/2025-visuel-boycott.png"
+category: boycott
+---
+```
+
+### 2.4 `social` — Singleton des réseaux sociaux
+
+**Fichier** : `src/content/social.yaml`
+**Loader** : `glob({ pattern: "social.yaml", base: "./src/content" })`
+
+#### Schéma Zod
+
+```ts
+const social = defineCollection({
+    loader: glob({ pattern: "social.yaml", base: "./src/content" }),
+    schema: z.object({
+        instagram: optionalUrl,
+        tiktok: optionalUrl,
+        telegram: optionalUrl,
+        facebook: optionalUrl,
+        twitter: optionalUrl,
+    }),
+});
+```
+
+#### Rôle
+
+Source de vérité éditable depuis l'admin Sveltia (singleton « Réseaux sociaux »). Consommée par `SocialCTA.astro` et `SocialSidebar.astro` au build. Tous les champs sont optionnels pour permettre une configuration vide sans casser le build.
+
+#### Contenu actuel (`src/content/social.yaml`)
+
+```yaml
+instagram: https://instagram.com/urgencepalestine
+tiktok: https://tiktok.com/@urgencepalestine
+telegram: https://t.me/urgencepalestine
+facebook: https://facebook.com/urgencepalestine
+twitter: https://twitter.com/urgencepalestine
+```
+
+### Helpers Zod réutilisables
+
+Définis en haut de `src/content.config.ts` :
+
+| Helper | Définition | Usage |
+|--------|------------|------|
+| `requiredString` | `z.string().min(1)` | `title`, `city`, `location` |
+| `optionalString` | `z.string().optional()` | `description`, `title` (collectif) |
+| `optionalDate` | `z.coerce.date().optional()` | `date` (collectif) |
+| `optionalUrl` | `z.string().url().optional()` | URLs réseaux sociaux, website |
+| `optionalImagePath` | `z.string().regex(/^\//).optional()` | `image` (collectif) |
+| `entryKind` | `z.enum(["section-locale", "mobilisation-etudiante"])` | `kind` (collectif) |
+| `priseCategory` | `z.enum(["communique", "analyse", "appel-a-mobilisation"])` | `category` (prisesDeParole) |
+| `mobilisationCategory` | `z.enum(["kit-militant", "boycott", "prisonniers"])` | `category` (mobilisation) |
+
+### Synchronisation Sveltia CMS ↔ Zod
+
+Le fichier `sveltia-cms.config.yml` déclare les mêmes collections avec les mêmes champs. Les commentaires dans les deux fichiers rappellent de les maintenir en sync. La collection `social` est un **singleton** Sveltia (pas dans un bloc `collections:`), tandis qu'elle est une collection `glob` côté Astro.
+
 ---
 
-## 3. Composants Astro et responsabilités
+## 3. Composants Astro et leurs responsabilités
 
-Tous les composants sont dans `src/components/`. Aucun n'utilise de
-framework UI ; le JS client est vanilla, typé, encapsulé en IIFE et
-déclaré dans des `<script>` Astro.
+### 3.1 `Layout.astro` — Layout racine
 
-### 3.1 Chrome global
+**Fichier** : `src/layouts/Layout.astro`
 
-| Composant | Fichier | Responsabilité |
-| --- | --- | --- |
-| **Layout** | `src/layouts/Layout.astro` | Layout racine. Importe `global.css` + `sections.css`, rend `<Header/>`, `<slot/>`, `<slot name="modal"/>`, `<Footer/>`. Props `title?`, `description?` (défauts « Urgence Palestine »). `<head>` : meta, `theme-color`, **preload** des polices critiques (`the-bold-font.woff2`, `poppins-400.woff2`), favicon SVG. Le slot `modal` permet aux pages d'injecter `NewsletterModal`. |
-| **Header** | `src/components/Header.astro` | Barre supérieure sticky, fond noir (`--color-flag-black`), wordmark + nav 4 liens (`Prises de parole` `/prises-de-parole`, `Collectif` `/collectif`, `Faites un don` `/don`, `Mobilisation` `/mobilisation`). Hover accent rouge. Responsive empilé sous 40rem. |
-| **Footer** | `src/components/Footer.astro` | Pied de page actif (utilisé par `Layout`). Brand block, liens, `<NewsletterSignup variant="inline">`, réseaux sociaux, **email obfusqué** : fragments `["contact","urgence-palestine"]` / `["fr"]` passés en `data-*`, réassemblés en `mailto:` par un `<script>` IIFE pour échapper aux scrapers. Fallback `<noscript>` vers `/contact`. |
-| **SiteFooter** | `src/components/SiteFooter.astro` | Variante alternative de footer (flag-stripe + `NewsletterSignup variant="footer"`). Présent mais **non référencé** par `Layout.astro` (qui utilise `Footer`). |
+| Aspect | Détail |
+|--------|--------|
+| Props | `title?: string`, `description?: string` (avec defaults) |
+| Rôle | Enveloppe chaque page : `<head>` (meta, fonts preload, favicon), `<Header>`, `<slot>`, `<Footer>` |
+| Styles importés | `../styles/global.css`, `../styles/sections.css` |
+| JS inline | `initReveal()` — IntersectionObserver pour scroll-reveal staggered |
 
-### 3.2 CTA
+#### Script `initReveal()`
 
-| Composant | Fichier | Responsabilité |
-| --- | --- | --- |
-| **DonationCTA** | `src/components/DonationCTA.astro` | Bloc don homepage. Sans props. Fond `--color-flag-red` + dégradé diagonal (green-deep → black), titre + lede + bouton « Faire un don » vers `https://donorbox.org/soutenir-up`. |
-| **GeneralCTA** | `src/components/GeneralCTA.astro` | **Variante B de la charte CTA** (non-clic). Props `title` (requis), `ctaLabel` (requis), `eyebrow?`, `tone?: "green-then-red"` (réservé). Deux stripes empilés : vert (titre) + rouge (label). Aucun `<a>`, aucun JS. `aria-labelledby="general-cta-title"`. |
+```js
+function initReveal() {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const targets = document.querySelectorAll(".reveal, .reveal-stagger");
+    // ...
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+                reveal(entry.target);
+                observer.unobserve(entry.target);
+            }
+        });
+    }, { threshold: 0.15, rootMargin: "0px 0px -40px 0px" });
+    targets.forEach((el) => observer.observe(el));
+}
+```
 
-### 3.3 Newsletter & engagement
+Ajoute `.is-revealed` aux éléments `.reveal` et aux enfants de `.reveal-stagger` avec un délai cascade via `--reveal-index`. Utilise uniquement `transform` + `opacity` (propriétés composites). Désactivé sous `prefers-reduced-motion: reduce`.
 
-| Composant | Fichier | Responsabilité |
-| --- | --- | --- |
-| **NewsletterSignup** | `src/components/NewsletterSignup.astro` | Formulaire newsletter réutilisable. Props : `id?` (défaut `newsletter-signup`), `variant?: "inline" \| "block" \| "stacked" \| "footer"` (`stacked` normalisé en `block`), `heading?`, `description?`, `buttonLabel?`, `labelledBy?`. `<form data-newsletter>` avec input email + submit + régions success/error (`role=status`/`role=alert`, `aria-live`). **Script client** : valide (`checkValidity`), simule POST (350ms), marque `sessionStorage["up-newsletter-subscribed"]="1"`, cache le formulaire, affiche le succès, dispatche `CustomEvent("up:newsletter:subscribed")`. Au load, si déjà inscrit → affiche directement le succès. |
-| **NewsletterModal** | `src/components/NewsletterModal.astro` | `<dialog data-newsletter-modal>` natif. Props : `delayMs?` (défaut 30000), `heading?`, `description?`, `buttonLabel?`. **Tracker d'inactivité** : ouvre après `delayMs` sans activity (click/scroll/keydown) ; toute activité annule et détache les listeners. Clôture par bouton ×, « Non merci », Escape, clic backdrop, ou succès. `sessionStorage["up-newsletter-modal-dismissed"]` + `["up-newsletter-subscribed"]` suppriment la réapparition. Écoute `up:newsletter:subscribed` pour se fermer. Embedde `<NewsletterSignup variant="block" heading="" description="" labelledBy=…>` (pas de `<form method="dialog">` pour éviter le nesting de forms). Animations `@keyframes nl-modal-in` / `nl-backdrop-in`, réduites sous `prefers-reduced-motion`. |
-| **EngagementForm** | `src/components/EngagementForm.astro` | Formulaire 4 champs (`name`, `email`, `city`, `message`, tous requis). Props `formId?` (défaut `engagement-form`). `novalidate` + validation client : `validateField` par champ (longueurs min, `checkValidity` email, message ≥ 10), focus sur 1er invalide, bouton « Envoi en cours… », simule POST 500ms, remplace le form par une carte de succès reprenant nom + ville (`data-engagement-success-name/city`), `scrollIntoView`, dispatche `up:engagement:submitted`. |
-| **EngagementPage** | `src/components/EngagementPage.astro` | Corps partagé des routes `/engagement` et `/agir`. Props `formId: string` (requis). Hero + 3 bénéfices (01/02/03) + `<EngagementForm formId>` + aside newsletter (`<NewsletterSignup variant="inline">`). Inclut `<NewsletterModal slot="modal">`. |
+### 3.2 `Header.astro` — En-tête sticky
 
-### 3.4 Communication inter-composants
+**Fichier** : `src/components/Header.astro`
 
-Les scripts client utilisent trois `CustomEvent` dédiés (sur `document`) :
-- `up:newsletter:subscribed` — émis par `NewsletterSignup` ; écouté par
-  `NewsletterModal` pour se fermer.
-- `up:engagement:submitted` — émis par `EngagementForm`.
-- (réservé) `up:newsletter:modal-dismissed` implicite via `dialog.close`.
+| Aspect | Détail |
+|--------|--------|
+| Imports | `socialLinks` depuis `src/data/social-links.ts` |
+| Rôle | Barre de navigation sticky avec wordmark, 4 liens de nav, 2 CTA (don, boutique), icônes réseaux sociaux |
+| Nav | `Prises de parole` → `/prises-de-parole`, `Collectif` → `/collectif`, `Faites un don` → `/don`, `Right to Resist` → `/right-to-resist` (featured) |
+| CTA | `Faire un don` (variant primary), `Boutique solidaire` (variant ghost, externe HelloAsso) |
+| Logos | Deux `<img>` (carré + rectangle) ; CSS masque l'inactif selon l'état scroll |
 
-Clés `sessionStorage` partagées :
-- `up-newsletter-subscribed` (NewsletterSignup + NewsletterModal)
-- `up-newsletter-modal-dismissed` (NewsletterModal)
+### 3.3 `Footer.astro` — Pied de page (version active)
+
+**Fichier** : `src/components/Footer.astro`
+
+| Aspect | Détail |
+|--------|--------|
+| Imports | `socialLinks` |
+| Rôle | Brand block, liens utiles, réseaux sociaux, email de contact obfusqué |
+| Obfuscation email | Fragments `["contact", "urgence-palestine"]` + `["fr"]` stockés en `data-*`, réassemblés en JS au runtime. Le `mailto:` est construit lettre par lettre pour éviter le scraping. |
+| Fallback noscript | `<noscript>` affiche un lien `/contact` |
+
+### 3.4 `SiteFooter.astro` — Pied de page (variante)
+
+**Fichier** : `src/components/SiteFooter.astro`
+
+| Aspect | Détail |
+|--------|--------|
+| Imports | `socialLinks` |
+| Rôle | Variante du footer avec stripe du drapeau palestinien, mentions légales, copyright |
+| Différence avec Footer.astro | Inclut une `flag-stripe` décorative, pas d'obfuscation email, liens vers `/mentions-legales` et `/contact` |
+
+### 3.5 `DonationCTA.astro` — Bloc don
+
+**Fichier** : `src/components/DonationCTA.astro`
+
+| Aspect | Détail |
+|--------|--------|
+| Props | Aucune |
+| Rôle | Bloc don haute impact sur la homepage. Lien externe vers Donorbox (`https://donorbox.org/soutenir-up`) |
+| Visuel | Fond noir (`--color-flag-black`), texte blanc, gradient subtil vert→transparent, bouton rouge avec `--shadow-hard` au hover |
+
+### 3.6 `GeneralCTA.astro` — CTA visuel deux bandes
+
+**Fichier** : `src/components/GeneralCTA.astro`
+
+| Aspect | Détail |
+|--------|--------|
+| Props | `title: string`, `ctaLabel: string`, `tone?: "green-then-red"`, `variant?: "default" \| "angled-split"` |
+| Rôle | CTA non-cliquable, harness visuel pour migrations futures. Deux bandes : titre vert + label rouge. |
+| Variantes | `default` (pleine largeur) ou `angled-split` (délègue à `AngledSplitCTA.astro`) |
+| JS | Aucun — pur Astro, zéro client JS |
+
+### 3.7 `AngledSplitCTA.astro` — CTA en bandes inclinées
+
+**Fichier** : `src/components/AngledSplitCTA.astro`
+
+| Aspect | Détail |
+|--------|--------|
+| Props | `title: string`, `ctaLabel: string`, `headingId?: string` |
+| Rôle | Variante de GeneralCTA : bande verte horizontale (titre) + bande rouge inclinée 2° (label). Le texte rouge suit la pente (`skewY`). |
+| Animation | `@keyframes angled-split-rise` — slide-up + fade-in séquentiel. Compositor-only, gated `prefers-reduced-motion`. |
+
+### 3.8 `MobilisationBlock.astro` — Bloc mobilisation photo + overlay
+
+**Fichier** : `src/components/MobilisationBlock.astro`
+
+| Aspect | Détail |
+|--------|--------|
+| Props | `backgroundImage?: string`, `isPlaceholder?: boolean`, `overlayTone?: "red" \| "green" \| "white" \| "black"` |
+| Rôle | Section mobilisation de la homepage. Photo en `background-image`, overlay solide (token flag), titre sur l'overlay, body + CTA en-dessous sur surface propre. |
+| Règles | Aucun `<img>` sous le contenu. Overlay en `position: absolute` entre photo et texte. `data-placeholder="true"` tant que la photo est un SVG temporaire. |
+| Defaults | `backgroundImage = "/mobilisation/_placeholder-manifestation.svg"`, `isPlaceholder = true`, `overlayTone = "red"` |
+
+### 3.9 `FeaturedFeed.astro` — Rail « À la une »
+
+**Fichier** : `src/components/FeaturedFeed.astro`
+
+| Aspect | Détail |
+|--------|--------|
+| Props | Aucune |
+| Rôle | Rail de 6 items éditorialement sélectionnés sur la homepage. Liens vers `/prises-de-parole/<slug>/`. |
+| Données | Liste statique `items: FeedItem[]` (hardcoded, pas de collection). Chaque item a `title`, `slug`, `image`, `date`, `category`, `ratio`. |
+| Type `FeedItem` | `{ title, slug, image, date, category: "communique" \| "analyse" \| "appel-a-mobilisation", ratio: "1-1" \| "4-5" \| "4-3" }` |
+| Accessibilité | Chaque carte est un seul lien (`<a>`) avec `aria-label` complet. L'overlay titre/date est `aria-hidden`. |
+| JS | IntersectionObserver pour reveal des cards au scroll. |
+
+### 3.10 `EngagementForm.astro` — Formulaire d'engagement
+
+**Fichier** : `src/components/EngagementForm.astro`
+
+| Aspect | Détail |
+|--------|--------|
+| Props | `formId?: string` (défaut `"engagement-form"`) |
+| Rôle | Formulaire 4 champs (nom, email, ville, message) avec validation client-side. Simule un POST (pas de backend) et remplace le formulaire par une carte de confirmation. |
+| Validation | `required` + `minlength` HTML + script client. Email en `type="email"`. |
+| Accessibilité | `role="alert"` + `aria-live="assertive"` pour erreurs. `role="status"` + `aria-live="polite"` pour succès. |
+| Multi-instance | Script scope par `[data-engagement-form]` pour supporter plusieurs formulaires sur la même page. |
+
+### 3.11 `EngagementPage.astro` — Page d'engagement partagée
+
+**Fichier** : `src/components/EngagementPage.astro`
+
+| Aspect | Détail |
+|--------|--------|
+| Props | `formId: string`, `pageSymbol?: string` |
+| Rôle | Corps partagé des routes `/engagement` et `/agir`. Hero + 3 bénéfices numérotés + `EngagementForm` + `NewsletterSignup`. |
+| Imports | `Layout.astro`, `EngagementForm.astro`, `NewsletterSignup.astro` |
+| Symbole décoratif | `<img src="/symbols/${pageSymbol}">` optionnel à côté du CTA. |
+
+### 3.12 `NewsletterSignup.astro` — Inscription newsletter
+
+**Fichier** : `src/components/NewsletterSignup.astro`
+
+| Aspect | Détail |
+|--------|--------|
+| Props | `id?: string`, `variant?: "inline" \| "block"`, `heading?`, `description?`, `buttonLabel?` |
+| Rôle | Formulaire newsletter avec consentement RGPD (checkbox requis), email, bouton. Carte de succès + message d'erreur. |
+| Variantes | `block` (carte homepage, bordure 2px, fond blanc) ou `inline` (compact, pour page engagement) |
+| Accessibilité | `fieldset`/`legend` pour le consentement, `aria-describedby` pour le hint, `role="status"` pour succès, `role="alert"` pour erreur. |
+
+### 3.13 `SocialCTA.astro` — Bloc réseaux sociaux
+
+**Fichier** : `src/components/SocialCTA.astro`
+
+| Aspect | Détail |
+|--------|--------|
+| Props | `id?: string`, `heading?: string`, `description?: string` |
+| Rôle | Gros boutons réseaux sociaux (Instagram, TikTok, Telegram, Facebook) avec icônes SVG + labels. Fond rouge, hover → ink + `--shadow-hard`. |
+| Imports | `socialLinks` depuis `src/data/social-links.ts` |
 
 ---
 
-## 4. Flux de données : collections → composants → pages
+## 4. Flux de données entre collections, composants et pages
 
 ### 4.1 Vue d'ensemble
 
+```mermaid
+graph TD
+    subgraph "Contenu (src/content/)"
+        MD1["prises-de-parole/*.md"]
+        MD2["collectif/*.md"]
+        MD3["mobilisation/*.md"]
+        YAML["social.yaml"]
+    end
+
+    subgraph "Schéma (src/content.config.ts)"
+        Z1["prisesDeParole (Zod)"]
+        Z2["collectif (Zod)"]
+        Z3["mobilisation (Zod)"]
+        Z4["social (Zod)"]
+    end
+
+    subgraph "Pages (src/pages/)"
+        P1["prises-de-parole.astro<br/>prises-de-parole/[...slug].astro"]
+        P2["collectif.astro<br/>collectif/[...slug].astro"]
+        P3["mobilisation.astro<br/>right-to-resist.astro<br/>mobilisation/[...slug].astro"]
+        P4["index.astro"]
+        P5["engagement.astro / agir.astro"]
+        P6["credits.astro"]
+    end
+
+    subgraph "Composants"
+        C1["FeaturedFeed.astro"]
+        C2["SocialCTA.astro"]
+        C3["NewsletterSignup.astro"]
+        C4["EngagementForm.astro"]
+        C5["EngagementPage.astro"]
+        C6["DonationCTA.astro"]
+        C7["GeneralCTA.astro"]
+        C8["MobilisationBlock.astro"]
+        C9["Header.astro / Footer.astro"]
+    end
+
+    subgraph "Données statiques"
+        D1["src/data/social-links.ts"]
+        D2["FeaturedFeed items[] (hardcoded)"]
+        D3["credits[] (hardcoded)"]
+    end
+
+    MD1 --> Z1 --> P1
+    MD2 --> Z2 --> P2
+    MD3 --> Z3 --> P3
+    YAML --> Z4 --> C2
+
+    D1 --> C9
+    D1 --> C2
+    D2 --> C1
+    D3 --> P6
+
+    P4 --> C1
+    P4 --> C2
+    P4 --> C3
+    P4 --> C6
+    P4 --> C7
+    P4 --> C8
+
+    P5 --> C5
+    C5 --> C4
+    C5 --> C3
 ```
-src/content/<collection>/*.md
-   │  (glob loader, Zod validation)
-   ▼
-astro:content  →  getCollection("<name>")  /  render(entry)
-   │
-   ├── pages index   (src/pages/<route>.astro)
-   └── pages détail  (src/pages/<route>/[...slug].astro  via getStaticPaths)
-```
 
-Les pages consomment les collections exclusivement via
-`import { getCollection, render } from "astro:content"`. Aucune logique
-métier n'est extraite dans des modules utilitaires — le tri/filtre/groupage
-est en ligne dans chaque page.
+### 4.2 Flux détaillé par collection
 
-### 4.2 Route `/` — `src/pages/index.astro`
+#### `prisesDeParole`
 
-- Aucune collection. Compose `Layout` + `GeneralCTA` + `DonationCTA` +
-  `.flag-stripe` + section `.pillars` (3 piliers) +
-  `<NewsletterSignup variant="block">` dans `.newsletter-section` +
-  `<NewsletterModal slot="modal">`.
-- Hero avec `img src="/symbols/antique-key.webp"` (eager, high priority).
+1. **Source** : fichiers `.md` dans `src/content/prises-de-parole/` avec frontmatter (title, date, description, category) + corps Markdown.
+2. **Validation** : `content.config.ts` valide le frontmatter via Zod au build.
+3. **Index** (`prises-de-parole.astro`) :
+   - `getCollection("prisesDeParole")` récupère toutes les entrées.
+   - Tri antichronologique par `date`.
+   - Groupery par `category` en 3 sections H2 (communiqués, analyses, appels).
+   - Extraction de la première image inline du corps Markdown via regex : `entry.body.match(/!\[.*?\]\((\/[^)\s]+)\)/)`.
+   - Badge coloré par catégorie (`.entry-card__badge--communique`, etc.).
+   - Slug URL : `entry.id.replace(/^\d{4}-\d{2}-\d{2}-/, "")`.
+4. **Détail** (`[...slug].astro`) :
+   - `getStaticPaths()` génère une route par entrée.
+   - `render(entry)` produit le composant `<Content />` pour le corps Markdown.
+   - Affiche titre, date formatée (`Intl.DateTimeFormat("fr-FR")`), description, corps, et un footer CTA (newsletter + retour à l'index).
 
-### 4.3 Routes `/engagement` et `/agir`
+#### `collectif`
 
-- `src/pages/engagement.astro` → `<EngagementPage formId="engagement" />`.
-- `src/pages/agir.astro` → `<EngagementPage formId="agir" />` (alias pour
-  que le CTA hero « Agir maintenant » atterrisse sur une URL cohérente).
-- Le `formId` unique évite les collisions d'`id` input/label.
+1. **Source** : fichiers `.md` dans `src/content/collectif/` avec frontmatter (city, title, contact_email, description, image, instagram, telegram, twitter, facebook, website, kind).
+2. **Index** (`collectif.astro`) :
+   - `getCollection("collectif")` récupère toutes les entrées.
+   - Séparation par `kind` : `section-locale` vs `mobilisation-etudiante`.
+   - Tri alphabétique par `city` (`localeCompare("fr")`).
+   - Pré-rendu des corps Markdown pour les entrées mobilisation étudiante (`render(entry)`).
+   - CTA externes : Google Form « Créer un collectif », Google Form « Je m'engage », Linktree mobilisation étudiante.
+3. **Détail** (`[...slug].astro`) :
+   - `getStaticPaths()` — `params.slug = entry.id` (pas de strip de préfixe).
+   - Construction d'un tableau `channels[]` à partir des champs de contact (email, instagram, telegram, twitter, facebook, website).
+   - Affichage conditionnel : image hero pour les sections locales, pas pour la mobilisation étudiante. CTA différents selon `kind`.
 
-### 4.4 Route `/prises-de-parole` — communiqués
+#### `mobilisation`
 
-**Index** (`src/pages/prises-de-parole.astro`) :
+1. **Source** : fichiers `.md` dans `src/content/mobilisation/` avec frontmatter (title, date, location, description, featured_image, category).
+2. **Index legacy** (`mobilisation.astro`) :
+   - `getCollection("mobilisation")` trié par date antichronologique.
+   - Groupery par `category` : `kit-militant`, `boycott`, `prisonniers`, `evenements` (défaut).
+   - Slug URL : `entry.id.replace(/^\d{4}-\d{2}-/, "")`.
+3. **Index nouveau** (`right-to-resist.astro`) :
+   - Même collection, même tri.
+   - En-tête brutaliste (fond sombre + drapeau palestinien).
+   - Section « featured » : 1 carte par catégorie de campagne (kit-militant, boycott, prisonniers), sélectionnée comme l'entrée la plus récente de la catégorie.
+   - Liste complète en-dessous.
+4. **Détail** (`[...slug].astro`) :
+   - `getStaticPaths()` — slug strippé du préfixe `YYYY-MM-`.
+   - Affiche tag de catégorie, titre, date + lieu, description, image à la une, corps Markdown.
+   - Footer CTA avec tagline contextuelle par catégorie.
+
+#### `social`
+
+1. **Source** : `src/content/social.yaml` (singleton Sveltia).
+2. **Consommation** : `SocialCTA.astro` et `SocialSidebar.astro` lisent la collection au build.
+3. **Note** : Le composant `Header.astro` et `Footer.astro` utilisent `src/data/social-links.ts` (source TypeScript hardcoded), pas la collection `social`. Les deux sources doivent être maintenues en sync manuellement.
+
+### 4.3 Flux des données statiques
+
+#### `src/data/social-links.ts`
+
 ```ts
-const entries = (await getCollection("communiques"))
-  .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
-const entrySlug = (e) => e.id.replace(/^\d{4}-\d{2}-\d{2}-/, "");
-const firstImage = (e) => (e.body ?? "").match(/!\[.*?\]\((\/[^)\s]+)\)/)?.[1] ?? null;
+export type SocialLink = { label: string; href: string; icon: string };
+export const socialLinks: SocialLink[] = [
+    { label: "Instagram", href: "https://instagram.com/urgencepalestine", icon: "M12 2.2c..." },
+    { label: "TikTok", href: "https://tiktok.com/@urgencepalestine", icon: "M14.5 2h-3..." },
+    { label: "Telegram", href: "https://t.me/urgencepalestine", icon: "M21.5 4.3..." },
+    { label: "Facebook", href: "https://facebook.com/urgencepalestine", icon: "M13.5 22v..." },
+];
 ```
-- Tri **du plus récent au plus ancien**.
-- Slug = `entry.id` (nom de fichier sans `.md`) **sans le préfixe
-  `YYYY-MM-DD-`** pour matcher le slug WordPress legacy.
-- **Vignette** : regex sur `entry.body` pour extraire la 1ère image
-  Markdown inline (`![…](/…)`) ; placeholder hachuré sinon.
-- Carte → lien `/prises-de-parole/<slug>/`. Date formatée
-  `Intl.DateTimeFormat("fr-FR", {day,month:"long",year})`.
 
-**Détail** (`src/pages/prises-de-parole/[...slug].astro`) :
-```ts
-export const getStaticPaths = (async () => {
-  const entries = await getCollection("communiques");
-  return entries.map((entry) => ({
-    params: { slug: entry.id.replace(/^\d{4}-\d{2}-\d{2}-/, "") },
-    props: { entry },
-  }));
-}) satisfies GetStaticPaths;
+Source de vérité TypeScript pour les icônes SVG (path data) et URLs. Importée par `Header.astro`, `Footer.astro`, `SiteFooter.astro`, `SocialCTA.astro`. Ne contient pas X/Twitter (celui-ci vient de `social.yaml` via la collection `social`).
 
-const { entry } = Astro.props;
-const { Content } = await render(entry);
-```
-- Breadcrumb + header (titre, date `<time datetime=…>`, description) +
-  `<Content />` (Markdown rendu, images pointant vers
-  `/communiques/<slug>/…`) + footer CTA (newsletter + retour index).
+#### `FeaturedFeed` — items hardcoded
 
-### 4.5 Route `/collectif` — Collectif
+Le composant `FeaturedFeed.astro` contient un tableau statique de 6 `FeedItem` sélectionnés éditorialement. Pas de collection Astro : les images pointent vers `/communiques/<slug>/...` dans `static/`.
 
-**Index** (`src/pages/collectif.astro`) :
-```ts
-const entries = await getCollection("collectif");
-const sections = entries
-  .filter((e) => (e.data.kind ?? "section-locale") === "section-locale")
-  .sort((a, b) => a.data.city.localeCompare(b.data.city, "fr"));
-const mobilisation = entries
-  .filter((e) => e.data.kind === "mobilisation-etudiante")
-  .sort((a, b) => a.data.city.localeCompare(b.data.city, "fr"));
-const mobilisationWithBody = await Promise.all(
-  mobilisation.map(async (e) => ({ entry: e, Content: (await render(e)).Content })),
-);
-```
-- **Split par `kind`** en deux groupes ; sections triées alphabétiquement
-  par `city` (locale `fr`).
-- Cartes sections locales : affichent `city`, `description`, chips de
-  canaux (email/Instagram/Telegram/X/Facebook/site web déduits des
-  frontmatter booléens) → lien `/collectif/<slug>/`.
-- Carte mobilisation étudiante : **pré-rend** le `<Content />` de chaque
-  entrée (commentaire : « so the index doesn't need to call `render()` per
-  card at request time »), affiche `image`, `title ?? city`, `description`,
-  le Markdown, et deux CTA (Linktree annuaire + « Je m'engage »).
-- URLs externes centralisées : `CREER_UN_COLLECTIF_URL` (Google Form),
-  `JE_MENGAGE_URL` (forms.gle), `MOBILISATION_ETUDIANTE_URL`
-  (linktr.ee/etudiant.es) — dupliquées dans la page détail (commentaire
-  « kept in sync with the index page »).
-- Section `legacy-ctas` : deux images-boutons
-  (`/collectif/cta-creer-un-collectif.png`,
-  `/collectif/cta-je-mengage.png`) vers les mêmes formulaires.
+#### `credits.astro` — tableau hardcoded
 
-**Détail** (`src/pages/collectif/[...slug].astro`) :
-- `getStaticPaths` depuis `getCollection("collectif")`, `params: { slug:
-  entry.id }` (slug = nom de fichier, car Sveltia slugifie `city`).
-- Construit un tableau typé `Channel[]` (`{ label, href, icon }`) à partir
-  des champs `contact_email` (mailto + icône ✉), `instagram` (◐),
-  `telegram` (✈), `twitter` (✕), `facebook` (f), `website` (↗).
-- Variante étudiante (`isEtudiante = kind === "mobilisation-etudiante"`) :
-  pas de hero image, panneau contact sur fond clair, CTA « Annuaire des
-  campus » + « Je m'engage ». Sinon : hero image, panneau contact noir,
-  CTA « Créer un collectif ».
-- Fallback « Aucun contact public » si `channels.length === 0`.
-
-### 4.6 Route `/mobilisation` — Mobilisation
-
-**Index** (`src/pages/mobilisation.astro`) :
-```ts
-const entries = (await getCollection("mobilisation"))
-  .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
-type GroupKey = "kit-militant" | "boycott" | "prisonniers" | "evenements";
-const order: GroupKey[] = ["kit-militant","boycott","prisonniers","evenements"];
-// groupage : category "evenement" → group "evenements"
-for (const e of entries) {
-  const cat = e.data.category ?? "evenement";
-  const key = (cat === "evenement" ? "evenements" : cat) as GroupKey;
-  grouped[key].push(e);
-}
-```
-- `groupMeta` : label + tagline par groupe ; `sectionIndex(key)` →
-  eyebrow « 01 »…« 04 ».
-- Cartes : `featured_image` (ou placeholder hachuré), date `<time>`,
-  `location`, `title` (lien), `description`, « Voir le détail → ».
-- **Slug** : `entry.id.replace(/^\d{4}-\d{2}-/, "")` (strip `YYYY-MM-`,
-  contrairement aux communiqués qui strip `YYYY-MM-DD-`).
-
-**Détail** (`src/pages/mobilisation/[...slug].astro`) :
-- `getStaticPaths` avec le même strip `YYYY-MM-`.
-- `groupLabel` mappe `category` → `{ tag, tagline }` (kit-militant / boycott
-  / prisonniers / evenement).
-- Header avec tag pill + titre + date + location + description, hero
-  `featured_image`, `<Content />`, footer CTA vers `/mobilisation/` et
-  `/engagement/`.
-
-### 4.7 Route `/symboles` — `src/pages/symboles.astro`
-
-- Aucune collection. Tableau local `symbols` (9 entrées :
-  `antique-key`, `pomegranate`, `olive-oil`, `keffieh`, `sunbird`, `poppy`,
-  `al-quds`, `al-aqsa`, `orange`) avec `label` + `caption`.
-- Rendu via `<img src="/symbols/${name}.webp">` (PNG/WebP générés par
-  `scripts/build-symbols.mjs` — **aucun `<svg>` inline**, critère
-  d'acceptation).
-- `<NewsletterModal slot="modal">`.
-
-### 4.8 Récapitulatif des stratégies de slug
-
-| Collection | Fichier | Strip pour URL | Route détail |
-| --- | --- | --- | --- |
-| communiques | `YYYY-MM-DD-<slug>.md` | `YYYY-MM-DD-` | `/prises-de-parole/<slug>/` |
-| mobilisation | `YYYY-MM-<slug>.md` | `YYYY-MM-` | `/mobilisation/<slug>/` |
-| collectif | `<slug>.md` (slugifié depuis `city`) | aucun | `/collectif/<slug>/` |
+La page `/credits` contient un tableau `Credit[]` de 9+ entrées listant chaque illustration CC-BY avec son artiste, source, licence et usage.
 
 ---
 
 ## 5. Dépendances externes et leur rôle
 
-### 5.1 Runtime (`dependencies`)
+### 5.1 Dépendances production (`dependencies`)
 
-| Package | Rôle |
-| --- | --- |
-| **astro** `^5.6.1` | Framework SSG : routing fichier, content collections (glob loader, `getCollection`/`render`), compilation `.astro`, bundling des `<script>`. |
-| **@astrojs/tailwind** `^6.0.2` | Intégration Tailwind : injecte les layers dans `global.css`, génère le CSS utilitaire. |
-| **tailwindcss** `^3.4.19` | Moteur Tailwind v3 (config `tailwind.config.mjs`). |
+| Package | Version | Rôle |
+|---------|---------|------|
+| `astro` | `^5.6.1` | Framework core : routage, content collections, build SSG |
+| `@astrojs/tailwind` | `^6.0.2` | Intégration Tailwind dans Astro (injecte le stylesheet, configure le content scanning) |
+| `tailwindcss` | `^3.4.19` | Framework CSS utility-first (preflight + utilities) |
 
-### 5.2 Dev (`devDependencies`)
+### 5.2 Dépendances développement (`devDependencies`)
 
-| Package | Rôle |
-| --- | --- |
-| **@astrojs/check** `^0.9.10` | Diagnostics Astro (type-check `.astro`). |
-| **typescript** `^5.9.3` | Typage des scripts composants et de `content.config.ts`. |
-| **turndown** `^7.2.0` | HTML→Markdown pour `scripts/migrate.mjs` (conversion des corps WordPress). |
+| Package | Version | Rôle |
+|---------|---------|------|
+| `@astrojs/check` | `^0.9.10` | Vérification de types des fichiers `.astro` (diagnostics TypeScript) |
+| `turndown` | `^7.2.0` | Convertisseur HTML → Markdown, utilisé par `scripts/migrate.mjs` pour migrer le contenu WordPress |
+| `typescript` | `^5.9.3` | Compilateur TypeScript pour la vérification de types |
 
-### 5.3 Dépendances implicites / externes au bundle
+### 5.3 Services externes intégrés
 
-- **Sveltia CMS** (`@sveltia/cms`) — chargé depuis `unpkg.com` CDN par
-  `public/admin/index.html` (pas dans `package.json`).
-- **sharp** — utilisé par `scripts/build-symbols.mjs` (et par Astro en
-  interne) pour rastériser les SVG de symboles en PNG 512×512.
-- **Donorbox** — `https://donorbox.org/soutenir-up` (CTA don, externe).
-- **Google Forms** — `CREER_UN_COLLECTIF_URL`, `JE_MENGAGE_URL` (externes).
-- **Linktree** — `https://linktr.ee/etudiant.es` (annuaire étudiant).
-- **WordPress REST API** — `https://www.urgence-palestine.com/wp-json/wp/v2`
-  (source legacy, utilisée uniquement par `scripts/migrate.mjs`).
+| Service | URL | Rôle | Intégration |
+|---------|-----|------|-------------|
+| **Donorbox** | `https://donorbox.org/soutenir-up` | Plateforme de dons | Lien externe dans `DonationCTA.astro` et Header CTA |
+| **HelloAsso** | `https://www.helloasso.com/associations/jeune-palestine` | Boutique solidaire / billetterie | Lien externe dans Header CTA |
+| **Google Forms** | URL Form « Créer un collectif » | Formulaire de création de section locale | Lien externe dans `collectif.astro` et `collectif/[...slug].astro` |
+| **Google Forms** | URL Form « Je m'engage » | Formulaire d'engagement étudiant | Lien externe dans `collectif.astro` et `collectif/[...slug].astro` |
+| **Linktree** | `https://linktr.ee/etudiant.es` | Annuaire mobilisation étudiante | Lien externe dans `collectif.astro` et `collectif/[...slug].astro` |
+| **Sveltia CMS** | `/admin/` | Back-office Git-based | `static/admin/index.html` + `sveltia-cms.config.yml` (symlink) |
 
-### 5.4 Scripts Node
+### 5.4 Fonts self-hosted
 
-| Fichier | Rôle |
-| --- | --- |
-| `scripts/build-symbols.mjs` | Génère les 9 PNG de symboles (SVG inline avec filtres `feTurbulence`/`feDisplacementMap` « wobble » + hachure, puis `sharp` → `static/symbols/<name>.png`). |
-| `scripts/migrate.mjs` | Migration WordPress → `communiques` : fetch REST API (cat 51/55/54), télécharge les images dans `static/communiques/<slug>/`, convertit HTML→Markdown (Turndown), réécrit les URLs d'images en `/communiques/<slug>/…`, écrit `src/content/communiques/YYYY-MM-DD-<slug>.md`, alimente `migration-inventory.md`. |
-| `scripts/verify-migration.mjs` | Vérification post-migration. |
-| `scripts/test-admin-mount.cjs` | Test du montage Sveltia CMS. |
-| `bin/` (`doctor`, `fetch-issue-images`, `oc`, `setup`) | Outils shell du harness (non liés au runtime Astro). |
+Les polices sont servies depuis `static/fonts/` et déclarées dans `src/styles/global.css` :
+
+| Font | Fichiers | Usage |
+|------|----------|-------|
+| **The Bold Font** (Sven Pels) | `the-bold-font.woff2`, `the-bold-font.ttf` | Display, headings (`--font-heading`) |
+| **Poppins** | `poppins-400.woff2`, `poppins-500.woff2`, `poppins-600.woff2`, `poppins-700.woff2` | Body text (`--font-body`) |
+
+Fallbacks déclarés dans `tailwind.config.mjs` et `tokens.css` :
+- Display : `"The Bold Font"`, `Boldonse`, `Anton`, `Oswald`, `"Arial Black"`, `Impact`, `sans-serif`
+- Body : `Poppins`, `Inter`, `-apple-system`, `BlinkMacSystemFont`, `"Segoe UI"`, `Roboto`, `"Helvetica Neue"`, `Arial`, `sans-serif`
 
 ---
 
 ## 6. Patterns réutilisables identifiés
 
-### 6.1 Pattern « collection → index + détail `[...slug]` »
+### 6.1 Pattern `getStaticPaths` + slug stripping
 
-Toutes les collections content suivent le même squelette :
+Toutes les pages dynamiques `[...slug].astro` suivent le même pattern :
 
-- **Index** : `getCollection()` → tri/filtre en ligne → `.map()` vers des
-  cartes liant `/route/<slug>/`. Slug dérivé de `entry.id` par regex de
-  strip. Empty state explicite (`entries.length === 0`).
-- **Détail** : `getStaticPaths` (`satisfies GetStaticPaths`) mappe
-  `entries` → `{ params: { slug }, props: { entry } }` ; page récupère
-  `entry` via `Astro.props`, rend `<Content />` via `await render(entry)`.
-- Header avec breadcrumb `← Retour`, eyebrow, titre `<h1>`, date `<time
-  datetime={d.date.toISOString()}>` formatée `Intl.DateTimeFormat("fr-FR")`,
-  description optionnelle, hero image optionnelle, corps Markdown, footer
-  CTA.
+```ts
+export const getStaticPaths = (async () => {
+    const entries = await getCollection("<collectionName>");
+    return entries.map((entry) => ({
+        params: { slug: entry.id.replace(/^<date-prefix-regex>/, "") },
+        props: { entry },
+    }));
+}) satisfies GetStaticPaths;
 
-### 6.2 Pattern « enveloppe page mince + composant partagé »
+const { entry } = Astro.props;
+const { Content } = await render(entry);
+```
 
-`/engagement` et `/agir` sont des one-liners :
+La regex de stripping varie :
+- `prisesDeParole` : `/^\d{4}-\d{2}-\d{2}-/` (YYYY-MM-DD-)
+- `mobilisation` : `/^\d{4}-\d{2}-/` (YYYY-MM-)
+- `collectif` : pas de stripping (l'`id` est directement le slug)
+
+### 6.2 Pattern de tri antichronologique
+
+Toutes les pages d'index trient par date décroissante :
+
+```ts
+const entries = (await getCollection("<name>"))
+    .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+```
+
+### 6.3 Pattern de formatage de date français
+
+Chaque page d'index et de détail instancie le même formateur :
+
+```ts
+const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+});
+```
+
+### 6.4 Pattern de grouping par catégorie
+
+Les pages d'index groupent les entrées par catégorie avec un objet `Record<Category, Meta>` puis filtrent :
+
+```ts
+// Pattern dans mobilisation.astro et right-to-resist.astro
+const groupMeta: Record<GroupKey, { label: string; tagline: string }> = { ... };
+const grouped: Record<GroupKey, typeof entries> = { ... };
+for (const entry of entries) {
+    const key = /* map category to GroupKey */;
+    grouped[key].push(entry);
+}
+// Rendu : itérer sur les clés, skip si vide
+```
+
+```ts
+// Pattern dans prises-de-parole.astro
+const categoryGroups = categoryOrder
+    .map((cat) => ({
+        category: cat,
+        label: categoryLabel[cat],
+        items: entries.filter((e) => (e.data.category ?? "communique") === cat),
+    }))
+    .filter((g) => g.items.length > 0);
+```
+
+### 6.5 Pattern de carte de détail avec breadcrumb + footer CTA
+
+Les trois pages de détail (`prises-de-parole/[...slug].astro`, `collectif/[...slug].astro`, `mobilisation/[...slug].astro`) partagent la même structure :
+
 ```astro
-<EngagementPage formId="engagement" />
+<Layout title={pageTitle} description={pageDescription}>
+    <main class="entry">
+        <nav class="entry__breadcrumb">
+            <a href="/<collection>/">← Retour à l'index</a>
+        </nav>
+        <article class="entry__article">
+            <header class="entry__header">
+                <h1 class="entry__title">{d.title}</h1>
+                <p class="entry__meta">...</p>
+            </header>
+            <div class="entry__body">
+                <Content />
+            </div>
+        </article>
+        <aside class="entry__footer">
+            <h2>...</h2>
+            <div class="entry__footer-actions">
+                <a class="btn btn--primary">...</a>
+                <a class="btn btn--ghost">...</a>
+            </div>
+        </aside>
+    </main>
+</Layout>
 ```
-Le composant `EngagementPage` porte tout le contenu et se charge d'inclure
-`Layout` + `NewsletterModal`. Le `formId` est l'unique variable, garantissant
-l'unicité des `id` HTML.
 
-### 6.3 Pattern « slot modal »
+### 6.6 Pattern de boutons `.btn` + variants
 
-`Layout.astro` expose `<slot name="modal" />` après `<slot />`. Les pages
-injectent `<NewsletterModal slot="modal" />` (index, symboles,
-EngagementPage) pour que le `<dialog>` soit rendu une seule fois, hors du
-`<main>`.
+Classes utilitaires réutilisées partout :
 
-### 6.4 Pattern « vanilla IIFE + CustomEvent + sessionStorage »
+| Classe | Visuel |
+|--------|--------|
+| `.btn` | Base : `min-height: 44px`, `font-heading`, `text-transform: uppercase`, `--radius-sharp` |
+| `.btn--primary` | Fond `--color-flag-red`, texte blanc, hover → `--color-flag-red-deep` + `--shadow-hard` |
+| `.btn--ghost` | Fond `--color-ink`, texte blanc, hover → inversion |
 
-Tous les scripts client (NewsletterSignup, NewsletterModal, EngagementForm,
-Footer) :
-- IIFE défensive (`if (document.readyState === "loading") … else init()`),
-- queries scopées par attributs `data-*` (`data-newsletter`,
-  `data-engagement-form`, `data-email-user-parts`…),
-- communication inter-composants par `CustomEvent` sur `document`
-  (`up:newsletter:subscribed`, `up:engagement:submitted`),
-- persistance d'état par `sessionStorage` avec `try/catch` (private mode),
-- `prefers-reduced-motion` respecté (CSS + court-circuit JS).
+### 6.7 Pattern de scroll-reveal
 
-### 6.5 Pattern « validation native + feedback ARIA »
+Deux mécanismes coexistent :
 
-Les formulaires combinent : `required` + `type="email"` + `minlength` HTML,
-`novalidate` sur le `<form>`, validation JS `input.checkValidity()` /
-`validity.valueMissing`, régions de retour `role="alert"` /
-`role="status"` avec `aria-live="assertive"` / `"polite"`, focus sur le
-1er champ invalide, bouton en état « busy » (`dataset["busy"]="1"`).
+1. **Global** (`Layout.astro` → `initReveal()`) — IntersectionObserver sur `.reveal` et `.reveal-stagger`. Ajoute `.is-revealed` + `--reveal-index` pour le cascade.
+2. **Local** (`FeaturedFeed.astro`) — IntersectionObserver sur `.featured-feed__item[data-reveal]`.
 
-### 6.6 Pattern « obfuscation d'email »
+Les deux respectent `prefers-reduced-motion: reduce` (retour immédiat, pas d'animation).
 
-`Footer.astro` éclate l'email en fragments `data-email-user-parts` /
-`data-email-domain-parts` (JSON), réassemblés à l'exécution ; le schéma
-`mailto:` est lui-même reconstruit lettre par lettre
-(`["m","a","i","l","t","o",":"].join("")`) pour qu'aucune adresse
-contiguë n'apparaisse dans le HTML statique. Fallback `<noscript>`.
+### 6.8 Pattern de design tokens à trois couches
 
-### 6.7 Pattern « tokens OKLCH + miroir Tailwind »
+1. **`tokens.css`** — Couleurs OKLCH, typographie fluide (`clamp()`), spacing 8pt, motion tokens, rayons, ombres. Source de vérité.
+2. **`tailwind.config.mjs`** — Miroir des tokens en hex (Tailwind ne supporte pas OKLCH nativement en v3) pour les utilities.
+3. **CSS custom properties** — Consommées dans les `<style>` scoped des composants via `var(--color-*)`, `var(--space-*)`, etc.
 
-Toute couleur/typo vient de `tokens.css` (OKLCH) via `var(--…)` dans le CSS
-composant. `tailwind.config.mjs` duplique les valeurs en hex pour les
-rares utilitaires Tailwind (`bg-palestine-red`, `font-display` sur le hero
-de `index.astro`). `src/styles/CTA.md` documente la charte d'usage des
-tokens pour les CTA.
+### 6.9 Pattern d'obfuscation anti-scraping
 
-### 6.8 Pattern « assets ré-hébergés, jamais hot-linkés »
+`Footer.astro` sépare l'email en fragments et le réassemble en JS :
 
-- Images communiqués : `static/communiques/<slug>/…` (ré-hébergées par
-  `migrate.mjs`), URLs réécrites en `/communiques/<slug>/…` dans le
-  Markdown.
-- Images mobilisation : `static/mobilisation/<category>/…`,
-  `featured_image: "/mobilisation/…"` en frontmatter.
-- Images collectif : `static/collectif/…`, `image: "/collectif/…"`.
-- Symboles : `static/symbols/<name>.webp` (générés par `build-symbols.mjs`).
-- Polices : `static/fonts/*.woff2` (self-hosted, preload dans `Layout`).
+```ts
+const userParts = ["contact", "urgence-palestine"];
+const domainParts = ["fr"];
+// data-email-user-parts={JSON.stringify(userParts)}
+// data-email-domain-parts={JSON.stringify(domainParts)}
+```
 
-### 6.9 Pattern « placeholder hachuré »
+Le `mailto:` est construit lettre par lettre :
 
-Quand une image est absente (`firstImage` null, `featured_image` absent),
-les cartes affichent un placeholder CSS
-`repeating-linear-gradient(45deg, …)` plutôt que de casser la grille.
+```ts
+const scheme = ["m", "a", "i", "l", "t", "o", ":"].join("");
+```
 
-### 6.10 Pattern « discriminateur `kind` / `category` »
+### 6.10 Pattern de consentement RGPD
 
-Une même collection rassemble des entrées de formes différentes, distinguées
-par un enum Zod avec `.default(...)` :
-- `collectif.kind` → `section-locale` (défaut) | `mobilisation-etudiante`.
-- `mobilisation.category` → `evenement` (défaut) | `kit-militant` |
-  `boycott` | `prisonniers`.
+`NewsletterSignup.astro` encapsule le consentement dans un `<fieldset>`/`<legend>` avec checkbox requis :
 
-Les pages d'index filtrent/groupent sur ce champ, et le détail adapte le
-rendu (panneau contact clair/sombre, CTA différents).
+```astro
+<fieldset class="newsletter__consent">
+    <legend class="visually-hidden">Consentement RGPD</legend>
+    <label>
+        <input type="checkbox" name="consent" required />
+        <span>Je consens à être recontacté·e...</span>
+    </label>
+</fieldset>
+```
 
-### 6.11 Pattern « commentaires-docs dans les `.astro` »
+### 6.11 Pattern de page alias
 
-Chaque page/composant commence par un bloc commentaire expliquant le
-rôle, la route, la stratégie de slug, les dépendances et les choix
-(héritage WordPress, pré-rendu `Content`, URLs externes à synchroniser).
-`content.config.ts` et `sveltia-cms.config.yml` font de même, se
-référençant mutuellement pour garder les schémas alignés.
+`/agir` et `/engagement` partagent le même corps via `EngagementPage.astro` :
+
+```astro
+<!-- src/pages/agir.astro -->
+<EngagementPage formId="agir" pageSymbol="victory_hand.png" />
+
+<!-- src/pages/engagement.astro -->
+<EngagementPage formId="engagement" pageSymbol="olive_branch_-_ccnisa.png" />
+```
+
+Seuls le `formId` (pour l'unicité des IDs DOM) et le symbole décoratif diffèrent.
+
+### 6.12 Pattern de drapeau palestinien décoratif
+
+Le drapeau est rendu en CSS pur (4 bandes) et réutilisé dans plusieurs composants :
+
+```html
+<div class="flag-stripe" role="img" aria-label="Drapeau palestinien : noir, blanc, vert, rouge">
+    <span class="flag-stripe__band flag-stripe__band--black"></span>
+    <span class="flag-stripe__band flag-stripe__band--white"></span>
+    <span class="flag-stripe__band flag-stripe__band--green"></span>
+    <span class="flag-stripe__band flag-stripe__band--red"></span>
+</div>
+```
+
+Présent dans `index.astro` (homepage), `SiteFooter.astro` (footer), et `right-to-resist.astro` (en-tête campagne).
 
 ---
 
-## 7. Cartographie des fichiers
+## Documentation self-maintenance
 
-```
-.
-├── astro.config.mjs              # SSG config (outDir=public, publicDir=static, i18n fr, tailwind)
-├── tailwind.config.mjs           # tokens miroir (hex) pour utilitaires
-├── sveltia-cms.config.yml        # config CMS canonique (3 collections)
-├── tsconfig.json                 # strict Astro
-├── package.json                  # astro + tailwind + turndown
-├── static/                       # publicDir → copié à la racine
-│   ├── admin/index.html          # SPA Sveltia CMS
-│   ├── sveltia-cms.config.yml    # symlink → ../sveltia-cms.config.yml
-│   ├── fonts/                    # the-bold-font, poppins 400/500/600/700
-│   ├── symbols/                  # 9 PNG/WebP (build-symbols.mjs)
-│   ├── communiques/              # images ré-hébergées
-│   ├── mobilisation/             # images ré-hébergées
-│   ├── collectif/                # images + CTA legacy
-│   ├── media/                    # media_folder Sveltia
-│   └── favicon.svg
-├── public/                       # outDir (build courant)
-├── scripts/
-│   ├── build-symbols.mjs         # SVG → PNG (sharp)
-│   ├── migrate.mjs               # WordPress REST → communiques (Turndown)
-│   ├── verify-migration.mjs
-│   └── test-admin-mount.cjs
-└── src/
-    ├── content.config.ts         # 3 collections + schémas Zod
-    ├── content/
-    │   ├── communiques/*.md      # 39 entrées
-    │   ├── collectif/*.md        # 28 entrées (villes + étudiants)
-    │   └── mobilisation/*.md     # 5 entrées
-    ├── layouts/
-    │   └── Layout.astro          # <head>, Header, slots, Footer
-    ├── components/
-    │   ├── Header.astro
-    │   ├── Footer.astro          # email obfusqué
-    │   ├── SiteFooter.astro      # variante alternative
-    │   ├── DonationCTA.astro
-    │   ├── GeneralCTA.astro      # CTA variante B (non-clic)
-    │   ├── NewsletterSignup.astro
-    │   ├── NewsletterModal.astro
-    │   ├── EngagementForm.astro
-    │   └── EngagementPage.astro
-    ├── pages/
-    │   ├── index.astro
-    │   ├── agir.astro            # alias → EngagementPage formId="agir"
-    │   ├── engagement.astro      # → EngagementPage formId="engagement"
-    │   ├── symboles.astro
-    │   ├── prises-de-parole.astro
-    │   ├── prises-de-parole/[...slug].astro
-    │   ├── collectif.astro
-    │   ├── collectif/[...slug].astro
-    │   ├── mobilisation.astro
-    │   └── mobilisation/[...slug].astro
-    └── styles/
-        ├── tokens.css            # design tokens OKLCH (source de vérité)
-        ├── global.css            # @import tokens + Tailwind + @font-face + reset
-        ├── sections.css          # hero, btn, flag-stripe, pillars, symbols, footer…
-        └── CTA.md                # charte des 2 variantes CTA
-```
+Ce document est maintenu par la boucle autonome Boucle. Le triage identifie les docs impactés, le worker les met à jour dans le même MR que le code, le reviewer vérifie la conformité et l'exhaustivité, l'e2e vérifie que les docs correspondent à la production.
 
----
-
-## 8. Points d'attention et dette technique observable
-
-- **Footer vs SiteFooter** : `Layout.astro` importe `Footer.astro` ;
-  `SiteFooter.astro` (variante avec flag-stripe + `variant="footer"`)
-  n'est pas référencé — duplication potentielle à clarifier.
-- **Duplication des URLs externes** : `CREER_UN_COLLECTIF_URL`,
-  `JE_MENGAGE_URL`, `MOBILISATION_ETUDIANTE_URL` sont redéclarées entre
-  `collectif.astro` et `collectif/[...slug].astro` (commentaire
-  « kept in sync ») — candidat à l'extraction vers un module
-  `src/lib/links.ts`.
-- **`featured_image`** de `mobilisation` est `optionalString` (non
-  validé comme chemin `/`) contrairement à `collectif.image` qui utilise
-  `optionalImagePath` — incohérence mineure entre les deux schémas.
-- **`category` Sveltia vs Zod** : Sveltia déclare 4 options dont
-  `evenement` (défaut), Zod aussi ; cohérent, mais l'index doit mapper
-  `evenement` → groupe `evenements` (pluralisation ad hoc).
-- **`/don`** : le `Header` lien « Faites un don » pointe vers `/don` qui
-  n'a pas de page dédiée (le don réel va vers Donorbox via
-  `DonationCTA`) — route potentiellement manquante.
-- **`AGENTS.md`** impose un workflow *upstream-first* (boucle) pour les
-  bugs et un commit obligatoire après tout travail.
+Voir [AGENTS.md](AGENTS.md) pour le processus complet et les conventions.
