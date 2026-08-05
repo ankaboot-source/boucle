@@ -110,6 +110,18 @@
 	--shadow-soft: 0 1px 0 rgba(0, 0, 0, 0.04);
 	--shadow-lift: 0 18px 40px -24px rgba(15, 15, 15, 0.32);
 
+	/*
+	 * Hard shadow — the brutalist relief. Blur radius is STRICTLY 0: the
+	 * offset is a solid offset hard-edge block of ink, never a diffuse
+	 * shadow. Used on interactive lift (hover/active) animations; see
+	 * DESIGN.md §3.2. All animation box-shadows must use this token, never
+	 * `--shadow-lift` (which carries a 40px blur and is reserved for
+	 * static, non-animated relief).
+	 */
+	--shadow-hard-offset: 6px;
+	--shadow-hard: var(--shadow-hard-offset) var(--shadow-hard-offset) 0px
+		var(--color-ink);
+
 	--container-narrow: 42rem;
 	--container-base: 60rem;
 	--container-wide: 78rem;
@@ -123,6 +135,8 @@
 	/* ---------- Motion ---------- */
 	--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 	--ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+	--ease-brutal-lift: cubic-bezier(0.2, 0.8, 0.2, 1);
+	--ease-brutal-reveal: cubic-bezier(0.1, 0.7, 1.0, 0.1);
 	--duration-fast: 140ms;
 	--duration-base: 240ms;
 	--duration-slow: 420ms;
