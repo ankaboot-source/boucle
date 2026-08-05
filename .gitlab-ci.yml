@@ -71,13 +71,14 @@ variables:
   # opencode-go mirrors the ollama-cloud catalog (same model names).
   # Per-role model overrides: BOUCLE_FALLBACK_MODEL_{TRIAGE,WORKER,REVIEWER,E2E}.
   BOUCLE_FALLBACK_PROVIDER: "opencode-go"
-  # File-type CI variables (paths to temp files written by GitLab CI/CD):
-  #   $PI_AUTH   — path to pi's auth.json (legacy, no longer used by bin/jc)
-  #   $JCODE_CONFIG — path to jcode's config.toml. The profile section named
-  #     by BOUCLE_PROVIDER_PROFILE above holds base_url / api_key_env /
-  #     default_model. The API key itself is read from the env var named in
-  #     api_key_env (typically BOUCLE_LLM_API_KEY) so the key never appears
-  #     in the config file or in CI logs.
+  # jcode config (config.toml + API key) is pre-installed on the runner host
+  # at ~/.jcode/config.toml — the same pattern as opencode auth at
+  # ~/.local/share/opencode/auth.json. CI does NOT pass any file-type variable
+  # for the LLM provider config: the key never leaves the runner. CI only
+  # passes the profile NAME via BOUCLE_PROVIDER_PROFILE (above) — the profile
+  # section in config.toml defines base_url + api_key_env + default_model,
+  # and the API key itself is read by jcode from the env var named in
+  # api_key_env (the runner host loads it from provider-ollama-cloud.env).
 
 # ── Default: use node:22-slim (has node, npm, curl — much smaller than node:22) ─
 # The shared runner is a docker executor. node:22-slim is ~250MB vs ~1GB.
@@ -203,20 +204,6 @@ default:
         mkdir -p "$HOME/.pi/agent" && chmod 700 "$HOME/.pi/agent"
         cp "$PI_AUTH" "$HOME/.pi/agent/auth.json"
         chmod 600 "$HOME/.pi/agent/auth.json"
-      fi
-
-      # ── jcode config (file-type CI variable → expected path) ──────
-      # $JCODE_CONFIG is a GitLab file-type CI variable pointing at a temp
-      # file containing the jcode config.toml. It defines the
-      # [providers.<profile>] section named by $BOUCLE_PROVIDER_PROFILE above
-      # (base_url, api_key_env, default_model). The API key itself is NOT in
-      # this file — it is read from the env var named in api_key_env
-      # (typically $BOUCLE_LLM_API_KEY, exported as a masked CI variable) so
-      # the secret never lands on disk or in CI logs.
-      if [ -n "${JCODE_CONFIG:-}" ] && [ -f "$JCODE_CONFIG" ]; then
-        mkdir -p "$HOME/.jcode" && chmod 700 "$HOME/.jcode"
-        cp "$JCODE_CONFIG" "$HOME/.jcode/config.toml"
-        chmod 600 "$HOME/.jcode/config.toml"
       fi
 
       # ── Verify ────────────────────────────────────────────────────

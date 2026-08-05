@@ -24,7 +24,7 @@
 # no --variant/--thinking (reasoning effort not controllable per-call),
 # no --log-level (use --quiet to suppress banner).
 # MCP disabled via JCODE_RUN_MCP=0, auto-poke via JCODE_RUN_AUTO_POKE=0,
-# idle timeout via JCODE_STREAM_IDLE_TIMEOUT_SECS=600.
+# idle timeout via JCODE_STREAM_IDLE_TIMEOUT_SECS=1800.
 # Temperature via JCODE_OPENAI_EXTRA_BODY='{"temperature":0.3}' env per role.
 
 set -euo pipefail
@@ -153,8 +153,10 @@ export JCODE_RUN_MCP="${JCODE_RUN_MCP:-0}"
 # Disable auto-poke loop (prevents jcode from re-prompting the model when
 # todos are incomplete — extends the run beyond the wall-clock budget).
 export JCODE_RUN_AUTO_POKE="${JCODE_RUN_AUTO_POKE:-0}"
-# Set idle timeout to 600s (default 180s is too short for heavy tasks).
-export JCODE_STREAM_IDLE_TIMEOUT_SECS="${JCODE_STREAM_IDLE_TIMEOUT_SECS:-600}"
+# Set idle timeout to 1800s (default 180s is too short for heavy tasks,
+# and 10m is too short for sub-agent/swarm scenarios where the main agent
+# is idle while a spawned worker is doing heavy work).
+export JCODE_STREAM_IDLE_TIMEOUT_SECS="${JCODE_STREAM_IDLE_TIMEOUT_SECS:-1800}"
 # Disable update check (avoid network call at startup in CI).
 export JCODE_NO_UPDATE="${JCODE_NO_UPDATE:-1}"
 # Disable selfdev (avoid repo auto-detection side effects).
