@@ -875,6 +875,29 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       always "(none yet)". The worker had no memory of what iteration 1
       had already attempted.
 
+29. **Model/API failure misdiagnosed as step-budget exhaustion** (issue #35 on up/urgence-palestine.fr)
+    - ❌ DO NOT treat an empty worker log as "agent likely exhausted its
+      step budget". When the model API is down or out of credits,
+      opencode hangs silently — no stdout, no crash, no tool calls in the
+      log. The job appears "running" until the 30 min timeout (which may
+      not fire on a shell executor). The generic "no code changes"
+      handler then re-triggers the worker into the same wall, wasting
+      the iteration budget on a problem that re-triggering cannot fix.
+    - ✅ DO: `bin/oc` exits 4 when the worker agent log is empty or shows
+      no agent activity (no tool calls, no file reads, no git operations).
+      The worker job detects exit 4, posts a diagnostic comment on the
+      issue with the available logs (last 2000 chars of agent-output.log),
+      and escalates to `boucle:human` immediately — no re-trigger. The
+      comment names the model (`$AGENT`) and tells the user to check API
+      status and credits. This distinguishes a model outage from a
+      step-budget issue and stops the loop from spinning.
+    - Context: issue #35 iteration 3, worker (kimi-k2.7-code) hung for
+      40 min with an empty log because ollama-cloud credits were
+      exhausted. The job was manually cancelled. Without exit 4
+      detection, the loop would have re-triggered 2 more times into the
+      same wall, then escalated with the misleading "agent likely
+      exhausted its step budget" message.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
