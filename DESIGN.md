@@ -1,11 +1,5 @@
 # DESIGN.md — Charte visuelle d'Urgence Palestine
 
-> **Maintenance** — Ce document est la référence visuelle du site consommateur.
-> Toute modification du design (tokens, composants, charte) doit le mettre à
-> jour. Les agents boucle (triage, worker, reviewer) DOIVENT s'y conformer.
-> Voir [AGENTS.md](AGENTS.md) pour les conventions de contribution et
-> [ARCHITECTURE.md](ARCHITECTURE.md) pour l'architecture système.
->
 > Synthèse opérationnelle de l'identité visuelle du site. Ce document est la
 > **référence unique** que tout nouveau composant, visuel, contenu rédigé ou
 > contribution extérieure doit consulter avant d'être livré.
@@ -607,7 +601,6 @@ Concrètement, l'ancrage politique se traduit par :
 
 ## Voir aussi
 
-### Sources de design (CSS)
 - [`src/styles/tokens.css`](src/styles/tokens.css) — source unique des
   valeurs de design (couleurs, type, espacement, motion).
 - [`src/styles/global.css`](src/styles/global.css) — reset, webfonts
@@ -616,10 +609,3 @@ Concrètement, l'ancrage politique se traduit par :
   transverses (hero, pillars, flag-stripe, footer).
 - [`src/styles/CTA.md`](src/styles/CTA.md) — charter des deux variantes
   de CTA (Variant A cliquable, Variant B non-cliquable).
-
-### Documentation boucle
-- [ARCHITECTURE.md](ARCHITECTURE.md) — Architecture système, pipeline, diagrammes Mermaid
-- [AGENTS.md](AGENTS.md) — Guide des agents, leçons apprises, anti-patternes
-- [CONTEXT.md](CONTEXT.md) — Contexte du projet, stack technique, contraintes
-- [README.md](README.md) — Vue d'ensemble, démarrage, usage
-- [LOOP.md](LOOP.md) — Configuration par consommateur
