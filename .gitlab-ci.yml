@@ -297,9 +297,49 @@ dispatch:
       # data runner while triage bootstraps only to find no work to do.
       trap 'if [ $? -eq 0 ] && [ ! -f .boucle-issue ]; then exit 1; fi' EXIT
 
-      ACTOR=$(jq -r '.user.username // empty' "$TRIGGER_PAYLOAD")
-      OBJECT_KIND=$(jq -r '.object_kind // empty' "$TRIGGER_PAYLOAD")
-      MR_ACTION=$(jq -r '.object_attributes.action // empty' "$TRIGGER_PAYLOAD")
+      # Sanity-check the trigger payload before jq touches it. GitLab file-type
+      # CI variables resolve to a temp file path; on shared runners (Atchoum)
+      # the path can be unset, empty, or point to a deleted file. Without this
+      # guard, `set -e` (GitLab default) propagates jq's exit 5 (system error,
+      # file not found) and the script terminates silently with zero stdout —
+      # exactly the failure that hit pipeline #1433434 on up/urgence-palestine.fr.
+      # Always produce a breadcrumb (lessons #5, #47) so the next failure mode
+      # is visible in the trace.
+      echo "dispatch: begin (runner has jq=$(command -v jq 2>/dev/null || echo MISSING), TRIGGER_PAYLOAD='${TRIGGER_PAYLOAD:-unset}')"
+      if [ -z "${TRIGGER_PAYLOAD:-}" ]; then
+        echo "dispatch: ABORT — TRIGGER_PAYLOAD is unset (no trigger payload passed to this job)"
+        exit 1
+      fi
+      if [ ! -f "$TRIGGER_PAYLOAD" ]; then
+        echo "dispatch: ABORT — TRIGGER_PAYLOAD='$TRIGGER_PAYLOAD' is set but the file is missing/unreadable (exit 5 trigger)"
+        exit 1
+      fi
+      if [ ! -r "$TRIGGER_PAYLOAD" ]; then
+        echo "dispatch: ABORT — TRIGGER_PAYLOAD='$TRIGGER_PAYLOAD' is not readable (permissions?)"
+        exit 1
+      fi
+      PAYLOAD_BYTES=$(wc -c < "$TRIGGER_PAYLOAD" 2>/dev/null || echo 0)
+      echo "dispatch: payload file OK ($PAYLOAD_BYTES bytes)"
+
+      # Parse the webhook payload. Use `|| rc=$?` to suppress `set -e` (GitLab
+      # default) so a jq parse error or missing field does not silently kill
+      # the dispatch script before triage/no-op routing can run. The original
+      # `// empty` filters already handle missing keys gracefully, but jq itself
+      # can still fail on a malformed payload (jq exit 2 usage/parse error) or
+      # a system-level file problem (jq exit 5) — we want a visible log, not a
+      # silent abort. We catch errors here and degrade to "no recognizable
+      # event" so the EXIT trap fails the job and triage is skipped; better a
+      # loud failure than a phantom triage pipeline on garbage input.
+      rc=0
+      ACTOR=$(jq -r '.user.username // empty' "$TRIGGER_PAYLOAD" 2>/dev/null) || rc=$?
+      if [ "$rc" -ne 0 ]; then
+        echo "dispatch: ABORT — jq failed on user.username (exit $rc); payload may be malformed or unreadable"
+        head -c 200 "$TRIGGER_PAYLOAD" 2>/dev/null | tr -d '\0' || true
+        echo
+        exit 1
+      fi
+      OBJECT_KIND=$(jq -r '.object_kind // empty' "$TRIGGER_PAYLOAD" 2>/dev/null) || true
+      MR_ACTION=$(jq -r '.object_attributes.action // empty' "$TRIGGER_PAYLOAD" 2>/dev/null) || true
       # Bot-originated events are filtered to prevent loops — EXCEPT for MR
       # merge webhooks. When the merger job (running as up-bot) merges a MR,
       # the merge webhook fires with ACTOR=up-bot. Without this exception,
