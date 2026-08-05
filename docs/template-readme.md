@@ -1,12 +1,12 @@
 # boucle template
 
-Portable dev-loop template. Apply to a target repo by copying these files to the repo root:
+Portable dev-loop template. Apply to a target repo by copying these files from the boucle repo root to the target repo root:
 
 ```bash
-cp -r boucle/boucle/bin <target-repo>/
-cp -r boucle/boucle/.opencode <target-repo>/
-cp boucle/boucle/.gitlab-ci.yml <target-repo>/
-cp boucle/boucle/LOOP.md <target-repo>/
+cp -r bin <target-repo>/
+cp -r .opencode <target-repo>/
+cp .gitlab-ci.yml <target-repo>/
+cp LOOP.md <target-repo>/
 ```
 
 Then run `bin/doctor` in CI to verify all prerequisites are met.
