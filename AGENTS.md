@@ -568,6 +568,35 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       agent uses the wrong marker, the parser won't act on a draft that
       lacks `## TL;DR`.
 
+46. **Preserve instructed content**
+    - ❌ DO NOT generate placeholders for content the issue instructs. If
+      the issue body specifies a video URL, a citation, a text, or an
+      image, the worker MUST ship it verbatim — never a generic
+      placeholder (e.g. a Rickroll video ID `dQw4w9WgXcQ` in place of the
+      instructed URL), never a paraphrase, never a substitute.
+    - ❌ DO NOT rewrite the instructed texts. If the issue quotes an
+      author verbatim, the worker ships that quote — it does not
+      summarize, paraphrase, or generate a new critique.
+    - ❌ DO NOT let later amendments override earlier preservation
+      instructions. The feedback channel injects the latest human
+      amendments (e.g. "fill empty spaces with keffiyeh", "single CTA")
+      WITHOUT the earlier preservation context (e.g. "keep the
+      texts/visuals/videos already shared", "video in front,
+      horizontal"). The worker applies the latest amendment literally
+      and degrades the validated layout — replacing the video with
+      keffiyeh instead of filling the empty space below it.
+    - ✅ DO: inject `BOUCLE_ISSUE_BODY` and `BOUCLE_ISSUE_NOTES` into the
+      worker job (mirroring the triage job) so the worker has the
+      instructed content and the full discussion history at hand without
+      spending steps on `glab issue view`.
+    - ✅ DO: inject `BOUCLE_ISSUE_BODY` into the reviewer job so it can
+      verify the MR content matches the original spec — a MR with
+      placeholder videos or rewritten citations is a FAIL even if it
+      satisfies the latest amendments.
+    - ✅ DO: add a "Preserve instructed content" instruction to the
+      worker prompt stating that amendments AMEND the spec, they do NOT
+      replace earlier preservation instructions — conciliate them.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
