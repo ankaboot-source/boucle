@@ -57,17 +57,31 @@ variables:
   # Disable Chromium visual preview in triage (saves ~120 MiB per triage job).
   # true = skip preview rendering entirely. false = default (mandatory for UI/UX issues via RENDER_REQUEST).
   BOUCLE_PREVIEW_DISABLE: "false"
-  # Provider fallback: when the primary provider (ollama-cloud) is down —
+  # Provider profile (generic): the name of the [providers.<profile>] section
+  # jcode reads from ~/.jcode/config.toml on the runner host. CI passes the
+  # profile name only — the API key lives in the api_key_env referenced by
+  # config.toml (so the key is never printed in CI logs). Default
+  # "ollama-cloud" matches the upstream boucle reference profile; consumers
+  # override this in GitLab CI/CD variables to point at their own provider
+  # (e.g. "opencode-go", "anthropic-direct", "custom-internal"). See bin/jc.
+  BOUCLE_PROVIDER_PROFILE: "ollama-cloud"
+  # Provider fallback: when the primary provider is down —
   # empty log / no agent activity, the exit-4 condition (AGENTS.md lesson #29) —
   # retry with this fallback provider before escalating to a human. Empty = disabled.
   # opencode-go mirrors the ollama-cloud catalog (same model names).
   # Per-role model overrides: BOUCLE_FALLBACK_MODEL_{TRIAGE,WORKER,REVIEWER,E2E}.
   BOUCLE_FALLBACK_PROVIDER: "opencode-go"
-  # File-type CI variable: $PI_AUTH holds a path to the auth.json temp file
+  # File-type CI variables (paths to temp files written by GitLab CI/CD):
+  #   $PI_AUTH   — path to pi's auth.json (legacy, no longer used by bin/jc)
+  #   $JCODE_CONFIG — path to jcode's config.toml. The profile section named
+  #     by BOUCLE_PROVIDER_PROFILE above holds base_url / api_key_env /
+  #     default_model. The API key itself is read from the env var named in
+  #     api_key_env (typically BOUCLE_LLM_API_KEY) so the key never appears
+  #     in the config file or in CI logs.
 
 # ── Default: use node:22-slim (has node, npm, curl — much smaller than node:22) ─
 # The shared runner is a docker executor. node:22-slim is ~250MB vs ~1GB.
-# before_script installs glab + pi + wrangler (not in the image).
+# before_script installs glab + pi + jcode + wrangler (not in the image).
 default:
   image: node:22-slim
   # Route to the project's dedicated runner. It's a shell executor (ignores
@@ -141,6 +155,33 @@ default:
         npm install -g --ignore-scripts @earendil-works/pi-coding-agent@$PI_VER pi-agent-mode
       fi
 
+      # ── jcode coding agent (standalone binary — replaces pi) ──
+      # jcode is the migration target for this worktree. It is a Rust binary
+      # shipped as a tarball on GitHub Releases — no Node/npm/Bun dependency.
+      # bin/jc wires jcode into the boucle role matrix (triage/worker/
+      # reviewer/e2e). Coexists with pi above (legacy) so old pipelines keep
+      # running while consumers migrate.
+      # NOTE: verify the actual release asset name on the jcode GitHub Releases
+      # page (https://github.com/1jehuang/jcode/releases) — the exact
+      # `-linux-x64.tar.gz` filename may differ; pin to the version you
+      # confirmed downloads cleanly.
+      if ! command -v jcode &>/dev/null; then
+        echo "Installing jcode coding agent (standalone binary)..."
+        JCODE_VER="${JCODE_VERSION:-latest}"
+        mkdir -p "$HOME/.local/bin"
+        curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x64.tar.gz" -o /tmp/jcode.tar.gz
+        tar xzf /tmp/jcode.tar.gz -C /tmp
+        # The tarball layout may place the binary at /tmp/jcode or /tmp/bin/jcode
+        # depending on the release asset. Try both.
+        if [ -f /tmp/jcode ]; then
+          mv /tmp/jcode "$HOME/.local/bin/jcode"
+        elif [ -f /tmp/bin/jcode ]; then
+          mv /tmp/bin/jcode "$HOME/.local/bin/jcode"
+        fi
+        chmod +x "$HOME/.local/bin/jcode"
+        rm -rf /tmp/jcode /tmp/bin /tmp/jcode.tar.gz
+      fi
+
       # ── codebase-memory-mcp (codebase knowledge graph) ──
       # Static binary — no node needed. codebase-memory-mcp: installed for repo indexing only (pi has no MCP support)
       # Agents query it via CLI (`codebase-memory-mcp cli ...`) for code
@@ -164,12 +205,28 @@ default:
         chmod 600 "$HOME/.pi/agent/auth.json"
       fi
 
+      # ── jcode config (file-type CI variable → expected path) ──────
+      # $JCODE_CONFIG is a GitLab file-type CI variable pointing at a temp
+      # file containing the jcode config.toml. It defines the
+      # [providers.<profile>] section named by $BOUCLE_PROVIDER_PROFILE above
+      # (base_url, api_key_env, default_model). The API key itself is NOT in
+      # this file — it is read from the env var named in api_key_env
+      # (typically $BOUCLE_LLM_API_KEY, exported as a masked CI variable) so
+      # the secret never lands on disk or in CI logs.
+      if [ -n "${JCODE_CONFIG:-}" ] && [ -f "$JCODE_CONFIG" ]; then
+        mkdir -p "$HOME/.jcode" && chmod 700 "$HOME/.jcode"
+        cp "$JCODE_CONFIG" "$HOME/.jcode/config.toml"
+        chmod 600 "$HOME/.jcode/config.toml"
+      fi
+
       # ── Verify ────────────────────────────────────────────────────
       echo "=== Environment ==="
       node --version 2>/dev/null || echo "node: MISSING"
       npm --version 2>/dev/null || echo "npm: MISSING"
       glab version 2>/dev/null | head -1 || echo "glab: MISSING"
       pi --version 2>/dev/null || echo "pi: MISSING"
+      jcode --version 2>/dev/null || echo "jcode: MISSING"
+      echo "BOUCLE_PROVIDER_PROFILE=${BOUCLE_PROVIDER_PROFILE:-ollama-cloud}"
       echo "$BOUCLE_DEPLOY_CMD" | grep -q wrangler && { wrangler --version 2>/dev/null || echo "wrangler: MISSING"; } || echo "wrangler: not needed (deploy doesn't use it)"
       codebase-memory-mcp --version 2>/dev/null || echo "codebase-memory-mcp: MISSING"
       echo "==================="
@@ -931,9 +988,9 @@ triage:
       PRE_RUN_TRIAGE_ID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
         | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## TL;DR")) | select(.body | test("## Disposition"))] | first | .id // 0')
       rc=0
-      ./bin/oc triage || rc=$?
+      ./bin/jc triage || rc=$?
       if [ "$rc" -ne 0 ]; then
-        echo "WARN: ./bin/oc triage exited $rc — checking if a triage comment was posted anyway."
+        echo "WARN: ./bin/jc triage exited $rc — checking if a triage comment was posted anyway."
       fi
 
       # Parse the triage comment for Disposition and Size
@@ -1013,7 +1070,7 @@ triage:
       # qu'aucune question n'est posée" symptom.
       if [ -z "$DISPOSITION" ]; then
         # ── Circuit breaker (silent-failure escalation) ─────────────────
-        # bin/oc exits 3 when the agent produced NO posted comment AND NO
+        # bin/jc exits 3 when the agent produced NO posted comment AND NO
         # drafted comment (silent failure — e.g. hit OUTPUT_TOKEN_MAX
         # mid-comment before reaching the glab tool call). If we leave the
         # issue at boucle:triage, the doctor re-triggers it every 10 min
@@ -1022,7 +1079,7 @@ triage:
         # so a human can investigate. The issue keeps its boucle:triage
         # label for traceability but moves to boucle::status::human.
         if [ "$rc" -eq 3 ]; then
-          echo "[boucle] Silent triage failure (bin/oc exit 3) — escalating issue #$IID to human to break doctor re-trigger loop."
+          echo "[boucle] Silent triage failure (bin/jc exit 3) — escalating issue #$IID to human to break doctor re-trigger loop."
           set_boucle_label "$IID" "boucle:human" "boucle::status::human"
           glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
             -f body=":rotating_light: Triage a échoué en silence (l'agent n'a produit aucun commentaire). Passage en revue humaine pour casser la boucle de re-déclenchement. Voir les logs du job $CI_JOB_URL." > /dev/null 2>&1 || true
@@ -1685,7 +1742,7 @@ worker:
       fi
 
       # Seed iterations.md on first run (companion to state.md). The worker
-      # appends to this file (bin/oc:488) and is instructed to read it at
+      # appends to this file (bin/jc:488) and is instructed to read it at
       # startup (worker.md) so it knows what previous iterations tried —
       # without this, each re-run starts blind and repeats the same mistakes.
       if [ ! -f ".boucle/$BOUCLE_ISSUE/iterations.md" ]; then
@@ -1757,13 +1814,13 @@ worker:
       # (step limit, crash, etc.). The safety-net commit below captures any
       # uncommitted work the agent produced before exiting.
       rc=0
-      ./bin/oc worker || rc=$?
+      ./bin/jc worker || rc=$?
       if [ "$rc" -ne 0 ]; then
-        echo "WARN: ./bin/oc worker exited $rc — proceeding to safety-net commit."
+        echo "WARN: ./bin/jc worker exited $rc — proceeding to safety-net commit."
       fi
 
       # ── Model/API failure detection (exit 4) ──────────────────────────
-      # bin/oc exits 4 when the worker agent log is empty or shows no agent
+      # bin/jc exits 4 when the worker agent log is empty or shows no agent
       # activity — the model API is likely down or out of credits. opencode
       # hangs silently in this case (no stdout, no crash) and the job appears
       # "running" until the timeout kills it. Without this detection, the
@@ -2278,9 +2335,9 @@ reviewer:
       echo "PRE_RUN_VERDICT_ID=$PRE_RUN_VERDICT_ID"
 
       rc=0
-      ./bin/oc reviewer || rc=$?
+      ./bin/jc reviewer || rc=$?
       if [ "$rc" -ne 0 ]; then
-        echo "WARN: ./bin/oc reviewer exited $rc — checking if a verdict was posted anyway."
+        echo "WARN: ./bin/jc reviewer exited $rc — checking if a verdict was posted anyway."
       fi
 
       # Parse verdict — agent posts on the MR, not the issue.
@@ -3273,7 +3330,7 @@ e2e:
         | jq -r '[.[] | select(.body | test("<!-- boucle:verdict")) | select(.body | test("role=e2e")) | .id] | max // 0' 2>/dev/null || echo 0)
       echo "PRE_RUN_VERDICT_ID=$PRE_RUN_VERDICT_ID"
 
-      ./bin/oc e2e || true
+      ./bin/jc e2e || true
 
       # Disable errexit for the post-agent section: the verdict parsing and
       # label/close calls below are all best-effort. GitLab Runner runs - |
@@ -3282,7 +3339,7 @@ e2e:
       # case statement can route to PASS/FAIL/UNCERTAIN. We handle errors
       # explicitly per-command instead.
       set +e
-      # Parse verdict from agent output (bin/oc logs to stdout)
+      # Parse verdict from agent output (bin/jc logs to stdout)
       # If BOUCLE_ISSUE is set, parse from issue comment; otherwise from agent stdout.
       # Tolerate glab/jq non-zero exit (glab may warn about version updates on
       # stderr; jq may error on unexpected JSON). An empty COMMENT → empty VERDICT
