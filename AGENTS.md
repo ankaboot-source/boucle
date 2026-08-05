@@ -689,6 +689,32 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       trace) but never wrote it into `state.md`. The reviewer eventually
       PASSed with a lenient interpretation, but the loop wasted 2 iterations.
 
+21. **Preview stale passes HTTP-200-only assertion** (issue #35 on up/urgence-palestine.fr)
+    - ❌ DO NOT trust an HTTP 200 on the preview URL as proof that the deployed
+      content matches the head commit. Three failure modes produce a 200
+      with stale content: (a) the deploy step's exit code is swallowed by a
+      `$(...) | grep | head` pipeline under `set +o pipefail`, so a failed
+      redeploy is silently treated as success; (b) the CDN edge keeps serving
+      cached content for seconds-to-minutes after a new deployment; (c) if the
+      build output is byte-identical to the previous iteration (Astro/Vite
+      cache hit on the shell executor), `wrangler pages deploy` returns the
+      same content-hash URL and the preview never updates.
+    - ✅ DO: the worker job writes a commit-SHA marker into the build output
+      (`__boucle_commit__.txt` + an HTML comment in `index.html`) right after
+      the build, captures the wrangler exit code separately from the URL
+      extraction (subshell + log file, not a swallowing pipeline), and the
+      deploy assertion fetches the marker from the preview URL with a retry
+      loop (`BOUCLE_PREVIEW_PROPAGATION_WAIT`, default 60s, 5s backoff) until
+      the deployed SHA matches the head SHA. A stale preview now FAILs the
+      worker job instead of passing through to the reviewer.
+    - Context: issue #35 iteration 3 deployed commit `6ca8aa33` but the
+      preview kept serving the iteration-2 content (cards with titles, wrong
+      grid, wrong links). The reviewer FAILed 3 times on "preview doesn't
+      match the commit" while the worker kept re-running blind. The MR
+      description refresh (lesson #19) fixed the wrong-URL path, but the
+      stale-content path remained open until this marker + retry assertion
+      was added.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
