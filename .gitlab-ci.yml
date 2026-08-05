@@ -58,27 +58,23 @@ variables:
   # true = skip preview rendering entirely. false = default (mandatory for UI/UX issues via RENDER_REQUEST).
   BOUCLE_PREVIEW_DISABLE: "false"
   # Provider profile (generic): the name of the [providers.<profile>] section
-  # jcode reads from ~/.jcode/config.toml on the runner host. CI passes the
-  # profile name only — the API key lives in the api_key_env referenced by
-  # config.toml (so the key is never printed in CI logs). Default
-  # "ollama-cloud" matches the upstream boucle reference profile; consumers
-  # override this in GitLab CI/CD variables to point at their own provider
-  # (e.g. "opencode-go", "anthropic-direct", "custom-internal"). See bin/jc.
-  BOUCLE_PROVIDER_PROFILE: "ollama-cloud"
+  # in the jcode config. bin/jc generates ~/.jcode/config.toml at runtime from
+  # BOUCLE_LLM_BASE_URL + BOUCLE_LLM_API_KEY (below) — no config file on the
+  # runner. Default "boucle" is the generic profile name; override only if you
+  # pre-install a named profile on the runner (local dev, backward compat).
+  BOUCLE_PROVIDER_PROFILE: "boucle"
+  # LLM provider credentials (generic — not hardcoded to any provider).
+  # bin/jc generates ~/.jcode/config.toml from these 2 env vars at runtime.
+  # Set both as GitLab CI/CD variables (BOUCLE_LLM_API_KEY = masked+protected).
+  # To switch provider: change these 2 vars + BOUCLE_PROVIDER_PROFILE — zero
+  # code changes. Works with any OpenAI-compatible endpoint.
+  BOUCLE_LLM_BASE_URL: "https://ollama.com/v1"
+  # BOUCLE_LLM_API_KEY: ""  # set as masked+protected CI variable
   # Provider fallback: when the primary provider is down —
   # empty log / no agent activity, the exit-4 condition (AGENTS.md lesson #29) —
   # retry with this fallback provider before escalating to a human. Empty = disabled.
-  # opencode-go mirrors the ollama-cloud catalog (same model names).
   # Per-role model overrides: BOUCLE_FALLBACK_MODEL_{TRIAGE,WORKER,REVIEWER,E2E}.
-  BOUCLE_FALLBACK_PROVIDER: "opencode-go"
-  # jcode config (config.toml + API key) is pre-installed on the runner host
-  # at ~/.jcode/config.toml — the same pattern as opencode auth at
-  # ~/.local/share/opencode/auth.json. CI does NOT pass any file-type variable
-  # for the LLM provider config: the key never leaves the runner. CI only
-  # passes the profile NAME via BOUCLE_PROVIDER_PROFILE (above) — the profile
-  # section in config.toml defines base_url + api_key_env + default_model,
-  # and the API key itself is read by jcode from the env var named in
-  # api_key_env (the runner host loads it from provider-ollama-cloud.env).
+  BOUCLE_FALLBACK_PROVIDER: ""
 
 # ── Default: use node:22-slim (has node, npm, curl — much smaller than node:22) ─
 # The shared runner is a docker executor. node:22-slim is ~250MB vs ~1GB.
@@ -147,21 +143,13 @@ default:
       fi
       unset _GLAB_INSTALLED
 
-      # ── pi coding agent (npm install — pi needs node >=22.19) ──────
-      # pi is a Node-based CLI: @earendil-works/pi-coding-agent is the runtime
-      # and pi-agent-mode ships the custom agents in .pi/agents/.
-      if ! command -v pi &>/dev/null; then
-        echo "Installing pi coding agent + pi-agent-mode..."
-        PI_VER="${PI_VERSION:-latest}"
-        npm install -g --ignore-scripts @earendil-works/pi-coding-agent@$PI_VER pi-agent-mode
-      fi
-
-      # ── jcode coding agent (standalone binary — replaces pi) ──
-      # jcode is the migration target for this worktree. It is a Rust binary
-      # shipped as a tarball on GitHub Releases — no Node/npm/Bun dependency.
+      # ── jcode coding agent (standalone Rust binary) ──────────────
+      # jcode replaces both opencode and pi. It is a Rust binary shipped as
+      # a tarball on GitHub Releases — no Node/npm/Bun dependency.
       # bin/jc wires jcode into the boucle role matrix (triage/worker/
-      # reviewer/e2e). Coexists with pi above (legacy) so old pipelines keep
-      # running while consumers migrate.
+      # reviewer/e2e). Provider config is generated at runtime by bin/jc
+      # from BOUCLE_LLM_BASE_URL + BOUCLE_LLM_API_KEY env vars — no
+      # config file needed on the runner host.
       # NOTE: verify the actual release asset name on the jcode GitHub Releases
       # page (https://github.com/1jehuang/jcode/releases) — the exact
       # `-linux-x64.tar.gz` filename may differ; pin to the version you
@@ -199,19 +187,11 @@ default:
         npm install -g wrangler 2>/dev/null || true
       fi
 
-      # ── pi auth (file-type CI variable → expected path) ──────
-      if [ -n "${PI_AUTH:-}" ] && [ -f "$PI_AUTH" ]; then
-        mkdir -p "$HOME/.pi/agent" && chmod 700 "$HOME/.pi/agent"
-        cp "$PI_AUTH" "$HOME/.pi/agent/auth.json"
-        chmod 600 "$HOME/.pi/agent/auth.json"
-      fi
-
       # ── Verify ────────────────────────────────────────────────────
       echo "=== Environment ==="
       node --version 2>/dev/null || echo "node: MISSING"
       npm --version 2>/dev/null || echo "npm: MISSING"
       glab version 2>/dev/null | head -1 || echo "glab: MISSING"
-      pi --version 2>/dev/null || echo "pi: MISSING"
       jcode --version 2>/dev/null || echo "jcode: MISSING"
       echo "BOUCLE_PROVIDER_PROFILE=${BOUCLE_PROVIDER_PROFILE:-ollama-cloud}"
       echo "$BOUCLE_DEPLOY_CMD" | grep -q wrangler && { wrangler --version 2>/dev/null || echo "wrangler: MISSING"; } || echo "wrangler: not needed (deploy doesn't use it)"

@@ -64,12 +64,48 @@ case "$ROLE" in
 esac
 
 # ── Provider profile (generic — not hardcoded to ollama-cloud) ─────────
-# The provider profile is defined in ~/.jcode/config.toml on the runner host.
-# It holds the base_url, api_key_env, and default_model. CI passes only the
-# profile name via BOUCLE_PROVIDER_PROFILE (default: ollama-cloud for backward
-# compat). The API key itself is referenced by api_key_env in config.toml and
-# set as a CI secret with the name declared there.
-PROVIDER_PROFILE="${BOUCLE_PROVIDER_PROFILE:-ollama-cloud}"
+# The provider profile name (passed to jcode --provider-profile). CI sets
+# BOUCLE_PROVIDER_PROFILE (default: boucle). The actual provider config
+# (base_url + api_key) is generated at runtime from BOUCLE_LLM_BASE_URL
+# and BOUCLE_LLM_API_KEY env vars — no config file needed on the runner.
+# See ensure_jcode_config() below.
+PROVIDER_PROFILE="${BOUCLE_PROVIDER_PROFILE:-boucle}"
+
+# ── Generate jcode config from env vars (no runner-host config file) ──
+# jcode needs ~/.jcode/config.toml with a [providers.<profile>] section.
+# Instead of shipping a config file on the runner (security risk + provider
+# lock-in), bin/jc generates it at runtime from 2 env vars:
+#   BOUCLE_LLM_BASE_URL  — the OpenAI-compatible API endpoint
+#   BOUCLE_LLM_API_KEY   — the API key (CI secret, masked)
+# If the env vars are not set, fall back to the existing config.toml on the
+# runner (for local dev / backward compat with the ollama-cloud profile).
+ensure_jcode_config() {
+  local config_dir="${JCODE_HOME:-$HOME/.jcode}"
+  local config_file="$config_dir/config.toml"
+  if [ -n "${BOUCLE_LLM_BASE_URL:-}" ] && [ -n "${BOUCLE_LLM_API_KEY:-}" ]; then
+    mkdir -p "$config_dir"
+    # Write the config with the generic profile name. The API key is
+    # referenced via api_key_env so it's never written to disk in plaintext.
+    cat > "$config_file" << TOML
+[provider]
+default_provider = "$PROVIDER_PROFILE"
+
+[providers.$PROVIDER_PROFILE]
+type = "openai-compatible"
+base_url = "$BOUCLE_LLM_BASE_URL"
+auth = "bearer"
+api_key_env = "BOUCLE_LLM_API_KEY"
+default_model = "$MODEL"
+requires_api_key = true
+TOML
+    export JCODE_HOME="$config_dir"
+  elif [ ! -f "$config_file" ]; then
+    echo "[boucle] ERROR: no jcode config. Set BOUCLE_LLM_BASE_URL + BOUCLE_LLM_API_KEY," >&2
+    echo "[boucle]        or pre-install ~/.jcode/config.toml on the runner." >&2
+    exit 1
+  fi
+  # If config.toml exists (runner-host or generated above), jcode uses it.
+}
 
 # ── Parse model + temperature from agent file YAML frontmatter ────────
 # The agent files (.opencode/agents/<role>.md) have YAML frontmatter:
@@ -145,6 +181,10 @@ STATE_DIR="$CI_PROJECT_DIR/.boucle/$ISSUE"
 STATE_FILE="$STATE_DIR/state.md"
 ITERATIONS_FILE="$STATE_DIR/iterations.md"
 # jcode has no SQLite DB (run mode is ephemeral), so no DB isolation needed.
+
+# ── Generate jcode config from env vars (no runner-host config file) ──
+# Must run AFTER model parsing (uses $MODEL) and BEFORE jcode invocation.
+ensure_jcode_config
 
 # ── jcode environment setup ────────────────────────────────────────────
 # Disable MCP in CI (AGENTS.md lesson #3: MCP handshake hangs).
