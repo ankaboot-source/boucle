@@ -125,7 +125,7 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		  ====================================================================
 		-->
 		<section class="locales" aria-labelledby="locales-title">
-			<header class="section-head">
+			<header class="section-head reveal">
 				<h2 id="locales-title">{sections.length} villes, un même combat.</h2>
 				<p class="section-head__lede">
 					Clique sur une ville pour voir les coordonnées complètes
@@ -240,7 +240,7 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		{
 			mobilisationWithBody.length > 0 && (
 				<section class="etudiantes" aria-labelledby="etudiantes-title">
-					<header class="section-head">
+					<header class="section-head reveal">
 						<h2 id="etudiantes-title">Sur les campus, en lien avec le national.</h2>
 						<p class="section-head__lede">
 							La coordination étudiante du collectif relaie les appels
@@ -307,7 +307,7 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		  ====================================================================
 		-->
 		<aside class="footer-cta" aria-labelledby="footer-cta-title">
-			<h2 id="footer-cta-title">Ta ville n'est pas dans la liste&nbsp;?</h2>
+			<h2 id="footer-cta-title" class="reveal">Ta ville n'est pas dans la liste&nbsp;?</h2>
 			<p>
 				Lance une section locale, ou rejoins la coordination étudiante
 				si tu es sur un campus. On t'accompagne.
@@ -465,16 +465,21 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		position: relative;
 		overflow: hidden;
 		transition:
-			transform var(--duration-base) var(--ease-out),
-			border-color var(--duration-base) var(--ease-out),
-			box-shadow var(--duration-base) var(--ease-out);
+			transform var(--duration-base) var(--ease-brutal-lift),
+			border-color var(--duration-base) var(--ease-brutal-lift),
+			box-shadow var(--duration-base) var(--ease-brutal-lift);
 	}
 
 	.cta-card:hover,
 	.cta-card:focus-within {
-		transform: translateY(-2px);
+		transform: translateY(-6px) translateX(2px);
 		border-color: var(--color-ink);
-		box-shadow: var(--shadow-lift);
+		box-shadow: var(--shadow-hard);
+	}
+
+	.cta-card:active {
+		transform: none;
+		box-shadow: none;
 	}
 
 	.cta-card::after {
@@ -568,9 +573,16 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 			transform var(--duration-fast) var(--ease-out);
 	}
 
-	.cta-card__btn:hover {
+	.cta-card__btn:hover,
+	.cta-card__btn:focus-visible {
 		background: var(--color-flag-red-deep);
-		transform: translateY(-1px);
+		transform: translateY(-6px) translateX(2px);
+		box-shadow: var(--shadow-hard);
+	}
+
+	.cta-card__btn:active {
+		transform: none;
+		box-shadow: none;
 	}
 
 	.cta-card__btn:focus-visible {
@@ -644,17 +656,23 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		color: var(--color-ink);
 		position: relative; /* anchor for the card-wide overlay link */
 		transition:
-			border-color var(--duration-base) var(--ease-out),
-			transform var(--duration-base) var(--ease-out),
-			background-color var(--duration-base) var(--ease-out),
-			box-shadow var(--duration-base) var(--ease-out);
+			border-color var(--duration-base) var(--ease-brutal-lift),
+			transform var(--duration-base) var(--ease-brutal-lift),
+			background-color var(--duration-base) var(--ease-brutal-lift),
+			box-shadow var(--duration-base) var(--ease-brutal-lift);
 	}
 
-	.locale-card:hover {
+	.locale-card:hover,
+	.locale-card:focus-within {
 		border-color: var(--color-ink);
 		background: var(--color-paper);
-		transform: translateY(-2px);
-		box-shadow: var(--shadow-lift);
+		transform: translateY(-6px) translateX(2px);
+		box-shadow: var(--shadow-hard);
+	}
+
+	.locale-card:active {
+		transform: none;
+		box-shadow: none;
 	}
 
 	/*
@@ -777,15 +795,21 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		overflow: hidden;
 		border: 1px solid var(--color-ink);
 		transition:
-			border-color var(--duration-base) var(--ease-out),
-			transform var(--duration-base) var(--ease-out),
-			box-shadow var(--duration-base) var(--ease-out);
+			border-color var(--duration-base) var(--ease-brutal-lift),
+			transform var(--duration-base) var(--ease-brutal-lift),
+			box-shadow var(--duration-base) var(--ease-brutal-lift);
 	}
 
-	.etudiante-card:hover {
+	.etudiante-card:hover,
+	.etudiante-card:focus-within {
 		border-color: var(--color-flag-red);
-		transform: translateY(-2px);
-		box-shadow: var(--shadow-lift);
+		transform: translateY(-6px) translateX(2px);
+		box-shadow: var(--shadow-hard);
+	}
+
+	.etudiante-card:active {
+		transform: none;
+		box-shadow: none;
 	}
 
 	@media (min-width: 64rem) {
@@ -876,8 +900,9 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		border-radius: var(--radius-sharp);
 		cursor: pointer;
 		transition:
-			background-color var(--duration-fast) var(--ease-out),
-			transform var(--duration-fast) var(--ease-out);
+			background-color var(--duration-fast) var(--ease-brutal-lift),
+			transform var(--duration-fast) var(--ease-brutal-lift),
+			box-shadow var(--duration-fast) var(--ease-brutal-lift);
 	}
 
 	.etudiante-card__btn--primary {
@@ -885,9 +910,16 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		color: var(--color-flag-white);
 	}
 
-	.etudiante-card__btn--primary:hover {
+	.etudiante-card__btn--primary:hover,
+	.etudiante-card__btn--primary:focus-visible {
 		background: var(--color-flag-red-deep);
-		transform: translateY(-1px);
+		transform: translateY(-6px) translateX(2px);
+		box-shadow: var(--shadow-hard);
+	}
+
+	.etudiante-card__btn--primary:active {
+		transform: none;
+		box-shadow: none;
 	}
 
 	.etudiante-card__btn--primary:focus-visible {
@@ -900,9 +932,16 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		color: var(--color-ink);
 	}
 
-	.etudiante-card__btn--ghost:hover {
+	.etudiante-card__btn--ghost:hover,
+	.etudiante-card__btn--ghost:focus-visible {
 		background: var(--color-paper-edge);
-		transform: translateY(-1px);
+		transform: translateY(-6px) translateX(2px);
+		box-shadow: var(--shadow-hard);
+	}
+
+	.etudiante-card__btn--ghost:active {
+		transform: none;
+		box-shadow: none;
 	}
 
 	.etudiante-card__btn--ghost:focus-visible {
@@ -921,16 +960,21 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		border: 1.5px solid var(--color-ink);
 		border-radius: var(--radius-sharp);
 		transition:
-			border-color var(--duration-base) var(--ease-out),
-			transform var(--duration-base) var(--ease-out),
-			box-shadow var(--duration-base) var(--ease-out);
+			border-color var(--duration-base) var(--ease-brutal-lift),
+			transform var(--duration-base) var(--ease-brutal-lift),
+			box-shadow var(--duration-base) var(--ease-brutal-lift);
 	}
 
 	.footer-cta:hover,
 	.footer-cta:focus-within {
 		border-color: var(--color-ink);
-		transform: translateY(-2px);
-		box-shadow: var(--shadow-lift);
+		transform: translateY(-6px) translateX(2px);
+		box-shadow: var(--shadow-hard);
+	}
+
+	.footer-cta:active {
+		transform: none;
+		box-shadow: none;
 	}
 
 	.footer-cta h2 {
@@ -1061,15 +1105,21 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		border: 1.5px solid var(--color-ink);
 		background: var(--color-bg-soft);
 		transition:
-			transform var(--duration-base) var(--ease-out),
-			border-color var(--duration-base) var(--ease-out),
-			box-shadow var(--duration-base) var(--ease-out);
+			transform var(--duration-base) var(--ease-brutal-lift),
+			border-color var(--duration-base) var(--ease-brutal-lift),
+			box-shadow var(--duration-base) var(--ease-brutal-lift);
 	}
 
-	.pictogram-cta__link:hover {
-		transform: translateY(-2px);
+	.pictogram-cta__link:hover,
+	.pictogram-cta__link:focus-visible {
+		transform: translateY(-6px) translateX(2px);
 		border-color: var(--color-flag-red);
-		box-shadow: var(--shadow-lift);
+		box-shadow: var(--shadow-hard);
+	}
+
+	.pictogram-cta__link:active {
+		transform: none;
+		box-shadow: none;
 	}
 
 	.pictogram-cta__link:focus-visible {
@@ -1087,6 +1137,7 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 	@media (prefers-reduced-motion: reduce) {
 		.cta-card,
 		.cta-card__arrow,
+		.cta-card__btn,
 		.locale-card,
 		.locale-card__link,
 		.locale-card__chip,
@@ -1098,12 +1149,19 @@ const MOBILISATION_ETUDIANTE_URL = "https://linktr.ee/etudiant.es";
 		}
 
 		.cta-card:hover,
-		.footer-cta:hover {
-			transform: none;
-			box-shadow: none;
-		}
-
-		.etudiante-card:hover {
+		.cta-card:active,
+		.cta-card__btn:hover,
+		.cta-card__btn:active,
+		.locale-card:hover,
+		.locale-card:active,
+		.etudiante-card:hover,
+		.etudiante-card:active,
+		.etudiante-card__btn:hover,
+		.etudiante-card__btn:active,
+		.footer-cta:hover,
+		.footer-cta:active,
+		.pictogram-cta__link:hover,
+		.pictogram-cta__link:active {
 			transform: none;
 			box-shadow: none;
 		}
