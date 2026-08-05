@@ -109,16 +109,21 @@
 	color: var(--color-ink-on-dark);
 	text-decoration: none;
 	transition:
-		border-color var(--duration-base) var(--ease-out),
-		box-shadow var(--duration-base) var(--ease-out),
-		transform var(--duration-base) var(--ease-out);
+		border-color var(--duration-base) var(--ease-brutal-lift),
+		box-shadow var(--duration-base) var(--ease-brutal-lift),
+		transform var(--duration-base) var(--ease-brutal-lift);
 }
 
 .featured-feed__card:hover,
 .featured-feed__card:focus-visible {
 	border-color: var(--color-ink);
-	transform: translateY(-2px);
-	box-shadow: var(--shadow-lift);
+	transform: translateY(-6px) translateX(2px);
+	box-shadow: var(--shadow-hard);
+}
+
+.featured-feed__card:active {
+	transform: none;
+	box-shadow: none;
 }
 
 .featured-feed__card:focus-visible {
@@ -325,6 +330,86 @@ img.hero__symbol {
 	height: 48px;
 }
 
+/* =============================================================================
+ * Shared brutalist motion system
+ * -----------------------------------------------------------------------------
+ * Hard-Lift (cards, buttons, images) + Staggered Slide-Up Brutal (reveals).
+ * All hover animations use ONLY transform + opacity and the hard shadow token
+ * (blur strictly 0) — see DESIGN.md §3.2 and §3.6. Reduced motion collapses
+ * every transform/delay to nothing (see the block at the end of this file).
+ * ========================================================================== */
+
+/*
+ * `.hard-lift` — the shared interactive relief. Applied to cards, image
+ * links and CTA wrappers. On hover/focus the element moves down-and-right
+ * by the token offset and casts a solid ink hard-edge block behind it; on
+ * active it snaps back flat with no shadow. Amplitude and shadow are
+ * token-driven so every component stays homogeneous.
+ */
+.hard-lift {
+	transition:
+		transform var(--duration-base) var(--ease-brutal-lift),
+		box-shadow var(--duration-base) var(--ease-brutal-lift),
+		border-color var(--duration-base) var(--ease-brutal-lift),
+		background-color var(--duration-base) var(--ease-brutal-lift);
+}
+
+.hard-lift:hover,
+.hard-lift:focus-visible,
+.hard-lift:focus-within {
+	transform: translateY(calc(-1 * var(--shadow-hard-offset)))
+		translateX(calc(var(--shadow-hard-offset) / 3));
+	box-shadow: var(--shadow-hard);
+}
+
+.hard-lift:active {
+	transform: none;
+	box-shadow: none;
+}
+
+/*
+ * Staggered Slide-Up Brutal — scroll-reveal for heading groups and cards.
+ * Each `.reveal` element starts 20px below, faded out; when `.is-revealed`
+ * is added (via IntersectionObserver in Layout.astro) it snaps up with the
+ * reveal easing. A child-per-item `.reveal-stagger` with a CSS var index
+ * drives a 50-75ms cascade via transition-delay.
+ */
+.reveal {
+	opacity: 0;
+	transform: translateY(20px);
+	transition:
+		opacity 200ms var(--ease-brutal-reveal),
+		transform 200ms var(--ease-brutal-reveal);
+	transition-delay: 0ms;
+}
+
+.reveal.is-revealed {
+	opacity: 1;
+	transform: translateY(0);
+}
+
+/* Mobile: reduced amplitude (10px vs 20px desktop) for reveals. */
+@media (max-width: 47.99rem) {
+	.reveal {
+		transform: translateY(10px);
+	}
+}
+
+.reveal-stagger > * {
+	opacity: 0;
+	transform: translateY(20px);
+	transition:
+		opacity 200ms var(--ease-brutal-reveal),
+		transform 200ms var(--ease-brutal-reveal);
+	transition-delay: calc(var(--reveal-index, 0) * 60ms);
+}
+
+.reveal-stagger > *.is-revealed,
+.reveal-stagger.is-revealed > * {
+	opacity: 1;
+	transform: translateY(0);
+}
+
 /* ---------- Buttons (homepage) ---------- */
 
 .btn {
@@ -349,8 +434,15 @@ img.hero__symbol {
 		transform var(--duration-fast) var(--ease-out);
 }
 
-.btn:hover {
-	transform: translateY(-1px);
+.btn:hover,
+.btn:focus-visible {
+	transform: translateY(-6px) translateX(2px);
+	box-shadow: var(--shadow-hard);
+}
+
+.btn:active {
+	transform: none;
+	box-shadow: none;
 }
 
 .btn--primary {
@@ -435,16 +527,21 @@ img.hero__symbol {
 	border-radius: var(--radius-sharp);
 	border: 1px solid var(--color-border);
 	transition:
-		transform var(--duration-base) var(--ease-out),
-		border-color var(--duration-base) var(--ease-out),
-		box-shadow var(--duration-base) var(--ease-out);
+		transform var(--duration-base) var(--ease-brutal-lift),
+		border-color var(--duration-base) var(--ease-brutal-lift),
+		box-shadow var(--duration-base) var(--ease-brutal-lift);
 }
 
 .pillar:hover,
 .pillar:focus-within {
-	transform: translateY(-2px);
+	transform: translateY(-6px) translateX(2px);
 	border-color: var(--color-ink);
-	box-shadow: var(--shadow-lift);
+	box-shadow: var(--shadow-hard);
+}
+
+.pillar:active {
+	transform: none;
+	box-shadow: none;
 }
 
 .pillar__index {
@@ -632,5 +729,50 @@ img.hero__symbol {
 	.pillar:focus-within {
 		transform: none;
 		box-shadow: none;
+	}
+
+	/* Hard-Lift + reveal: kill all translations, staggers and delays; keep
+	 * only instant visual state changes (colour, opacity). */
+	.hard-lift,
+	.hard-lift:hover,
+	.hard-lift:focus-visible,
+	.hard-lift:focus-within,
+	.hard-lift:active,
+	.btn,
+	.btn:hover,
+	.btn:focus-visible,
+	.btn:active,
+	.reveal,
+	.reveal-stagger > * {
+		transition: none;
+		transform: none;
+		box-shadow: none;
+	}
+
+	.reveal,
+	.reveal-stagger > * {
+		opacity: 1;
+	}
+}
+
+/*
+ * Touch devices: hover is a phantom state (no persistent pointer), so the
+ * complex lift/hover gestures are disabled in favour of a clear active
+ * state at tap. The hard-shadow still flashes on :active to give tap
+ * feedback, but the -6px lift and its 6px offset shadow are suppressed so
+ * they don't linger after the finger lifts.
+ */
+@media (hover: none) and (pointer: coarse) {
+	.hard-lift:hover,
+	.btn:hover,
+	.btn:focus-visible {
+		transform: none;
+		box-shadow: none;
+	}
+
+	.hard-lift:active,
+	.btn:active {
+		transform: translateY(-2px);
+		box-shadow: var(--shadow-hard);
 	}
 }
