@@ -898,6 +898,51 @@ atomic.
       same wall, then escalated with the misleading "agent likely
       exhausted its step budget" message.
 
+41. **Anchor VERDICT greps to start-of-line**
+    - ❌ DO NOT use `grep -E 'VERDICT: (PASS|FAIL|UNCERTAIN)'` without a
+      `^` start-of-line anchor in the verdict parsing pipeline. opencode's
+      bash tool traces commands with `set -x`-style output (ANSI color +
+      `$ ` PS4 prompt) in `agent-output.log`. A trace line like
+      `[0m$ [0mglab mr note 36 --message "VERDICT: PASS"` contains the
+      substring `VERDICT: PASS` — an unanchored grep matches it inside the
+      trace, and the log-scraping fallback posts the trace as a verdict
+      note. The result: a malformed note (containing shell trace output)
+      appears on the MR, and CI may parse a phantom VERDICT from a command
+      the agent echoed but never actually posted as a real verdict.
+    - ❌ DO NOT assume the awk `^VERDICT:` exit guard is sufficient. The
+      awk exits on `^VERDICT:` (start-of-line), but the trace line starts
+      with `[0m$` (ANSI reset + PS4), so awk keeps printing past it. The
+      downstream `grep -qiE 'VERDICT: ...'` validation then matches the
+      substring inside the trace line — because it is NOT anchored.
+    - ✅ DO: anchor EVERY `grep` that validates or extracts a VERDICT with
+      `^`: `grep -qiE '^VERDICT: (PASS|FAIL|UNCERTAIN)'` for validation
+      and `grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)'` for extraction.
+      This applies to both the reviewer and e2e jobs, in both the primary
+      note-parse and the log-scraping fallback. The `^` anchor ensures the
+      grep only matches a real `VERDICT:` line (posted by the agent as a
+      verdict), never a substring inside a shell trace or quoted command.
+
+42. **Merger MUST handle "Pipelines must succeed" via MWPS**
+    - ❌ DO NOT fail the merger when `detailed_merge_status` is
+      `pipeline_status_must_pass` or `checking` after a short poll. The
+      force-push (rebase) triggers a new pipeline on the MR branch. If the
+      GitLab project has "Pipelines must succeed" enabled, GitLab refuses
+      to merge until that pipeline completes — and a 2-minute poll window
+      is far too short for a full CI run. The merger fails → `boucle:human`
+      → the MR sits approved-but-unmerged even though everything is fine.
+    - ❌ DO NOT assume `merge_when_pipeline_succeeds=false` is always the
+      right merge mode. It only works when the MR is immediately
+      `mergeable`. When a pipeline is running, GitLab rejects the immediate
+      merge with a 405 and the merger treats the empty `merge_commit_sha`
+      as a hard failure.
+    - ✅ DO: poll `detailed_merge_status` for up to 10 min (60×10s),
+      tolerating `checking`/`pipeline_status_must_pass`/`pipeline_blocked`
+      as transient states. If the pipeline is still running after the poll
+      window, switch to `merge_when_pipeline_succeeds=true` (MWPS) — GitLab
+      merges automatically once the pipeline passes. Post a note so the
+      human knows the merge is scheduled, and exit 0 (the deploy triggered
+      by the eventual merge + the doctor's staleness check close the loop).
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
