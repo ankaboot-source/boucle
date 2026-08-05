@@ -122,7 +122,7 @@ const totalLabel = `${entries.length} prise${entries.length > 1 ? "s" : ""} de p
 		-->
 		{categoryGroups.map((group) => (
 			<section class="category-section" aria-labelledby={`category-${group.category}`}>
-				<h2 class="category-section__title" id={`category-${group.category}`}>
+				<h2 class="category-section__title reveal" id={`category-${group.category}`}>
 					{group.label}
 					<span class="category-section__count">({group.items.length})</span>
 				</h2>
@@ -292,16 +292,21 @@ const totalLabel = `${entries.length} prise${entries.length > 1 ? "s" : ""} de p
 		text-decoration: none;
 		color: var(--color-ink);
 		transition:
-			transform var(--duration-base) var(--ease-out),
-			border-color var(--duration-base) var(--ease-out),
-			box-shadow var(--duration-base) var(--ease-out);
+			transform var(--duration-base) var(--ease-brutal-lift),
+			border-color var(--duration-base) var(--ease-brutal-lift),
+			box-shadow var(--duration-base) var(--ease-brutal-lift);
 	}
 
 	.entry-card__link:hover,
 	.entry-card__link:focus-visible {
-		transform: translateY(-2px);
+		transform: translateY(-6px) translateX(2px);
 		border-color: var(--color-ink);
-		box-shadow: var(--shadow-lift);
+		box-shadow: var(--shadow-hard);
+	}
+
+	.entry-card__link:active {
+		transform: none;
+		box-shadow: none;
 	}
 
 	.entry-card__link:focus-visible {

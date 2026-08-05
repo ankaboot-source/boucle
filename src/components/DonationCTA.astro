@@ -99,16 +99,24 @@
 		text-decoration: none;
 		cursor: pointer;
 		transition:
-			background-color var(--duration-base) var(--ease-out),
-			color var(--duration-base) var(--ease-out),
-			border-color var(--duration-base) var(--ease-out),
-			transform var(--duration-fast) var(--ease-out);
+			background-color var(--duration-base) var(--ease-brutal-lift),
+			color var(--duration-base) var(--ease-brutal-lift),
+			border-color var(--duration-base) var(--ease-brutal-lift),
+			transform var(--duration-fast) var(--ease-brutal-lift),
+			box-shadow var(--duration-fast) var(--ease-brutal-lift);
 	}
 
-	.donation-cta__button:hover {
+	.donation-cta__button:hover,
+	.donation-cta__button:focus-visible {
 		background: var(--color-flag-red-deep);
 		border-color: var(--color-flag-red-deep);
-		transform: translateY(-1px);
+		transform: translateY(-6px) translateX(2px);
+		box-shadow: var(--shadow-hard);
+	}
+
+	.donation-cta__button:active {
+		transform: none;
+		box-shadow: none;
 	}
 
 	@media (min-width: 48rem) {

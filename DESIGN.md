@@ -146,6 +146,27 @@ Ombre **rare et franche** quand elle existe :
 Jamais d'ombres douces diffuses continues — c'est l'un des tout premiers
 signaux de design générique.
 
+#### Ombres d'animation (Hard Shadow Lift)
+
+Les **animations** (hover/active des cards, boutons, images) utilisent une
+ombre **dure** au lieu de `--shadow-lift` : un bloc offset plein, encre
+solide, **blur radius strictement à 0** — le relief « hard shadow lift »
+du mouvement brutaliste.
+
+```css
+--shadow-hard-offset: 6px;
+--shadow-hard: var(--shadow-hard-offset) var(--shadow-hard-offset) 0px
+	var(--color-ink);
+```
+
+- Au `:hover`/`:focus-visible`, l'élément monte en diagonale
+  (`translateY(-6px) translateX(2px)`) et projette `--shadow-hard`.
+- Au `:active`, il retombe à plat : `transform: none` + `box-shadow: none`
+  (le « snap » du lift).
+- `--shadow-lift` reste réservé aux **reliefs statiques** (non animés) ;
+  tout `box-shadow` d'animation doit consommer `--shadow-hard`.
+- Seules `transform` et `opacity` sont animées — jamais de reflow layout.
+
 ### 3.3 Typographie
 
 Deux familles, **deux rôles**, contrat clair :
@@ -282,12 +303,36 @@ Conteneurs (largeurs max) :
 | --- | --- |
 | `--ease-out` | `cubic-bezier(0.22, 1, 0.36, 1)` |
 | `--ease-in-out` | `cubic-bezier(0.65, 0, 0.35, 1)` (à utiliser **rarement**) |
+| `--ease-brutal-lift` | `cubic-bezier(0.2, 0.8, 0.2, 1)` — lift des cards/boutons |
+| `--ease-brutal-reveal` | `cubic-bezier(0.1, 0.7, 1.0, 0.1)` — révélations au scroll |
 | `--duration-fast` | `140 ms` |
 | `--duration-base` | `240 ms` |
 | `--duration-slow` | `420 ms` |
 
 `@media (prefers-reduced-motion: reduce)` ramène toutes les durées à
 `0 ms` — toujours.
+
+#### Courbes et timings d'animation (globales)
+
+| Gesture | Durée | Easing | Ampitude |
+| --- | --- | --- | --- |
+| Hard Lift (hover/active) | `--duration-base` (240 ms), active `--duration-fast` | `--ease-brutal-lift` | `translateY(-6px) translateX(2px)` + `--shadow-hard` |
+| Staggered Slide-Up Brutal (révélation texte) | `200 ms` / élément | `--ease-brutal-reveal` | `translateY(20px)` → `0` desktop, `10px` mobile |
+| Stagger delay | `50–75 ms` / élément (par défaut `60 ms`) | — | via `transition-delay` + `--reveal-index` |
+| Snap au tap (active) | `--duration-fast` | `--ease-brutal-lift` | `transform: none` + `box-shadow: none` |
+
+- La révélation « Staggered Slide-Up Brutal » est portée par
+  `.reveal` (élément isolé) et `.reveal-stagger` (groupe dont chaque enfant
+  porte un `--reveal-index`), pilotés par un `IntersectionObserver` dans
+  `src/layouts/Layout.astro`.
+- **Mobile** : l'amplitude du translateY du stagger est réduite à `10px`
+  (vs `20px` desktop).
+- **Écrans tactiles** (`@media (hover: none) and (pointer: coarse)`) : le
+  hover complexe (lift complet) est désactivé au profit d'un état actif clair
+  au tap (léger `translateY(-2px)` + `--shadow-hard`).
+- **`prefers-reduced-motion: reduce`** : toutes les translations, delays de
+  stagger et ombres d'animation sont supprimés ; seuls les changements
+  d'état visuels instantanés (couleur, opacité) sont conservés.
 
 ### 3.7 Variante « angled-split » des CTA
 
@@ -338,12 +383,15 @@ rouge par un comité de rédaction qui sait ce qu'il fait.** Pas un tract
 agressif pour autant — un tract **tenu**, lisible, qui assume son sujet
 sans crier plus fort que nécessaire.
 
-### 3.9 « Grunge highlight » du lien featured
+### 3.9 « Right to Resist » — lien featured (hover brutaliste cinétique)
 
 Le lien **« Right to Resist »** dans le header principal (`navItems[3]`
 dans [`src/components/Header.astro`](src/components/Header.astro))
-bénéficie d'un surligné *rough marker stroke* qui apparaît **derrière**
-le texte au `:hover` et `:focus-visible`, et **disparaît** lorsque
+bénéficie d'un surligné **brutaliste cinétique** : au `:hover` et
+`:focus-visible`, le texte se décale vers le haut-gauche
+(`translate(-2px, -2px)`) pendant qu'un **bloc plein à arête dure** (même
+relief que `--shadow-hard`, DESIGN.md §3.2) **claque** derrière lui avec un
+timeline `steps(3, end)` (pas de lissage), puis disparaît lorsque
 l'interaction se termine. Il ne faut jamais se substituer à un
 `text-decoration: underline`.
 
@@ -364,24 +412,26 @@ l'interaction se termine. Il ne faut jamais se substituer à un
 #### Règles d'implémentation
 
 - Le surligné est un pseudo-élément `::after` positionné en arrière-plan
-  (`z-index: -1`) avec `left: -2px; right: -2px; bottom: 2px; height: 70%`.
-- La texture est produite par **deux gradients linéaires superposés**
-  (angles 104deg et 183deg) et une légère rotation (`transform:
-  rotate(-1deg)`), créant des bords irréguliers sans recourir à une
-  image externe.
+  (`z-index: -1`) avec `left: 0; right: 0; bottom: 2px; height: 70%`.
+- Le surligné est un **bloc plein** (`background: var(--featured-highlight-bg)`),
+  à arête dure, sans flou ni texture — le même registre que `--shadow-hard`
+  (DESIGN.md §3.2).
 - La couleur du surligné est pilotée par `--featured-highlight-bg`,
   la couleur du texte au hover/focus par
   `--featured-text-on-highlight`. Les deux tokens changent en fonction
   de la surface (default / scrolled / light).
-- La révélation se fait par `clip-path: inset(0 100% 0 0)` →
-  `clip-path: inset(0 0 0 0)`, avec `transition: clip-path
-  var(--duration-base) var(--ease-out)`. Lorsque le pointeur quitte
-  l'élément ou que le focus disparaît, le surligné retombe dans son
-  état masqué.
+- La révélation est **cinétique** : le `::after` part décalé
+  (`transform: translate(6px, 6px) scaleX(0)`) et claque en place
+  (`transform: translate(0, 0) scaleX(1)`) avec un timeline
+  `steps(3, end)` et `--ease-brutal-lift`, pendant que le texte lui-même
+  se décale vers le haut-gauche (`translate(-2px, -2px)`). Lorsque le
+  pointeur quitte l'élément ou que le focus disparaît, le surligné et le
+  texte retombent dans leur état masqué.
 - Sous `@media (prefers-reduced-motion: reduce)`, la transition du
-  pseudo-élément est annulée (`transition: none`) et le surligné reste
-  masqué. Les tokens de durée étant déjà réduits à `0ms`, aucune
-  animation ne persiste.
+  pseudo-élément est annulée (`transition: none`), le surligné reste
+  masqué et le décalage du texte est supprimé (`transform: none`). Les
+  tokens de durée étant déjà réduits à `0ms`, aucune animation ne
+  persiste.
 
 #### Accessibilité
 

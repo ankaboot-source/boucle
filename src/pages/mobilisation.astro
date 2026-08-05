@@ -94,7 +94,7 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 						class="mobilisation__group"
 						aria-labelledby={`group-${key}`}
 					>
-						<header class="section-head">
+						<header class="section-head reveal">
 							<h2 id={`group-${key}`}>{groupMeta[key].label}</h2>
 							<p class="mobilisation__group-tagline">
 								{groupMeta[key].tagline}
@@ -241,16 +241,21 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 		border-radius: var(--radius-sharp);
 		overflow: hidden;
 		transition:
-			transform var(--duration-base) var(--ease-out),
-			border-color var(--duration-base) var(--ease-out),
-			box-shadow var(--duration-base) var(--ease-out);
+			transform var(--duration-base) var(--ease-brutal-lift),
+			border-color var(--duration-base) var(--ease-brutal-lift),
+			box-shadow var(--duration-base) var(--ease-brutal-lift);
 	}
 
 	.card__inner:hover,
 	.card__inner:focus-within {
-		transform: translateY(-2px);
+		transform: translateY(-6px) translateX(2px);
 		border-color: var(--color-ink);
-		box-shadow: var(--shadow-lift);
+		box-shadow: var(--shadow-hard);
+	}
+
+	.card__inner:active {
+		transform: none;
+		box-shadow: none;
 	}
 
 	.card__media {

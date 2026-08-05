@@ -331,15 +331,17 @@ const ctaItems = [
 	 * links via four token-driven gestures:
 	 *   1. heading-family display (instead of body) with bold weight
 	 *   2. uppercase + wide tracking (the brutalist militant stamp)
-	 *   3. a rough marker-stroke highlight behind the text on hover/focus
+	 *   3. a KINETIC BRUTALIST hover: the text snaps up-and-right over a
+	 *      hard-edged ink offset block (the same hard-shadow relief used
+	 *      on cards/buttons — DESIGN.md §3.2), revealed with a `steps()`
+	 *      snap rather than a soft glide.
 	 *   4. a white-on-black / red-on-white / red-on-white contrast logic
 	 *      for the three possible header surfaces (default, light, scrolled)
 	 *
-	 * The highlight is implemented with a generated ::after pseudo-element
-	 * using a double-layer linear-gradient plus a slight rotation. It does
-	 * NOT use text-decoration: underline, and it must vanish when the hover
-	 * or focus state ends. Surface-specific colours are controlled through
-	 * the two CSS variables below.
+	 * The highlight is a hard-edged ::after block, NOT a diffuse shadow and
+	 * NOT text-decoration: underline, and it must vanish when the hover or
+	 * focus state ends. Surface-specific colours are controlled through the
+	 * two CSS variables below.
 	 *
 	 * The treatment is reversible: removing the `featured` flag from
 	 * `navItems` reverts this entry to the standard link style.
@@ -358,53 +360,41 @@ const ctaItems = [
 		padding: 0 var(--space-xs);
 		border-left: 1px solid oklch(28% 0 0);
 		color: var(--color-flag-red);
+		transition:
+			color var(--duration-fast) var(--ease-brutal-lift),
+			transform var(--duration-fast) var(--ease-brutal-lift);
 	}
 
-	/* Rough marker-stroke highlight behind the text.
-	 * Two stacked gradients (104deg and 183deg) create a washed, dry-brush
-	 * texture with deliberately hard edges and a slight rotation.
-	 * The pseudo-element is clipped to zero width by default and revealed on
-	 * hover/focus via a clip-path transition; when the interaction ends the
-	 * clip-path reverts and the highlight disappears. */
+	/* Kinetic brutalist highlight: a hard-edged offset block that snaps in
+	 * behind the text on hover/focus and snaps out when the interaction
+	 * ends. The ::after is translated up-and-right by the hard-shadow
+	 * offset and revealed with a steps() timeline (no lissage), matching
+	 * the hard-lift relief used across cards and buttons. */
 	.site-header__link--featured::after {
 		content: "";
 		position: absolute;
-		left: -2px;
-		right: -2px;
+		left: 0;
+		right: 0;
 		bottom: 2px;
 		height: 70%;
 		z-index: -1;
 		pointer-events: none;
-		background:
-			linear-gradient(
-				104deg,
-				color-mix(in oklch, var(--featured-highlight-bg), transparent 100%) 0.9%,
-				color-mix(in oklch, var(--featured-highlight-bg), transparent 10%) 2.4%,
-				color-mix(in oklch, var(--featured-highlight-bg), transparent 25%) 5.8%,
-				color-mix(in oklch, var(--featured-highlight-bg), transparent 55%) 93%,
-				color-mix(in oklch, var(--featured-highlight-bg), transparent 15%) 96%,
-				color-mix(in oklch, var(--featured-highlight-bg), transparent 100%) 98%
-			),
-			linear-gradient(
-				183deg,
-				color-mix(in oklch, var(--featured-highlight-bg), transparent 100%) 0%,
-				color-mix(in oklch, var(--featured-highlight-bg), transparent 35%) 7.9%,
-				color-mix(in oklch, var(--featured-highlight-bg), transparent 100%) 15%
-			);
-		transform: rotate(-1deg);
-		clip-path: inset(0 100% 0 0);
-		transition: clip-path var(--duration-base) var(--ease-out);
+		background: var(--featured-highlight-bg);
+		transform: translate(6px, 6px) scaleX(0);
+		transform-origin: left center;
+		transition: transform var(--duration-fast) steps(3, end);
 	}
 
 	.site-header__link--featured:hover,
 	.site-header__link--featured:focus-visible {
 		color: var(--featured-text-on-highlight);
 		text-decoration: none;
+		transform: translate(-2px, -2px);
 	}
 
 	.site-header__link--featured:hover::after,
 	.site-header__link--featured:focus-visible::after {
-		clip-path: inset(0 0 0 0);
+		transform: translate(0, 0) scaleX(1);
 	}
 
 	/* On the scrolled (red) surface, the flag-red featured text would
@@ -439,12 +429,17 @@ const ctaItems = [
 	}
 
 	/* Motion must not leak for users who prefer reduced motion. The
-	 * highlight simply stays hidden; the link still changes colour via
-	 * the inherited instant colour transition. */
+	 * highlight simply stays hidden and the link keeps its instant colour
+	 * transition — no kinetic snap. */
 	@media (prefers-reduced-motion: reduce) {
 		.site-header__link--featured::after {
 			transition: none;
-			clip-path: inset(0 100% 0 0);
+			transform: translate(6px, 6px) scaleX(0);
+		}
+
+		.site-header__link--featured:hover,
+		.site-header__link--featured:focus-visible {
+			transform: none;
 		}
 	}
 
