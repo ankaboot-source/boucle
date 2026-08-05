@@ -80,6 +80,14 @@ You have these skills in `.opencode/skill/`. **Use them** — they contain domai
 - **research** — when you need to understand an unfamiliar library or API.
 - **wayfinder** — when you need to plan decision tickets.
 
+**Product skills** (load when the issue touches that domain — they ground implementation in user intent):
+- **brainstorming** — when the acceptance criteria are ambiguous, use this to clarify intent before coding.
+- **customer-research** — when the issue is grounded in user needs (VOC, personas), use this to keep implementation user-centered.
+- **marketing-psychology** — when the issue touches persuasion, framing, or CTA design, use this to ground UI choices in behavioral principles.
+- **cro** — when the issue targets a conversion path, use this to implement measurable improvements.
+- **onboarding** — when the issue targets first-run experience or activation, use this to frame implementation around time-to-value.
+- **copywriting** — when the issue involves user-facing copy, use this to write verifiable copy (headline, CTA, error message).
+
 **You are NOT excused from loading skills because boucle called you instead of the end-user.** The skills are project-local and travel with the repo. They exist for YOU to use. Load them.
 
 ## Instructions
