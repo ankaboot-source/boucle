@@ -1,145 +1,151 @@
-# CONTEXT.md — Contexte du projet boucle
+# CONTEXT.md — Boucle project context
 
-> **Maintenance** — Ce document capture le contexte, la stack technique et les
-> contraintes de boucle. Toute modification de la portée, de la stack ou des
-> contraintes doit le mettre à jour. Voir [AGENTS.md](AGENTS.md) pour les
-> conventions de contribution.
+> **Maintenance** — This document captures the context, identity, tech stack
+> and constraints of boucle. Any change to scope, stack, or constraints must
+> update it. See [AGENTS.md](AGENTS.md) for contribution conventions.
 
-## Purpose
+## 1. Identity
 
-boucle est une boucle de développement autonome qui transforme des issues
-GitLab en sites déployés sur Cloudflare Pages, sans intervention humaine
-continue. L'objectif principal est de **réduire le coût humain du
-développement de sites militants** (Urgence Palestine et autres collectifs
-associatifs) tout en maintenant la qualité par :
+Boucle is a **loop engineering** tool for **Product Builders**. It turns a
+forge issue (GitLab, soon GitHub) into a deployed product, without
+continuous human intervention — the human stays in the loop at decision
+points (spec validation, MR approval).
 
-- **Revue adversaire** systématique (agent `reviewer`, modèle différent du
-  worker) contre l'URL preview.
-- **Vérification de bout en bout** sur l'URL production (agent `e2e`).
-- **Spec gate humain** pour les issues de taille M, garantissant que
-  l'humain valide l'interprétation avant implémentation.
+Boucle **lowers the barrier to entry** for building websites and applications,
+while integrating with **developer CI/CD practices**. Unlike SaaS platforms
+that lock the user into a closed UI, boucle lives in the forge — no new
+frontend, no server to maintain, no computer to keep running.
 
-boucle est aussi auto-hébergée : le projet boucle se met à jour depuis son
-propre upstream, et l'orchestrateur CI est réutilisable dans plusieurs
-projets consommateurs via submodule.
+Boucle **frees the user from interactive chats** that demand a permanent
+presence in front of the screen — a dynamic that is often toxic. Work
+happens asynchronously, driven by labels and comments.
 
-## Stack technique
+## 2. Features
 
-| Couche | Technologie |
+- **Self-maintaining documentation** — boucle keeps its charter docs
+  (`ARCHITECTURE.md`, `AGENTS.md`, `CONTEXT.md`, `DESIGN.md`, `LOOP.md`) in
+  sync with the code as part of each work cycle. The triage identifies
+  impacted docs, the worker updates them in the same MR, the reviewer
+  verifies doc conformance and completeness, and the e2e verifies docs
+  match production reality. A doc that drifts from the system it describes
+  is treated as a bug.
+
+## 3. Target audience
+
+- **Product Builders**: those who build products (websites, applications) but
+  are not necessarily full-time developers.
+- Refinement (triage) and end-to-end testing make boucle accessible to those
+  who do not master the entire CI/CD chain.
+- The human stays in the loop: spec validation (readable TL;DR), MR approval.
+
+## 4. Tech stack
+
+| Layer | Technology |
 | --- | --- |
-| Forge | GitLab (framagit.org par défaut, GitLab.com supporté) |
-| CI/CD | GitLab CI — pipeline 8 stages (check, dispatch, triage, work, review, merge, deploy, verify) |
-| Orchestrateur agents | `opencode` CLI, lancé via `bin/oc` (harness avec retry, empty-output guard, metrics, log capture) |
-| Agents IA | 4 agents spécialisés sous `.opencode/agents/` |
-| Modèles LLM | `minimax-m3` (triage, worker), `glm-5.2` (reviewer), `kimi-k2.7-code` (e2e) |
-| Coding agent | `pi` (`.pi/agents/*.md`) — utilisé par `worker` |
-| Knowledge graph | `codebase-memory-mcp` — utilisé par triage/worker (stripé en CI) |
-| Deploy target | Cloudflare Pages (via `wrangler`) |
-| Site consommateur | Astro — static site generation |
-| Tests shell | `bats` (Bash Automated Testing System) |
-| Lint shell | `shellcheck`, `shfmt` |
-| Hooks | `pre-commit` (configuré par `bin/setup`) |
+| Forge | GitLab (MVP), GitHub (planned) |
+| CI/CD | GitLab CI (8 stages) |
+| AI agents | opencode (4 agents: triage, worker, reviewer, e2e) |
+| Models | minimax-m3 (triage, worker), glm-5.2 (reviewer), kimi-k2.7-code (e2e) — open-weight preference |
+| Coding agent | pi (`.pi/agents/*.md`) |
+| Knowledge graph | codebase-memory-mcp |
+| Deployment | Cloudflare Pages (wrangler) — MVP, other targets planned |
+| Tests | bats (shell), shellcheck, shfmt |
+| Hooks | pre-commit |
 
-## Contraintes
+Boucle is designed to be **forge-agnostic and deploy-agnostic**. Current
+limitations (GitLab only, Cloudflare only) are due to the MVP, not
+definitive choices.
 
-Ces contraintes sont **non négociables** et guident toute décision
-d'architecture ou d'implémentation. Voir [AGENTS.md](AGENTS.md) pour les
-leçons apprises détaillées.
+## 5. Philosophy
 
-- **Fail-open** : l'auto-update ne doit **JAMAIS** bloquer le pipeline. Toute
-  erreur réseau, de signature ou de tarball est convertie en warning + exit 0.
-  Mieux vaut une version stale qu'un pipeline cassé.
-- **Upstream-first** : un bug doit être corrigé dans boucle **D'ABORD**, puis
-  la mise à jour est appliquée dans le consommateur, puis les données
-  existantes impactées sont remédiées. Vous ne devez **JAMAIS** patcher un
-  consommateur pour contourner un défaut boucle.
-- **Label-driven state machine** : l'état de chaque issue est piloté
-  exclusivement par les labels GitLab `boucle:*`. Pas de base de données
-  externe, pas d'API state séparée. Les labels sont la source de vérité.
-- **Post-early rule** : les agents doivent poster leur commentaire **D'ABORD**
-  (même partiel), puis raffiner ensuite. Le gaspillage de steps par
-  raffinement itératif est le bug #1 documenté. Un brouillon incomplet posté
-  vaut TOUJOURS mieux qu'un raffinement jamais posté.
-- **Idempotence** : tous les scripts `bin/*` (`setup`, `doctor`, `update`,
-  `oc`) doivent être idempotents. Rejouer un script ne doit avoir aucun effet
-  de bord supplémentaire.
-- **Serial merge** : `resource_group: boucle-merge` sérialise tous les merges.
-  Vous ne devez JAMAIS paralléliser les merges — un rebase concurrent contre
-  un `master` stale produit des conflits et des conditions de course.
-- **Anti-feedback-loop** : l'auto-update doit skipper les pipelines
-  déclenchés par push-source (variable `CI_PIPELINE_SOURCE == "push"`),
-  sinon on tombe dans une boucle `update → commit → update → commit…`.
-- **SHA-anchored verdict** : les verdicts `reviewer` et `e2e` doivent inclure
-  le SHA en hex nu, sans quotes, sans whitespace, sans angle brackets.
-  Format exact : `<!-- boucle:verdict v=1 role=reviewer sha=abc123def456 -->`.
-  Le parseur CI ÉCHOUE si le format n'est pas respecté à la lettre.
+### Open-source and open-weight
 
-## Limites connues
+Boucle favors **open-source** in the spirit of libre — not merely technicist
+open-source. This includes a **preference for open-weight models**: boucle's
+agents use accessible models, in the spirit of technological sovereignty and
+accessibility.
 
-- **codebase-memory-mcp hang en CI** : le handshake MCP peut dépasser la
-  fenêtre de 30 secondes du runner. `bin/oc` strip les MCP servers du config
-  opencode en CI ; les agents retombent sur les outils natifs
-  `glob`/`grep`/`read`.
-- **Steps épuisés avant commit** : le worker peut épuiser son budget de steps
-  avant de committer. Le CI applique un safety-net commit automatique avant
-  rebase pour ne pas perdre le travail. L'agent doit éviter les changements
-  non stageables (binaires, configs locales non-committées).
-- **Verdict sans SHA** : si l'agent reviewer poste un verdict non conforme au
-  format SHA-anchored, le CI tente un fallback SHA-unanchored parsing. Ce
-  fallback est best-effort et ne doit pas être considéré comme une garantie.
-- **No-op label writes** : GitLab enregistre un *Resource Label Event* à
-  chaque PUT, même si le label est inchangé. Tout code de label-manipulation
-  doit vérifier l'état actuel avant d'écrire, sinon l'historique d'events
-  explose et peut fausser les transitions de state machine.
-- **MR vide** : si le worker produit zéro changement, le CI détecte
-  `base_sha == head_sha` et re-trigger ou escalade. Le worker DOIT produire
-  au minimum un commit (même trivial) pour franchir ce guard.
-- **Webhook sans travail** : un webhook qui ne produit pas de fichier
-  `.boucle-issue` ne doit pas consommer un runner silencieusement. L'EXIT trap
-  de `dispatch` fait échouer le job si aucun travail n'est produit.
+### Technological ethics
 
-## Décisions architecturales clés
+Technology must not serve:
 
-1. **Label-driven state machine** (vs DB externe) : pas de base de données,
-   pas d'API state séparée. Les labels GitLab sont la source de vérité unique.
-   Avantage : zéro infra à gérer, tout est versionné dans Git via les
-   resource label events. Coût : couplage fort à l'API GitLab.
+- **autonomous weapons** (weapon systems without human supervision),
+- **mass surveillance** (population-wide cyber-surveillance),
+- **human rights violations** and war crimes,
+- **colonialism** and recolonization,
+- **environmental destruction** (ecocide),
+- **genocide**.
 
-2. **4 agents spécialisés** (vs 1 agent généraliste) : chaque agent a un
-   modèle adapté à sa tâche (`minimax-m3` pour l'analyse et l'écriture,
-   `glm-5.2` pour la revue adversaire, `kimi-k2.7-code` pour la vérification
-   e2e). Le reviewer utilise un **modèle différent** du worker pour limiter
-   la sycophancy.
+This ethic is not a technical constraint but a **guiding principle**.
+Contributions to boucle must align with this line.
 
-3. **`bin/oc` comme harness unique** : un seul entrypoint wrap `opencode run`
-   avec gestion du retry, empty-output guard (exit code 3 si rien posté),
-   metrics, log capture (CI scrape `agent-output.log` en fallback), et
-   stripping des MCP servers en CI.
+## 6. Governance
 
-4. **Fail-open self-update** : l'auto-update ne bloque jamais le pipeline.
-   Toute erreur est convertie en warning + exit 0. Le tracking de version
-   via `.boucle-version` permet de voir d'un coup d'œil si on est à jour ou
-   stale. Trade-off : on peut accumuler du retard sur les versions upstream.
+- **ankaboot team**: decides on evolution (new features, architectural
+  changes, breaking changes).
+- **External contributors**: can propose via issues and MRs. The ankaboot
+  team validates.
+- **Contribution policy**: open to all. Anyone can contribute via MRs.
+  Review is required, no restriction on who can propose.
 
-5. **Event-driven catchup** : le catchup des merges directs (sans passer par
-   la MR boucle) est déclenché par événement (webhook MR merge), pas par
-   polling `doctor`. Évite une boucle `poll → nothing → poll`.
+## 7. Technical constraints
 
-6. **Human-readable spec validation** : le commentaire triage DOIT commencer
-   par un TL;DR de 2-4 phrases en langage non-technique. La preview visuelle
-   est opt-in. L'approbation se fait par emoji (`:+1:`) ou reply courte.
-   Réduit la friction de validation sans sacrifier la rigueur.
+- **Fail-open**: auto-update must NEVER block the pipeline. Any error →
+  warning + exit 0. A stale version is always better than a broken pipeline.
+- **Upstream-first**: fix in boucle FIRST, then update consumer, then
+  remediate data. You must NEVER patch a consumer to work around a boucle
+  defect.
+- **Label-driven**: the state machine is driven by forge labels. No
+  external database, no separate state API. Labels are the source of truth.
+- **Post-early**: agents must post FIRST, refine AFTER. Step waste is bug
+  #1. An incomplete draft posted is ALWAYS better than a refinement never
+  posted.
+- **Idempotence**: all `bin/*` scripts (`setup`, `doctor`, `update`, `oc`)
+  must be idempotent. Re-running a script must produce no additional side
+  effects.
+- **Serial merge**: `resource_group: boucle-merge` serializes all merges.
+  You must NEVER parallelize merges — a concurrent rebase against a stale
+  `master` produces conflicts and race conditions.
+- **Anti-feedback-loop**: auto-update must skip push-source pipelines
+  (`CI_PIPELINE_SOURCE == "push"`), otherwise the system enters an
+  `update → commit → update → commit…` loop.
+- **SHA-anchored verdict**: `reviewer` and `e2e` verdicts must include the
+  SHA in raw hex, with no quotes, no whitespace, no angle brackets. Exact
+  format: `<!-- boucle:verdict v=1 role=reviewer sha=abc123def456 -->`. The
+  CI parser FAILS if the format is not respected to the letter.
+- **Forge-native**: boucle lives in the forge. You must NEVER introduce a
+  new frontend, a server, or a computer to keep running.
 
-7. **Serial merge via `resource_group`** : tous les jobs `merge` partagent le
-   même `resource_group: boucle-merge`. GitLab sérialise leur exécution.
-   Chaque rebase part d'un `master` qui inclut les MRs précédemment
-   fusionnées.
+## 8. Known limitations (MVP)
 
-## Voir aussi
+- **GitLab only**: GitHub is planned but not yet implemented.
+- **Cloudflare Pages only**: other deployment targets are planned.
+- **codebase-memory-mcp hang in CI**: the MCP handshake can exceed the
+  30-second runner window. `bin/oc` strips MCP servers from the opencode
+  config in CI; agents fall back to native `glob`/`grep`/`read` tools.
+- **Steps exhausted before commit**: the worker can run out of steps before
+  committing. CI applies an automatic safety-net commit before rebase to
+  avoid losing work. Agents must avoid unstaged changes (binaries, local
+  configs).
+- **Verdict without SHA**: if the reviewer agent posts a verdict that does
+  not match the SHA-anchored format, CI attempts a SHA-unanchored parsing
+  fallback. This fallback is best-effort and must not be considered a
+  guarantee.
+- **No-op label writes**: the forge records a *Resource Label Event* on
+  every PUT, even if the label is unchanged. All label-manipulation code
+  must check the current state before writing, otherwise the event history
+  explodes and can distort state machine transitions.
+- **Empty MR**: if the worker produces zero changes, CI detects
+  `base_sha == head_sha` and re-triggers or escalates. The worker MUST
+  produce at least one commit (even trivial) to pass this guard.
+- **Webhook without work**: a webhook that does not produce a
+  `.boucle-issue` file must NEVER consume a runner silently. The
+  `dispatch` EXIT trap fails the job if no work is produced.
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — Architecture système, pipeline, diagrammes Mermaid
-- [AGENTS.md](AGENTS.md) — Guide des agents, leçons apprises, anti-patternes
-- [README.md](README.md) — Vue d'ensemble, démarrage, usage
-- [DESIGN.md](DESIGN.md) — Charte visuelle du site consommateur
-- [LOOP.md](LOOP.md) — Configuration par consommateur
-- [.opencode/UPSTREAM-FIX-WORKFLOW.md](.opencode/UPSTREAM-FIX-WORKFLOW.md) — Workflow de fix upstream
+## 9. See also
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) — System architecture, pipeline, Mermaid diagrams
+- [AGENTS.md](AGENTS.md) — Agent guide, lessons learned, anti-patterns
+- [README.md](README.md) — Overview, getting started, usage
+- [LOOP.md](LOOP.md) — Per-consumer configuration
+- [.opencode/UPSTREAM-FIX-WORKFLOW.md](.opencode/UPSTREAM-FIX-WORKFLOW.md) — Upstream fix workflow
