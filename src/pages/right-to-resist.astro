@@ -24,6 +24,42 @@ const entries = (await getCollection("mobilisation"))
 	// Sort newest first so the index reads chronologically.
 	.sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
 
+// Alliés — partner organisations split into three editorial groups.
+const allyEntries = await getCollection("allies");
+
+const frontAllies = allyEntries
+	.filter((entry) => entry.data.group === "front-liberation")
+	.sort((a, b) => a.data.order - b.data.order);
+
+const siblingAllies = allyEntries
+	.filter((entry) => entry.data.group === "lutte-siblings")
+	.sort((a, b) => a.data.order - b.data.order);
+
+const palestinianAllies = allyEntries
+	.filter((entry) => entry.data.group === "palestinian-voices")
+	.sort((a, b) => a.data.order - b.data.order);
+
+const allyGroups = [
+	{
+		id: "front-liberation",
+		title: "Notre front pour la libération et la dignité",
+		items: frontAllies,
+		accent: "red" as const,
+	},
+	{
+		id: "lutte-siblings",
+		title: "Nos sœurs et frères de lutte",
+		items: siblingAllies,
+		accent: "green" as const,
+	},
+	{
+		id: "palestinian-voices",
+		title: "Nos voix palestinien·nes",
+		items: palestinianAllies,
+		accent: "black" as const,
+	},
+];
+
 type FeaturedKey = "kit-militant" | "boycott" | "prisonniers";
 
 const featuredMeta: Record<FeaturedKey, { tag: string; tagline: string }> = {
@@ -247,6 +283,111 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 						Aucun contenu de mobilisation pour le moment. Revenez bientôt.
 					</p>
 				)
+			}
+		</section>
+
+		<!--
+		  ====================================================================
+		  Alliés — embedded section, not a standalone page. The layout is an
+		  irregular mosaic: items are grouped by editorial front, each cell
+		  shows the logo/name by default and reveals the full presentation on
+		  hover/focus. Under reduced motion the reveal is always visible so
+		  no content is hidden behind interaction.
+		  ====================================================================
+		-->
+		<section
+			class="right-to-resist__allies"
+			aria-labelledby="allies-section-title"
+		>
+			<header class="right-to-resist__allies-header">
+				<h2 id="allies-section-title" class="right-to-resist__section-title">
+					Nos alliés dans la résistance.
+				</h2>
+				<p class="right-to-resist__allies-lede">
+					Nous agissons aux côtés d’organisations et de collectifs qui
+					portent la même exigence de libération et de dignité. Chaque
+					cellule mène vers leur site ou leur page.
+				</p>
+			</header>
+
+			{
+				allyGroups.map((group) => (
+					<div class="allies-group" data-group={group.id}>
+						<div class="allies-group__header">
+							<h3 class="allies-group__title" id={`allies-${group.id}-title`}>
+								{group.title}
+							</h3>
+							<span
+								class:list={[
+									"allies-group__accent",
+									group.accent === "red" && "allies-group__accent--red",
+									group.accent === "green" && "allies-group__accent--green",
+									group.accent === "black" && "allies-group__accent--black",
+								]}
+								aria-hidden="true"
+							/>
+						</div>
+
+						<ul class="allies-mosaic" role="list" aria-labelledby={`allies-${group.id}-title`}>
+							{group.items.map((entry) => {
+								const d = entry.data;
+								return (
+								<li class="allies-mosaic__cell" data-accent={group.accent}>
+									{d.aplat && (
+										<img
+											class="allies-mosaic__aplat"
+											src={d.aplat}
+											alt=""
+											loading="lazy"
+											decoding="async"
+											width="800"
+											height="600"
+										/>
+									)}
+									<a
+										class="allies-mosaic__link"
+										href={d.url}
+										target="_blank"
+										rel="noopener"
+										aria-label={`${d.name} — ${d.description ?? ""} (ouvre dans un nouvel onglet)`}
+									>
+										<span class="allies-mosaic__front" aria-hidden="true">
+											{d.logo ? (
+												<img
+													class="allies-mosaic__logo"
+													src={d.logo}
+													alt=""
+													loading="lazy"
+													decoding="async"
+													width="160"
+													height="160"
+												/>
+											) : (
+												<span class="allies-mosaic__initial" aria-hidden="true">
+													{d.name.charAt(0).toUpperCase()}
+												</span>
+											)}
+											<span class="allies-mosaic__name-front">{d.name}</span>
+										</span>
+
+										<span class="allies-mosaic__reveal">
+											<span class="allies-mosaic__name">{d.name}</span>
+											{d.presentation && (
+												<span class="allies-mosaic__presentation">
+													{d.presentation}
+												</span>
+											)}
+											<span class="allies-mosaic__cta">
+												Visiter <span aria-hidden="true">→</span>
+											</span>
+										</span>
+									</a>
+								</li>
+								);
+							})}
+						</ul>
+					</div>
+				))
 			}
 		</section>
 	</main>
@@ -555,6 +696,348 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 		text-transform: uppercase;
 		color: var(--color-text-muted);
 		font-weight: var(--weight-semibold);
+	}
+
+	/* ---------- Alliés mosaic ---------- */
+	.right-to-resist__allies {
+		width: min(100% - 2 * var(--space-s), var(--container-wide));
+		margin-inline: auto;
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-xl);
+	}
+
+	.right-to-resist__allies-header {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-s);
+		max-width: var(--container-base);
+	}
+
+	.right-to-resist__allies-lede {
+		margin: 0;
+		font-size: var(--text-lg);
+		line-height: var(--leading-relaxed);
+		color: var(--color-text-muted);
+		max-width: 62ch;
+	}
+
+	.allies-group {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-m);
+	}
+
+	.allies-group__header {
+		display: flex;
+		align-items: center;
+		gap: var(--space-s);
+	}
+
+	.allies-group__title {
+		font-family: var(--font-heading);
+		font-size: var(--text-xl);
+		line-height: var(--leading-snug);
+		letter-spacing: var(--tracking-tight);
+		margin: 0;
+	}
+
+	.allies-group__accent {
+		display: inline-block;
+		width: 4px;
+		height: 1.2em;
+		flex-shrink: 0;
+		background: var(--color-accent);
+	}
+
+	.allies-group__accent--red {
+		background: var(--color-flag-red);
+	}
+
+	.allies-group__accent--green {
+		background: var(--color-flag-green);
+	}
+
+	.allies-group__accent--black {
+		background: var(--color-flag-black);
+	}
+
+	/*
+	 * Irregular mosaic: a dense grid where cells span different column
+	 * widths, creating visual rhythm without falling into a generic
+	 * bento-box look. The first two cells of each group are larger to
+	 * create a focal point, then a row of smaller cells follows. All
+	 * hard edges, no card padding, no rounded corners, no gradient.
+	 */
+	/* Uniform, hole-free responsive grid. Each cell is an equal square sized
+	 * for small logos, so the mosaic fills edge-to-edge no matter how many
+	 * organisations a group holds (3 / 5 / 3 …). No fixed nth-child spans,
+	 * no large-photo cells that leave ragged gaps ("trous") — the number of
+	 * columns is driven by the available width via auto-fit, so any count
+	 * packs cleanly. */
+	.allies-mosaic {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr));
+		gap: 1px;
+		background: var(--color-ink);
+		border: 1px solid var(--color-ink);
+	}
+
+	.allies-mosaic__cell {
+		position: relative;
+		aspect-ratio: 4 / 3;
+		min-height: 176px;
+		background: var(--color-paper);
+		overflow: hidden;
+	}
+
+	/* Large aplat image behind each cell: iconic photo, or keffieh scanline
+	 * motif when no photo is provided. It is dimmed and desaturated so the
+	 * white/black logo and name remain readable; on hover/focus it restores
+	 * colour and brightness. */
+	.allies-mosaic__aplat {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+		filter: grayscale(100%) brightness(0.55) contrast(1.1);
+		transform: scale(1.05);
+		transition:
+			filter var(--duration-base) var(--ease-out),
+			transform var(--duration-base) var(--ease-out);
+		z-index: 0;
+		pointer-events: none;
+	}
+
+	/* Fallback keffieh scanline motif for cells with no aplat image. The
+	 * pattern is the same for every cell so the mosaic reads as a single
+	 * fabric; the group colour is kept in the 4px left accent only. */
+	.allies-mosaic__cell:not(:has(> .allies-mosaic__aplat))::before {
+		content: "";
+		position: absolute;
+		inset: 0;
+		background: repeating-linear-gradient(
+			0deg,
+			transparent 0 4px,
+			oklch(20% 0.02 30 / 0.35) 4px 8px
+		);
+		z-index: 0;
+		pointer-events: none;
+	}
+
+	.allies-mosaic__link {
+		display: flex;
+		flex-direction: column;
+		justify-content: flex-end;
+		width: 100%;
+		height: 100%;
+		min-height: 176px;
+		padding: var(--space-m);
+		color: var(--color-text);
+		text-decoration: none;
+		background: var(--color-paper);
+		position: relative;
+		transition:
+			background-color var(--duration-base) var(--ease-out);
+	}
+
+	.allies-mosaic__link:hover,
+	.allies-mosaic__link:focus-visible {
+		background: var(--color-flag-black);
+		color: var(--color-ink-on-dark);
+		outline: none;
+	}
+
+	/* Hover/focus restores colour and brightness on the aplat image. */
+	.allies-mosaic__cell:has(.allies-mosaic__link:hover) .allies-mosaic__aplat,
+	.allies-mosaic__cell:has(.allies-mosaic__link:focus-visible) .allies-mosaic__aplat {
+		filter: grayscale(0%) brightness(1) contrast(1);
+		transform: scale(1);
+	}
+
+	/* 4px left accent to distinguish the two groups. */
+	.allies-mosaic__cell[data-accent="red"] .allies-mosaic__link {
+		border-left: 4px solid var(--color-flag-red);
+	}
+
+	.allies-mosaic__cell[data-accent="green"] .allies-mosaic__link {
+		border-left: 4px solid var(--color-flag-green);
+	}
+
+	.allies-mosaic__cell[data-accent="black"] .allies-mosaic__link {
+		border-left: 4px solid var(--color-flag-black);
+	}
+
+	.allies-mosaic__link:focus-visible {
+		outline: 2px solid var(--color-flag-red);
+		outline-offset: 2px;
+	}
+
+	/* Visible focus on the green group needs green outline for contrast. */
+	.allies-mosaic__cell[data-accent="green"] .allies-mosaic__link:focus-visible {
+		outline-color: var(--color-flag-green);
+	}
+
+	/* Default state: logo/initial + name, placed at the bottom. */
+	.allies-mosaic__front {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: var(--space-s);
+		transition:
+			opacity var(--duration-base) var(--ease-out),
+			transform var(--duration-base) var(--ease-out);
+		position: relative;
+		z-index: 1;
+	}
+
+	.allies-mosaic__logo {
+		width: 64px;
+		height: 64px;
+		object-fit: contain;
+		display: block;
+		filter: grayscale(100%) contrast(1.2);
+		transition:
+			filter var(--duration-base) var(--ease-out),
+			transform var(--duration-base) var(--ease-out);
+	}
+
+	/* Hover/focus restores the logo to its original colours and lifts it
+	 * slightly so it pops against the restored aplat. */
+	.allies-mosaic__link:hover .allies-mosaic__logo,
+	.allies-mosaic__link:focus-visible .allies-mosaic__logo {
+		filter: grayscale(0%) contrast(1);
+		transform: scale(1.08);
+	}
+
+	.allies-mosaic__initial {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 64px;
+		height: 64px;
+		font-family: var(--font-heading);
+		font-size: var(--text-2xl);
+		line-height: 1;
+		color: var(--color-ink);
+		background: var(--color-bg-soft);
+		border: 1px solid var(--color-border);
+	}
+
+	.allies-mosaic__name-front {
+		font-family: var(--font-heading);
+		font-size: var(--text-lg);
+		line-height: var(--leading-snug);
+		letter-spacing: var(--tracking-tight);
+		position: relative;
+		z-index: 1;
+	}
+
+	/* Hover/focus reveal layer: slides up over the cell, exposing the
+	 * full name + presentation + CTA. */
+	.allies-mosaic__reveal {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		flex-direction: column;
+		justify-content: flex-end;
+		gap: var(--space-xs);
+		padding: var(--space-m);
+		background: var(--color-flag-black);
+		color: var(--color-ink-on-dark);
+		transform: translateY(100%);
+		transition: transform var(--duration-base) var(--ease-out);
+		z-index: 2;
+	}
+
+	.allies-mosaic__link:hover .allies-mosaic__reveal,
+	.allies-mosaic__link:focus-visible .allies-mosaic__reveal {
+		transform: translateY(0);
+	}
+
+	.allies-mosaic__link:hover .allies-mosaic__front,
+	.allies-mosaic__link:focus-visible .allies-mosaic__front {
+		opacity: 0;
+		transform: translateY(-8px);
+	}
+
+	.allies-mosaic__name {
+		font-family: var(--font-heading);
+		font-size: var(--text-xl);
+		line-height: var(--leading-snug);
+		letter-spacing: var(--tracking-tight);
+	}
+
+	.allies-mosaic__presentation {
+		font-size: var(--text-sm);
+		line-height: var(--leading-relaxed);
+		color: oklch(85% 0 0);
+		display: -webkit-box;
+		-webkit-line-clamp: 5;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+
+	.allies-mosaic__cta {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2xs);
+		font-family: var(--font-body);
+		font-size: var(--text-sm);
+		font-weight: var(--weight-semibold);
+		color: var(--color-flag-white);
+		text-transform: uppercase;
+		letter-spacing: var(--tracking-wide);
+		margin-top: auto;
+		padding-top: var(--space-xs);
+	}
+
+	@media (max-width: 40rem) {
+		.allies-mosaic {
+			grid-template-columns: 1fr;
+		}
+
+		.allies-mosaic__cell {
+			grid-column: span 1;
+			min-height: 176px;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.allies-mosaic__link,
+		.allies-mosaic__front,
+		.allies-mosaic__reveal {
+			transition: none;
+		}
+
+		/* Reveal stays visible so content is not hidden behind hover. */
+		.allies-mosaic__reveal {
+			position: static;
+			transform: none;
+			background: transparent;
+			color: inherit;
+			padding: var(--space-xs) 0 0;
+			margin-top: auto;
+		}
+
+		.allies-mosaic__presentation {
+			color: var(--color-text-muted);
+		}
+
+		.allies-mosaic__cta {
+			color: var(--color-accent);
+		}
+
+		.allies-mosaic__link:hover .allies-mosaic__front,
+		.allies-mosaic__link:focus-visible .allies-mosaic__front {
+			opacity: 1;
+			transform: none;
+		}
 	}
 
 	/* ---------- Full list ---------- */
