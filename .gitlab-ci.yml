@@ -1717,9 +1717,9 @@ worker:
       # up/urgence-palestine.fr: worker used dQw4w9WgXcQ for 2 of 3 videos and
       # rewrote the Hammouri/Alsoumi citations). Mirrors the triage job.
       export BOUCLE_ISSUE_BODY
-      BOUCLE_ISSUE_BODY=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID" 2>/dev/null | jq -r '.description // empty' 2>/dev/null || echo "")
+      BOUCLE_ISSUE_BODY=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" 2>/dev/null | jq -r '.description // empty' 2>/dev/null || echo "")
       if [ -z "$BOUCLE_ISSUE_BODY" ]; then
-        echo "[boucle] WARN: could not fetch issue #$IID body — worker will fall back to glab issue view."
+        echo "[boucle] WARN: could not fetch issue #$BOUCLE_ISSUE body — worker will fall back to glab issue view."
       fi
 
       # Fetch the issue notes (comments) and export them so the worker sees
@@ -1731,10 +1731,10 @@ worker:
       # replaced the video in the primary media slot instead of filling the
       # empty space below the portrait visual). Mirrors the triage job.
       export BOUCLE_ISSUE_NOTES
-      BOUCLE_ISSUE_NOTES=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes?per_page=100" 2>/dev/null \
+      BOUCLE_ISSUE_NOTES=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes?per_page=100" 2>/dev/null \
         | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | reverse | .[]' 2>/dev/null || echo "")
       if [ -z "$BOUCLE_ISSUE_NOTES" ]; then
-        echo "[boucle] INFO: no prior notes for issue #$IID (first worker run)."
+        echo "[boucle] INFO: no prior notes for issue #$BOUCLE_ISSUE (first worker run)."
       fi
 
       # Run the agent. Use `|| rc=$?` to suppress set -e so the script
