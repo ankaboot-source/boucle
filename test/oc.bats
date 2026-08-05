@@ -280,7 +280,76 @@ EOF
   extract_func strip_mcp_for_ci "$WORKDIR/func"
   # shellcheck disable=SC1090
   ( export CI_PROJECT_DIR="$WORKDIR"; unset OPENCODE_CONFIG; source "$WORKDIR/func"; strip_mcp_for_ci; echo "OPENCODE_CONFIG=${OPENCODE_CONFIG:-unset}" ) > "$WORKDIR/out" 2>&1
-  run cat "$WORKDIR/out"
+  run cat "$WORKDIR.out"
   assert_output --partial "OPENCODE_CONFIG=unset"
   rm -rf "$WORKDIR"
+}
+
+# ── collapse-duplicate-notes: jq filter logic ─────────────────────────
+# bin/collapse-duplicate-notes drives glab (network), so we test the
+# jq filter it composes (per <type>) against mock note arrays instead.
+# The filter is the heart of the script — if it misclassifies a note,
+# the wrong body gets PUT or the wrong note gets DELETE. Tests mirror
+# the FILTER variable built in the case statement.
+#
+# Bodies contain newlines, so we can't count records with `wc -l` —
+# each match starts a new "record" on a line beginning with `<id>\t`,
+# but the body's own newlines start subsequent lines. We use
+# `grep -c '^[0-9]\{1,\}\t'` which counts only lines that begin a record.
+
+@test "collapse triage filter selects only boucle:triage notes with ## Disposition" {
+  mock_notes='[
+    {"id": 1, "body": "<!-- boucle:triage v=1 -->\n\n## Disposition\nREADY"},
+    {"id": 2, "body": "<!-- boucle:verdict v=1 role=reviewer -->\n\n## Verdict\nAPPROVE"},
+    {"id": 3, "body": "<!-- boucle:triage v=1 -->\n\n(no disposition section)"}
+  ]'
+  result="$(printf '%s' "$mock_notes" | jq -r '.[] | select(.body | test("<!-- boucle:triage")) | select(.body | test("(?m)^## Disposition")) | "\(.id)\t\(.body)"')"
+  [ "$(printf '%s' "$result" | grep -c '^[0-9]\{1,\}	')" = "1" ]
+  printf '%s' "$result" | grep -q '^1	'
+}
+
+@test "collapse triage filter respects pre_id boundary" {
+  mock_notes='[
+    {"id": 10, "body": "<!-- boucle:triage v=1 -->\n\n## Disposition\nREADY"},
+    {"id": 20, "body": "<!-- boucle:triage v=1 -->\n\n## Disposition\nNEEDS-INFO"},
+    {"id": 30, "body": "<!-- boucle:triage v=1 -->\n\n## Disposition\nREADY"}
+  ]'
+  # pre_id=15 → only notes 20 and 30 should match
+  result="$(printf '%s' "$mock_notes" | jq -r '.[] | select(.body | test("<!-- boucle:triage")) | select(.body | test("(?m)^## Disposition")) | select(.id > 15) | "\(.id)\t\(.body)"')"
+  [ "$(printf '%s' "$result" | grep -c '^[0-9]\{1,\}	')" = "2" ]
+  printf '%s' "$result" | grep -q '^20	'
+  printf '%s' "$result" | grep -q '^30	'
+}
+
+@test "collapse reviewer filter selects role=reviewer verdicts and anchors on sha" {
+  mock_notes='[
+    {"id": 1, "body": "<!-- boucle:verdict v=1 role=reviewer sha=abc123 -->\n\n## Verdict\nAPPROVE"},
+    {"id": 2, "body": "<!-- boucle:verdict v=1 role=e2e sha=abc123 -->\n\n## Verdict\nPASS"},
+    {"id": 3, "body": "<!-- boucle:verdict v=1 role=reviewer sha=def456 -->\n\n## Verdict\nCHANGES"}
+  ]'
+  # With sha=abc123: only note 1 matches
+  result="$(printf '%s' "$mock_notes" | jq -r '.[] | select(.body | test("<!-- boucle:verdict")) | select(.body | test("role=reviewer")) | select(.body | test("abc123")) | "\(.id)\t\(.body)"')"
+  [ "$(printf '%s' "$result" | grep -c '^[0-9]\{1,\}	')" = "1" ]
+  printf '%s' "$result" | grep -q '^1	'
+}
+
+@test "collapse e2e filter selects role=e2e verdicts" {
+  mock_notes='[
+    {"id": 1, "body": "<!-- boucle:verdict v=1 role=reviewer sha=abc123 -->\n\n## Verdict\nAPPROVE"},
+    {"id": 2, "body": "<!-- boucle:verdict v=1 role=e2e sha=abc123 -->\n\n## Verdict\nPASS"},
+    {"id": 3, "body": "<!-- boucle:verdict v=1 role=e2e sha=abc123 -->\n\n## Verdict\nFAIL"}
+  ]'
+  result="$(printf '%s' "$mock_notes" | jq -r '.[] | select(.body | test("<!-- boucle:verdict")) | select(.body | test("role=e2e")) | "\(.id)\t\(.body)"')"
+  [ "$(printf '%s' "$result" | grep -c '^[0-9]\{1,\}	')" = "2" ]
+  printf '%s' "$result" | grep -q '^2	'
+  printf '%s' "$result" | grep -q '^3	'
+}
+
+@test "collapse with pre_id=0 selects all matching notes (first run)" {
+  mock_notes='[
+    {"id": 5, "body": "<!-- boucle:triage v=1 -->\n\n## Disposition\nREADY"},
+    {"id": 6, "body": "<!-- boucle:triage v=1 -->\n\n## Disposition\nNEEDS-INFO"}
+  ]'
+  result="$(printf '%s' "$mock_notes" | jq -r '.[] | select(.body | test("<!-- boucle:triage")) | select(.body | test("(?m)^## Disposition")) | select(.id > 0) | "\(.id)\t\(.body)"')"
+  [ "$(printf '%s' "$result" | grep -c '^[0-9]\{1,\}	')" = "2" ]
 }
