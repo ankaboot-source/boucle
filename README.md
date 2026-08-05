@@ -1,73 +1,73 @@
-# boucle — Boucle de développement autonome
+# boucle — Autonomous development loop
 
-> **Maintenance** — Ce document est le point d'entrée de boucle. Toute
-> modification de l'usage, du démarrage ou de la configuration doit le mettre à
-> jour. Voir [AGENTS.md](AGENTS.md) pour les conventions de contribution.
+> **Maintenance** — This document is the entry point for boucle. Any change
+> to usage, getting started, or configuration must update it. See
+> [AGENTS.md](AGENTS.md) for contribution conventions.
 
-## Qu'est-ce que boucle ?
+## What is boucle?
 
-boucle transforme un issue GitLab en site déployé sur Cloudflare Pages, sans
-intervention humaine (sauf validation de spec en taille M et approbation de
-MR). Quatre agents IA — **triage**, **worker**, **reviewer**, **e2e** —
-orchestrent le flux : analyse → implémentation → revue adversaire → fusion →
-déploiement → vérification de bout en bout.
+Boucle turns a GitLab issue into a deployed Cloudflare Pages site, without
+continuous human intervention (only spec validation and MR approval require
+humans). Four AI agents — **triage**, **worker**, **reviewer**, **e2e** —
+orchestrate the flow: analysis → implementation → adversarial review →
+merge → deployment → end-to-end verification.
 
 ```mermaid
 flowchart LR
-    A[Issue GitLab<br/>label boucle:triage] --> B[triage<br/>minimax-m3]
-    B --> C{Spec gate<br/>taille M ?}
-    C -->|Oui| D[👤 humain<br/>approuve spec]
-    C -->|Non| E[worker<br/>minimax-m3]
+    A[GitLab issue<br/>label boucle:triage] --> B[triage<br/>minimax-m3]
+    B --> C{Spec gate<br/>size M?}
+    C -->|Yes| D[👤 human<br/>approves spec]
+    C -->|No| E[worker<br/>minimax-m3]
     D --> E
     E --> F[reviewer<br/>glm-5.2]
-    F --> G{👤 humain<br/>approuve MR}
+    F --> G{👤 human<br/>approves MR}
     G --> H[merger]
     H --> I[deploy<br/>Cloudflare Pages]
     I --> J[e2e<br/>kimi-k2.7-code]
-    J --> K{Tests<br/>e2e verts ?}
-    K -->|Oui| L[✅ done<br/>issue fermé]
-    K -->|Non| M[⚠️ humain<br/>intervient]
+    J --> K{e2e tests<br/>green?}
+    K -->|Yes| L[✅ done<br/>issue closed]
+    K -->|No| M[⚠️ human<br/>intervenes]
 ```
 
-L'état de chaque issue est piloté exclusivement par des labels GitLab
+The state of every issue is driven exclusively by GitLab labels
 (`boucle:triage`, `boucle:todo`, `boucle:working`, `boucle:review`,
-`boucle:approval`, `boucle:merging`, `boucle:done`, `boucle:human`) — pas de
-base de données externe. Voir [ARCHITECTURE.md](ARCHITECTURE.md) pour le
-détail de la machine à états.
+`boucle:approval`, `boucle:merging`, `boucle:done`, `boucle:human`) — there is
+no external database. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full
+state machine.
 
-## Démarrage rapide
+## Quick start
 
-Pré-requis : un dépôt GitLab (ou GitLab.com) avec Cloudflare Pages configuré
-comme target de déploiement, et un Personal Access Token du bot boucle.
+Prerequisites: a GitLab repository (or `gitlab.com`) with Cloudflare Pages
+configured as the deployment target, and a Personal Access Token for the
+boucle bot.
 
 ```bash
-# 1. Cloner boucle comme submodule dans le repo consommateur
+# 1. Add boucle as a submodule in the consumer repo
 git submodule add https://github.com/ankaboot-source/boucle .boucle
 
-# 2. Configurer l'infrastructure (idempotent — peut être rejoué sans danger)
+# 2. Configure infrastructure (idempotent — safe to re-run)
 BOUCLE_TOKEN=xxx CLOUDFLARE_API_TOKEN=yyy bin/setup
 
-# 3. Vérifier l'installation (doit afficher "OK" partout)
+# 3. Verify the installation (must print "OK" everywhere)
 bin/doctor
 
-# 4. Créer un issue GitLab avec le label `boucle:triage`
-#    OU assigner un issue existant au bot boucle
+# 4. Create a GitLab issue with the `boucle:triage` label
+#    OR assign an existing issue to the boucle bot
 ```
 
-Une fois ces étapes franchies, le pipeline GitLab CI prend le relais
-automatiquement. Vous n'avez plus qu'à répondre aux sollicitations humaines
-(validation de spec, approbation de MR).
+Once these steps complete, the GitLab CI pipeline takes over automatically.
+You only have to respond to human prompts (spec validation, MR approval).
 
-## Comment ça marche
+## How it works
 
-Voici la séquence complète, du déclencheur initial à la fermeture de l'issue :
+Here is the full sequence, from the initial trigger to issue closure:
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant U as Utilisateur
+    participant U as User
     participant GL as GitLab
-    participant CI as Pipeline CI
+    participant CI as CI Pipeline
     participant T as triage
     participant W as worker
     participant R as reviewer
@@ -75,103 +75,109 @@ sequenceDiagram
     participant CF as Cloudflare Pages
     participant E as e2e
 
-    U->>GL: Crée issue + label boucle:triage
-    GL->>CI: Webhook déclenche pipeline
-    CI->>CI: dispatch route l'événement
-    CI->>T: Analyser l'issue
-    T-->>GL: Commentaire structuré (TL;DR + steps)
-    alt Spec gate (taille M, profil product)
-        U->>GL: Approuve spec (emoji/reply)
+    U->>GL: Create issue + label boucle:triage
+    GL->>CI: Webhook triggers pipeline
+    CI->>CI: dispatch routes the event
+    CI->>T: Analyze the issue
+    T-->>GL: Structured comment (TL;DR + steps)
+    alt Spec gate (size M, product profile)
+        U->>GL: Approves spec (emoji/reply)
     end
-    CI->>W: Implémenter sur branche boucle/<iid>
-    W->>GL: Build + deploy preview + ouvre MR
-    CI->>R: Revue adversaire contre URL preview
+    CI->>W: Implement on branch boucle/<iid>
+    W->>GL: Build + deploy preview + open MR
+    CI->>R: Adversarial review against preview URL
     R-->>GL: Verdict PASS/FAIL
-    U->>GL: Approuve la MR
+    U->>GL: Approves the MR
     CI->>M: Rebase + merge
-    M->>GL: Fusionne vers main
-    CI->>CF: Déploiement production
-    CF-->>CI: URL production
-    CI->>E: Vérifier sur URL production
-    E-->>GL: Rapport e2e
+    M->>GL: Merges into main
+    CI->>CF: Production deployment
+    CF-->>CI: Production URL
+    CI->>E: Verify on production URL
+    E-->>GL: e2e report
     alt e2e PASS
-        GL->>GL: Issue fermé, label boucle:done
+        GL->>GL: Issue closed, label boucle:done
     else e2e FAIL
         GL->>GL: Label boucle:human
     end
 ```
 
-Quelques points clés :
+Key invariants you must respect:
 
-- **Chaque agent est stateless et idempotent** : relancer un job sur le même
-  état n'a pas d'effet de bord. Vous devez toujours pouvoir rejouer `bin/setup`
-  ou `bin/doctor` sans casser quoi que ce soit.
-- **Les agents postent D'ABORD et raffinent ENSUITE**. Un commentaire partiel
-  vaut mieux que pas de commentaire du tout — c'est ce qui permet au pipeline
-  de continuer même si l'agent épuise ses steps.
-- **Les chemins de fichiers commités par le worker sont escaped** (jamais de
-  `\$file` interpolé dans le shell).
+- **Every agent is stateless and idempotent**. Re-running a job on the same
+  state must never have side effects. You must always be able to re-run
+  `bin/setup` or `bin/doctor` without breaking anything.
+- **Agents post FIRST and refine AFTER**. A partial comment is always better
+  than no comment at all — this is what lets the pipeline keep moving even
+  if the agent runs out of steps.
+- **File paths committed by the worker must always be escaped** — never
+  interpolate `$file` raw into shell.
+- **Documentation is self-maintained**. Boucle keeps its own charter docs
+  (`ARCHITECTURE.md`, `AGENTS.md`, `CONTEXT.md`, `DESIGN.md`, `LOOP.md`) in
+  sync with the code as part of each work cycle — the triage identifies
+  impacted docs, the worker updates them in the same MR, the reviewer
+  verifies doc conformance and completeness, and the e2e verifies docs
+  match production reality.
 
 ## Configuration
 
-La configuration par consommateur est documentée exhaustivement dans
-[LOOP.md](LOOP.md). Voici les **variables CI minimales** à définir :
+Per-consumer configuration is documented exhaustively in
+[LOOP.md](LOOP.md). Below are the **minimum CI variables** you must define:
 
 | Variable | Description |
 | --- | --- |
-| `BOUCLE_ENABLED` | Active ou désactive boucle (`true` / `false`). **Requis.** |
-| `BOUCLE_TOKEN` | Personal Access Token du bot (scope `api`). **Requis.** |
-| `CLOUDFLARE_API_TOKEN` | Token Cloudflare pour le déploiement. **Requis.** |
-| `BOUCLE_SPEC_PROFILE` | Mode spec gate : `product` (gate M), `strict` (gate toutes tailles), `off` (pas de gate). |
-| `BOUCLE_UPDATE_MODE` | Mode auto-update : `release` (latest tag) ou `dev` (latest commit main). |
+| `BOUCLE_ENABLED` | Enables or disables boucle (`true` / `false`). **Required.** |
+| `BOUCLE_TOKEN` | Personal Access Token for the bot (scope `api`). **Required.** |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare token for deployment. **Required.** |
+| `BOUCLE_SPEC_PROFILE` | Spec gate mode: `product` (gate M only), `strict` (gate every size), `off` (no gate). |
+| `BOUCLE_UPDATE_MODE` | Auto-update mode: `release` (latest tag) or `dev` (latest commit on main). |
 
-Voir [ARCHITECTURE.md](ARCHITECTURE.md) pour la liste complète des variables
-CI, leurs valeurs par défaut et leurs interactions.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full list of CI variables,
+their default values, and how they interact.
 
 ## Agents
 
-boucle orchestre quatre agents IA spécialisés, chacun avec un modèle adapté à
-sa tâche :
+Boucle orchestrates four specialized AI agents, each backed by a model
+matched to its task:
 
-| Agent | Modèle | Rôle |
+| Agent | Model | Role |
 | --- | --- | --- |
-| `triage` | `minimax-m3` | Analyse l'issue. Sortie : disposition `READY` / `NEEDS-INFO` / `NEEDS-SPLIT` + commentaire structuré (TL;DR + steps). |
-| `worker` | `minimax-m3` | Implémente sur branche `boucle/<iid>`, build, deploy preview, ouvre la MR. |
-| `reviewer` | `glm-5.2` | Revue adversaire contre l'URL preview (anti-sycophancy, fall-back SHA-unanchored parsing). |
-| `e2e` | `kimi-k2.7-code` | Vérification de bout en bout sur l'URL production. Décide PASS/FAIL. |
+| `triage` | `minimax-m3` | Analyzes the issue. Output: disposition `READY` / `NEEDS-INFO` / `NEEDS-SPLIT` + a structured comment (TL;DR + steps). |
+| `worker` | `minimax-m3` | Implements on branch `boucle/<iid>`, builds, deploys preview, opens the MR. |
+| `reviewer` | `glm-5.2` | Adversarial review against the preview URL (anti-sycophancy, fall-back SHA-unanchored parsing). |
+| `e2e` | `kimi-k2.7-code` | End-to-end verification on the production URL. Decides PASS/FAIL. |
 
-Le coding agent `pi` (sous `.pi/agents/*.md`) est utilisé par `worker` pour
-l'écriture de code. Le knowledge graph `codebase-memory-mcp` alimente triage et
-worker, mais **doit être strip en CI** (le handshake MCP peut hang > 30s) —
-voir [AGENTS.md](AGENTS.md) pour le fallback glob/grep/read.
+The coding agent `pi` (under `.pi/agents/*.md`) is used by `worker` for
+writing code. The `codebase-memory-mcp` knowledge graph feeds triage and
+worker, but you **must strip it in CI** (the MCP handshake can hang > 30s) —
+see [AGENTS.md](AGENTS.md) for the glob/grep/read fallback.
 
 ## Auto-update
 
-boucle se met à jour automatiquement depuis l'upstream
+Boucle self-updates from upstream
 ([github.com/ankaboot-source/boucle](https://github.com/ankaboot-source/boucle))
-à chaque exécution du pipeline.
+on every pipeline run.
 
-- **Modes** : `release` (latest tag stable) ou `dev` (latest commit sur
-  `main`). Sélection via `BOUCLE_UPDATE_MODE`.
-- **Chemins synchronisés** (`SYNC_PATHS`) :
+- **Modes**: `release` (latest stable tag) or `dev` (latest commit on `main`).
+  Select via `BOUCLE_UPDATE_MODE`.
+- **Synchronized paths** (`SYNC_PATHS`):
   `bin .pi .gitlab-ci.yml .opencode/opencode.json .opencode/agents`.
-  Le reste du dépôt consommateur n'est jamais touché par la sync.
-- **Fail-open** : toute erreur réseau, de téléchargement ou de signature est
-  convertie en **warning**, et le pipeline continue avec la version actuelle.
-  L'auto-update ne doit JAMAIS bloquer un pipeline.
-- **Tracking de version** : fichier `.boucle-version` à la racine du
-  consommateur, mis à jour à chaque sync réussie.
-- **Anti feedback-loop** : la sync skip automatiquement les pipelines
-  déclenchés par push-source (évite la boucle `update → commit → update`).
+  The rest of the consumer repository must never be touched by the sync.
+- **Fail-open**: any network, download, or signature error must be converted
+  into a **warning**, and the pipeline must continue with the current
+  version. Auto-update must NEVER block a pipeline.
+- **Version tracking**: a `.boucle-version` file at the root of the consumer,
+  updated on every successful sync.
+- **Anti-feedback-loop**: the sync must always skip pipelines triggered by
+  push-source (to avoid the `update → commit → update` loop).
 
-Pour forcer une version spécifique, voir
+To pin a specific version, see
 [.opencode/UPSTREAM-FIX-WORKFLOW.md](.opencode/UPSTREAM-FIX-WORKFLOW.md).
 
-## Voir aussi
+## See also
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — Architecture système, pipeline, diagrammes Mermaid
-- [AGENTS.md](AGENTS.md) — Guide des agents, leçons apprises, anti-patternes
-- [CONTEXT.md](CONTEXT.md) — Contexte du projet, stack technique, contraintes
-- [DESIGN.md](DESIGN.md) — Charte visuelle du site consommateur
-- [LOOP.md](LOOP.md) — Configuration par consommateur
-- [.opencode/UPSTREAM-FIX-WORKFLOW.md](.opencode/UPSTREAM-FIX-WORKFLOW.md) — Workflow de fix upstream
+- [ARCHITECTURE.md](ARCHITECTURE.md) — System architecture, pipeline, Mermaid diagrams
+- [AGENTS.md](AGENTS.md) — Agent guide, lessons learned, anti-patterns
+- [CONTEXT.md](CONTEXT.md) — Project context, tech stack, constraints
+- [DESIGN.md](DESIGN.md) — Consumer site visual charter
+- [LOOP.md](LOOP.md) — Per-consumer configuration
+- [.opencode/UPSTREAM-FIX-WORKFLOW.md](.opencode/UPSTREAM-FIX-WORKFLOW.md) — Upstream fix workflow
