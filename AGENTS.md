@@ -802,6 +802,53 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       wrong" with a screenshot got the text through to the worker but the
       screenshot was dropped.
 
+26. **Attachment framing conflates "inspect for context" with "ship as asset"** (issue #35 on up/urgence-palestine.fr)
+    - ❌ DO NOT frame all attachments (issue + MR) as "Read each file to
+      inspect them… use them as context for addressing reviewer feedback".
+      Attachments have a **dual nature**: they may be (a) source assets the
+      user wants shipped (logos, photos, illustrations — copy to `public/`
+      and reference in the build), OR (b) mockups/screenshots for context
+      (reviewer feedback, bug reports — inspect for guidance, do not ship).
+      A single "use as context" framing primes the worker to *consult* the
+      file, not to *adopt* it. When the worker cannot see the image (text-only
+      model — `Read` on a PNG returns garbage), it fabricates a substitute
+      instead of copying the uploaded file.
+    - ✅ DO: `bin/oc` and `worker.md` frame attachments as dual-nature. The
+      worker decides based on the comment's intent: "use this file as the
+      separator" → ship-as-asset (`cp` to `public/`, reference in build);
+      "this is what's wrong" → inspect-for-context. The worker uses `file
+      <path>` (not `Read`) to get dimensions/metadata on binaries — `Read`
+      on a PNG returns base64 garbage on text-only models. The worker does
+      NOT need to *see* the image to *ship* it — `cp` + reference is enough.
+    - Context: issue #35, tahrir commented "il doit y avoir une séparation
+      visuelle entre les colonnes avec le visuel ci-joint" + uploaded
+      `vertical_keffiyeh.png`. The worker downloaded it (21251 bytes
+      confirmed), was told to "use as context", could not `Read` the PNG
+      (minimax-m3 is text-only), and fabricated a fake Palestinian flag +
+      Unicode symbol instead of `cp`-ing the uploaded file to `public/`.
+
+27. **Log-scraping fallback bypassed when a stale verdict exists** (issue #35 on up/urgence-palestine.fr)
+    - ❌ DO NOT gate the log-scraping fallback on `if [ -z "$VERDICT" ]` alone.
+      The SHA-unanchored fallback (which finds the newest `boucle:verdict`
+      regardless of SHA) may set VERDICT to a **stale** verdict from a previous
+      iteration (different SHA than the current MR head). Once VERDICT is
+      non-empty, the log-scraping is skipped — the current run's drafted
+      verdict in stdout (which is fresher and SHA-correct) is lost.
+    - ✅ DO: track whether the found verdict matches the current MR head SHA
+      (`VERDICT_SHA_MATCHED` flag). Run the log-scraping if VERDICT is empty
+      OR if `VERDICT_SHA_MATCHED=false` (stale verdict). If the log-scraping
+      finds a fresher verdict (SHA-anchored in stdout), override the stale
+      verdict. This recovers the current run's verdict even when an old
+      verdict note exists on the MR.
+    - Context: issue #35 iteration 4, reviewer 3830247 posted a FAIL verdict
+      in stdout (4/5 criteria PASS, 1 FAIL on MR description) but exhausted
+      its 35 steps before posting via `glab mr note`. The SHA-anchored parse
+      found nothing (not posted). The SHA-unanchored fallback found the old
+      UNCERTAIN verdict (note 2417731, sha=28071e46 ≠ head 0c2f979b), set
+      VERDICT=UNCERTAIN, and the log-scraping was skipped. The CI escalated
+      to `boucle:human` with "Verdict unparsable or uncertain" instead of
+      acting on the FAIL verdict that was sitting in stdout.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
