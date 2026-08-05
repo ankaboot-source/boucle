@@ -652,6 +652,43 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       Track this limitation here and remove the entry once boucle is public
       and `bin/update` succeeds unauthenticated.
 
+19. **MR description not refreshed on worker re-run** (issue #34 on up/urgence-palestine.fr)
+    - ❌ DO NOT reuse an existing MR on iteration 2+ without updating its
+      description. The worker deploys to a branch-based preview URL that
+      changes between iterations, and the MR description carries the preview
+      URL the reviewer tests against. A stale description points the
+      reviewer at the wrong (old) URL — the reviewer may PASS a deployment
+      that no longer exists, or FAIL a deployment that was never tested.
+    - ✅ DO: the worker job calls `glab mr update` on the reused MR to
+      refresh both the title and the description (new preview URL + new
+      Approach + new commit summary) on every iteration. The reuse branch
+      in `.gitlab-ci.yml` now updates the MR instead of silently reusing it.
+    - Context: MR !30 iteration 2 deployed to
+      `https://boucle-34.urgence-palestine.pages.dev` but the MR description
+      still pointed at the iteration-1 URL
+      `https://b87caf91.urgence-palestine.pages.dev`. The reviewer tested the
+      stale URL and validated anyway. The user saw "logos still invisible"
+      because the URL in the MR was wrong.
+
+20. **Worker does not fill the Approach section in state.md** (issue #34 on up/urgence-palestine.fr)
+    - ❌ DO NOT leave the `## Approach` section of `state.md` as the seed
+      placeholder `(to be determined by worker)`. The Approach section
+      becomes the MR description's `### Approach` block, which the reviewer
+      reads to verify doc conformance (e.g. DESIGN.md §2 and §4 citations).
+      An empty Approach causes repeated reviewer FAIL verdicts on the same
+      criterion, wasting the iteration budget (`BOUCLE_MAX_ITERATIONS`).
+    - ✅ DO: the worker MUST fill the Approach section with 2-5 sentences
+      explaining the implementation approach and citing the specific charter
+      doc sections it conformed to (`worker.md` step 8). The CI extraction
+      (`APPROACH=$(sed -n '/^## Approach/,/^## /p' state.md ...`) now falls
+      back to an explicit note when the section is still the placeholder, so
+      the MR description is never the literal seed text.
+    - Context: 3 reviewer FAIL verdicts on MR !30, all blocking on the same
+      criterion: "MR description does not cite DESIGN.md §2 and §4". The
+      worker (minimax-m3) understood the requirement (visible in the job
+      trace) but never wrote it into `state.md`. The reviewer eventually
+      PASSed with a lenient interpretation, but the loop wasted 2 iterations.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
