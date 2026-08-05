@@ -15,6 +15,9 @@ export default defineConfig({
         // landing page; per-entry URLs at /mobilisation/<slug>/ are
         // intentionally kept unchanged).
         '/mobilisation': '/right-to-resist',
+        // /allies/ was re-integrated as a section inside /right-to-resist/
+        // per issue #43 — keep the old URL working.
+        '/allies': '/right-to-resist',
     },
     i18n: {
         defaultLocale: 'fr',
