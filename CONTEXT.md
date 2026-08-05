@@ -50,7 +50,7 @@ happens asynchronously, driven by labels and comments.
 | Forge | GitLab (MVP), GitHub (planned) |
 | CI/CD | GitLab CI (8 stages) |
 | AI agents | opencode (4 agents: triage, worker, reviewer, e2e) |
-| Models | minimax-m3 (triage, worker), glm-5.2 (reviewer), kimi-k2.7-code (e2e) — open-weight preference |
+| Models | glm-5.2 (triage, reviewer), deepseek-v4-flash (worker, e2e) — open-weight preference |
 | Coding agent | pi (`.pi/agents/*.md`) |
 | Knowledge graph | codebase-memory-mcp |
 | Deployment | Cloudflare Pages (wrangler) — MVP, other targets planned |

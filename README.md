@@ -14,16 +14,16 @@ merge → deployment → end-to-end verification.
 
 ```mermaid
 flowchart LR
-    A[GitLab issue<br/>label boucle:triage] --> B[triage<br/>minimax-m3]
+    A[GitLab issue<br/>label boucle:triage] --> B[triage<br/>glm-5.2]
     B --> C{Spec gate<br/>size M?}
     C -->|Yes| D[👤 human<br/>approves spec]
-    C -->|No| E[worker<br/>minimax-m3]
+    C -->|No| E[worker<br/>glm-5.2]
     D --> E
     E --> F[reviewer<br/>glm-5.2]
     F --> G{👤 human<br/>approves MR}
     G --> H[merger]
     H --> I[deploy<br/>Cloudflare Pages]
-    I --> J[e2e<br/>kimi-k2.7-code]
+    I --> J[e2e<br/>deepseek-v4-flash]
     J --> K{e2e tests<br/>green?}
     K -->|Yes| L[✅ done<br/>issue closed]
     K -->|No| M[⚠️ human<br/>intervenes]
@@ -141,10 +141,10 @@ matched to its task:
 
 | Agent | Model | Role |
 | --- | --- | --- |
-| `triage` | `minimax-m3` | Analyzes the issue. Output: disposition `READY` / `NEEDS-INFO` / `NEEDS-SPLIT` + a structured comment (TL;DR + steps). |
-| `worker` | `minimax-m3` | Implements on branch `boucle/<iid>`, builds, deploys preview, opens the MR. |
+| `triage` | `glm-5.2` | Analyzes the issue. Output: disposition `READY` / `NEEDS-INFO` / `NEEDS-SPLIT` + a structured comment (TL;DR + steps). |
+| `worker` | `glm-5.2` | Implements on branch `boucle/<iid>`, builds, deploys preview, opens the MR. |
 | `reviewer` | `glm-5.2` | Adversarial review against the preview URL (anti-sycophancy, fall-back SHA-unanchored parsing). |
-| `e2e` | `kimi-k2.7-code` | End-to-end verification on the production URL. Decides PASS/FAIL. |
+| `e2e` | `deepseek-v4-flash` | End-to-end verification on the production URL. Decides PASS/FAIL. |
 
 The coding agent `pi` (under `.pi/agents/*.md`) is used by `worker` for
 writing code. The `codebase-memory-mcp` knowledge graph feeds triage and
