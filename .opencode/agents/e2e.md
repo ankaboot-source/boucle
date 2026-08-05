@@ -1,7 +1,7 @@
 ---
 description: E2E agent — verifies acceptance criteria on the live production URL
 mode: primary
-model: ollama-cloud/kimi-k2.7-code
+model: ollama-cloud/deepseek-v4-flash
 steps: 30
 ---
 

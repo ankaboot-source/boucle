@@ -235,10 +235,10 @@ stateDiagram-v2
 
 | Agent | Model | Steps | Role |
 | --- | --- | --- | --- |
-| **triage** | `ollama-cloud/minimax-m3` | 200 | Analyzes the issue, posts a structured comment (TL;DR + Analysis + Acceptance criteria + Classification S/M/L + Questions + Disposition `READY`/`NEEDS-INFO`/`NEEDS-SPLIT`) |
-| **worker** | `ollama-cloud/kimi-k2.7-code` | 100 | Implements on a `boucle/<iid>` branch, builds, deploys the Cloudflare preview, creates the MR |
+| **triage** | `ollama-cloud/glm-5.2` | 200 | Analyzes the issue, posts a structured comment (TL;DR + Analysis + Acceptance criteria + Classification S/M/L + Questions + Disposition `READY`/`NEEDS-INFO`/`NEEDS-SPLIT`) |
+| **worker** | `ollama-cloud/deepseek-v4-flash` | 100 | Implements on a `boucle/<iid>` branch, builds, deploys the Cloudflare preview, creates the MR |
 | **reviewer** | `ollama-cloud/glm-5.2` | 35 | Adversarial review against the preview URL, verdict `PASS`/`FAIL`/`UNCERTAIN` anchored by commit SHA |
-| **e2e** | `ollama-cloud/kimi-k2.7-code` | 30 | Verifies on the production URL, verdict `PASS`/`FAIL`/`UNCERTAIN` |
+| **e2e** | `ollama-cloud/deepseek-v4-flash` | 30 | Verifies on the production URL, verdict `PASS`/`FAIL`/`UNCERTAIN` |
 
 ### Interaction sequence
 
@@ -330,7 +330,7 @@ flowchart LR
 
 | Script | Role |
 | --- | --- |
-| `bin/oc` | Harness entrypoint: wraps `opencode run`, role mapping (triage→m3, worker→m3, reviewer→glm-5.2, e2e→kimi-k2.7), 3x retry with exponential backoff, **empty-output guard** (empty output → exit 3 → retry), **provider fallback** (exit-4 condition → retry with `BOUCLE_FALLBACK_PROVIDER`), log capture to `.boucle/<issue>/`, Prometheus metrics, configurable timeout |
+| `bin/oc` | Harness entrypoint: wraps `opencode run`, role mapping (triage→glm-5.2, worker→deepseek-v4-flash, reviewer→glm-5.2, e2e→deepseek-v4-flash), 3x retry with exponential backoff, **empty-output guard** (empty output → exit 3 → retry), **provider fallback** (exit-4 condition → retry with `BOUCLE_FALLBACK_PROVIDER`), log capture to `.boucle/<issue>/`, Prometheus metrics, configurable timeout |
 | `bin/setup` | Day-0 infrastructure setup (**idempotent**): creates the runner tag, CI variables, `boucle:*` labels, the board, the protected `main` branch, adds the bot as a member, generates the trigger token, configures the webhook, creates the Cloudflare Pages project |
 | `bin/update` | Auto-update from upstream: fetch latest tag/commit, tarball download, extraction of `SYNC_PATHS`, **fail-open** (any error → warning + exit 0), tracking via `.boucle-version`, modes `release` (latest tag) or `dev` (latest commit on main), anti-feedback-loop guard (skip on `push-source`) |
 | `bin/doctor` | Day-0 verification and diagnostics: ~20 checks (labels present, CI variables, branch protection, runner available, agents resolvable, CF Pages reachable, `.boucle-version` up to date) |

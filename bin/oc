@@ -4,10 +4,10 @@
 # Swapping to Claude Code or Codex = editing this one file.
 #
 # Role mapping (boucle role → project-local agent in .opencode/agents/):
-#   triage   → triage    (minimax-m3, analyzes issue)
-#   worker   → worker    (kimi-k2.7-code, implements)
+#   triage   → triage    (glm-5.2, analyzes issue)
+#   worker   → worker    (deepseek-v4-flash, implements)
 #   reviewer → reviewer  (glm-5.2, adversarial review)
-#   e2e      → e2e       (kimi-k2.7-code, visual verification)
+#   e2e      → e2e       (deepseek-v4-flash, visual verification)
 # Project-local agents are defined in .opencode/agents/*.md and travel
 # with the repo. The agent's system prompt provides general behavior;
 # the user prompt (built below) adds boucle-specific task instructions.
@@ -44,7 +44,7 @@ case "$ROLE" in
     # full comment + the glab tool call.
     OUTPUT_TOKEN_MAX="4000"
     ;;
-  worker) AGENT="worker" ;;
+  worker) AGENT="worker" VARIANT="max" ;;
   reviewer)
     AGENT="reviewer"
     VARIANT="low"
@@ -52,6 +52,7 @@ case "$ROLE" in
     ;;
   e2e)
     AGENT="e2e"
+    VARIANT="max"
     OUTPUT_TOKEN_MAX="4000"
     ;;
   *)
@@ -72,10 +73,10 @@ FALLBACK_PROVIDER="${BOUCLE_FALLBACK_PROVIDER:-}"
 FALLBACK_MODEL=""
 if [ -n "$FALLBACK_PROVIDER" ]; then
   case "$ROLE" in
-    triage)   FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_TRIAGE:-minimax-m3}" ;;
-    worker)   FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_WORKER:-kimi-k2.7-code}" ;;
+    triage)   FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_TRIAGE:-glm-5.2}" ;;
+    worker)   FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_WORKER:-deepseek-v4-flash}" ;;
     reviewer) FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_REVIEWER:-glm-5.2}" ;;
-    e2e)      FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_E2E:-kimi-k2.7-code}" ;;
+    e2e)      FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_E2E:-deepseek-v4-flash}" ;;
   esac
 fi
 FALLBACK_USED=""
@@ -365,7 +366,7 @@ build_prompt() {
     triage)
       # Inject the issue body (fetched by CI as BOUCLE_ISSUE_BODY) so the
       # agent does not waste steps calling glab issue view / gh issue view
-      # (minimax-m3 burned 4+ steps on failed fetches before posting).
+      # (the triage model burned 4+ steps on failed fetches before posting).
       local body="${BOUCLE_ISSUE_BODY:-}"
       # Inject the prior discussion (fetched by CI as BOUCLE_ISSUE_NOTES) so
       # the agent sees previous triage Questions AND the author's answers.

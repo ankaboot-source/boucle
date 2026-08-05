@@ -23,10 +23,10 @@ and [LOOP.md](LOOP.md).
 
 | Agent   | Model                       | Steps | Temp | Role                                                                                                                |
 | ------- | ---------------------------- | ----- | ---- | ------------------------------------------------------------------------------------------------------------------- |
-| triage  | ollama-cloud/minimax-m3      | 200   | 0.3  | Analyzes issue, posts structured comment (TL;DR + Analysis + Acceptance criteria + Classification S/M/L + Questions + Disposition) |
-| worker  | ollama-cloud/kimi-k2.7-code  | 100   | —    | Implements on branch `boucle/<iid>`, reads `state.md`, uses codebase-memory-mcp, conventional commit                 |
+| triage  | ollama-cloud/glm-5.2        | 200   | 0.3  | Analyzes issue, posts structured comment (TL;DR + Analysis + Acceptance criteria + Classification S/M/L + Questions + Disposition) |
+| worker  | ollama-cloud/deepseek-v4-flash | 100   | —    | Implements on branch `boucle/<iid>`, reads `state.md`, uses codebase-memory-mcp, conventional commit                 |
 | reviewer| ollama-cloud/glm-5.2         | 35    | 0.2  | Adversarial review against preview URL, SHA-anchored verdict                                                       |
-| e2e     | ollama-cloud/kimi-k2.7-code  | 30    | —    | Verifies on production URL, SHA-anchored verdict                                                                    |
+| e2e     | ollama-cloud/deepseek-v4-flash | 30    | —    | Verifies on production URL, SHA-anchored verdict                                                                    |
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full pipeline and state machine details.
 
