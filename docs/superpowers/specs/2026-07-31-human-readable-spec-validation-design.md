@@ -80,7 +80,7 @@ Issue GitLab → webhook → pipeline → job triage:
                - npm install puppeteer-core @sparticuz/chromium dans /tmp
                - rend preview.html → preview.png (1280x800, fullPage)
                - upload PNG via POST /projects/:id/uploads
-                - fetch commentaire, insert "## Aperçu\n![...](url)" après TL;DR
+               - fetch commentaire, append "## Aperçu\n![...](url)"
                - PUT /projects/:id/issues/:iid/notes/:note_id
                - rm RENDER_REQUEST (idempotence)
            - sinon: skip (non-UI/UX, zéro coût Chromium)
@@ -195,8 +195,7 @@ if [ -s "$RENDER_REQUEST_FILE" ] && [ -s "$PREVIEW_HTML" ]; then
         IMG_URL=$(echo "$UPLOAD_RESP" | jq -r '.markdown // empty' 2>/dev/null)
 
         if [ -n "$IMG_URL" ]; then
-          # 5. Fetch du commentaire existant, insert de la section Aperçu
-          #    juste après le TL;DR (première chose que l'humain voit), PUT.
+          # 5. Fetch du commentaire existant, append de la section Aperçu, PUT.
           EXISTING_BODY=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
             "/projects/$CI_PROJECT_ID/issues/$IID/notes/$TRIAGE_NOTE_ID" 2>/dev/null \
             | jq -r '.body' 2>/dev/null)
