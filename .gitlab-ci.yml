@@ -150,25 +150,19 @@ default:
       # reviewer/e2e). Provider config is generated at runtime by bin/jc
       # from BOUCLE_LLM_BASE_URL + BOUCLE_LLM_API_KEY env vars — no
       # config file needed on the runner host.
-      # NOTE: verify the actual release asset name on the jcode GitHub Releases
-      # page (https://github.com/1jehuang/jcode/releases) — the exact
-      # `-linux-x64.tar.gz` filename may differ; pin to the version you
-      # confirmed downloads cleanly.
+      # Asset names follow the pattern jcode-<os>-<arch>.tar.gz (e.g.
+      # jcode-linux-x86_64.tar.gz). The tarball contains a single binary
+      # named jcode-linux-x86_64.bin at its root.
       if ! command -v jcode &>/dev/null; then
         echo "Installing jcode coding agent (standalone binary)..."
-        JCODE_VER="${JCODE_VERSION:-latest}"
+        JCODE_VER="${JCODE_VERSION:-v0.68.0}"
         mkdir -p "$HOME/.local/bin"
-        curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x64.tar.gz" -o /tmp/jcode.tar.gz
+        curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x86_64.tar.gz" -o /tmp/jcode.tar.gz
         tar xzf /tmp/jcode.tar.gz -C /tmp
-        # The tarball layout may place the binary at /tmp/jcode or /tmp/bin/jcode
-        # depending on the release asset. Try both.
-        if [ -f /tmp/jcode ]; then
-          mv /tmp/jcode "$HOME/.local/bin/jcode"
-        elif [ -f /tmp/bin/jcode ]; then
-          mv /tmp/bin/jcode "$HOME/.local/bin/jcode"
-        fi
+        # The tarball contains jcode-linux-x86_64.bin at its root.
+        mv /tmp/jcode-linux-x86_64.bin "$HOME/.local/bin/jcode"
         chmod +x "$HOME/.local/bin/jcode"
-        rm -rf /tmp/jcode /tmp/bin /tmp/jcode.tar.gz
+        rm -rf /tmp/jcode-linux-x86_64* /tmp/jcode.tar.gz
       fi
 
       # ── codebase-memory-mcp (codebase knowledge graph) ──
