@@ -769,12 +769,18 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 	 * create a focal point, then a row of smaller cells follows. All
 	 * hard edges, no card padding, no rounded corners, no gradient.
 	 */
+	/* Uniform, hole-free responsive grid. Each cell is an equal square sized
+	 * for small logos, so the mosaic fills edge-to-edge no matter how many
+	 * organisations a group holds (3 / 5 / 3 …). No fixed nth-child spans,
+	 * no large-photo cells that leave ragged gaps ("trous") — the number of
+	 * columns is driven by the available width via auto-fit, so any count
+	 * packs cleanly. */
 	.allies-mosaic {
 		list-style: none;
 		margin: 0;
 		padding: 0;
 		display: grid;
-		grid-template-columns: repeat(12, 1fr);
+		grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr));
 		gap: 1px;
 		background: var(--color-ink);
 		border: 1px solid var(--color-ink);
@@ -782,8 +788,8 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 
 	.allies-mosaic__cell {
 		position: relative;
-		grid-column: span 6;
-		min-height: 220px;
+		aspect-ratio: 4 / 3;
+		min-height: 176px;
 		background: var(--color-paper);
 		overflow: hidden;
 	}
@@ -824,48 +830,13 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 		pointer-events: none;
 	}
 
-	.allies-mosaic__cell:nth-child(1),
-	.allies-mosaic__cell:nth-child(2) {
-		grid-column: span 6;
-		min-height: 280px;
-	}
-
-	.allies-mosaic__cell:nth-child(3) {
-		grid-column: span 12;
-	}
-
-	@media (min-width: 40rem) {
-		.allies-mosaic__cell {
-			grid-column: span 4;
-			min-height: 240px;
-		}
-
-		.allies-mosaic__cell:nth-child(1) {
-			grid-column: span 7;
-			min-height: 320px;
-		}
-
-		.allies-mosaic__cell:nth-child(2) {
-			grid-column: span 5;
-			min-height: 320px;
-		}
-
-		.allies-mosaic__cell:nth-child(3) {
-			grid-column: span 4;
-		}
-
-		.allies-mosaic__cell:nth-child(4) {
-			grid-column: span 8;
-		}
-	}
-
 	.allies-mosaic__link {
 		display: flex;
 		flex-direction: column;
 		justify-content: flex-end;
 		width: 100%;
 		height: 100%;
-		min-height: 220px;
+		min-height: 176px;
 		padding: var(--space-m);
 		color: var(--color-text);
 		text-decoration: none;
@@ -1031,13 +1002,9 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 			grid-template-columns: 1fr;
 		}
 
-		.allies-mosaic__cell,
-		.allies-mosaic__cell:nth-child(1),
-		.allies-mosaic__cell:nth-child(2),
-		.allies-mosaic__cell:nth-child(3),
-		.allies-mosaic__cell:nth-child(4) {
+		.allies-mosaic__cell {
 			grid-column: span 1;
-			min-height: 220px;
+			min-height: 176px;
 		}
 	}
 
