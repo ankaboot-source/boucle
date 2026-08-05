@@ -114,7 +114,7 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 			class="right-to-resist__featured"
 			aria-labelledby="featured-title"
 		>
-			<h2 id="featured-title" class="right-to-resist__section-title">
+			<h2 id="featured-title" class="right-to-resist__section-title reveal">
 				Campagnes à la une
 			</h2>
 			<ul class="right-to-resist__featured-list" role="list">
@@ -184,7 +184,7 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 			class="right-to-resist__list-section"
 			aria-labelledby="all-entries-title"
 		>
-			<h2 id="all-entries-title" class="right-to-resist__section-title">
+			<h2 id="all-entries-title" class="right-to-resist__section-title reveal">
 				Toutes les actions
 			</h2>
 			<ul class="right-to-resist__cards" role="list">
@@ -452,21 +452,26 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 		width: 100%;
 		background: var(--color-bg-soft);
 		border: 1px solid var(--color-border);
-		border-radius: var(--radius-m);
+		border-radius: var(--radius-sharp);
 		overflow: hidden;
 		text-decoration: none;
 		color: var(--color-ink);
 		transition:
-			transform var(--duration-base) var(--ease-out),
-			border-color var(--duration-base) var(--ease-out),
-			box-shadow var(--duration-base) var(--ease-out);
+			transform var(--duration-base) var(--ease-brutal-lift),
+			border-color var(--duration-base) var(--ease-brutal-lift),
+			box-shadow var(--duration-base) var(--ease-brutal-lift);
 	}
 
 	.featured-card__link:hover,
 	.featured-card__link:focus-visible {
-		transform: translateY(-2px);
+		transform: translateY(-6px) translateX(2px);
 		border-color: var(--color-ink);
-		box-shadow: var(--shadow-lift);
+		box-shadow: var(--shadow-hard);
+	}
+
+	.featured-card__link:active {
+		transform: none;
+		box-shadow: none;
 	}
 
 	.featured-card__link:focus-visible {
@@ -572,19 +577,24 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 		width: 100%;
 		background: var(--color-bg-soft);
 		border: 1px solid var(--color-border);
-		border-radius: var(--radius-m);
+		border-radius: var(--radius-sharp);
 		overflow: hidden;
 		transition:
-			transform var(--duration-base) var(--ease-out),
-			border-color var(--duration-base) var(--ease-out),
-			box-shadow var(--duration-base) var(--ease-out);
+			transform var(--duration-base) var(--ease-brutal-lift),
+			border-color var(--duration-base) var(--ease-brutal-lift),
+			box-shadow var(--duration-base) var(--ease-brutal-lift);
 	}
 
 	.card__inner:hover,
 	.card__inner:focus-within {
-		transform: translateY(-2px);
-		border-color: color-mix(in oklch, var(--color-accent) 35%, var(--color-border));
-		box-shadow: var(--shadow-lift);
+		transform: translateY(-6px) translateX(2px);
+		border-color: var(--color-ink);
+		box-shadow: var(--shadow-hard);
+	}
+
+	.card__inner:active {
+		transform: none;
+		box-shadow: none;
 	}
 
 	.card__media {
