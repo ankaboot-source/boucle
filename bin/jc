@@ -113,6 +113,12 @@ TOML
 #   temperature: 0.3
 # jcode needs the model name without the provider prefix (jcode uses
 # --provider-profile for the provider, --model for the model name).
+#
+# Model override: BOUCLE_MODEL_<ROLE> env var takes precedence over the
+# agent file default. This lets CI swap models per-role without editing
+# the agent files (e.g. BOUCLE_MODEL_TRIAGE=glm-5.2-flash for a cheaper
+# triage, BOUCLE_MODEL_WORKER=deepseek-v4-flash for a faster worker).
+# The agent file default is the "good default" — override only when needed.
 AGENT_FILE=""
 for candidate in \
   "$CI_PROJECT_DIR/.opencode/agents/${AGENT}.md" \
@@ -133,6 +139,13 @@ MODEL=$(awk '/^model:/{sub(/^model:[[:space:]]*/,""); gsub(/.*\//,""); print; ex
 if [ -z "$MODEL" ]; then
   echo "[boucle] ERROR: no model found in $AGENT_FILE frontmatter" >&2
   exit 1
+fi
+
+# Override model from env var if set (per-role: BOUCLE_MODEL_TRIAGE, etc.)
+OVERRIDE_VAR="BOUCLE_MODEL_$(echo "$ROLE" | tr '[:lower:]' '[:upper:]')"
+if [ -n "${!OVERRIDE_VAR:-}" ]; then
+  echo "[boucle] model override: $OVERRIDE_VAR=${!OVERRIDE_VAR} (default: $MODEL)" >&2
+  MODEL="${!OVERRIDE_VAR}"
 fi
 
 # Extract temperature (optional — empty means use provider default)
