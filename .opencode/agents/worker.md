@@ -96,27 +96,33 @@ You have these skills in `.opencode/skill/`. **Use them** — they contain domai
 2. Read `iterations.md` in `.boucle/<issue>/` — it logs what each previous iteration tried and its result. Without this you will repeat rejected approaches and waste your step budget (issue #35 on up/urgence-palestine.fr: 2 iterations produced zero code changes because the worker re-discovered the codebase from scratch each time). If the file is absent or empty, this is the first iteration.
 3. Read the issue body and the triage analysis comment.
 4. **Read the "Prior feedback on the MR" section of your prompt** (if present). It contains reviewer verdicts (`VERDICT: FAIL` with the unmet acceptance criteria) and human comments on the MR. You MUST address every actionable item before claiming done — a re-run that ignores prior feedback will FAIL the reviewer the same way again and waste the iteration budget. Map each unmet criterion to a concrete change in your implementation.
-5. **Issue attachments** (paths listed in your prompt under "Issue attachments") may be source assets to ship (logos, photos, visuals) OR mockups/screenshots for context. Decide based on the issue body and comment intent. For each file:
+5. **Preserve instructed content.** The "Issue body" section of your prompt contains the EXACT content the human instructed — URLs (video, site, image), citations, texts, critiques. You MUST use them verbatim:
+   - **DO NOT generate placeholders.** If the issue says the video is `https://www.youtube.com/watch?v=7lLDKB024Cs`, use that exact URL — never a generic placeholder like `dQw4w9WgXcQ`.
+   - **DO NOT rewrite the instructed texts.** If the issue quotes a citation from the author, ship that citation verbatim — do not paraphrase, summarize, or generate a new text.
+   - **DO NOT substitute URLs or images.** Use the exact URLs the issue provides.
+   - If a field is missing from the issue body in your prompt, fetch it via `glab issue view <IID>` rather than inventing.
+   - **Amendments do NOT override preservation.** The "Prior feedback" section may contain amendments (e.g. "fill empty spaces with keffiyeh", "single CTA"). These AMEND the spec — they do NOT replace earlier preservation instructions (e.g. "keep the texts/visuals/videos already shared", "video in front, horizontal"). Conciliate them: "fill empty spaces with keffiyeh" means fill the empty space, not replace the video; "single CTA" means one CTA per work, not remove the video CTA. When an amendment seems to conflict with a prior instruction, preserve the prior validated content and apply the amendment around it.
+6. **Issue attachments** (paths listed in your prompt under "Issue attachments") may be source assets to ship (logos, photos, visuals) OR mockups/screenshots for context. Decide based on the issue body and comment intent. For each file:
    - Run `file <path>` to get its type and dimensions (e.g. `PNG 52x100` = vertical image). This tells you the format and aspect ratio without needing to see the pixels.
    - **Do NOT use the Read tool on binary files** (PNG/ZIP/etc.) — it returns garbage on text-only models. Use `file` for metadata, not `Read` for content.
    - If it's a source asset (logo, photo, visual to display), copy it into the build tree (e.g. `cp <path> public/<name>`) and reference it in your code (e.g. `<img src="/<name>">`).
    - If it's a mockup/screenshot, use it as context for the implementation (dimensions, layout hints).
    - If no issue attachments are listed, none were attached (or they exceeded the size cap) — proceed with text only.
-6. **MR comment attachments** (paths listed in your prompt under "MR comment attachments") have the same dual nature — mockups/screenshots for context OR source assets to ship. Decide based on the comment intent:
-   - Run `file <path>` to get type and dimensions.
-   - **Do NOT use the Read tool on binary files** — same as issue attachments.
-   - If the human explicitly says to use the file as an asset (e.g. "use this image", "with the attached visual", "séparation visuelle avec le visuel ci-joint"), treat it as a source asset — copy it into the build tree (`cp <path> public/<name>`) and reference it in your code.
-   - If it's a mockup/screenshot, use it as context for addressing the feedback (dimensions, layout hints).
-   - If none are listed, no images were attached to MR comments.
-7. **Query the codebase graph** (search_graph, trace_path) to understand the code you'll touch before reading files blindly.
-8. **Load relevant skills** with the `skill` tool — domain skills (astro, frontend-design, etc.) AND process skills (test-driven-development, etc.) based on what the issue asks for.
-9. Implement the acceptance criteria from `state.md`.
-10. Update `state.md`:
+ 7. **MR comment attachments** (paths listed in your prompt under "MR comment attachments") have the same dual nature — mockups/screenshots for context OR source assets to ship. Decide based on the comment intent:
+    - Run `file <path>` to get type and dimensions.
+    - **Do NOT use the Read tool on binary files** — same as issue attachments.
+    - If the human explicitly says to use the file as an asset (e.g. "use this image", "with the attached visual", "séparation visuelle avec le visuel ci-joint"), treat it as a source asset — copy it into the build tree (`cp <path> public/<name>`) and reference it in your code.
+    - If it's a mockup/screenshot, use it as context for addressing the feedback (dimensions, layout hints).
+    - If none are listed, no images were attached to MR comments.
+ 8. **Query the codebase graph** (search_graph, trace_path) to understand the code you'll touch before reading files blindly.
+ 9. **Load relevant skills** with the `skill` tool — domain skills (astro, frontend-design, etc.) AND process skills (test-driven-development, etc.) based on what the issue asks for.
+ 10. Implement the acceptance criteria from `state.md`.
+ 11. Update `state.md`:
     - **Fill in the "Approach" section with what you did.** This is NOT optional. The Approach section becomes the MR description that the reviewer reads to verify doc conformance (e.g. DESIGN.md §2 and §4 citations). An empty or placeholder Approach causes reviewer FAIL loops — issue #34 on up/urgence-palestine.fr had 3 FAIL verdicts, all blocking on the same criterion: "MR description does not cite DESIGN.md". **Format: write 3-6 bullet points (`- item`), one per aspect of your approach.** GitLab markdown renders single newlines as spaces (soft breaks), so a paragraph becomes an unreadable wall of text. Bullet points (`-`) and blank lines between sections render properly. Each bullet should cite the charter doc section you followed (e.g. "Conforms to DESIGN.md §2 — sharp corners via `--radius-sharp`").
     - **If human MR comments amended the spec** (new or changed requirements vs the triage-era criteria), update the `## Acceptance criteria` section of `state.md` to reflect the amended spec — mark each amended criterion with `(amended via MR comment)`. `state.md` is seeded once from the triage comment and never refreshed automatically; without this update the criteria drift from what the human actually asked for, and the reviewer grades against a stale spec.
     - If you tried and rejected an approach, add it to "Tried and rejected" with why.
-11. Append to `iterations.md` with what you changed.
-12. **Update charter docs** if your changes impact them (see "Doc maintenance" above). Commit doc updates in the same MR as the code.
+ 12. Append to `iterations.md` with what you changed.
+ 13. **Update charter docs** if your changes impact them (see "Doc maintenance" above). Commit doc updates in the same MR as the code.
 
 ## Rules
 

@@ -1705,6 +1705,34 @@ worker:
       # Makes them available to the worker agent via BOUCLE_ISSUE_ATTACHMENTS.
       ./bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
 
+      # Fetch the issue body and export it so the worker agent does not waste
+      # steps calling glab issue view, and — more importantly — so it has the
+      # instructed content (URLs, citations, texts) at hand. Without this, the
+      # worker invents placeholders (e.g. Rickroll video IDs) and rewrites the
+      # instructed texts instead of preserving them (issue #42 on
+      # up/urgence-palestine.fr: worker used dQw4w9WgXcQ for 2 of 3 videos and
+      # rewrote the Hammouri/Alsoumi citations). Mirrors the triage job.
+      export BOUCLE_ISSUE_BODY
+      BOUCLE_ISSUE_BODY=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID" 2>/dev/null | jq -r '.description // empty' 2>/dev/null || echo "")
+      if [ -z "$BOUCLE_ISSUE_BODY" ]; then
+        echo "[boucle] WARN: could not fetch issue #$IID body — worker will fall back to glab issue view."
+      fi
+
+      # Fetch the issue notes (comments) and export them so the worker sees
+      # the FULL discussion history — including early preservation instructions
+      # (e.g. "garder les textes/visuels/vidéos déjà partagés") that the latest
+      # amendments must NOT override. Without this, the worker only sees the
+      # latest amendments via BOUCLE_REVIEWER_FEEDBACK and applies them
+      # literally, degrading validated layouts (issue #42 iteration 7: keffiyeh
+      # replaced the video in the primary media slot instead of filling the
+      # empty space below the portrait visual). Mirrors the triage job.
+      export BOUCLE_ISSUE_NOTES
+      BOUCLE_ISSUE_NOTES=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes?per_page=100" 2>/dev/null \
+        | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | reverse | .[]' 2>/dev/null || echo "")
+      if [ -z "$BOUCLE_ISSUE_NOTES" ]; then
+        echo "[boucle] INFO: no prior notes for issue #$IID (first worker run)."
+      fi
+
       # Run the agent. Use `|| rc=$?` to suppress set -e so the script
       # continues to the safety-net commit even if the agent exits non-zero
       # (step limit, crash, etc.). The safety-net commit below captures any
@@ -2206,6 +2234,20 @@ reviewer:
       fi
 
       export BOUCLE_PREVIEW_URL="$PREVIEW_URL"
+
+      # Fetch the issue body and export it so the reviewer agent can verify
+      # that the MR content (texts, video URLs, citations) matches what the
+      # issue actually instructed. Without this, the reviewer only sees the
+      # MR diff + the human amendments and cannot detect content regressions
+      # vs. the original issue (issue #42 on up/urgence-palestine.fr: reviewer
+      # posted "Leaning PASS" on an iteration that had Rickroll placeholder
+      # videos and rewritten citations, because it had no issue body to
+      # compare against). Mirrors the triage and worker jobs.
+      export BOUCLE_ISSUE_BODY
+      BOUCLE_ISSUE_BODY=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" 2>/dev/null | jq -r '.description // empty' 2>/dev/null || echo "")
+      if [ -z "$BOUCLE_ISSUE_BODY" ]; then
+        echo "[boucle] WARN: could not fetch issue #$BOUCLE_ISSUE body — reviewer will grade without the original spec."
+      fi
 
       # Run the agent against the preview.
       # Use `|| rc=$?` to suppress set -e so the script continues to
