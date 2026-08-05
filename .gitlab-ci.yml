@@ -2442,6 +2442,12 @@ e2e:
 # issues with no active pipeline (canceled before dispatch ran).
 doctor:
   stage: verify
+  # Loop-critical control-plane job: makes only API calls, no build.
+  # Override default.tags ([data]) so the doctor runs on ANY available runner
+  # (including Atchoum) and is never blocked by a busy dedicated runner — same
+  # pattern as dispatch, merger, and catchup. Without this, the doctor fails
+  # with runner_system_failure whenever a worker is running on the data runner.
+  tags: []
   rules:
     - if: $BOUCLE_ENABLED != "true"
       when: never
