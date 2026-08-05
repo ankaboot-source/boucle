@@ -133,6 +133,7 @@ flowchart TD
 
     SpecGate -->|user validates| SpecDone[boucle:todo]
     SpecGate -->|user rejects| SpecReject[boucle:needs-info]
+    SpecGate -->|DND window / boucle:autonomous<br/>auto-skip + flag label| SpecDone
     SpecDone --> Work
     SpecReject --> NeedsInfo
 
@@ -436,7 +437,7 @@ All boucle configuration variables are prefixed with `BOUCLE_`. No other variabl
 | `BOUCLE_STALENESS_THRESHOLD` | Threshold in seconds before an issue is considered stuck by `doctor`. | `300` |
 | `BOUCLE_PREVIEW_DISABLE` | Disables PNG preview generation (`bin/render-preview`). | `false` |
 | `BOUCLE_SPEC_PROFILE` | Spec gate profile (determines when human validation is required). | `product` (gate for Size M) |
-| `BOUCLE_DND_ENABLED` | Enables Do-Not-Disturb mode. When `true`, the spec gate is auto-validated during the configured quiet window so the loop runs autonomously up to the MR without contacting the human. | `true` |
+| `BOUCLE_DND_ENABLED` | Enables Do-Not-Disturb mode. When `true`, the spec gate is auto-validated during the configured quiet window so the loop runs autonomously up to the MR without contacting the human. The skip is transparent: triage posts an explanatory comment (naming the active window + how to disable) and applies the `boucle:dnd` flag label so the board shows WHY the gate was skipped. See §4. | `true` |
 | `BOUCLE_DND_START` | DND window start (`HH:MM`, 24h). | `22:00` |
 | `BOUCLE_DND_END` | DND window end (`HH:MM`, 24h). Supports overnight wrap (start > end). | `07:00` |
 | `BOUCLE_DND_TZ` | IANA timezone for the DND window. | `UTC` |
@@ -454,6 +455,7 @@ All boucle configuration variables are prefixed with `BOUCLE_`. No other variabl
 - `BOUCLE_DEPLOY_CMD` MUST **always** contain `$$BRANCH` (the double `$` is the GitLab CI YAML escape).
 - `BOUCLE_MAX_ITERATIONS` set to `0` means **no retry** (first failure → human).
 - `BOUCLE_STALENESS_THRESHOLD` MUST be **strictly greater** than the longest job timeout (worker/reviewer = 30 min, so default 2400s/40 min). The doctor MUST also check for an active pipeline (via the pipelines API variables endpoint) before re-triggering, to avoid parasitic duplicate triggers while a job is legitimately still running.
+- **Gate-skip transparency** — the spec gate has two auto-skip paths (`boucle:autonomous` label = per-issue opt-in; DND window = time-based global). Both MUST leave a visible trace: an explanatory comment (WHY the gate was skipped, WHAT happens next, HOW to disable) AND a flag label (`boucle:autonomous` / `boucle:dnd`) applied via `set_boucle_label` so it is visible on the board. The flag label is transient — `set_boucle_label` strips `boucle:*` labels on the next state transition. See AGENTS.md lesson "Gate-skip transparency".
 
 ---
 

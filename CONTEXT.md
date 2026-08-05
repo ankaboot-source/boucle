@@ -31,9 +31,12 @@ happens asynchronously, driven by labels and comments.
   is treated as a bug.
 - **Do-Not-Disturb mode** — a configurable quiet window (default 22:00–07:00)
   during which the spec-validation gate is auto-validated, letting the loop
-  run autonomously up to the MR without contacting the human. Preserves the
-  human's quality of life; MR approval stays human-gated. See
-  [ARCHITECTURE.md](ARCHITECTURE.md) §9 (`BOUCLE_DND_*` variables).
+  run autonomously up to the MR without contacting the human. The skip is
+  transparent: triage posts an explanatory comment (active window + how to
+  disable) and applies the `boucle:dnd` flag label so the board shows WHY the
+  gate was skipped. Preserves the human's quality of life; MR approval stays
+  human-gated. See [ARCHITECTURE.md](ARCHITECTURE.md) §9 (`BOUCLE_DND_*`
+  variables).
 
 ## 3. Target audience
 

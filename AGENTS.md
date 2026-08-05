@@ -616,6 +616,31 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       + `boucle:draft`, e2e `boucle:verdict` + `boucle:draft`, and triage
       `boucle:triage` + `boucle:draft`.
 
+48. **Gate-skip transparency**
+    - ❌ DO NOT auto-skip a gate (spec gate, approval gate, any quality
+      gate) without leaving a visible, self-explanatory trace on the
+      issue. A silent skip — where the loop proceeds past a gate with
+      no comment and no flag label — leaves the human unable to
+      understand why the gate was not respected. The issue arrives at
+      the next state with no indication of WHY the gate was bypassed,
+      so the human cannot audit the decision or disable the skip if
+      it was unwanted.
+    - ❌ DO NOT post a terse one-liner ("spec auto-validé") as the only
+      trace. A one-liner states WHAT happened but not WHY (which
+      condition triggered the skip), WHAT happens next (the loop
+      continues to the MR), or HOW to disable it (the relevant CI
+      variable or label to remove).
+    - ✅ DO: every gate-skip path MUST (1) post an explanatory comment
+      naming the trigger condition (DND window with its active range,
+      or the `boucle:autonomous` label), stating what happens next
+      (loop continues to the MR, human validates the MR), and how to
+      disable it (the CI variable or label to remove); AND (2) apply a
+      flag label (`boucle:dnd` / `boucle:autonomous`) that rides along
+      to the next state via `set_boucle_label` so the skip reason is
+      visible on the board at a glance. The flag label is transient —
+      `set_boucle_label` strips `boucle:*` labels on the next state
+      transition, so it is a one-step signal, not a persistent state.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.

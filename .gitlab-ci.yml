@@ -1042,29 +1042,40 @@ triage:
               *) echo "WARN: unknown BOUCLE_SPEC_PROFILE '$SPEC_PROFILE' — treating as product"
                  [ "$SIZE" = "M" ] && SHOULD_GATE=true ;;
             esac
-            # Do-Not-Disturb: during the configured quiet window the spec gate
-            # is auto-validated so the loop runs autonomously up to the MR
-            # without contacting the human. See bin/dnd + ARCHITECTURE.md.
+            # Gate-skip transparency: when the spec gate is auto-validated
+            # (DND window or boucle:autonomous label), record WHY on the issue
+            # so the human understands why no gate was respected. Each skip
+            # path applies a flag label (visible on the board) AND posts an
+            # explanatory comment. See AGENTS.md lesson "Gate-skip
+            # transparency" + ARCHITECTURE.md §4.
             # Two paths flip SHOULD_GATE=false:
             #   1. boucle:autonomous label on the issue (per-issue opt-in,
             #      applied at creation — takes precedence, intentional).
             #   2. DND window active (time-based, global).
+            GATE_SKIP_LABELS=""
             AUTONOMOUS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID" 2>/dev/null \
               | jq -r '(.labels // []) | map(select(. == "boucle:autonomous")) | length' 2>/dev/null || echo 0)
             if [ "$SHOULD_GATE" = "true" ] && [ "${AUTONOMOUS:-0}" -gt 0 ] 2>/dev/null; then
               echo "[boucle] 🤖 Issue flagged autonomous — auto-validating spec gate for #$IID"
               SHOULD_GATE=false
+              GATE_SKIP_LABELS="boucle:autonomous"
+              AUTONOMOUS_NOTE=$(printf "🤖 **Spec gate auto-validée — issue flaguée autonome**\n\nLa validation humaine du spec a été automatiquement validée car cette issue porte le label \`boucle:autonomous\`. La boucle continue donc jusqu'à la MR sans contact humain.\n\nLe label \`boucle:autonomous\` reste visible sur l'issue (tableau de bord) jusqu'à la prochaine transition d'état.\n\nVous pourrez valider la MR quand elle sera prête. Pour ne plus auto-valider le spec sur cette issue, retirez le label \`boucle:autonomous\`.")
               glab api --hostname $BOUCLE_FORGE_HOST -X POST \
                 "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-                -f body="🤖 **Issue flaguée autonome** — spec auto-validé. La boucle continue jusqu'à la MR sans contact humain." \
+                -f body="$AUTONOMOUS_NOTE" \
                 > /dev/null 2>&1 || true
             fi
             if [ "$SHOULD_GATE" = "true" ] && ./bin/dnd 2>/dev/null; then
+              DND_START="${BOUCLE_DND_START:-22:00}"
+              DND_END="${BOUCLE_DND_END:-07:00}"
+              DND_TZ="${BOUCLE_DND_TZ:-UTC}"
               echo "[boucle] 🌙 DND active — auto-validating spec gate for #$IID"
               SHOULD_GATE=false
+              GATE_SKIP_LABELS="${GATE_SKIP_LABELS:+$GATE_SKIP_LABELS,}boucle:dnd"
+              DND_NOTE=$(printf "🌙 **Spec gate auto-validée — mode Do-Not-Disturb actif**\n\nLa validation humaine du spec a été automatiquement validée car la fenêtre DND est active (%s–%s %s). La boucle continue donc jusqu'à la MR sans contact humain.\n\nLe label \`boucle:dnd\` a été appliqué à l'issue (visible sur le tableau de bord) pour signaler cette auto-validation ; il sera retiré à la prochaine transition d'état.\n\nVous pourrez valider la MR quand elle sera prête. Pour désactiver le DND : mettez \`BOUCLE_DND_ENABLED=false\` dans les variables CI du projet." "$DND_START" "$DND_END" "$DND_TZ")
               glab api --hostname $BOUCLE_FORGE_HOST -X POST \
                 "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-                -f body="🌙 **Do-Not-Disturb actif** — spec auto-validé. La boucle continue jusqu'à la MR sans contact humain." \
+                -f body="$DND_NOTE" \
                 > /dev/null 2>&1 || true
             fi
             if [ "$SHOULD_GATE" = "true" ]; then
@@ -1111,8 +1122,11 @@ triage:
                 glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
                   -f body="$SPEC_MSG" > /dev/null
               fi
-            else
-              set_boucle_label "$IID" "boucle:todo,size:$(echo $SIZE | tr '[:upper:]' '[:lower:]')" "boucle::status::bot"
+             else
+               # Include gate-skip flag labels (boucle:autonomous / boucle:dnd)
+               # so the board shows WHY the gate was skipped. Consumed on the
+               # next state transition (set_boucle_label strips boucle:* labels).
+               set_boucle_label "$IID" "boucle:todo,size:$(echo $SIZE | tr '[:upper:]' '[:lower:]')${GATE_SKIP_LABELS:+,$GATE_SKIP_LABELS}" "boucle::status::bot"
               # Concurrency cap: defer worker trigger if too many issues are already working.
               MAX_PARALLEL="${BOUCLE_MAX_PARALLEL_ISSUES:-0}"
               WORKING_COUNT=0
