@@ -270,10 +270,14 @@ La section alliées est intégrée dans `/right-to-resist/` (l'ancienne URL
 `/allies/` redirige vers `/right-to-resist/`). Son titre mobilisateur est
 **« Nos alliés dans la résistance. »**. Elle obéit aux règles suivantes :
 
-1. **Mosaïque irrégulière**. Les organisations sont disposées dans une grille
-   dense avec des cellules de largeurs variables (jamais une grille bento
-   uniforme). Les coins sont droits, les fonds restent monochrome ou noir,
-   aucune carte SaaS, aucun gradient décoratif.
+1. **Grille uniforme sans trous**. Les organisations sont disposées dans une
+   grille de cellules carrées égales, taillée pour les petits logos. Elle se
+   remplit bord à bord quel que soit le nombre de collectifs dans un groupe
+   (3, 5, 3…). Aucune cellule géante ni `nth-child` à portées fixes conçue
+   pour de grandes photos, qui laisserait des « trous » avec un nombre
+   variable d'items — le nombre de colonnes est piloté par la largeur
+   disponible (`auto-fit`). Les coins sont droits, les fonds restent
+   monochrome ou noir, aucune carte SaaS, aucun gradient décoratif.
 
 2. **Hover / focus reveal**. Chaque cellule affiche le logo et le nom par
    défaut ; au survol ou au focus clavier, un volet noir glisse par-dessus
@@ -286,7 +290,8 @@ La section alliées est intégrée dans `/right-to-resist/` (l'ancienne URL
    `allies` expose un champ `logo` (chemin d'actif statique root-rel), un
    champ optionnel `aplat` (grande image de fond de cellule) et un champ
    `presentation` (texte long). Le résumé sur la page d'accueil montre
-   seulement les logos et un lien d'ancrage vers la section détaillée. Les
+   **tous** les logos des organisations (liste complète, dans l'ordre
+   d'affichage) et un lien d'ancrage vers la section détaillée. Les
    logos doivent être les vrais logos des organisations (téléchargés depuis
    leur site ou réseau social) ; aucun SVG généré artificiellement n'est
    accepté.

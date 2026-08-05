@@ -2,17 +2,15 @@
 /*
  * AlliesSummary
  * -------------
- * Compact home-page preview of the allies section. Shows a short strip of
- * organisation logos and a CTA that anchors to the detailed mosaic on
- * /right-to-resist/. Pure Astro, no client JS.
+ * Home-page preview of the allies section. Shows every organisation logo
+ * (complete list, in display order) and a CTA that anchors to the detailed
+ * mosaic on /right-to-resist/. Pure Astro, no client JS.
  */
 import { getCollection } from "astro:content";
 
 const allies = (await getCollection("allies")).sort(
 	(a, b) => a.data.order - b.data.order
 );
-
-const firstAllies = allies.slice(0, 5);
 ---
 
 <section class="allies-summary" aria-labelledby="allies-summary-title">
@@ -28,7 +26,7 @@ const firstAllies = allies.slice(0, 5);
 
 	<ul class="allies-summary__logos" role="list">
 		{
-			firstAllies.map((entry) => (
+			allies.map((entry) => (
 				<li class="allies-summary__item">
 					{entry.data.logo ? (
 						<img
