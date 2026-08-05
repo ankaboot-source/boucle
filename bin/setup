@@ -278,6 +278,18 @@ else
   log_pass "boucle:autonomous created"
 fi
 
+# boucle:dnd — flag label (not a state). Applied at triage when the
+# Do-Not-Disturb window auto-validates the spec gate, so the board shows
+# WHY the gate was skipped. Mirrors boucle:autonomous. Distinct color
+# (deep indigo — night theme) to distinguish from autonomous (purple).
+EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:dnd" 2> /dev/null | jq -r '.[0].name // empty')
+if [ -n "$EXISTING" ]; then
+  log_skip "boucle:dnd already exists"
+else
+  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/labels -f name=boucle:dnd -f color=#1A237E -f 'description=Flag: spec gate auto-validated by DND window at triage' >/dev/null"
+  log_pass "boucle:dnd created"
+fi
+
 echo ""
 
 # ── 3. Issue Board ────────────────────────────────────────────────────
