@@ -70,7 +70,6 @@ while [[ $# -gt 0 ]]; do
       echo "  --bot-token <pat>        Bot PAT (used as BOUCLE_TOKEN CI variable)"
       echo "  --cf-token <token>       Cloudflare API token (for Pages project)"
       echo "  --runner-tag <tag>       Runner tag to use in .gitlab-ci.yml (default: boucle)"
-      echo "  --auth-path <path>        Path to pi auth.json (default: ~/.pi/agent/auth.json)"
       echo "  --skip-cf                Skip Cloudflare Pages project creation"
       echo "  --dry-run                 Print what would be done, don't execute"
       exit 0
@@ -215,21 +214,27 @@ else
   log_pass "BOUCLE_UPDATE_MODE set to release"
 fi
 
-# PI_AUTH (file type) — requires auth.json to exist locally
-if [ -f "$PI_AUTH_PATH" ]; then
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/PI_AUTH" 2> /dev/null | jq -r '.key // empty')
-  if [ -n "$EXISTING" ]; then
-    log_skip "PI_AUTH already exists"
-  else
-    # Copy auth.json to temp file for @file syntax
-    TMP_AUTH=$(mktemp)
-    cp "$PI_AUTH_PATH" "$TMP_AUTH"
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables --field key=PI_AUTH --field value=@$TMP_AUTH --field variable_type=file >/dev/null"
-    rm -f "$TMP_AUTH"
-    log_pass "PI_AUTH set (file type)"
-  fi
+# BOUCLE_LLM_API_KEY (masked) — required for jcode to authenticate
+EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_LLM_API_KEY" 2> /dev/null | jq -r '.key // empty')
+if [ -n "$EXISTING" ]; then
+  log_skip "BOUCLE_LLM_API_KEY already exists"
 else
-  log_fail "PI_AUTH — auth.json not found at $PI_AUTH_PATH"
+  read -r -p "BOUCLE_LLM_API_KEY value (masked): " LLM_API_KEY
+  if [ -n "$LLM_API_KEY" ]; then
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables --field key=BOUCLE_LLM_API_KEY --field value=$LLM_API_KEY --field masked=true >/dev/null"
+    log_pass "BOUCLE_LLM_API_KEY set (masked)"
+  else
+    log_fail "BOUCLE_LLM_API_KEY — no value provided"
+  fi
+fi
+
+# BOUCLE_LLM_BASE_URL — OpenAI-compatible endpoint
+EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_LLM_BASE_URL" 2> /dev/null | jq -r '.key // empty')
+if [ -n "$EXISTING" ]; then
+  log_skip "BOUCLE_LLM_BASE_URL already exists"
+else
+  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables --field key=BOUCLE_LLM_BASE_URL --field value=https://ollama.com/v1 >/dev/null"
+  log_pass "BOUCLE_LLM_BASE_URL set (default: https://ollama.com/v1)"
 fi
 
 echo ""
@@ -523,7 +528,7 @@ fi
 echo "     Register one on your build machine (docker executor) or enable a shared runner with the tag."
 echo "  2. Apply the loop template to the target repo:"
 echo "     cp -r boucle/boucle/bin <target-repo>/"
-echo "     cp -r boucle/boucle/.pi <target-repo>/"
+echo "     cp -r boucle/boucle/.jcode <target-repo>/"
 echo "     cp boucle/boucle/.gitlab-ci.yml <target-repo>/"
 echo "     cp boucle/boucle/LOOP.md <target-repo>/"
 echo "  3. Run bin/doctor in CI to verify all prerequisites are met."
