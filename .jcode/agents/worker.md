@@ -28,6 +28,46 @@ You have a knowledge graph of this codebase. **Use it before grep/glob** for cod
 
 If `search_graph` returns no results, run `codebase-memory-mcp cli index_repository '{"repo_path":"."}'`, then retry. Fall back to grep/glob only for string literals, config values, or non-code files.
 
+## Swarm — parallel sub-agents
+
+You have the `swarm` tool available (`--tools '*'` is enabled). Use it to spawn sub-agents that work in parallel when the task has independent parts. This is faster than doing everything sequentially.
+
+**When to use swarm:**
+- The issue requires both research AND implementation — spawn a research sub-agent while you start implementing.
+- Multiple independent files need changes — spawn one sub-agent per file group.
+- You need to understand an unfamiliar library AND implement against it — spawn a research sub-agent while you scaffold.
+- The codebase is large and you need to explore multiple areas — spawn parallel explorers.
+
+**When NOT to use swarm:**
+- The task is a single small change (<20 lines, one file) — do it directly.
+- The parts are tightly coupled (editing one file changes what another needs) — do them sequentially.
+- You're unsure what to do — plan first, then delegate once the plan is clear.
+
+**Delegation rules:**
+- Every spawned sub-agent MUST get a self-contained prompt: objective, constraints, relevant file paths, and expected output. One-liners are prohibited.
+- Spawned sub-agents are workers — they can read, write, and run bash. They CANNOT spawn further sub-agents (maxRecursionDepth=1).
+- If a sub-agent's work conflicts with yours (same file), do it sequentially instead.
+- Collect sub-agent results before committing — reconcile their changes against the issue's acceptance criteria.
+- Sub-agent outputs are inputs, not final truth — verify their work before claiming done.
+
+**Example — research + implementation in parallel:**
+```
+swarm: [
+  {prompt: "Research how Astro content collections define schema fields. Read src/content.config.ts and the Astro docs. Return: the schema field types available, how to add a new field, and an example. Do NOT edit files.", model: "fast"},
+  {prompt: "Read src/pages/prises-de-parole/[...slug].astro and src/layouts/Layout.astro. Return: the current layout structure, where the hero section is, and what props the layout expects. Do NOT edit files.", model: "fast"}
+]
+```
+While those run, you can start scaffolding the new component. When they return, integrate their findings into your implementation.
+
+**Example — parallel file edits (independent modules):**
+```
+swarm: [
+  {prompt: "Edit src/components/Hero.astro to add a parallax wrapper div with 3 layers. The layers are: background image, midground pattern, foreground text. Use absolute positioning. Do NOT touch any other file.", model: "default"},
+  {prompt: "Edit src/styles/sections.css to add the parallax CSS classes. The classes are: .parallax-wrapper, .parallax-layer-bg, .parallax-layer-mid, .parallax-layer-fg. Each layer uses transform: translateZ() for depth. Do NOT touch any other file.", model: "default"}
+]
+```
+Both run in parallel. You reconcile and commit after both complete.
+
 ## Charter docs — read and conform
 
 Before implementing, read the charter docs at the repo root. They are **imperatives**, not suggestions:
