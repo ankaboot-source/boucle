@@ -90,18 +90,18 @@ fi
 
 # ── Agents parse ───────────────────────────────────────────────────────
 for role in triage worker reviewer e2e; do
-  if [ -f ".pi/agents/$role.md" ]; then
+  if [ -f ".jcode/agents/$role.md" ]; then
     pass "agent $role.md exists"
   else
     fail "agent $role.md missing"
   fi
 done
 
-# ── pi reachable ─────────────────────────────────────────────────
-if command -v pi &> /dev/null; then
-  pass "pi in PATH"
+# ── jcode reachable ────────────────────────────────────────────────
+if command -v jcode &> /dev/null; then
+  pass "jcode in PATH"
 else
-  fail "pi not in PATH"
+  fail "jcode not in PATH"
 fi
 
 # ── CLOUDFLARE_API_TOKEN can deploy ────────────────────────────────────
