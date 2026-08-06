@@ -13,7 +13,6 @@ BOT_USERNAME="${BOUCLE_BOT_USERNAME:-up-bot}"
 BOT_TOKEN=""
 CF_TOKEN=""
 RUNNER_TAG=""
-PI_AUTH_PATH="${PI_AUTH_PATH:-$HOME/.pi/agent/auth.json}"
 SKIP_CF=false
 DRY_RUN=false
 
@@ -45,10 +44,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --runner-tag)
       RUNNER_TAG="$2"
-      shift 2
-      ;;
-    --auth-path)
-      PI_AUTH_PATH="$2"
       shift 2
       ;;
     --skip-cf)

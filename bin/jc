@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bin/jc — boucle's harness entrypoint (S3)
 # Wraps jcode: scrubs secrets, enforces caps, runs agent, asserts side effects.
-# Swapping to opencode or pi = editing this one file.
+# Swapping to jcode = editing this one file.
 #
 # Role mapping (boucle role → project-local agent in .jcode/agents/):
 #   triage   → triage    (glm-5.2, analyzes issue)
@@ -11,7 +11,7 @@
 #
 # jcode loads AGENTS.md (charter doc, repo root) + .jcode/prompt-overlay.md
 # (role-specific prompt, written per invocation) + .jcode/skills/ (moved from
-# .opencode/skill/). The agent's system prompt provides general behavior;
+# .jcode/skills/). The agent's system prompt provides general behavior;
 # the user prompt (built below) adds boucle-specific task instructions.
 #
 # jcode CLI: jcode --provider-profile "$BOUCLE_PROVIDER_PROFILE" --model <model> --tools '*' \

@@ -13,7 +13,7 @@
 # The MR attachments have their OWN total budget tracking — independent from
 # issue attachments — but reuse the same cap env vars.
 #
-# Output: writes .boucle/$ISSUE/.mr-attachments.env (sourced by bin/oc) and
+# Output: writes .boucle/$ISSUE/.mr-attachments.env (sourced by bin/jc) and
 #         .boucle/$ISSUE/mr-attachments/MANIFEST.md (human-readable log).
 #
 # If BOUCLE_MR_IID is empty (no MR exists on first run), the script exits
@@ -154,7 +154,7 @@ done
   done
 } > "$ATT_DIR/MANIFEST.md"
 
-# Write env file for bin/oc to source
+# Write env file for bin/jc to source
 {
   printf 'BOUCLE_MR_ATTACHMENTS="'
   for f in "${downloaded_files[@]}"; do

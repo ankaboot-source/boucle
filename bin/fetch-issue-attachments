@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # bin/fetch-issue-attachments — downloads attachments uploaded to a GitLab issue
-# Called before ./bin/oc <role> to make issue attachments available to agents.
+# Called before ./bin/jc <role> to make issue attachments available to agents.
 #
 # Policy: caps individual attachment size (BOUCLE_IMAGE_MAX_BYTES) and total
 # downloaded size per issue (BOUCLE_IMAGE_TOTAL_MAX_BYTES). Attachments over
@@ -9,7 +9,7 @@
 # archives, etc.) — not just images. Variable names retain the IMAGE prefix
 # for backward compatibility with consumers that override them via GitLab UI.
 #
-# Output: writes .boucle/$ISSUE/.attachments.env (sourced by bin/oc) and
+# Output: writes .boucle/$ISSUE/.attachments.env (sourced by bin/jc) and
 #         .boucle/$ISSUE/attachments/MANIFEST.md (human-readable log).
 set -euo pipefail
 
@@ -158,7 +158,7 @@ done
   done
 } > "$ATT_DIR/MANIFEST.md"
 
-# Write env file for bin/oc to source
+# Write env file for bin/jc to source
 {
   printf 'BOUCLE_ISSUE_ATTACHMENTS="'
   for f in "${downloaded_files[@]}"; do
