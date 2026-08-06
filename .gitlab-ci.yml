@@ -3148,7 +3148,7 @@ deploy:
   # runner_system_failure; retrying recovers without human intervention.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
   retry:
-    max: 3
+    max: 2
     when: runner_system_failure
   rules:
     - if: $BOUCLE_ENABLED != "true"
