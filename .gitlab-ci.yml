@@ -3229,7 +3229,7 @@ deploy:
       if [ -z "$DEPLOY_URL" ]; then
         echo "FAIL: no deployment URL from wrangler" >&2; exit 1
       fi
-      if ! curl -s -o /dev/null -w "%{http_code}" "$DEPLOY_URL" | grep -q "200"; then
+      if ! curl -sL -o /dev/null -w "%{http_code}" "$DEPLOY_URL" | grep -q "200"; then
         echo "FAIL: deployment URL $DEPLOY_URL not 200" >&2; exit 1
       fi
       echo "Deployed to $DEPLOY_URL (200 OK)"
@@ -3431,7 +3431,7 @@ e2e:
       # Deploy-triggered e2e: no issue context. Run a deterministic HTTP smoke test.
       if [ -z "${BOUCLE_ISSUE:-}" ]; then
         echo "Deploy-triggered e2e — no issue context. Running HTTP smoke test."
-        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BOUCLE_LIVE_URL")
+        HTTP_CODE=$(curl -sL -o /dev/null -w "%{http_code}" "$BOUCLE_LIVE_URL")
         if [ "$HTTP_CODE" = "200" ]; then
           echo "E2E smoke test PASS — $BOUCLE_LIVE_URL returns 200"
           exit 0
