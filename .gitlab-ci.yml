@@ -39,10 +39,11 @@ variables:
   BOUCLE_IMAGE_MAX_BYTES: "10485760"
   BOUCLE_IMAGE_TOTAL_MAX_BYTES: "52428800"
   # Concurrency: max issues allowed in boucle:working state simultaneously.
-  # 0 = unlimited (GitLab runner tag + resource_group are the only limits).
-  # When set, triage won't trigger a new worker if the cap is reached — the
-  # issue stays at boucle:todo and the doctor re-triggers it when a slot frees.
-  BOUCLE_MAX_PARALLEL_ISSUES: "0"
+  # Default 5. 0 = unlimited (GitLab runner tag + resource_group are the only
+  # limits) if you explicitly override it back. Triage won't trigger a new
+  # worker if the cap is reached — the issue stays at boucle:todo and the
+  # doctor re-triggers it when a slot frees.
+  BOUCLE_MAX_PARALLEL_ISSUES: "5"
   # Iteration cap: max worker re-runs per issue (rebase conflicts, empty MRs,
   # reviewer FAIL). Default 3. Override per-project if you want more/fewer retries.
   BOUCLE_MAX_ITERATIONS: "3"
@@ -269,6 +270,29 @@ check:
   script:
     - make check
 
+# ── Self-update (boucle upstream sync) ──────────────────────────────────
+# bin/update fetches the latest boucle version from upstream and commits it
+# to the consumer's master. Runs on a schedule (cron) and on pushes to master
+# — NEVER on webhook triggers, so the autonomous loop never pays the self-update
+# cost on no-op dispatch events. The bot's push does not retrigger a pipeline
+# (webhook push_events=false), so there is no self-loop. Effect is deferred to
+# the next pipeline (current pipeline runs on the original checkout).
+self-update:
+  stage: check
+  # Run on any available runner (including the shared docker runner) so a
+  # busy data runner never blocks the self-update. The job is lightweight.
+  tags: []
+  rules:
+    - if: $BOUCLE_ENABLED != "true"
+      when: never
+    # Only run on schedules (cron) and pushes to master — never on webhook
+    # triggers (the autonomous loop) or MR pipelines.
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"
+    - when: never
+  script:
+    - ./bin/update
+
 # ── Dispatcher ──────────────────────────────────────────────────────────
 dispatch:
   stage: dispatch
@@ -294,7 +318,6 @@ dispatch:
   # pipeline will show as "failed" on no-op webhook events — that's
   # expected and harmless: it just means "nothing to do".
   script:
-    - ./bin/update
     - |
       # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
       set +o pipefail
@@ -1012,7 +1035,7 @@ triage:
               MAX_PARALLEL="${BOUCLE_MAX_PARALLEL_ISSUES:-0}"
               WORKING_COUNT=0
               if [ "$MAX_PARALLEL" -gt 0 ] 2>/dev/null; then
-                WORKING_COUNT=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues?state=opened&labels=boucle:working&per_page=100" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
+                WORKING_COUNT=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues?state=opened&labels=boucle:working&per_page=100" | jq 'length')
                 if [ "$WORKING_COUNT" -ge "$MAX_PARALLEL" ]; then
                   echo "[boucle] Max parallel issues ($MAX_PARALLEL) reached — $WORKING_COUNT already working. Deferring #$IID (stays at boucle:todo, doctor will re-trigger when a slot frees)."
                   glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
@@ -2849,12 +2872,12 @@ doctor:
       # Only applies when BOUCLE_MAX_PARALLEL_ISSUES is set (> 0).
       MAX_PARALLEL="${BOUCLE_MAX_PARALLEL_ISSUES:-0}"
       if [ "$MAX_PARALLEL" -gt 0 ] 2>/dev/null; then
-        WORKING_COUNT=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:working&per_page=100" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
+        WORKING_COUNT=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:working&per_page=100" | jq 'length')
         if [ "$WORKING_COUNT" -lt "$MAX_PARALLEL" ]; then
           TODO_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:todo&per_page=100" | jq -r '.[].iid')
           for IID in $TODO_ISSUES; do
             # Re-check working count each iteration (a previous trigger may have flipped it)
-            WORKING_COUNT=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:working&per_page=100" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
+            WORKING_COUNT=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:working&per_page=100" | jq 'length')
             if [ "$WORKING_COUNT" -ge "$MAX_PARALLEL" ]; then
               echo "  → slots full again ($WORKING_COUNT/$MAX_PARALLEL) — stopping todo recovery"
               break
