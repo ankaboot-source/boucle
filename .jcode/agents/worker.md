@@ -21,7 +21,7 @@ If `search_graph` returns no results, run `index_repository` with the repo path,
 
 ## Skills available
 
-You have these skills in `.opencode/skill/`. **Use them** — they contain domain expertise you need. **Load a skill with the `skill` tool BEFORE doing work in its domain.** This is not optional.
+You have these skills in `.jcode/skills/`. **Use them** — they contain domain expertise you need. **Load a skill with the `skill` tool BEFORE doing work in its domain.** This is not optional.
 
 **Domain skills** (load before working in that domain):
 - **astro** — before writing/editing `.astro` components, pages, or content collections.

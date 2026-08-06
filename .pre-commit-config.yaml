@@ -5,7 +5,7 @@
 
 # Scope: boucle is a portable dev-loop harness that ships to consumer repos.
 # The harness lives in bin/, scripts/, test/, Makefile, .gitlab-ci.yml, and
-# this config. Everything else (src/ content, docs/, .opencode/ vendored
+# this config. Everything else (src/ content, docs/, .jcode/ vendored
 # skills) is either upstream-synced or project content — not ours to reformat.
 # EXCLUDE re-anchors the hooks onto harness files only.
 repos:
@@ -16,12 +16,12 @@ repos:
       - id: check-merge-conflict
       - id: check-executables-have-shebangs
       - id: check-shebang-scripts-are-executable
-        exclude: ^\.opencode/
+        exclude: ^\.jcode/
       - id: end-of-file-fixer
-        exclude: ^(src/|docs/|\.opencode/|\.boucle-version$)
+        exclude: ^(src/|docs/|\.jcode/|\.boucle-version$)
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
-        exclude: ^(src/|docs/|\.opencode/)
+        exclude: ^(src/|docs/|\.jcode/)
       - id: mixed-line-ending
         args: [--fix=lf]
       - id: check-added-large-files
@@ -35,7 +35,7 @@ repos:
   # Local hook: the koalaman/shellcheck-precommit hook pulls a Docker image,
   # which fails in CI/hosts without a daemon. We use the system binary
   # (brew install shellcheck) via the Makefile's lint target instead.
-  # Exclude .opencode/ — upstream-vendored scripts synced by bin/update.
+  # Exclude .jcode/ — upstream-vendored scripts synced by bin/update.
   - repo: local
     hooks:
       - id: shellcheck
@@ -43,17 +43,17 @@ repos:
         entry: bash -c 'shellcheck -x --severity=warning "$@"' --
         language: system
         types: [shell]
-        exclude: ^\.opencode/
+        exclude: ^\.jcode/
 
   # ── shfmt (formatting) ──
-  # Exclude .opencode/ — reformatting vendored scripts creates churn that
+  # Exclude .jcode/ — reformatting vendored scripts creates churn that
   # the next bin/update overwrites.
   - repo: https://github.com/scop/pre-commit-shfmt
     rev: v3.13.1-1
     hooks:
       - id: shfmt
         args: ["-i", "2", "-bn", "-ci", "-sr"]
-        exclude: ^\.opencode/
+        exclude: ^\.jcode/
 
   # ── bats unit tests (local hook, pre-push so commits stay fast) ──
   - repo: local
