@@ -598,9 +598,9 @@ dispatch:
             -F "variables[BOUCLE_ITERATION]=$MR_NOTE_ITERATION" > /dev/null
           exit 0
         fi
-        IID=$(jq -r '.issue.iid // .work_item.iid // .epic.iid // empty' "$TRIGGER_PAYLOAD")
+        IID=$(jq -r '.issue.iid // .work_item.iid // .epic.iid // empty' "$TRIGGER_PAYLOAD" 2>/dev/null) || true
       else
-        IID=$(jq -r '.object_attributes.iid // .issue.iid // empty' "$TRIGGER_PAYLOAD")
+        IID=$(jq -r '.object_attributes.iid // .issue.iid // empty' "$TRIGGER_PAYLOAD" 2>/dev/null) || true
       fi
 
       if [ -z "$IID" ]; then
@@ -623,6 +623,7 @@ dispatch:
       # resume work), so we let that path through and check state there.
       # MR webhooks already have their own guard at lines 307-313.
       if [ "$OBJECT_KIND" != "merge_request" ]; then
+        echo "dispatch: checking issue state for #$IID (closed-issue guard)"
         ISSUE_STATE_FOR_GUARD=$(glab api --hostname $BOUCLE_FORGE_HOST --method GET "/projects/$CI_PROJECT_ID/issues/$IID" 2>/dev/null | jq -r '.state // "unknown"' 2>/dev/null || echo "unknown")
         if [ "$ISSUE_STATE_FOR_GUARD" = "closed" ]; then
           # Check if this is a BOT_JUST_ASSIGNED event — if so, let it through
@@ -688,11 +689,19 @@ dispatch:
         fi
       }
 
-      # Get current labels
-      LABELS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID" | jq -r '.labels | join(",")')
+      # Get current labels. Guard with || true so a glab api failure (missing
+      # BOUCLE_FORGE_HOST, auth error on shared runner, network issue) does not
+      # kill the script under set -e before routing echos fire (lesson #5).
+      echo "dispatch: fetching labels for #$IID (forge=$BOUCLE_FORGE_HOST, project=$CI_PROJECT_ID)"
+      LABELS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID" 2>/dev/null | jq -r '.labels | join(",")' 2>/dev/null || echo "")
+      if [ -z "$LABELS" ]; then
+        echo "dispatch: ABORT — glab api failed to fetch labels for #$IID (BOUCLE_FORGE_HOST=${BOUCLE_FORGE_HOST:-unset}, exit non-zero)"
+        exit 1
+      fi
+      echo "dispatch: labels for #$IID: $LABELS"
 
       # Resolve: issue opened, body edited in triage/needs-info/todo, or author reply on needs-info
-      ACTION=$(jq -r '.object_attributes.action // empty' "$TRIGGER_PAYLOAD")
+      ACTION=$(jq -r '.object_attributes.action // empty' "$TRIGGER_PAYLOAD" 2>/dev/null) || true
 
       # Parent issue split into sub-issues — waiting for them to close.
       # Do not re-triage or re-work; the doctor closes it when sub-issues complete.
