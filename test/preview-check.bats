@@ -64,6 +64,8 @@ PY
 teardown() {
   if [ -n "${SERVER_PID:-}" ]; then kill "$SERVER_PID" 2>/dev/null || true; fi
   if [ -n "${SERVER_ROOT:-}" ]; then rm -rf "$SERVER_ROOT"; fi
+  if [ -n "${SLOW_PID:-}" ]; then kill "$SLOW_PID" 2>/dev/null || true; fi
+  if [ -n "${SLOW_ROOT:-}" ]; then rm -rf "$SLOW_ROOT"; fi
 }
 
 @test "curl -sL follows 308 redirect and reports 200 (the fix)" {
@@ -93,4 +95,82 @@ teardown() {
   # curl -sL -o /dev/null -w "%{http_code}" ... | grep -q "200" or = "200").
   code="$(curl -sL -o /dev/null -w "%{http_code}" "$SERVER_URL")"
   [ "$code" = "200" ]
+}
+
+# ── Retry-with-backoff tests ────────────────────────────────────────────
+# Bug class: Cloudflare Pages deployments take time to propagate after the
+# deploy command returns the URL. A single curl fails while the edge is
+# warming up, stalling the worker (and the whole loop). The fix retries
+# with exponential backoff. These tests stand up a server that returns
+# non-200 a fixed number of times then 200, and assert the retry loop
+# succeeds (and that a permanently-failing server fails after 6 attempts).
+
+_start_slow_server() {
+  SLOW_ROOT="$(mktemp -d)"
+  printf 'ok\n' > "$SLOW_ROOT/index.html"
+  SLOW_SCRIPT="$(mktemp)"
+  cat > "$SLOW_SCRIPT" <<'PY'
+import http.server, socketserver, os, sys
+
+# Serve 503 for the first N requests, then 200.
+SERVE_503_FOR = int(os.environ.get('SERVE_503_FOR', '3'))
+state = {'count': 0}
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def __init__(self, *a, **kw):
+        super().__init__(*a, directory=os.environ['SLOW_ROOT'], **kw)
+    def do_GET(self):
+        state['count'] += 1
+        if state['count'] <= SERVE_503_FOR:
+            self.send_response(503)
+            self.end_headers()
+            return
+        super().do_GET()
+
+socketserver.TCPServer.allow_reuse_address = True
+with socketserver.TCPServer(('127.0.0.1', 0), Handler) as httpd:
+    print(httpd.server_address[1], flush=True)
+    httpd.serve_forever()
+PY
+  SERVE_503_FOR="${1:-3}" SLOW_ROOT="$SLOW_ROOT" python3 "$SLOW_SCRIPT" > "$SLOW_ROOT/port" 2>/dev/null &
+  SLOW_PID=$!
+  for _ in $(seq 1 50); do
+    if [ -s "$SLOW_ROOT/port" ]; then break; fi
+    sleep 0.1
+  done
+  SLOW_PORT="$(cat "$SLOW_ROOT/port")"
+  SLOW_URL="http://127.0.0.1:${SLOW_PORT}/"
+}
+
+@test "worker preview retry loop succeeds after transient 503s" {
+  # Server returns 503 for the first 2 requests, then 200.
+  _start_slow_server 2
+  # Mirrors the worker retry loop in .gitlab-ci.yml (6 attempts, backoff).
+  # Use near-zero delays so the test stays fast.
+  ok=false
+  attempt=0
+  delay=0
+  while [ "$attempt" -lt 6 ]; do
+    attempt=$((attempt + 1))
+    code=$(curl -sL -o /dev/null -w "%{http_code}" "$SLOW_URL" 2>/dev/null || echo "000")
+    if [ "$code" = "200" ]; then ok=true; break; fi
+    [ "$attempt" -lt 6 ] && { sleep "$delay"; delay=$((delay + 1)); }
+  done
+  [ "$ok" = "true" ]
+}
+
+@test "worker preview retry loop fails after 6 permanent 503s" {
+  # Server always returns 503 (SERVE_503_FOR huge).
+  _start_slow_server 999
+  ok=false
+  attempt=0
+  delay=0
+  while [ "$attempt" -lt 6 ]; do
+    attempt=$((attempt + 1))
+    code=$(curl -sL -o /dev/null -w "%{http_code}" "$SLOW_URL" 2>/dev/null || echo "000")
+    if [ "$code" = "200" ]; then ok=true; break; fi
+    [ "$attempt" -lt 6 ] && { sleep "$delay"; delay=$((delay + 1)); }
+  done
+  [ "$ok" = "false" ]
+  [ "$attempt" = "6" ]
 }

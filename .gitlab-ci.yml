@@ -1637,10 +1637,32 @@ worker:
       if [ -z "$PREVIEW_URL" ]; then
         echo "FAIL: no preview URL" >&2; exit 1
       fi
+      # Cloudflare Pages deployments take time to propagate after the
+      # deploy command returns the URL. Retry with exponential backoff
+      # so we don't fail the worker (and stall the loop) while the edge
+      # is still warming up. Total budget ~5 min, well within the 30m
+      # worker timeout.
       # -L follows redirects (e.g. Cloudflare Pages 308 adding a trailing
       # slash to directory routes); the final response code must be 200.
-      if ! curl -sL -o /dev/null -w "%{http_code}" "$PREVIEW_URL" | grep -q "200"; then
-        echo "FAIL: preview URL not 200" >&2; exit 1
+      PREVIEW_OK=false
+      attempt=0
+      delay=5
+      while [ "$attempt" -lt 6 ]; do
+        attempt=$((attempt + 1))
+        HTTP_CODE=$(curl -sL -o /dev/null -w "%{http_code}" "$PREVIEW_URL" 2>/dev/null || echo "000")
+        if [ "$HTTP_CODE" = "200" ]; then
+          echo "Preview URL 200 OK (attempt $attempt/6)"
+          PREVIEW_OK=true
+          break
+        fi
+        if [ "$attempt" -lt 6 ]; then
+          echo "Preview URL returned $HTTP_CODE (attempt $attempt/6) — retrying in ${delay}s..." >&2
+          sleep "$delay"
+          delay=$((delay * 2))
+        fi
+      done
+      if [ "$PREVIEW_OK" != "true" ]; then
+        echo "FAIL: preview URL not 200 after $attempt attempts (last code: $HTTP_CODE)" >&2; exit 1
       fi
 
       # Set review label
@@ -2344,12 +2366,31 @@ deploy:
       BRANCH=master
       DEPLOY_URL=$(eval "$BOUCLE_DEPLOY_CMD" 2>&1 | grep -oE "$BOUCLE_DEPLOY_URL_REGEX" | head -1)
 
-      # Assert: deployment URL returns 200 (production domain may not have DNS yet)
+      # Assert: deployment URL returns 200 (production domain may not have DNS yet).
       if [ -z "$DEPLOY_URL" ]; then
         echo "FAIL: no deployment URL from wrangler" >&2; exit 1
       fi
-      if ! curl -sL -o /dev/null -w "%{http_code}" "$DEPLOY_URL" | grep -q "200"; then
-        echo "FAIL: deployment URL $DEPLOY_URL not 200" >&2; exit 1
+      # Retry with exponential backoff — Cloudflare Pages edge propagation
+      # can lag the deploy command's return. Total budget ~5 min.
+      DEPLOY_OK=false
+      attempt=0
+      delay=5
+      while [ "$attempt" -lt 6 ]; do
+        attempt=$((attempt + 1))
+        HTTP_CODE=$(curl -sL -o /dev/null -w "%{http_code}" "$DEPLOY_URL" 2>/dev/null || echo "000")
+        if [ "$HTTP_CODE" = "200" ]; then
+          echo "Deployment URL 200 OK (attempt $attempt/6)"
+          DEPLOY_OK=true
+          break
+        fi
+        if [ "$attempt" -lt 6 ]; then
+          echo "Deployment URL returned $HTTP_CODE (attempt $attempt/6) — retrying in ${delay}s..." >&2
+          sleep "$delay"
+          delay=$((delay * 2))
+        fi
+      done
+      if [ "$DEPLOY_OK" != "true" ]; then
+        echo "FAIL: deployment URL $DEPLOY_URL not 200 after $attempt attempts (last code: $HTTP_CODE)" >&2; exit 1
       fi
       echo "Deployed to $DEPLOY_URL (200 OK)"
 
