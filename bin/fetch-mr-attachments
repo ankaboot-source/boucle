@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+# bin/fetch-mr-attachments — downloads attachments uploaded to a GitLab MR
+# Called after MR_FOR_FEEDBACK is resolved in .gitlab-ci.yml. Mines MR notes
+# for /uploads/ paths (screenshots, mockups attached to reviewer verdicts or
+# human comments). Mirrors bin/fetch-issue-attachments but for merge requests.
+#
+# Policy: caps individual attachment size (BOUCLE_IMAGE_MAX_BYTES) and total
+# downloaded size per MR (BOUCLE_IMAGE_TOTAL_MAX_BYTES). Attachments over
+# the individual cap are skipped. Once the total cap is reached, remaining
+# attachments are skipped. Caps apply to ALL attachment types (images, PDFs,
+# archives, etc.) — not just images. Variable names retain the IMAGE prefix
+# for backward compatibility with consumers that override them via GitLab UI.
+# The MR attachments have their OWN total budget tracking — independent from
+# issue attachments — but reuse the same cap env vars.
+#
+# Output: writes .boucle/$ISSUE/.mr-attachments.env (sourced by bin/oc) and
+#         .boucle/$ISSUE/mr-attachments/MANIFEST.md (human-readable log).
+#
+# If BOUCLE_MR_IID is empty (no MR exists on first run), the script exits
+# cleanly with an empty BOUCLE_MR_ATTACHMENTS="" env file. This is normal —
+# workers on the first iteration of a new issue do not have an MR yet.
+set -euo pipefail
+
+ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
+CI_PROJECT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
+STATE_DIR="$CI_PROJECT_DIR/.boucle/$ISSUE"
+ATT_DIR="$STATE_DIR/mr-attachments"
+ENV_FILE="$STATE_DIR/.mr-attachments.env"
+
+# Required only when there IS an MR to fetch. On the first run, no MR exists
+# yet — the script writes an empty env file and exits cleanly.
+MR_IID="${BOUCLE_MR_IID:-}"
+
+# Size caps (defaults: 10 MiB per attachment, 50 MiB total per MR).
+# Names retain the IMAGE prefix for backward compatibility.
+MAX_BYTES="${BOUCLE_IMAGE_MAX_BYTES:-10485760}"
+TOTAL_MAX_BYTES="${BOUCLE_IMAGE_TOTAL_MAX_BYTES:-52428800}"
+
+HOST="${BOUCLE_FORGE_HOST:-framagit.org}"
+
+mkdir -p "$ATT_DIR"
+# Clean slate per run (re-download fresh each time)
+rm -f "$ATT_DIR"/* "$ENV_FILE" 2> /dev/null || true
+
+# No MR on first run — write empty env file and exit cleanly.
+if [ -z "$MR_IID" ]; then
+  echo "[fetch-mr-attachments] BOUCLE_MR_IID is empty (no MR on first run) — skipping"
+  printf 'BOUCLE_MR_ATTACHMENTS=""\n' > "$ENV_FILE"
+  exit 0
+fi
+
+PROJECT_ID="${CI_PROJECT_ID:?CI_PROJECT_ID must be set}"
+
+# Collect all markdown text from MR notes (oldest first).
+# Unlike the issue path, MRs have no parent-issue concept — no inheritance
+# logic here. The MR notes are already fetched by the worker job (for
+# BOUCLE_REVIEWER_FEEDBACK), but we re-fetch them here because we want only
+# the `.body` field (no author prefix, no system-note filter) for path mining.
+ALL_TEXT=$(mktemp)
+trap 'rm -f "$ALL_TEXT"' EXIT
+
+{
+  glab api --hostname "$HOST" "/projects/$PROJECT_ID/merge_requests/$MR_IID/notes?per_page=100&order_by=created_at&sort=asc" 2> /dev/null \
+    | jq -r '.[].body // empty' 2> /dev/null || true
+} > "$ALL_TEXT"
+
+# Extract all GitLab upload paths (any extension — images, PDFs, archives, etc.).
+# GitLab markdown references uploads as ![alt](/uploads/<hash>/<filename.ext>)
+# or as regular links [label](/uploads/...). We only download forge-hosted
+# uploads (not arbitrary internet URLs) for safety.
+mapfile -t UPLOAD_PATHS < <(
+  grep -oiE "/uploads/[^[:space:]\"')]+" "$ALL_TEXT" \
+    | sort -u || true
+)
+
+if [ "${#UPLOAD_PATHS[@]}" -eq 0 ] || [ -z "${UPLOAD_PATHS[0]:-}" ]; then
+  echo "[fetch-mr-attachments] No attachments found in MR !$MR_IID"
+  printf 'BOUCLE_MR_ATTACHMENTS=""\n' > "$ENV_FILE"
+  exit 0
+fi
+
+downloaded_files=()
+total_size=0
+skipped_count=0
+idx=0
+
+for path in "${UPLOAD_PATHS[@]}"; do
+  [ -z "$path" ] && continue
+  idx=$((idx + 1))
+
+  filename=$(basename "$path")
+  # Sanitize filename (alphanumeric, dot, dash, underscore only)
+  filename=$(echo "$filename" | tr -cd '[:alnum:]._-')
+  [ -z "$filename" ] && filename="attachment_${idx}.bin"
+
+  # Prefix with idx to guarantee uniqueness across uploads with same basename
+  outpath="$ATT_DIR/${idx}_${filename}"
+
+  # Check total cap
+  if [ "$total_size" -ge "$TOTAL_MAX_BYTES" ]; then
+    echo "[fetch-mr-attachments] Total cap ($TOTAL_MAX_BYTES bytes) reached — skipping $filename"
+    skipped_count=$((skipped_count + 1))
+    continue
+  fi
+
+  remaining=$((TOTAL_MAX_BYTES - total_size))
+  per_file_cap=$((MAX_BYTES < remaining ? MAX_BYTES : remaining))
+
+  # Download via the GitLab API (not the raw /uploads/ URL).
+  # The raw URL (https://$HOST/uploads/...) returns a login page for private
+  # projects — the /uploads/ endpoint uses cookie-based session auth, not the
+  # PRIVATE-TOKEN header. The API endpoint
+  #   GET /projects/:id/uploads/:secret/:filename
+  # with `Accept: application/octet-stream` returns the binary blob correctly.
+  # See boucle lesson #31.
+  if glab api --hostname "$HOST" --method GET \
+    "/projects/$PROJECT_ID${path}" \
+    -H "Accept: application/octet-stream" \
+    > "$outpath" 2> /dev/null; then
+    actual_size=$(wc -c < "$outpath")
+    if [ "$actual_size" -eq 0 ]; then
+      rm -f "$outpath"
+      echo "[fetch-mr-attachments] Empty response for $filename — skipping"
+      skipped_count=$((skipped_count + 1))
+      continue
+    fi
+    # Check against per-file cap (API has no --max-filesize equivalent)
+    if [ "$actual_size" -gt "$per_file_cap" ]; then
+      rm -f "$outpath"
+      echo "[fetch-mr-attachments] $filename ($actual_size bytes) exceeds cap ($per_file_cap) — skipping"
+      skipped_count=$((skipped_count + 1))
+      continue
+    fi
+    total_size=$((total_size + actual_size))
+    downloaded_files+=("$outpath")
+    echo "[fetch-mr-attachments] Downloaded ${idx}_${filename} ($actual_size bytes)"
+  else
+    rm -f "$outpath"
+    echo "[fetch-mr-attachments] Skipped $filename (download failed)"
+    skipped_count=$((skipped_count + 1))
+  fi
+done
+
+# Write manifest
+{
+  echo "# MR !$MR_IID (issue #$ISSUE) — attachments"
+  echo ""
+  echo "- Downloaded: ${#downloaded_files[@]} attachment(s), $total_size bytes total"
+  [ "$skipped_count" -gt 0 ] && echo "- Skipped: $skipped_count (over size cap or total cap reached)"
+  echo ""
+  echo "## Files"
+  for f in "${downloaded_files[@]}"; do
+    echo "- $(basename "$f") ($(wc -c < "$f") bytes)"
+  done
+} > "$ATT_DIR/MANIFEST.md"
+
+# Write env file for bin/oc to source
+{
+  printf 'BOUCLE_MR_ATTACHMENTS="'
+  for f in "${downloaded_files[@]}"; do
+    printf '%s ' "$f"
+  done
+  printf '"\n'
+} > "$ENV_FILE"
+
+echo "[fetch-mr-attachments] Done: ${#downloaded_files[@]} attachments, $total_size bytes total, $skipped_count skipped"
