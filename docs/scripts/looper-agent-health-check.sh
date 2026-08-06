@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # boucle POC — looper agent health check (layer 2)
-# Runs every 15 min via cron. Spawns an opencode headless session that
+# Runs every 15 min via cron. Spawns a jcode headless session that
 # detects novel edge cases the bash script can't catch:
 # - never-ending fixer↔reviewer cycles (same PR >3 rounds)
 # - zombie processes (running but no CPU/log for 10+ min)
