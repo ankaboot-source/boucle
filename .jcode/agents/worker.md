@@ -113,16 +113,17 @@ You have these skills in `.jcode/skills/`. **Use them** — they contain domain 
     - **Do NOT use the Read tool on binary files** — same as issue attachments.
      - If the human explicitly says to use the file as an asset (e.g. "use this image", "with the attached visual", "visual separation with the attached visual"), treat it as a source asset — copy it into the build tree (`cp <path> public/<name>`) and reference it in your code.
     - If it's a mockup/screenshot, use it as context for addressing the feedback (dimensions, layout hints).
-    - If none are listed, no images were attached to MR comments.
- 8. **Query the codebase graph** (search_graph, trace_path) to understand the code you'll touch before reading files blindly.
- 9. **Load relevant skills** with the `skill` tool — domain skills (astro, frontend-design, etc.) AND process skills (test-driven-development, etc.) based on what the issue asks for.
- 10. Implement the acceptance criteria from `state.md`.
- 11. Update `state.md`:
+     - If none are listed, no images were attached to MR comments.
+  8. **Sibling sub-issues** (when `BOUCLE_SIBLINGS` is non-empty in your prompt) are **context only**. They tell you what sibling sub-issues exist, their state, and their MR URLs — useful when you consume a shared artifact a sibling produced (a component, a schema, a config). The dispatch gate already guaranteed that any sub-issue you depend on is closed before you started, so you do NOT need to wait for or verify siblings. Do NOT let sibling state override this issue's own spec (lesson #46): your acceptance criteria are your contract, not what a sibling did or didn't do. If a sibling's artifact is missing or broken despite the sibling being closed, that's a defect in the sibling — implement your acceptance criteria against the artifact as it should be, and note the discrepancy in `state.md` under "Awaiting human".
+  9. **Query the codebase graph** (search_graph, trace_path) to understand the code you'll touch before reading files blindly.
+  10. **Load relevant skills** with the `skill` tool — domain skills (astro, frontend-design, etc.) AND process skills (test-driven-development, etc.) based on what the issue asks for.
+  11. Implement the acceptance criteria from `state.md`.
+  12. Update `state.md`:
     - **Fill in the "Approach" section with what you did.** This is NOT optional. The Approach section becomes the MR description that the reviewer reads to verify doc conformance (e.g. DESIGN.md §2 and §4 citations). An empty or placeholder Approach causes reviewer FAIL loops — issue #34 on up/urgence-palestine.fr had 3 FAIL verdicts, all blocking on the same criterion: "MR description does not cite DESIGN.md". **Format: write 3-6 bullet points (`- item`), one per aspect of your approach.** GitLab markdown renders single newlines as spaces (soft breaks), so a paragraph becomes an unreadable wall of text. Bullet points (`-`) and blank lines between sections render properly. Each bullet should cite the charter doc section you followed (e.g. "Conforms to DESIGN.md §2 — sharp corners via `--radius-sharp`").
     - **If human MR comments amended the spec** (new or changed requirements vs the triage-era criteria), update the `## Acceptance criteria` section of `state.md` to reflect the amended spec — mark each amended criterion with `(amended via MR comment)`. `state.md` is seeded once from the triage comment and never refreshed automatically; without this update the criteria drift from what the human actually asked for, and the reviewer grades against a stale spec.
     - If you tried and rejected an approach, add it to "Tried and rejected" with why.
- 12. Append to `iterations.md` with what you changed.
- 13. **Update charter docs** if your changes impact them (see "Doc maintenance" above). Commit doc updates in the same MR as the code.
+  13. Append to `iterations.md` with what you changed.
+  14. **Update charter docs** if your changes impact them (see "Doc maintenance" above). Commit doc updates in the same MR as the code.
 
 ## Rules
 
