@@ -638,7 +638,7 @@ if [ "$DRY_RUN" = "true" ]; then
   # Agent stdout+stderr → $AGENT_LOG (for CI log-scraping fallback), then
   # echoed to the job log. AGENT_EXIT is set by run_with_retry in this
   # shell (no pipe → no subshell → global propagates). Final exit ignored.
-  run_with_retry -- jcode --provider-profile "$PROVIDER_PROFILE" --model "$MODEL" --tools '*' run --quiet "$PROMPT" > "$AGENT_LOG" 2>&1 || true
+  run_with_retry -- jcode --provider-profile "$PROVIDER_PROFILE" --model "$MODEL" --tools '*' run --quiet "$PROMPT" > "$AGENT_LOG" 2>&1 || echo "WARN: jcode dry-run exited non-zero (crash or step limit) — see $AGENT_LOG" >&2
   cat "$AGENT_LOG"
   # Stop the RSS sampler so it stops writing to the tmp file.
   if [ -n "$RSS_SAMPLER_PID" ] && kill -0 "$RSS_SAMPLER_PID" 2> /dev/null; then
