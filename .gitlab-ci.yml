@@ -3142,6 +3142,14 @@ catchup:
 # ── Deploy (on push to master) ─────────────────────────────────────────
 deploy:
   stage: deploy
+  # Auto-retry transient runner failures (runner busy/offline, OOM, daemon restart).
+  # The deploy job inherits default.tags: [data] — it can only run on the dedicated
+  # shell runner, which is shared with worker jobs. Contention produces
+  # runner_system_failure; retrying recovers without human intervention.
+  # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
+  retry:
+    max: 3
+    when: runner_system_failure
   rules:
     - if: $BOUCLE_ENABLED != "true"
       when: never
