@@ -186,11 +186,18 @@ default:
         curl -fsSL "https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh" | bash 2>/dev/null || true
       fi
 
-      # ── wrangler (only if deploy uses it) ──────────────────────────
-      if echo "$BOUCLE_DEPLOY_CMD" | grep -q "wrangler" && ! command -v wrangler &>/dev/null; then
-        echo "Installing wrangler..."
-        npm install -g wrangler 2>/dev/null || true
-      fi
+      # ── wrangler (only for jobs that deploy: worker + deploy) ──────
+      # BOUCLE_DEPLOY_CMD is a global var that always contains wrangler,
+      # so the old grep check installed it on every job. Gate on job name
+      # instead — only worker (preview deploy) and deploy (prod deploy) use it.
+      case "$CI_JOB_NAME" in
+        worker|deploy)
+          if echo "$BOUCLE_DEPLOY_CMD" | grep -q "wrangler" && ! command -v wrangler &>/dev/null; then
+            echo "Installing wrangler (job: $CI_JOB_NAME)..."
+            npm install -g wrangler 2>/dev/null || true
+          fi
+          ;;
+      esac
 
       # ── Verify ────────────────────────────────────────────────────
       echo "=== Environment ==="
@@ -199,17 +206,26 @@ default:
       glab version 2>/dev/null | head -1 || echo "glab: MISSING"
       jcode --version 2>/dev/null || echo "jcode: MISSING"
       echo "BOUCLE_PROVIDER_PROFILE=${BOUCLE_PROVIDER_PROFILE:-ollama-cloud}"
-      echo "$BOUCLE_DEPLOY_CMD" | grep -q wrangler && { wrangler --version 2>/dev/null || echo "wrangler: MISSING"; } || echo "wrangler: not needed (deploy doesn't use it)"
+      case "$CI_JOB_NAME" in worker|deploy) echo "$BOUCLE_DEPLOY_CMD" | grep -q wrangler && { wrangler --version 2>/dev/null || echo "wrangler: MISSING"; } || echo "wrangler: not needed";; *) echo "wrangler: not needed (job: $CI_JOB_NAME)";; esac
       codebase-memory-mcp --version 2>/dev/null || echo "codebase-memory-mcp: MISSING"
       echo "==================="
 
       # ── Index repo for codebase-memory-mcp (agents query the graph) ──
-      # Fast (<30s for this repo size). Agents call search_graph /
-      # trace_path / get_code_snippet instead of grep/glob for code discovery.
-      if command -v codebase-memory-mcp &>/dev/null; then
-        echo "Indexing repo for codebase-memory-mcp..."
-        codebase-memory-mcp cli index_repository --repo_path "${CI_PROJECT_DIR:-$(pwd)}" --json >/dev/null 2>&1 || true
-      fi
+      # Fast (<30s for this repo size). Only index for agent jobs that have
+      # the CLI fallback documented in their prompts (triage, worker, reviewer).
+      # Non-agent jobs (dispatch, merger, catchup, e2e, doctor, deploy) never
+      # query the graph — skip the index to save ~30s per job.
+      case "$CI_JOB_NAME" in
+        triage|worker|reviewer)
+          if command -v codebase-memory-mcp &>/dev/null; then
+            echo "Indexing repo for codebase-memory-mcp (job: $CI_JOB_NAME)..."
+            codebase-memory-mcp cli index_repository --repo_path "${CI_PROJECT_DIR:-$(pwd)}" --json >/dev/null 2>&1 || true
+          fi
+          ;;
+        *)
+          echo "Skipping codebase-memory-mcp index (job: $CI_JOB_NAME — not an agent job)"
+          ;;
+      esac
 
 # ── Quality gate (lint + unit tests) ─────────────────────────────────────
 # Runs shellcheck + shfmt + bats on push/MR pipelines only. Never runs on
@@ -1589,6 +1605,16 @@ worker:
     max: 2
     when: runner_system_failure
   resource_group: boucle-issue-$BOUCLE_ISSUE
+  cache:
+    key:
+      files:
+        - package-lock.json
+      prefix: npm-${CI_JOB_NAME}
+    paths:
+      - .npm/
+    policy: pull-push
+  variables:
+    npm_config_cache: .npm
   needs:
     - job: dispatch
       optional: true
@@ -3174,6 +3200,16 @@ deploy:
   retry:
     max: 3
     when: runner_system_failure
+  cache:
+    key:
+      files:
+        - package-lock.json
+      prefix: npm-${CI_JOB_NAME}
+    paths:
+      - .npm/
+    policy: pull-push
+  variables:
+    npm_config_cache: .npm
   rules:
     - if: $BOUCLE_ENABLED != "true"
       when: never
