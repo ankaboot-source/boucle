@@ -59,11 +59,11 @@ Doc updates rules:
 
 ## Skills available
 
-You have these skills in `.opencode/skill/`. **Use them** — they contain domain expertise you need. **Load a skill with the `skill` tool BEFORE doing work in its domain.** This is not optional.
+You have these skills in `.jcode/skills/`. **Use them** — they contain domain expertise you need. **Load a skill with the `skill` tool BEFORE doing work in its domain.** This is not optional.
 
 **Domain skills** (load before working in that domain):
 - **astro** — before writing/editing `.astro` components, pages, or content collections.
-- **ui-ux-pro-max** — before ANY UI/visual work. This is the PRIMARY design skill. It bundles a searchable database (84 styles, 192 color palettes, 74 font pairings, 98 UX guidelines, 22 stacks) and a `--design-system` command that returns a complete design system with reasoning. Run `python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "<query>" --design-system` FIRST, then cross-reference the output with `DESIGN.md` (the charter overrides generic recommendations). This skill is self-contained — it does NOT require `.impeccable.md` or any external setup.
+- **ui-ux-pro-max** — before ANY UI/visual work. This is the PRIMARY design skill. It bundles a searchable database (84 styles, 192 color palettes, 74 font pairings, 98 UX guidelines, 22 stacks) and a `--design-system` command that returns a complete design system with reasoning. Run `python3 .jcode/skills/ui-ux-pro-max/scripts/search.py "<query>" --design-system` FIRST, then cross-reference the output with `DESIGN.md` (the charter overrides generic recommendations). This skill is self-contained — it does NOT require `.impeccable.md` or any external setup.
 - **frontend-design** — before building UI components or visual layouts. NOTE: this skill requires a `.impeccable.md` file at the project root OR the `teach-impeccable` skill. If neither exists, skip it and use **ui-ux-pro-max** + `DESIGN.md` instead.
 - **effective-ui-design** — before styling (accessibility, spacing, typography, responsive).
 - **web-design-guidelines** — before HTML/CSS work (WCAG, semantic HTML, best practices).
@@ -111,7 +111,7 @@ You have these skills in `.opencode/skill/`. **Use them** — they contain domai
  7. **MR comment attachments** (paths listed in your prompt under "MR comment attachments") have the same dual nature — mockups/screenshots for context OR source assets to ship. Decide based on the comment intent:
     - Run `file <path>` to get type and dimensions.
     - **Do NOT use the Read tool on binary files** — same as issue attachments.
-    - If the human explicitly says to use the file as an asset (e.g. "use this image", "with the attached visual", "séparation visuelle avec le visuel ci-joint"), treat it as a source asset — copy it into the build tree (`cp <path> public/<name>`) and reference it in your code.
+     - If the human explicitly says to use the file as an asset (e.g. "use this image", "with the attached visual", "visual separation with the attached visual"), treat it as a source asset — copy it into the build tree (`cp <path> public/<name>`) and reference it in your code.
     - If it's a mockup/screenshot, use it as context for addressing the feedback (dimensions, layout hints).
     - If none are listed, no images were attached to MR comments.
  8. **Query the codebase graph** (search_graph, trace_path) to understand the code you'll touch before reading files blindly.

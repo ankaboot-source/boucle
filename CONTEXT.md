@@ -49,7 +49,7 @@ happens asynchronously, driven by labels and comments.
 | --- | --- |
 | Forge | GitLab (MVP), GitHub (planned) |
 | CI/CD | GitLab CI (8 stages) |
-| AI agents | opencode (4 agents: triage, worker, reviewer, e2e) |
+| AI agents | jcode (4 agents: triage, worker, reviewer, e2e) |
 | Models | glm-5.2 (triage, reviewer), deepseek-v4-flash (worker, e2e) — open-weight preference |
 | Coding agent | pi (`.pi/agents/*.md`) |
 | Knowledge graph | codebase-memory-mcp |
@@ -126,8 +126,8 @@ Contributions to boucle must align with this line.
 - **GitLab only**: GitHub is planned but not yet implemented.
 - **Cloudflare Pages only**: other deployment targets are planned.
 - **codebase-memory-mcp hang in CI**: the MCP handshake can exceed the
-  30-second runner window. `bin/oc` strips MCP servers from the opencode
-  config in CI; agents fall back to native `glob`/`grep`/`read` tools.
+  30-second runner window. `bin/jc` disables MCP servers in CI via
+  `JCODE_RUN_MCP=0`; agents fall back to native `glob`/`grep`/`read` tools.
 - **Steps exhausted before commit**: the worker can run out of steps before
   committing. CI applies an automatic safety-net commit before rebase to
   avoid losing work. Agents must avoid unstaged changes (binaries, local
@@ -153,4 +153,4 @@ Contributions to boucle must align with this line.
 - [AGENTS.md](AGENTS.md) — Agent guide, lessons learned, anti-patterns
 - [README.md](README.md) — Overview, getting started, usage
 - [LOOP.md](LOOP.md) — Per-consumer configuration
-- [.opencode/UPSTREAM-FIX-WORKFLOW.md](.opencode/UPSTREAM-FIX-WORKFLOW.md) — Upstream fix workflow
+- [.jcode/UPSTREAM-FIX-WORKFLOW.md](.jcode/UPSTREAM-FIX-WORKFLOW.md) — Upstream fix workflow

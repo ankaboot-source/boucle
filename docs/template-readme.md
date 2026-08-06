@@ -4,7 +4,7 @@ Portable dev-loop template. Apply to a target repo by copying these files from t
 
 ```bash
 cp -r bin <target-repo>/
-cp -r .opencode <target-repo>/
+cp -r .jcode <target-repo>/
 cp .gitlab-ci.yml <target-repo>/
 cp LOOP.md <target-repo>/
 ```
@@ -13,7 +13,7 @@ Then run `bin/doctor` in CI to verify all prerequisites are met.
 
 ## Roles
 
-Four opencode agents in `.opencode/agents/`:
+Four jcode agents in `.jcode/agents/`:
 
 | Agent | Model | Purpose |
 |-------|-------|---------|
