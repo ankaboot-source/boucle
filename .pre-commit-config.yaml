@@ -18,7 +18,7 @@ repos:
       - id: check-shebang-scripts-are-executable
         exclude: ^\.jcode/
       - id: end-of-file-fixer
-        exclude: ^(src/|docs/|\.jcode/|\.boucle-version$)
+        exclude: ^(src/|docs/|\.jcode/)
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
         exclude: ^(src/|docs/|\.jcode/)
@@ -35,7 +35,7 @@ repos:
   # Local hook: the koalaman/shellcheck-precommit hook pulls a Docker image,
   # which fails in CI/hosts without a daemon. We use the system binary
   # (brew install shellcheck) via the Makefile's lint target instead.
-  # Exclude .jcode/ — upstream-vendored scripts synced by bin/update.
+  # Exclude .jcode/ — upstream-vendored scripts.
   - repo: local
     hooks:
       - id: shellcheck
@@ -46,8 +46,7 @@ repos:
         exclude: ^\.jcode/
 
   # ── shfmt (formatting) ──
-  # Exclude .jcode/ — reformatting vendored scripts creates churn that
-  # the next bin/update overwrites.
+  # Exclude .jcode/ — reformatting vendored scripts creates churn.
   - repo: https://github.com/scop/pre-commit-shfmt
     rev: v3.13.1-1
     hooks:
