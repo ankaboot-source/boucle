@@ -225,17 +225,6 @@ else
   log_pass "BOUCLE_SPEC_PROFILE set"
 fi
 
-# BOUCLE_UPDATE_MODE — controls self-update behavior.
-# Values: release (default, fetch latest tag) | dev (fetch latest commit on main).
-# If unset, bin/update defaults to release.
-EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_UPDATE_MODE" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
-if [ -n "$EXISTING" ]; then
-  log_skip "BOUCLE_UPDATE_MODE already exists"
-else
-  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_UPDATE_MODE -f value=release -f masked=false -f protected=false >/dev/null"
-  log_pass "BOUCLE_UPDATE_MODE set to release"
-fi
-
 # BOUCLE_LLM_API_KEY (masked) — required for jcode to authenticate
 EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_LLM_API_KEY" 2> /dev/null | jq -r '.key // empty')
 if [ -n "$EXISTING" ]; then
@@ -339,7 +328,7 @@ if [ -n "$PROTECTION" ] && echo "$PROTECTION" | jq -e '.name' > /dev/null 2>&1; 
     NEEDS_UPDATE=true
   fi
   if [ "$PUSH_LEVEL" != "30" ]; then
-    echo "  ! $DEFAULT_BRANCH push_access_level=$PUSH_LEVEL (expected 30 for bot self-update)"
+    echo "  ! $DEFAULT_BRANCH push_access_level=$PUSH_LEVEL (expected 30 for bot push)"
     NEEDS_UPDATE=true
   fi
   if [ "$NEEDS_UPDATE" = "true" ]; then
@@ -509,33 +498,6 @@ fi
 
 echo ""
 
-# ── 9. Initial .boucle-version ───────────────────────────────────────
-echo "=== Initial .boucle-version ==="
-
-# Fetch current upstream version (dev mode: main commit SHA — always works,
-# even before the operator starts tagging releases).
-UPSTREAM_VERSION=$(curl -fsSL "https://api.github.com/repos/ankaboot-source/boucle/commits/main" 2> /dev/null | jq -r '.sha // empty' 2> /dev/null || echo "")
-
-if [ -z "$UPSTREAM_VERSION" ]; then
-  log_fail "could not fetch upstream version from GitHub API"
-else
-  # Check if .boucle-version already exists in the repo
-  EXISTING_FILE=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/repository/files/.boucle-version?ref=$DEFAULT_BRANCH" 2> /dev/null | jq -r '.file_path // empty' 2> /dev/null || true)
-  if [ -n "$EXISTING_FILE" ]; then
-    log_skip ".boucle-version already exists in repo"
-  else
-    # Create .boucle-version via GitLab Repository Files API
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/repository/files/.boucle-version -f branch=$DEFAULT_BRANCH -f content=$UPSTREAM_VERSION -f 'commit_message=chore(boucle): record initial version' >/dev/null"
-    if [ $? -eq 0 ]; then
-      log_pass ".boucle-version created (version: ${UPSTREAM_VERSION:0:12}...)"
-    else
-      log_fail ".boucle-version creation failed (bin/update will create it on first run)"
-    fi
-  fi
-fi
-
-echo ""
-
 # ── Summary ───────────────────────────────────────────────────────────
 echo "=== Summary ==="
 echo "  Passed: $PASS"
@@ -567,8 +529,5 @@ echo "  3. Run bin/doctor in CI to verify all prerequisites are met."
 echo "  4. Create your first issue — the webhook will trigger triage."
 
 print_webhook_recommendations
-echo ""
-echo "Self-update: boucle updates itself automatically at the start of each pipeline."
-echo "  Set BOUCLE_UPDATE_MODE=dev in CI/CD variables to track main instead of tags."
 
 exit 0

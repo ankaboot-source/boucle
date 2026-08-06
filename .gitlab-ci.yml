@@ -270,29 +270,6 @@ check:
   script:
     - make check
 
-# ── Self-update (boucle upstream sync) ──────────────────────────────────
-# bin/update fetches the latest boucle version from upstream and commits it
-# to the consumer's master. Runs on a schedule (cron) and on pushes to master
-# — NEVER on webhook triggers, so the autonomous loop never pays the self-update
-# cost on no-op dispatch events. The bot's push does not retrigger a pipeline
-# (webhook push_events=false), so there is no self-loop. Effect is deferred to
-# the next pipeline (current pipeline runs on the original checkout).
-self-update:
-  stage: check
-  # Run on any available runner (including the shared docker runner) so a
-  # busy data runner never blocks the self-update. The job is lightweight.
-  tags: []
-  rules:
-    - if: $BOUCLE_ENABLED != "true"
-      when: never
-    # Only run on schedules (cron) and pushes to master — never on webhook
-    # triggers (the autonomous loop) or MR pipelines.
-    - if: $CI_PIPELINE_SOURCE == "schedule"
-    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"
-    - when: never
-  script:
-    - ./bin/update
-
 # ── Dispatcher ──────────────────────────────────────────────────────────
 dispatch:
   stage: dispatch
