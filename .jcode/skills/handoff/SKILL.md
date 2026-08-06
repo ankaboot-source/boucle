@@ -5,7 +5,7 @@ argument-hint: "What will the next session be used for?"
 disable-model-invocation: true
 ---
 
-Write a handoff document summarising the current conversation so a fresh agent can continue the work. Save it to `/tmp/opencode/handoff-<timestamp>.md` (or, if the host sets a different temporary directory via env, that path).
+Write a handoff document summarising the current conversation so a fresh agent can continue the work. Save it to `/tmp/jcode/handoff-<timestamp>.md` (or, if the host sets a different temporary directory via env, that path).
 
 Include a "suggested skills" section in the document, which suggests skills that the agent should invoke.
 

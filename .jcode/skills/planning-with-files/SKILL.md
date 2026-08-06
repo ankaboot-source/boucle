@@ -246,7 +246,7 @@ export PLAN_ID=2026-01-10-backend-refactor
 ```
 
 Each session reads from its own isolated plan directory. Hooks resolve the correct plan automatically.
-- `scripts/session-catchup.py` — Recover context from previous session (v2.2.0). For OpenCode (v2.38.0+), reads the new SQLite store at `${XDG_DATA_HOME:-~/.local/share}/opencode/opencode.db` instead of the legacy JSON tree.
+- `scripts/session-catchup.py` — Recover context from previous session (v2.2.0). For jcode (v2.38.0+), reads the new SQLite store at `${XDG_DATA_HOME:-~/.local/share}/jcode/jcode.db` instead of the legacy JSON tree.
 
 ## Claude Code Turn-Loop Integration (v2.38.0+)
 

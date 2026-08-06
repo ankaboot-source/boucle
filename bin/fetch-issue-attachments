@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+# bin/fetch-issue-attachments — downloads attachments uploaded to a GitLab issue
+# Called before ./bin/jc <role> to make issue attachments available to agents.
+#
+# Policy: caps individual attachment size (BOUCLE_IMAGE_MAX_BYTES) and total
+# downloaded size per issue (BOUCLE_IMAGE_TOTAL_MAX_BYTES). Attachments over
+# the individual cap are skipped. Once the total cap is reached, remaining
+# attachments are skipped. Caps apply to ALL attachment types (images, PDFs,
+# archives, etc.) — not just images. Variable names retain the IMAGE prefix
+# for backward compatibility with consumers that override them via GitLab UI.
+#
+# Output: writes .boucle/$ISSUE/.attachments.env (sourced by bin/jc) and
+#         .boucle/$ISSUE/attachments/MANIFEST.md (human-readable log).
+set -euo pipefail
+
+ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
+CI_PROJECT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
+STATE_DIR="$CI_PROJECT_DIR/.boucle/$ISSUE"
+ATT_DIR="$STATE_DIR/attachments"
+ENV_FILE="$STATE_DIR/.attachments.env"
+
+# Size caps (defaults: 10 MiB per attachment, 50 MiB total per issue).
+# Names retain the IMAGE prefix for backward compatibility.
+MAX_BYTES="${BOUCLE_IMAGE_MAX_BYTES:-10485760}"
+TOTAL_MAX_BYTES="${BOUCLE_IMAGE_TOTAL_MAX_BYTES:-52428800}"
+
+HOST="${BOUCLE_FORGE_HOST:-framagit.org}"
+PROJECT_ID="${CI_PROJECT_ID:?CI_PROJECT_ID must be set}"
+
+mkdir -p "$ATT_DIR"
+# Clean slate per run (re-download fresh each time)
+rm -f "$ATT_DIR"/* "$ENV_FILE" 2> /dev/null || true
+
+# Collect all markdown text from the issue description + all note bodies
+ALL_TEXT=$(mktemp)
+trap 'rm -f "$ALL_TEXT"' EXIT
+
+{
+  glab api --hostname "$HOST" "/projects/$PROJECT_ID/issues/$ISSUE" 2> /dev/null \
+    | jq -r '.description // empty' 2> /dev/null || true
+  glab api --hostname "$HOST" "/projects/$PROJECT_ID/issues/$ISSUE/notes" 2> /dev/null \
+    | jq -r '.[].body // empty' 2> /dev/null || true
+} > "$ALL_TEXT"
+
+# Parent-issue attachment inheritance.
+# Sub-issues created by boucle carry a "## Parent issue\n#N — <url>" section.
+# Assets (logos, zips, mockups) are often uploaded to the parent issue only,
+# so the worker on the sub-issue would not see them. Resolve the parent IID
+# from the current issue's description and append its description + notes to
+# the text we mine for upload paths. One level only (no recursion) to avoid
+# cycles and keep the scope tight to the split that produced this issue.
+# Disable with BOUCLE_PARENT_ATTACHMENTS_DISABLE=true.
+if [ "${BOUCLE_PARENT_ATTACHMENTS_DISABLE:-false}" != "true" ]; then
+  # Parse the parent IID from the current issue's description only (notes are
+  # not templated, so they cannot carry the "## Parent issue" section).
+  PARENT_IID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/issues/$ISSUE" 2> /dev/null \
+    | jq -r '.description // empty' 2> /dev/null \
+    | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' \
+    | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+  if [ -n "${PARENT_IID:-}" ] && [ "$PARENT_IID" != "$ISSUE" ]; then
+    echo "[fetch-issue-attachments] Found parent issue #$PARENT_IID — inheriting its attachments"
+    {
+      glab api --hostname "$HOST" "/projects/$PROJECT_ID/issues/$PARENT_IID" 2> /dev/null \
+        | jq -r '.description // empty' 2> /dev/null || true
+      glab api --hostname "$HOST" "/projects/$PROJECT_ID/issues/$PARENT_IID/notes" 2> /dev/null \
+        | jq -r '.[].body // empty' 2> /dev/null || true
+    } >> "$ALL_TEXT"
+  fi
+fi
+
+# Extract all GitLab upload paths (any extension — images, PDFs, archives, etc.).
+# GitLab markdown references uploads as ![alt](/uploads/<hash>/<filename.ext>)
+# or as regular links [label](/uploads/...). We only download forge-hosted
+# uploads (not arbitrary internet URLs) for safety.
+mapfile -t UPLOAD_PATHS < <(
+  grep -oiE "/uploads/[^[:space:]\"')]+" "$ALL_TEXT" \
+    | sort -u || true
+)
+
+if [ "${#UPLOAD_PATHS[@]}" -eq 0 ] || [ -z "${UPLOAD_PATHS[0]:-}" ]; then
+  echo "[fetch-issue-attachments] No attachments found in issue #$ISSUE"
+  printf 'BOUCLE_ISSUE_ATTACHMENTS=""\n' > "$ENV_FILE"
+  exit 0
+fi
+
+downloaded_files=()
+total_size=0
+skipped_count=0
+idx=0
+
+for path in "${UPLOAD_PATHS[@]}"; do
+  [ -z "$path" ] && continue
+  idx=$((idx + 1))
+
+  filename=$(basename "$path")
+  # Sanitize filename (alphanumeric, dot, dash, underscore only)
+  filename=$(echo "$filename" | tr -cd '[:alnum:]._-')
+  [ -z "$filename" ] && filename="attachment_${idx}.bin"
+
+  # Prefix with idx to guarantee uniqueness across uploads with same basename
+  outpath="$ATT_DIR/${idx}_${filename}"
+
+  # Check total cap
+  if [ "$total_size" -ge "$TOTAL_MAX_BYTES" ]; then
+    echo "[fetch-issue-attachments] Total cap ($TOTAL_MAX_BYTES bytes) reached — skipping $filename"
+    skipped_count=$((skipped_count + 1))
+    continue
+  fi
+
+  remaining=$((TOTAL_MAX_BYTES - total_size))
+  per_file_cap=$((MAX_BYTES < remaining ? MAX_BYTES : remaining))
+
+  # Download via the GitLab API (not the raw /uploads/ URL).
+  # The raw URL (https://$HOST/uploads/...) returns a login page for private
+  # projects — the /uploads/ endpoint uses cookie-based session auth, not the
+  # PRIVATE-TOKEN header. The API endpoint
+  #   GET /projects/:id/uploads/:secret/:filename
+  # with `Accept: application/octet-stream` returns the binary blob correctly.
+  # See boucle lesson #31.
+  if glab api --hostname "$HOST" --method GET \
+    "/projects/$PROJECT_ID${path}" \
+    -H "Accept: application/octet-stream" \
+    > "$outpath" 2> /dev/null; then
+    actual_size=$(wc -c < "$outpath")
+    if [ "$actual_size" -eq 0 ]; then
+      rm -f "$outpath"
+      echo "[fetch-issue-attachments] Empty response for $filename — skipping"
+      skipped_count=$((skipped_count + 1))
+      continue
+    fi
+    # Check against per-file cap (API has no --max-filesize equivalent)
+    if [ "$actual_size" -gt "$per_file_cap" ]; then
+      rm -f "$outpath"
+      echo "[fetch-issue-attachments] $filename ($actual_size bytes) exceeds cap ($per_file_cap) — skipping"
+      skipped_count=$((skipped_count + 1))
+      continue
+    fi
+    total_size=$((total_size + actual_size))
+    downloaded_files+=("$outpath")
+    echo "[fetch-issue-attachments] Downloaded ${idx}_${filename} ($actual_size bytes)"
+  else
+    rm -f "$outpath"
+    echo "[fetch-issue-attachments] Skipped $filename (download failed)"
+    skipped_count=$((skipped_count + 1))
+  fi
+done
+
+# Write manifest
+{
+  echo "# Issue #$ISSUE — attachments"
+  echo ""
+  echo "- Downloaded: ${#downloaded_files[@]} attachment(s), $total_size bytes total"
+  [ "$skipped_count" -gt 0 ] && echo "- Skipped: $skipped_count (over size cap or total cap reached)"
+  echo ""
+  echo "## Files"
+  for f in "${downloaded_files[@]}"; do
+    echo "- $(basename "$f") ($(wc -c < "$f") bytes)"
+  done
+} > "$ATT_DIR/MANIFEST.md"
+
+# Write env file for bin/jc to source
+{
+  printf 'BOUCLE_ISSUE_ATTACHMENTS="'
+  for f in "${downloaded_files[@]}"; do
+    printf '%s ' "$f"
+  done
+  printf '"\n'
+} > "$ENV_FILE"
+
+echo "[fetch-issue-attachments] Done: ${#downloaded_files[@]} attachments, $total_size bytes total, $skipped_count skipped"
