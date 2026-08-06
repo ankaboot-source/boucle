@@ -7,10 +7,10 @@ node_modules/
 # astro build output (configured via outDir in astro.config.mjs)
 public/
 
-# opencode runtime db (created by the opencode CLI; not part of the repo)
-.opencode-*.db
-.opencode-*.db-shm
-.opencode-*.db-wal
+# jcode runtime db (created by the jcode CLI; not part of the repo)
+.jcode-*.db
+.jcode-*.db-shm
+.jcode-*.db-wal
 
 # logs
 npm-debug.log*
