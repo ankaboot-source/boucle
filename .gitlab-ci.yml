@@ -838,6 +838,14 @@ dispatch:
 # ── Triage ──────────────────────────────────────────────────────────────
 triage:
   stage: triage
+  # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
+  # The triage job inherits default.tags: [data] — if the assigned runner is broken,
+  # the job fails instantly with runner_system_failure and the issue is stranded.
+  # retry lets GitLab reassign to another tagged runner.
+  # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
+  retry:
+    max: 2
+    when: runner_system_failure
   # resource_group omitted — BOUCLE_ISSUE not available at pipeline eval time for triage
   needs:
     - job: dispatch
@@ -1572,6 +1580,14 @@ triage:
 # ── Worker ──────────────────────────────────────────────────────────────
 worker:
   stage: work
+  # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
+  # The worker job inherits default.tags: [data] — if the assigned runner is broken,
+  # the job fails instantly with runner_system_failure and the issue is stranded.
+  # retry lets GitLab reassign to another tagged runner.
+  # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
+  retry:
+    max: 2
+    when: runner_system_failure
   resource_group: boucle-issue-$BOUCLE_ISSUE
   needs:
     - job: dispatch
@@ -2214,6 +2230,14 @@ worker:
 # ── Reviewer ────────────────────────────────────────────────────────────
 reviewer:
   stage: review
+  # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
+  # The reviewer job inherits default.tags: [data] — if the assigned runner is broken,
+  # the job fails instantly with runner_system_failure and the MR is stranded.
+  # retry lets GitLab reassign to another tagged runner.
+  # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
+  retry:
+    max: 2
+    when: runner_system_failure
   resource_group: boucle-issue-$BOUCLE_ISSUE
   needs:
     - job: dispatch
@@ -3182,6 +3206,14 @@ deploy:
 # ── E2E (after deploy) ─────────────────────────────────────────────────
 e2e:
   stage: verify
+  # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
+  # The e2e job inherits default.tags: [data] — if the assigned runner is broken,
+  # the job fails instantly with runner_system_failure and the issue is stranded.
+  # retry lets GitLab reassign to another tagged runner.
+  # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
+  retry:
+    max: 2
+    when: runner_system_failure
   resource_group: boucle-issue-$BOUCLE_ISSUE
   needs:
     - job: dispatch
