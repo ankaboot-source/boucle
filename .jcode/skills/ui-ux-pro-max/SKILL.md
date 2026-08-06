@@ -51,7 +51,7 @@ Extract key information from the request:
 **Always start with `--design-system`** to get comprehensive recommendations with reasoning:
 
 ```bash
-python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "<product_type> <industry> <keywords>" --design-system [-p "Project Name"]
+python3 .jcode/skills/ui-ux-pro-max/scripts/search.py "<product_type> <industry> <keywords>" --design-system [-p "Project Name"]
 ```
 
 This command:
@@ -62,7 +62,7 @@ This command:
 
 **Example:**
 ```bash
-python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "humanitarian NGO editorial brutalist dark" --design-system -p "Urgence Palestine"
+python3 .jcode/skills/ui-ux-pro-max/scripts/search.py "humanitarian NGO editorial brutalist dark" --design-system -p "Urgence Palestine"
 ```
 
 ### Step 2b: Persist Design System (Master + Overrides Pattern)
@@ -70,7 +70,7 @@ python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "humanitarian NGO editor
 To save the design system for hierarchical retrieval across sessions, add `--persist`:
 
 ```bash
-python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "<query>" --design-system --persist -p "Project Name" --output-dir "."
+python3 .jcode/skills/ui-ux-pro-max/scripts/search.py "<query>" --design-system --persist -p "Project Name" --output-dir "."
 ```
 
 This creates:
@@ -79,7 +79,7 @@ This creates:
 
 **With page-specific override:**
 ```bash
-python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "<query>" --design-system --persist -p "Project Name" --output-dir "." --page "dashboard"
+python3 .jcode/skills/ui-ux-pro-max/scripts/search.py "<query>" --design-system --persist -p "Project Name" --output-dir "." --page "dashboard"
 ```
 
 ### Step 2c: Design Dials (optional)
@@ -87,7 +87,7 @@ python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "<query>" --design-syste
 Three optional 1-10 sliders that tune `--design-system` output without changing your query:
 
 ```bash
-python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "<query>" --design-system --variance <1-10> --motion <1-10> --density <1-10>
+python3 .jcode/skills/ui-ux-pro-max/scripts/search.py "<query>" --design-system --variance <1-10> --motion <1-10> --density <1-10>
 ```
 
 | Dial | Low (1-3) | Mid (4-7) | High (8-10) |
@@ -102,7 +102,7 @@ python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "<query>" --design-syste
 
 **Example:**
 ```bash
-python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "internal analytics dashboard" --design-system --variance 8 --motion 7 --density 8 -p "Ops Console"
+python3 .jcode/skills/ui-ux-pro-max/scripts/search.py "internal analytics dashboard" --design-system --variance 8 --motion 7 --density 8 -p "Ops Console"
 ```
 
 ### Step 3: Supplement with Detailed Searches (as needed)
@@ -110,7 +110,7 @@ python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "internal analytics dash
 After getting the design system, use domain searches to get additional details:
 
 ```bash
-python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "<keyword>" --domain <domain> [-n <max_results>]
+python3 .jcode/skills/ui-ux-pro-max/scripts/search.py "<keyword>" --domain <domain> [-n <max_results>]
 ```
 
 **When to use detailed searches:**
@@ -135,7 +135,7 @@ python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "<keyword>" --domain <do
 Get implementation-specific best practices for the project's stack:
 
 ```bash
-python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "<keyword>" --stack <stack>
+python3 .jcode/skills/ui-ux-pro-max/scripts/search.py "<keyword>" --stack <stack>
 ```
 
 **Available stacks:** `react`, `nextjs`, `vue`, `svelte`, `astro`, `swiftui`, `react-native`, `flutter`, `nuxtjs`, `nuxt-ui`, `html-tailwind`, `shadcn`, `jetpack-compose`, `threejs`, `angular`, `laravel`, `javafx`, `wpf`, `winui`, `avalonia`, `uno`, `uwp`
@@ -176,7 +176,7 @@ python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "<keyword>" --stack <sta
 ### Step 2: Generate Design System (REQUIRED)
 
 ```bash
-python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "AI search tool modern minimal" --design-system -p "AI Search"
+python3 .jcode/skills/ui-ux-pro-max/scripts/search.py "AI search tool modern minimal" --design-system -p "AI Search"
 ```
 
 **Output:** Complete design system with pattern, style, colors, typography, effects, and anti-patterns.
@@ -185,16 +185,16 @@ python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "AI search tool modern m
 
 ```bash
 # Get style options for a modern tool product
-python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "minimalism dark mode" --domain style
+python3 .jcode/skills/ui-ux-pro-max/scripts/search.py "minimalism dark mode" --domain style
 
 # Get UX best practices for search interaction and loading
-python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "search loading animation" --domain ux
+python3 .jcode/skills/ui-ux-pro-max/scripts/search.py "search loading animation" --domain ux
 ```
 
 ### Step 4: Stack Guidelines
 
 ```bash
-python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "list performance navigation" --stack astro
+python3 .jcode/skills/ui-ux-pro-max/scripts/search.py "list performance navigation" --stack astro
 ```
 
 **Then:** Synthesize design system + detailed searches and implement the design. **Always cross-reference with the project's DESIGN.md charter** — the charter overrides any generic recommendation from this skill.
@@ -207,10 +207,10 @@ The `--design-system` flag supports two output formats:
 
 ```bash
 # ASCII box (default) - best for terminal display
-python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "fintech crypto" --design-system
+python3 .jcode/skills/ui-ux-pro-max/scripts/search.py "fintech crypto" --design-system
 
 # Markdown - best for documentation
-python3 .opencode/skill/ui-ux-pro-max/scripts/search.py "fintech crypto" --design-system -f markdown
+python3 .jcode/skills/ui-ux-pro-max/scripts/search.py "fintech crypto" --design-system -f markdown
 ```
 
 ---

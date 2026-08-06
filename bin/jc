@@ -3,15 +3,15 @@
 # Wraps jcode: scrubs secrets, enforces caps, runs agent, asserts side effects.
 # Swapping to opencode or pi = editing this one file.
 #
-# Role mapping (boucle role → project-local agent in .opencode/agents/):
+# Role mapping (boucle role → project-local agent in .jcode/agents/):
 #   triage   → triage    (glm-5.2, analyzes issue)
 #   worker   → worker    (deepseek-v4-flash, implements)
 #   reviewer → reviewer  (glm-5.2, adversarial review)
 #   e2e      → e2e       (deepseek-v4-flash, visual verification)
 #
 # jcode loads AGENTS.md (charter doc, repo root) + .jcode/prompt-overlay.md
-# (role-specific prompt, written per invocation) + .jcode/skills/ (symlink to
-# .opencode/skill/). The agent's system prompt provides general behavior;
+# (role-specific prompt, written per invocation) + .jcode/skills/. The agent's
+# system prompt provides general behavior;
 # the user prompt (built below) adds boucle-specific task instructions.
 #
 # jcode CLI: jcode --provider-profile "$BOUCLE_PROVIDER_PROFILE" --model <model> --tools '*' \
@@ -38,7 +38,7 @@ DRY_RUN="${BOUCLE_DRY_RUN:-false}"
 # The only bound is wall-clock timeout (set per-job in .gitlab-ci.yml) + iteration cap.
 # JCODE_RUN_AUTO_POKE=0 prevents the auto-poke loop from extending the run.
 
-# ── Map boucle roles to project-local agents (.opencode/agents/*.md) ──
+# ── Map boucle roles to project-local agents (.jcode/agents/*.md) ──
 # jcode has no --variant flag. Reasoning effort is not controllable per-call.
 # Temperature is set via JCODE_OPENAI_EXTRA_BODY env (parsed from agent YAML frontmatter).
 AGENT=""
@@ -108,7 +108,7 @@ TOML
 }
 
 # ── Parse model + temperature from agent file YAML frontmatter ────────
-# The agent files (.opencode/agents/<role>.md) have YAML frontmatter:
+# The agent files (.jcode/agents/<role>.md) have YAML frontmatter:
 #   model: ollama-cloud/glm-5.2
 #   temperature: 0.3
 # jcode needs the model name without the provider prefix (jcode uses
@@ -121,9 +121,9 @@ TOML
 # The agent file default is the "good default" — override only when needed.
 AGENT_FILE=""
 for candidate in \
-  "$CI_PROJECT_DIR/.opencode/agents/${AGENT}.md" \
-  "$(pwd)/.opencode/agents/${AGENT}.md" \
-  "$(dirname "$0")/../.opencode/agents/${AGENT}.md"; do
+  "$CI_PROJECT_DIR/.jcode/agents/${AGENT}.md" \
+  "$(pwd)/.jcode/agents/${AGENT}.md" \
+  "$(dirname "$0")/../.jcode/agents/${AGENT}.md"; do
   if [ -f "$candidate" ]; then
     AGENT_FILE="$candidate"
     break
@@ -431,7 +431,7 @@ fi
 BOUCLE_MR_ATTACHMENTS="${BOUCLE_MR_ATTACHMENTS:-}"
 
 # ── 4. Build the agent prompt (issue-specific context only) ──────────
-# Role instructions live in .opencode/agents/<role>.md (system prompt,
+# Role instructions live in .jcode/agents/<role>.md (system prompt,
 # loaded via .jcode/prompt-overlay.md).
 # The user prompt below only adds issue-specific context to avoid duplication.
 build_prompt() {
