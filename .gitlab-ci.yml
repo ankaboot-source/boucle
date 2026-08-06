@@ -1719,6 +1719,19 @@ reviewer:
         exit 1
       fi
 
+      # Download attachments uploaded to the issue (images, PDFs, archives).
+      ./bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
+
+      # Download attachments uploaded to MR comments (reviewer screenshots,
+      # human mockups). Mirrors bin/fetch-issue-attachments but for MR notes.
+      export BOUCLE_MR_IID="$MR_IID"
+      ./bin/fetch-mr-attachments || echo "[boucle] WARN: MR attachment fetch failed — continuing without MR attachments"
+
+      # Describe image attachments using a vision model so the reviewer gets
+      # visual context as text without swapping its model.
+      # Forge controls: BOUCLE_VISION_ROUTING, BOUCLE_VISION_MODEL, BOUCLE_VISION_ROLES.
+      ./bin/describe-images reviewer || echo "[boucle] WARN: image description failed — continuing without descriptions"
+
       export BOUCLE_PREVIEW_URL="$PREVIEW_URL"
 
       # Run the agent against the preview.
@@ -1727,9 +1740,9 @@ reviewer:
       # crash, etc.). The missing-verdict recovery below handles the
       # case where the agent didn't post a verdict.
       rc=0
-      ./bin/oc reviewer || rc=$?
+      ./bin/jc reviewer || rc=$?
       if [ "$rc" -ne 0 ]; then
-        echo "WARN: ./bin/oc reviewer exited $rc — checking if a verdict was posted anyway."
+        echo "WARN: ./bin/jc reviewer exited $rc — checking if a verdict was posted anyway."
       fi
 
       # Parse verdict — agent posts on the MR, not the issue.
@@ -2512,10 +2525,10 @@ e2e:
 
       # Run the agent on the live URL.
       # Tolerate non-zero exit: the agent may post a valid verdict (PASS/FAIL)
-      # yet exit non-zero (e.g. pi cleanup, glab "new version" warning on
+      # yet exit non-zero (e.g. jcode cleanup, glab "new version" warning on
       # stderr). We verify the verdict from the issue comment below, so the
       # agent exit code is not authoritative.
-      ./bin/oc e2e || true
+      ./bin/jc e2e || true
 
       # Disable errexit for the post-agent section: the verdict parsing and
       # label/close calls below are all best-effort. GitLab Runner runs - |
@@ -2524,7 +2537,7 @@ e2e:
       # case statement can route to PASS/FAIL/UNCERTAIN. We handle errors
       # explicitly per-command instead.
       set +e
-      # Parse verdict from agent output (bin/oc logs to stdout)
+      # Parse verdict from agent output (bin/jc logs to stdout)
       # If BOUCLE_ISSUE is set, parse from issue comment; otherwise from agent stdout.
       # Tolerate glab/jq non-zero exit (glab may warn about version updates on
       # stderr; jq may error on unexpected JSON). An empty COMMENT → empty VERDICT
