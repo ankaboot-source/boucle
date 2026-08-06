@@ -33,10 +33,10 @@ returns no results, run `index_repository` with the repo path, then retry.
 ## Bug resolution workflow
 
 The upstream-first bug fix workflow is defined in
-[`.opencode/UPSTREAM-FIX-WORKFLOW.md`](.opencode/UPSTREAM-FIX-WORKFLOW.md).
+[`.jcode/UPSTREAM-FIX-WORKFLOW.md`](.jcode/UPSTREAM-FIX-WORKFLOW.md).
 
 That file is portable: it ships with boucle when installed in consumer
-projects (via the `.opencode/` directory). Read it and follow it for any
+projects (via the `.jcode/` directory). Read it and follow it for any
 bug reported on a consumer project.
 
 Summary: **fix upstream in boucle first, then update boucle in the

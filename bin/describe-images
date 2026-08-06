@@ -1,0 +1,190 @@
+#!/usr/bin/env bash
+# bin/describe-images — describe image attachments using a vision model
+# Called after bin/fetch-issue-attachments / bin/fetch-mr-attachments, before bin/jc.
+#
+# Replaces the old bin/detect-vision-need approach which swapped the worker's
+# model to a vision model for the whole run. Instead, this script runs the
+# vision model (minimax-m3) ONLY to describe images, then writes the
+# descriptions to .boucle/$ISSUE/.image-descriptions.md. bin/jc reads that
+# file and injects the descriptions into the agent prompt as text — so the
+# worker/reviewer/triage stay on their default models (deepseek-v4-flash,
+# glm-5.2) and get image context as text, not as raw binaries.
+#
+# Output: writes .boucle/$ISSUE/.image-descriptions.md (markdown with one
+#         section per image: filename, dimensions, description).
+#         If no images found, exits 0 without writing the file.
+#
+# Forge controls (all optional, with defaults):
+#   BOUCLE_VISION_ROUTING  — "enabled" (default) or "disabled" (master switch)
+#   BOUCLE_VISION_MODEL    — vision model to use (default: minimax-m3)
+#   BOUCLE_VISION_ROLES    — comma-separated eligible roles (default: triage,worker,reviewer)
+#   BOUCLE_VISION_TIMEOUT  — per-image timeout (default: 120s)
+set -euo pipefail
+
+ROLE="${1:?usage: bin/describe-images <role>}"
+ISSUE="${BOUCLE_ISSUE:-}"
+CI_PROJECT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
+STATE_DIR="$CI_PROJECT_DIR/.boucle/$ISSUE"
+DESC_FILE="$STATE_DIR/.image-descriptions.md"
+
+# ── Master switch ──────────────────────────────────────────────────────
+if [ "${BOUCLE_VISION_ROUTING:-enabled}" = "disabled" ]; then
+  echo "[describe-images] routing disabled (BOUCLE_VISION_ROUTING=disabled) — skipping" >&2
+  exit 0
+fi
+
+# ── Role eligibility ──────────────────────────────────────────────────
+ELIGIBLE_ROLES="${BOUCLE_VISION_ROLES:-triage,worker,reviewer}"
+case ",${ELIGIBLE_ROLES}," in
+  *",${ROLE},"*) : ;; # eligible
+  *)
+    echo "[describe-images] role=${ROLE} not in BOUCLE_VISION_ROLES='${ELIGIBLE_ROLES}' — skipping" >&2
+    exit 0
+    ;;
+esac
+
+# ── Check that `file` command is available ────────────────────────────
+if ! command -v file > /dev/null 2>&1; then
+  echo "[describe-images] WARNING: 'file' command not found — cannot detect images, skipping" >&2
+  exit 0
+fi
+
+# ── Scan attachment dirs for images ───────────────────────────────────
+IMAGE_FILES=()
+for dir in "$STATE_DIR/attachments" "$STATE_DIR/mr-attachments"; do
+  [ -d "$dir" ] || continue
+  while IFS= read -r -d '' f; do
+    mime=$(file --mime-type -b "$f" 2> /dev/null || echo "")
+    case "$mime" in
+      image/*) IMAGE_FILES+=("$f") ;;
+    esac
+  done < <(find "$dir" -maxdepth 1 -type f -print0 2> /dev/null || true)
+done
+
+IMAGE_COUNT=${#IMAGE_FILES[@]}
+if [ "$IMAGE_COUNT" -eq 0 ]; then
+  echo "[describe-images] role=${ROLE} images=0 → no descriptions needed (staying on default model)" >&2
+  exit 0
+fi
+
+echo "[describe-images] role=${ROLE} images=${IMAGE_COUNT} → generating descriptions with vision model" >&2
+
+# ── Resolve vision model + provider ──────────────────────────────────
+VISION_MODEL="${BOUCLE_VISION_MODEL:-minimax-m3}"
+VISION_TIMEOUT="${BOUCLE_VISION_TIMEOUT:-120}"
+PROVIDER_PROFILE="${BOUCLE_PROVIDER_PROFILE:-boucle}"
+
+# ── Generate jcode config (same as bin/jc) ────────────────────────────
+# Reuse the same env-var-based config generation so the vision model uses
+# the same provider profile as the main agent.
+ensure_jcode_config() {
+  local config_dir="${JCODE_HOME:-$HOME/.jcode}"
+  local config_file="$config_dir/config.toml"
+  if [ -n "${BOUCLE_LLM_BASE_URL:-}" ] && [ -n "${BOUCLE_LLM_API_KEY:-}" ]; then
+    mkdir -p "$config_dir"
+    cat > "$config_file" << TOML
+[provider]
+default_provider = "$PROVIDER_PROFILE"
+
+[providers.$PROVIDER_PROFILE]
+type = "openai-compatible"
+base_url = "$BOUCLE_LLM_BASE_URL"
+auth = "bearer"
+api_key_env = "BOUCLE_LLM_API_KEY"
+default_model = "$VISION_MODEL"
+requires_api_key = true
+TOML
+    export JCODE_HOME="$config_dir"
+  elif [ ! -f "$config_file" ]; then
+    echo "[describe-images] ERROR: no jcode config. Set BOUCLE_LLM_BASE_URL + BOUCLE_LLM_API_KEY," >&2
+    echo "[describe-images]        or pre-install ~/.jcode/config.toml on the runner." >&2
+    exit 1
+  fi
+}
+
+ensure_jcode_config
+
+# jcode env setup (same as bin/jc)
+export JCODE_RUN_MCP="${JCODE_RUN_MCP:-0}"
+export JCODE_RUN_AUTO_POKE="${JCODE_RUN_AUTO_POKE:-0}"
+export JCODE_STREAM_IDLE_TIMEOUT_SECS="${JCODE_STREAM_IDLE_TIMEOUT_SECS:-1800}"
+export JCODE_NO_UPDATE="${JCODE_NO_UPDATE:-1}"
+export JCODE_NO_SELFDEV="${JCODE_NO_SELFDEV:-1}"
+export JCODE_NO_EMOJI="${JCODE_NO_EMOJI:-1}"
+
+# ── Describe each image ───────────────────────────────────────────────
+# For each image file, run jcode with a prompt asking the vision model to
+# describe the image. The image path is passed in the prompt — jcode's
+# vision model can read local files when given the path.
+mkdir -p "$STATE_DIR"
+: > "$DESC_FILE"
+
+echo "# Image descriptions for issue #${ISSUE}" >> "$DESC_FILE"
+echo "" >> "$DESC_FILE"
+echo "Generated by \`bin/describe-images\` using vision model \`${VISION_MODEL}\`." >> "$DESC_FILE"
+echo "" >> "$DESC_FILE"
+
+SUCCESS_COUNT=0
+FAIL_COUNT=0
+
+for img in "${IMAGE_FILES[@]}"; do
+  filename=$(basename "$img")
+  # Get dimensions/metadata via `file`
+  meta=$(file "$img" 2>/dev/null || echo "unknown")
+
+  echo "## ${filename}" >> "$DESC_FILE"
+  echo "" >> "$DESC_FILE"
+  echo "- File: \`$img\`" >> "$DESC_FILE"
+  echo "- Metadata: ${meta}" >> "$DESC_FILE"
+  echo "" >> "$DESC_FILE"
+
+  # Build the description prompt. The vision model reads the image from
+  # the local path and returns a text description.
+  DESC_PROMPT="You are a vision model. Read the image at the following local file path and describe it in detail for a developer who will use it as context to implement a web feature. Describe: visual content, colors, layout, dimensions, text content (if any), and the likely purpose (logo, photo, mockup, screenshot, pattern, icon, etc.). Be concise but complete.
+
+Image file path: ${img}
+
+Read the file at that path and describe it. Output only the description, no preamble."
+
+  # Run jcode with the vision model, capturing output.
+  # Timeout per image so one hanging image doesn't block the whole run.
+  desc_output=""
+  if desc_output=$(timeout "$VISION_TIMEOUT" \
+    jcode --provider-profile "$PROVIDER_PROFILE" --model "$VISION_MODEL" --tools '*' \
+    run --quiet "$DESC_PROMPT" 2>/dev/null); then
+    if [ -n "$desc_output" ]; then
+      echo "Description:" >> "$DESC_FILE"
+      echo "" >> "$DESC_FILE"
+      echo "$desc_output" >> "$DESC_FILE"
+      echo "" >> "$DESC_FILE"
+      SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+      echo "[describe-images] Described ${filename} ✓" >&2
+    else
+      echo "Description: *(vision model returned empty output)*" >> "$DESC_FILE"
+      echo "" >> "$DESC_FILE"
+      FAIL_COUNT=$((FAIL_COUNT + 1))
+      echo "[describe-images] ${filename}: empty output from vision model" >&2
+    fi
+  else
+    rc=$?
+    echo "Description: *(vision model failed or timed out after ${VISION_TIMEOUT}s, exit ${rc})*" >> "$DESC_FILE"
+    echo "" >> "$DESC_FILE"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+    echo "[describe-images] ${filename}: failed (exit ${rc}) — continuing" >&2
+  fi
+
+  echo "---" >> "$DESC_FILE"
+  echo "" >> "$DESC_FILE"
+done
+
+echo "[describe-images] Done: ${SUCCESS_COUNT} described, ${FAIL_COUNT} failed, ${IMAGE_COUNT} total" >&2
+
+# If ALL images failed, remove the file so bin/jc doesn't inject a useless
+# file full of error stubs. If at least one succeeded, keep it.
+if [ "$SUCCESS_COUNT" -eq 0 ]; then
+  echo "[describe-images] All images failed — removing descriptions file" >&2
+  rm -f "$DESC_FILE"
+  exit 0
+fi
+
+exit 0

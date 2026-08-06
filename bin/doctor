@@ -44,11 +44,18 @@ for var in BOUCLE_TOKEN BOUCLE_ENABLED CLOUDFLARE_API_TOKEN BOUCLE_TRIGGER_TOKEN
   fi
 done
 
-# ── PI_AUTH (file type) ─────────────────────────────────────────
-if glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/PI_AUTH" 2> /dev/null | jq -e '.variable_type == "file"' > /dev/null 2>&1; then
-  pass "PI_AUTH is file type"
+# ── BOUCLE_LLM_API_KEY (masked) ──────────────────────────────────
+if glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_LLM_API_KEY" 2> /dev/null | jq -e '.key // empty' > /dev/null 2>&1; then
+  pass "BOUCLE_LLM_API_KEY is set"
 else
-  fail "PI_AUTH missing or not file type"
+  fail "BOUCLE_LLM_API_KEY missing — jcode cannot authenticate to the LLM provider"
+fi
+
+# ── BOUCLE_LLM_BASE_URL ──────────────────────────────────────────
+if glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_LLM_BASE_URL" 2> /dev/null | jq -e '.key // empty' > /dev/null 2>&1; then
+  pass "BOUCLE_LLM_BASE_URL is set"
+else
+  warn "BOUCLE_LLM_BASE_URL not set — bin/jc will use its built-in default"
 fi
 
 # ── Branch protection ──────────────────────────────────────────────────
@@ -90,18 +97,18 @@ fi
 
 # ── Agents parse ───────────────────────────────────────────────────────
 for role in triage worker reviewer e2e; do
-  if [ -f ".pi/agents/$role.md" ]; then
+  if [ -f ".jcode/agents/$role.md" ]; then
     pass "agent $role.md exists"
   else
     fail "agent $role.md missing"
   fi
 done
 
-# ── pi reachable ─────────────────────────────────────────────────
-if command -v pi &> /dev/null; then
-  pass "pi in PATH"
+# ── jcode reachable ────────────────────────────────────────────────
+if command -v jcode &> /dev/null; then
+  pass "jcode in PATH"
 else
-  fail "pi not in PATH"
+  fail "jcode not in PATH"
 fi
 
 # ── CLOUDFLARE_API_TOKEN can deploy ────────────────────────────────────

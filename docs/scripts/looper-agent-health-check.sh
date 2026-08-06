@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # boucle POC — looper agent health check (layer 2)
-# Runs every 15 min via cron. Spawns an opencode headless session that
+# Runs every 15 min via cron. Spawns a jcode headless session that
 # detects novel edge cases the bash script can't catch:
 # - never-ending fixer↔reviewer cycles (same PR >3 rounds)
 # - zombie processes (running but no CPU/log for 10+ min)
@@ -33,21 +33,21 @@ Run these commands and analyze the output:
 - `/tmp/looper-dev/looper loop list --json` — all loops and their status
 - `sqlite3 ~/.looper/looper.sqlite "SELECT seq, type, status, repo, pr_number, attempts, last_run_at FROM loops WHERE status IN ('"'"'running'"'"','"'"'backing_off'"'"','"'"'paused'"'"','"'"'queued'"'"') ORDER BY seq;"` — active/stuck loops
 - `sqlite3 ~/.looper/looper.sqlite "SELECT l.seq, l.type, l.pr_number, l.repo, COUNT(*) as rounds FROM loops l WHERE l.type IN ('"'"'fixer'"'"','"'"'reviewer'"'"') AND l.pr_number IS NOT NULL GROUP BY l.pr_number, l.type HAVING rounds > 3;"` — potential never-ending cycles
-- `pgrep -af opencode` — running agent processes (check for zombies: running but no CPU)
+- `pgrep -af jcode` — running agent processes (check for zombies: running but no CPU)
 - `tail -50 ~/.looper/logs/looperd.log` — recent daemon log (look for errors, panics, stuck ticks)
 - `tail -30 ~/.looper/logs/health-check.log` — what the bash script already handled
 
 ### 2. Detect anomalies
 Look for these patterns the bash script CANNOT catch:
 - **Never-ending cycles:** same PR has >3 fixer OR >3 reviewer loops (ping-pong: fixer fixes → reviewer finds new issue → fixer fixes again)
-- **Zombie processes:** loop status "running" but the opencode child process has 0% CPU for 10+ min (stuck on infinite reasoning)
+- **Zombie processes:** loop status "running" but the jcode child process has 0% CPU for 10+ min (stuck on infinite reasoning)
 - **Semantic garbage:** worker PR with 0 file changes, review with 0 inline comments, fixer that "fixed" something but the diff is empty
 - **Novel errors:** any error in daemon log not matching known bugs (#595/#598/#599/#600)
 - **Stuck planner:** planner running >30 min (should take <1h but if stuck at 45min with no spec PR, likely stuck)
 
 ### 3. Take action (quick-win fixes)
 - If a never-ending cycle is detected: stop the loop with `/tmp/looper-dev/looper stop <seq>`, document why
-- If a zombie process is detected: kill the opencode child PID, mark the loop as stopped in DB
+- If a zombie process is detected: kill the jcode child PID, mark the loop as stopped in DB
 - If a novel error looks like a new bug: check if it is already filed at https://github.com/nexu-io/looper/issues, if not, file a minimalist bug report using `gh issue create --repo nexu-io/looper`
 
 ### 4. Document lessons
@@ -77,7 +77,6 @@ Print a concise summary at the end:
 echo "[$TS] agent health check starting..." >> "$LOG"
 
 # Run the agent headless with auto-approve (needs shell/sqlite3/gh access)
-OPENCODE_PERMISSION='{"bash":"allow","edit":"allow","write":"allow","read":"allow","glob":"allow","grep":"allow","list":"allow","external_directory":"allow","task":"allow","skill":"allow","todowrite":"allow","question":"allow","webfetch":"allow","websearch":"allow","lsp":"allow","doom_loop":"allow"}' \
-  opencode run --auto --dir "$POC_DIR" --format json --title "looper-health-check-$TS" "$PROMPT" >> "$LOG" 2>&1 || true
+  jcode run --auto --dir "$POC_DIR" --format json --title "looper-health-check-$TS" "$PROMPT" >> "$LOG" 2>&1 || true
 
 echo "[$TS] agent health check done" >> "$LOG"
