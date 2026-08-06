@@ -9,6 +9,7 @@ set -euo pipefail
 PROJECT=""
 HOST="framagit.org"
 BOT_ID=""
+BOT_USERNAME="${BOUCLE_BOT_USERNAME:-up-bot}"
 BOT_TOKEN=""
 CF_TOKEN=""
 RUNNER_TAG=""
@@ -28,6 +29,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --bot-id)
       BOT_ID="$2"
+      shift 2
+      ;;
+    --bot-username)
+      BOT_USERNAME="$2"
       shift 2
       ;;
     --bot-token)
@@ -61,6 +66,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --project <id-or-path>   Target GitLab project ID or path (e.g. 123456 or group/project)"
       echo "  --host <forge-host>      GitLab host (default: framagit.org)"
       echo "  --bot-id <id>            Bot user ID (for adding as project member)"
+      echo "  --bot-username <name>    Bot username (default: up-bot; used to seed BOUCLE_BOT_USERNAME CI variable)"
       echo "  --bot-token <pat>        Bot PAT (used as BOUCLE_TOKEN CI variable)"
       echo "  --cf-token <token>       Cloudflare API token (for Pages project)"
       echo "  --runner-tag <tag>       Runner tag to use in .gitlab-ci.yml (default: boucle)"
@@ -341,6 +347,36 @@ if [ -n "$BOT_ID" ]; then
   fi
 else
   log_skip "bot member (no --bot-id provided)"
+fi
+
+# ── 5b. Bot ID + Username CI variables ─────────────────────────────────
+# set_boucle_label reassigns issues to the bot via assignee_ids[], which
+# requires a numeric user ID. Seed BOUCLE_BOT_ID when --bot-id is provided
+# so the loop can reassign without a username lookup at runtime. Always
+# seed BOUCLE_BOT_USERNAME (default up-bot) so the before_script fallback
+# can resolve the ID by username when BOUCLE_BOT_ID is unset.
+echo "=== Bot CI Variables ==="
+
+# BOUCLE_BOT_ID (only when --bot-id provided; it's a public user ID, not a secret)
+if [ -n "$BOT_ID" ]; then
+  EXISTING_BOT_ID_VAR=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_BOT_ID" 2>/dev/null | jq -r '.value // empty' || true)
+  if [ "$EXISTING_BOT_ID_VAR" = "$BOT_ID" ]; then
+    log_skip "BOUCLE_BOT_ID CI variable (already $BOT_ID)"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_BOT_ID -f value=$BOT_ID -f masked=false -f protected=false >/dev/null"
+    log_pass "BOUCLE_BOT_ID CI variable set to $BOT_ID"
+  fi
+else
+  log_skip "BOUCLE_BOT_ID CI variable (no --bot-id provided; before_script will resolve by username)"
+fi
+
+# BOUCLE_BOT_USERNAME (always — drives the before_script username fallback)
+EXISTING_BOT_USERNAME_VAR=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_BOT_USERNAME" 2>/dev/null | jq -r '.value // empty' || true)
+if [ "$EXISTING_BOT_USERNAME_VAR" = "$BOT_USERNAME" ]; then
+  log_skip "BOUCLE_BOT_USERNAME CI variable (already $BOT_USERNAME)"
+else
+  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_BOT_USERNAME -f value=$BOT_USERNAME -f masked=false -f protected=false >/dev/null"
+  log_pass "BOUCLE_BOT_USERNAME CI variable set to $BOT_USERNAME"
 fi
 
 echo ""
