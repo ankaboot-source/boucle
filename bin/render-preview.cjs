@@ -19,10 +19,17 @@ if (!input || !output) {
   // Resolved at call time so NODE_PATH=/tmp/node_modules (installed on-demand
   // by the CI block) takes effect — keeping these requires inside the IIFE.
   const puppeteer = require('puppeteer-core');
-  const chromium = require('@sparticuz/chromium');
+  // @sparticuz/chromium v149+ restructured its exports as an ES module:
+  // the named exports (executablePath, args, headless) moved under `.default`.
+  // Older versions expose them at the top level. Support both shapes so an
+  // unpinned `npm install` in CI doesn't break the render on a version bump.
+  const chromiumMod = require('@sparticuz/chromium');
+  const chromium = chromiumMod.default || chromiumMod;
   const browser = await puppeteer.launch({
     args: chromium.args,
-    executablePath: await chromium.executablePath(),
+    executablePath: typeof chromium.executablePath === 'function'
+      ? await chromium.executablePath()
+      : chromium.executablePath,
     headless: chromium.headless,
   });
   try {
