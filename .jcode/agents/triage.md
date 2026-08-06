@@ -209,18 +209,18 @@ The CI sees the final marker + `## Disposition` and acts immediately — it sets
 
 ### Phase 3 — Creative proposal & consequences (optional, if steps remain after Phase 2)
 
-**Goal: propose ideas BEYOND the explicitly requested demand, and draw out what logically follows from the need. This is the "force de proposition créative".**
+**Goal: propose ideas BEYOND the explicitly requested demand, and draw out what logically follows from the need. This is the "creative proposal force".**
 
 1. **Load `ln-51-opportunity-evaluator`** (skill tool). Generate 3-5 **materially distinct** opportunities (not cosmetic variants) that the need opens up — directions the requester didn't envision. Each opportunity must be a different *approach to the need*, not a different *styling of the solution*.
 2. **Load `wayfinder`** (skill tool). Map the **fog-of-war**: what decisions will this need force downstream? "If we build this, then X becomes necessary/possible/blocked." This is second-order consequence mapping — the logical implications of satisfying the need, not just the immediate task.
 3. **For UI/UX issues**, load `prototype` (skill tool) and consider 2-3 radically different UI variations on the affected route — not to implement, but to surface design decisions the worker should be aware of.
-4. **Record the output** in two new sections of your final comment: `## Propositions créatives` and `## Conséquences`. These are advisory — the worker is not bound by them, but they expand the solution space beyond the literal request.
+4. **Record the output** in two new sections of your final comment: `## Creative proposals` and `## Consequences`. These are advisory — the worker is not bound by them, but they expand the solution space beyond the literal request.
 
 **Bounded output:** 3-5 bullets per section max. A wall of text is a triage defect — the worker will not read it. Each bullet is one idea or one consequence, one sentence.
 
 ### Phase 4 — Final post (mandatory)
 
-Post your **final triage comment** with the `<!-- boucle:triage v=1 -->` marker. If you completed Phases 2-3, the comment includes the `## Propositions créatives` and `## Conséquences` sections. If you skipped them (step budget exhausted), post without them — the Phase 1 draft is still valid.
+Post your **final triage comment** with the `<!-- boucle:triage v=1 -->` marker. If you completed Phases 2-3, the comment includes the `## Creative proposals` and `## Consequences` sections. If you skipped them (step budget exhausted), post without them — the Phase 1 draft is still valid.
 
 The CI collapses duplicate triage comments from the same run, replacing the earlier draft with your final version — so only the final analysis remains visible.
 
@@ -231,7 +231,7 @@ Post your **final triage comment** on the issue with this format:
 ```
 <!-- boucle:triage v=1 -->
 ## TL;DR
-<2-4 phrases en langage courant, non-technique. Décrit le résultat visible pour l'utilisateur, pas le mécanisme d'implémentation.>
+<2-4 sentences in plain, non-technical language. Describe the visible result for the user, not the implementation mechanism.>
 
 ## Analysis
 <what the issue actually asks for, in your own words — structured via the four problem-framing lenses (see §1): user segment, pain points, business context, success metrics>
@@ -254,17 +254,17 @@ If no blocking questions, write "none" on its own line.
 ## Disposition
 READY | NEEDS-INFO | NEEDS-SPLIT
 
-## Propositions créatives
+## Creative proposals
 - <opportunity 1 — a materially different approach to the need, not a styling variant>
 - <opportunity 2>
 - <opportunity 3>
 
-## Conséquences
+## Consequences
 - <consequence 1 — what follows from satisfying this need: a decision, dependency, or new possibility it forces downstream>
 - <consequence 2>
 ```
 
-**The `## Propositions créatives` and `## Conséquences` sections are OPTIONAL.** Include them only if you completed Phase 3. If you exhausted your step budget in Phase 1 or 2, omit them — the comment is still valid. Never pad these sections with cosmetic variants or obvious restatements; 3 sharp bullets beat 5 generic ones.
+**The `## Creative proposals` and `## Consequences` sections are OPTIONAL.** Include them only if you completed Phase 3. If you exhausted your step budget in Phase 1 or 2, omit them — the comment is still valid. Never pad these sections with cosmetic variants or obvious restatements; 3 sharp bullets beat 5 generic ones.
 
 You may also post a **first-pass draft** (with the `<!-- boucle:draft role=triage -->` marker — see "Phase 1" above) before the final comment. The CI collapses duplicate triage comments from the same run, so the draft is replaced by the final comment.
 

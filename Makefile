@@ -9,12 +9,12 @@ SHFMT_FLAGS := -i 2 -bn -ci -sr
 BATS := bats
 
 # Shell scripts in the repo: *.sh files + extensionless scripts in bin/.
-# Exclude .opencode/ — those scripts are upstream-vendored (synced by bin/update);
+# Exclude .jcode/ — those scripts are upstream-vendored (synced by bin/update);
 # reformatting them creates churn that the next update overwrites.
 # Exclude bin/oc — it is upstream-vendored (synced by bin/update from boucle);
 # the consumer copy may lag upstream's shfmt-conformant version until the next
 # sync, and reformatting it locally creates churn the next update overwrites.
-SRC_SH := $(shell git ls-files '*.sh' '*.bash' ':!:.opencode' 2>/dev/null)
+SRC_SH := $(shell git ls-files '*.sh' '*.bash' ':!:.jcode' 2>/dev/null)
 BIN_SH := $(shell git ls-files 'bin/*' 2>/dev/null | grep -v '\.cjs$$' | grep -v '^bin/oc$$' || true)
 ALL_SH := $(strip $(SRC_SH) $(BIN_SH))
 
