@@ -75,6 +75,17 @@ variables:
   # retry with this fallback provider before escalating to a human. Empty = disabled.
   # Per-role model overrides: BOUCLE_FALLBACK_MODEL_{TRIAGE,WORKER,REVIEWER,E2E}.
   BOUCLE_FALLBACK_PROVIDER: ""
+  # ── Vision model routing (capability-based, workaround for jcode #819) ──
+  # When issue/MR attachments contain images, override the role's model to a
+  # vision-capable model so the agent can actually see the images instead of
+  # crashing (jcode #755) or fabricating descriptions.
+  # BOUCLE_VISION_ROUTING: "enabled" (default) or "disabled" — master switch.
+  # BOUCLE_VISION_MODEL: vision model to use (default: minimax-m3, on OpenRouter).
+  # BOUCLE_VISION_ROLES: comma-separated eligible roles (default: triage,worker,reviewer).
+  # e2e is excluded (curl+grep, no image consumption).
+  BOUCLE_VISION_ROUTING: "enabled"
+  BOUCLE_VISION_MODEL: "minimax-m3"
+  BOUCLE_VISION_ROLES: "triage,worker,reviewer"
 
 # ── Default: use node:22-slim (has node, npm, curl — much smaller than node:22) ─
 # The shared runner is a docker executor. node:22-slim is ~250MB vs ~1GB.
@@ -961,6 +972,10 @@ triage:
       # Makes them available to the triage agent via BOUCLE_ISSUE_ATTACHMENTS.
       ./bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
 
+      # Detect image attachments and route to a vision-capable model if needed.
+      # Forge controls: BOUCLE_VISION_ROUTING, BOUCLE_VISION_MODEL, BOUCLE_VISION_ROLES.
+      eval "$(./bin/detect-vision-need triage)"
+
       # Fetch the issue body and export it so the triage agent does not
       # waste steps calling glab issue view / gh issue view (minimax-m3
       # burned 4+ steps on failed fetches before posting its comment).
@@ -1791,6 +1806,11 @@ worker:
       # Makes them available to the worker agent via BOUCLE_ISSUE_ATTACHMENTS.
       ./bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
 
+      # Detect image attachments (issue + MR comments) and route to a
+      # vision-capable model if needed.
+      # Forge controls: BOUCLE_VISION_ROUTING, BOUCLE_VISION_MODEL, BOUCLE_VISION_ROLES.
+      eval "$(./bin/detect-vision-need worker)"
+
       # Fetch the issue body and export it so the worker agent does not waste
       # steps calling glab issue view, and — more importantly — so it has the
       # instructed content (URLs, citations, texts) at hand. Without this, the
@@ -2332,6 +2352,20 @@ reviewer:
       if [ -z "$BOUCLE_ISSUE_BODY" ]; then
         echo "[boucle] WARN: could not fetch issue #$BOUCLE_ISSUE body — reviewer will grade without the original spec."
       fi
+
+      # Download attachments from MR comments (reviewer screenshots, human
+      # mockups) so the reviewer can see what the human pointed at.
+      # Gated on MR_IID being non-empty (it is set above from the MR lookup).
+      if [ -n "${MR_IID:-}" ]; then
+        export BOUCLE_MR_IID="$MR_IID"
+        ./bin/fetch-mr-attachments || echo "[boucle] WARN: MR attachment fetch failed — continuing without MR attachments"
+      fi
+      ./bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
+
+      # Detect image attachments (issue + MR comments) and route to a
+      # vision-capable model if needed.
+      # Forge controls: BOUCLE_VISION_ROUTING, BOUCLE_VISION_MODEL, BOUCLE_VISION_ROLES.
+      eval "$(./bin/detect-vision-need reviewer)"
 
       # Run the agent against the preview.
       # Use `|| rc=$?` to suppress set -e so the script continues to

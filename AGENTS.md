@@ -976,6 +976,23 @@ atomic.
       + `boucle:draft`, e2e `boucle:verdict` + `boucle:draft`, and triage
       `boucle:triage` + `boucle:draft`.
 
+48. **Capability-based model routing (vision workaround)**
+    - ❌ DO NOT run all agents on a vision model when only some issues/MR
+      comments contain images — 3x cost for roles that never touch images.
+    - ❌ DO NOT run all agents on a text-only model and accept that they
+      crash (jcode #755) or fabricate image content when images are present.
+    - ✅ DO: detect image attachments via `bin/detect-vision-need <role>`
+      (called after `fetch-issue-attachments`/`fetch-mr-attachments`, before
+      `bin/jc <role>`). When images are found, it emits
+      `export BOUCLE_MODEL_<ROLE>=<vision_model>` to stdout; the caller
+      `eval`s it so `bin/jc`'s existing per-role override (line 144-149)
+      routes to a vision-capable model for that run only. Forge controls:
+      `BOUCLE_VISION_ROUTING` (enabled/disabled), `BOUCLE_VISION_MODEL`
+      (default minimax-m3), `BOUCLE_VISION_ROLES` (default
+      triage,worker,reviewer). This is a workaround for jcode issues #683
+      (per-role model) and #819 (capability-based routing) — remove when
+      jcode implements native capability-based routing.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
