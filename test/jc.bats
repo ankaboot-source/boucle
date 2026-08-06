@@ -364,7 +364,7 @@ EOF
 
 @test "model override: BOUCLE_MODEL_TRIAGE overrides default model from agent file" {
   # Use a temporary agent file so we control the default.
-  AGENT_DIR=$(mktemp -d)/agents
+  AGENT_DIR=$(mktemp -d)/.jcode/agents
   mkdir -p "$AGENT_DIR"
   cat > "$AGENT_DIR/triage.md" <<'EOF'
 ---
@@ -373,9 +373,6 @@ temperature: 0.3
 ---
 triage agent body
 EOF
-  # Source the relevant block from bin/jc: AGENT_FILE lookup + MODEL extraction
-  # + override application. We extract a slice from "AGENT_FILE=" to the
-  # temperature line (the override is the last assignment before temperature).
   TMPF=$(mktemp)
   awk '
     /^AGENT_FILE=""/ { p = 1 }
@@ -384,7 +381,7 @@ EOF
   ' bin/jc > "$TMPF"
   # shellcheck disable=SC1090
   run bash -c "
-    CI_PROJECT_DIR='$(dirname "$AGENT_DIR")'
+    CI_PROJECT_DIR='$(dirname "$(dirname "$AGENT_DIR")")'
     AGENT='triage'
     ROLE='triage'
     export BOUCLE_MODEL_TRIAGE='glm-5.2-flash'
@@ -394,11 +391,11 @@ EOF
   assert_success
   assert_output --partial "MODEL=glm-5.2-flash"
   rm -f "$TMPF"
-  rm -rf "$(dirname "$AGENT_DIR")"
+  rm -rf "$(dirname "$(dirname "$AGENT_DIR")")"
 }
 
 @test "model override: absent BOUCLE_MODEL_TRIAGE keeps default model" {
-  AGENT_DIR=$(mktemp -d)/agents
+  AGENT_DIR=$(mktemp -d)/.jcode/agents
   mkdir -p "$AGENT_DIR"
   cat > "$AGENT_DIR/triage.md" <<'EOF'
 ---
@@ -415,7 +412,7 @@ EOF
   ' bin/jc > "$TMPF"
   # shellcheck disable=SC1090
   run bash -c "
-    CI_PROJECT_DIR='$(dirname "$AGENT_DIR")'
+    CI_PROJECT_DIR='$(dirname "$(dirname "$AGENT_DIR")")'
     AGENT='triage'
     ROLE='triage'
     unset BOUCLE_MODEL_TRIAGE BOUCLE_MODEL_WORKER BOUCLE_MODEL_REVIEWER BOUCLE_MODEL_E2E
@@ -427,11 +424,11 @@ EOF
   # The provider prefix 'ollama-cloud/' must have been stripped.
   refute_output --partial 'ollama-cloud/'
   rm -f "$TMPF"
-  rm -rf "$(dirname "$AGENT_DIR")"
+  rm -rf "$(dirname "$(dirname "$AGENT_DIR")")"
 }
 
 @test "model override: BOUCLE_MODEL_WORKER overrides default worker model" {
-  AGENT_DIR=$(mktemp -d)/agents
+  AGENT_DIR=$(mktemp -d)/.jcode/agents
   mkdir -p "$AGENT_DIR"
   cat > "$AGENT_DIR/worker.md" <<'EOF'
 ---
@@ -447,7 +444,7 @@ EOF
   ' bin/jc > "$TMPF"
   # shellcheck disable=SC1090
   run bash -c "
-    CI_PROJECT_DIR='$(dirname "$AGENT_DIR")'
+    CI_PROJECT_DIR='$(dirname "$(dirname "$AGENT_DIR")")'
     AGENT='worker'
     ROLE='worker'
     export BOUCLE_MODEL_WORKER='deepseek-v4-flash-fast'
@@ -457,7 +454,7 @@ EOF
   assert_success
   assert_output --partial "MODEL=deepseek-v4-flash-fast"
   rm -f "$TMPF"
-  rm -rf "$(dirname "$AGENT_DIR")"
+  rm -rf "$(dirname "$(dirname "$AGENT_DIR")")"
 }
 
 # ── run_with_retry (transient-failure handling) ───────────────────────
