@@ -215,7 +215,7 @@ EOF
 @test "empty-output guard: log with only jcode banner IS a silent failure" {
   # Simulate a dead-run log: only jcode banner output (e.g. `--help` text or
   # usage banner), no glab call, no boucle:triage marker. The guard must
-  # detect this. Equivalent to the opencode-header case the old test covered.
+  # detect this. Equivalent to the jcode-header case the old test covered.
   LOG=$(mktemp)
   cat > "$LOG" <<'EOF'
 Usage: jcode [OPTIONS] <COMMAND>
@@ -251,7 +251,7 @@ NEEDS-SPLIT" > "$LOG"
 }
 
 # ── ensure_jcode_config (replaces strip_mcp_for_ci) ──────────────────
-# bin/jc no longer mutates an opencode config to remove MCP (lesson #3:
+# bin/jc no longer mutates a jcode config to remove MCP (lesson #3:
 # MCP is disabled via JCODE_RUN_MCP=0 env in CI). Instead, bin/jc
 # generates a jcode config.toml on the runner from BOUCLE_LLM_BASE_URL +
 # BOUCLE_LLM_API_KEY, so no config file needs to ship to the runner
