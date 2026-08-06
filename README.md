@@ -160,7 +160,7 @@ on every pipeline run.
 - **Modes**: `release` (latest stable tag) or `dev` (latest commit on `main`).
   Select via `BOUCLE_UPDATE_MODE`.
 - **Synchronized paths** (`SYNC_PATHS`):
-  `bin .pi .gitlab-ci.yml .opencode/opencode.json .opencode/agents`.
+  `bin .pi .gitlab-ci.yml .jcode/agents .jcode/skills .jcode/UPSTREAM-FIX-WORKFLOW.md`.
   The rest of the consumer repository must never be touched by the sync.
 - **Fail-open**: any network, download, or signature error must be converted
   into a **warning**, and the pipeline must continue with the current
@@ -171,7 +171,7 @@ on every pipeline run.
   push-source (to avoid the `update → commit → update` loop).
 
 To pin a specific version, see
-[.opencode/UPSTREAM-FIX-WORKFLOW.md](.opencode/UPSTREAM-FIX-WORKFLOW.md).
+[.jcode/UPSTREAM-FIX-WORKFLOW.md](.jcode/UPSTREAM-FIX-WORKFLOW.md).
 
 ## See also
 
@@ -180,4 +180,4 @@ To pin a specific version, see
 - [CONTEXT.md](CONTEXT.md) — Project context, tech stack, constraints
 - [DESIGN.md](DESIGN.md) — Consumer site visual charter
 - [LOOP.md](LOOP.md) — Per-consumer configuration
-- [.opencode/UPSTREAM-FIX-WORKFLOW.md](.opencode/UPSTREAM-FIX-WORKFLOW.md) — Upstream fix workflow
+- [.jcode/UPSTREAM-FIX-WORKFLOW.md](.jcode/UPSTREAM-FIX-WORKFLOW.md) — Upstream fix workflow

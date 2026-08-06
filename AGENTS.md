@@ -362,7 +362,7 @@ justification on stdout); the reviewer MUST reject entries that fail it.
 37. **Push consumer fixes upstream in the SAME session**
     - ❌ DO NOT land a fix on the consumer repo (`master`) and defer the
       upstream push to "later". The upstream-first workflow
-      (`.opencode/UPSTREAM-FIX-WORKFLOW.md`) says "fix upstream FIRST,
+      (`.jcode/UPSTREAM-FIX-WORKFLOW.md`) says "fix upstream FIRST,
       then update consumer" — but in practice fixes land on consumer
       `master` first (that's where the work happens) and the upstream
       push is forgotten. This grows the divergence between consumer
@@ -647,7 +647,7 @@ atomic.
       and never picks up upstream fixes.
     - ✅ DO: until boucle is public, propagate upstream fixes to consumers
       **manually** — push the fix to `origin` on GitHub, then copy the
-      changed `SYNC_PATHS` (`bin`, `.pi`, `.gitlab-ci.yml`, `.opencode/...`)
+      changed `SYNC_PATHS` (`bin`, `.pi`, `.gitlab-ci.yml`, `.jcode/...`)
       into the consumer repo and bump `.boucle-version` to the upstream SHA.
       Track this limitation here and remove the entry once boucle is public
       and `bin/update` succeeds unauthenticated.
@@ -1091,10 +1091,10 @@ and create a **NEW** commit — **NEVER** amend the failed commit.
 ## Upstream fix workflow
 
 The upstream-first workflow is defined in
-[`.opencode/UPSTREAM-FIX-WORKFLOW.md`](.opencode/UPSTREAM-FIX-WORKFLOW.md).
-That file is **portable**: it ships with boucle when installed in consumer projects
-(via the `.opencode/` directory).
+[`.jcode/UPSTREAM-FIX-WORKFLOW.md`](.jcode/UPSTREAM-FIX-WORKFLOW.md).
 
+That file is **portable**: it ships with boucle when installed in consumer projects
+(via the `.jcode/` directory).
 ### Golden rule
 
 **Fix upstream in boucle FIRST, then update boucle in the consumer, THEN remediate
@@ -1120,4 +1120,4 @@ there first.
 - [README.md](README.md) — Overview, getting started, usage
 - [DESIGN.md](DESIGN.md) — Consumer site visual charter
 - [LOOP.md](LOOP.md) — Per-consumer configuration
-- [.opencode/UPSTREAM-FIX-WORKFLOW.md](.opencode/UPSTREAM-FIX-WORKFLOW.md) — Upstream fix workflow
+- [.jcode/UPSTREAM-FIX-WORKFLOW.md](.jcode/UPSTREAM-FIX-WORKFLOW.md) — Upstream fix workflow
