@@ -1,7 +1,7 @@
 ---
 description: Worker agent — implements issues on a branch
 mode: primary
-model: ollama-cloud/minimax-m3
+model: ollama-cloud/deepseek-v4-flash:0731
 steps: 50
 ---
 
