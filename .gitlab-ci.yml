@@ -31,8 +31,11 @@ variables:
   BOUCLE_DEPLOY_URL_REGEX: "https://[a-z0-9.-]+\\.pages\\.dev"
   # Production URL (for e2e fallback when deploy doesn't pass a live URL)
   BOUCLE_PRODUCTION_URL: ""
-  # Image attachment policy: max size per image (bytes) and total per issue (bytes).
-  # Defaults: 10 MiB per image, 50 MiB total. Images over either cap are skipped.
+  # Attachment policy: max size per attachment (bytes) and total per issue (bytes).
+  # Applies to ALL uploads fetched by bin/fetch-issue-attachments (images, PDFs,
+  # archives, etc.), not just images. Variable names retain the IMAGE prefix for
+  # backward compatibility with consumers that override them via GitLab UI.
+  # Defaults: 10 MiB per attachment, 50 MiB total. Attachments over either cap are skipped.
   BOUCLE_IMAGE_MAX_BYTES: "10485760"
   BOUCLE_IMAGE_TOTAL_MAX_BYTES: "52428800"
   # Concurrency: max issues allowed in boucle:working state simultaneously.
@@ -50,11 +53,40 @@ variables:
   # Disable Chromium visual preview in triage (saves ~120 MiB per triage job).
   # true = skip preview rendering entirely. false = default (agent opt-in via RENDER_REQUEST).
   BOUCLE_PREVIEW_DISABLE: "false"
-  # File-type CI variable: $PI_AUTH holds a path to the auth.json temp file
+  # Provider profile (generic): the name of the [providers.<profile>] section
+  # in the jcode config. bin/jc generates ~/.jcode/config.toml at runtime from
+  # BOUCLE_LLM_BASE_URL + BOUCLE_LLM_API_KEY (below) — no config file on the
+  # runner. Default "boucle" is the generic profile name; override only if you
+  # pre-install a named profile on the runner (local dev, backward compat).
+  BOUCLE_PROVIDER_PROFILE: "boucle"
+  # LLM provider credentials (generic — not hardcoded to any provider).
+  # bin/jc generates ~/.jcode/config.toml from these 2 env vars at runtime.
+  # Set both as GitLab CI/CD variables (BOUCLE_LLM_API_KEY = masked+protected).
+  # To switch provider: change these 2 vars + BOUCLE_PROVIDER_PROFILE — zero
+  # code changes. Works with any OpenAI-compatible endpoint.
+  BOUCLE_LLM_BASE_URL: "https://ollama.com/v1"
+  # BOUCLE_LLM_API_KEY: ""  # set as masked+protected CI variable
+  # Provider fallback: when the primary provider is down —
+  # empty log / no agent activity, the exit-4 condition (AGENTS.md lesson #29) —
+  # retry with this fallback provider before escalating to a human. Empty = disabled.
+  # Per-role model overrides: BOUCLE_FALLBACK_MODEL_{TRIAGE,WORKER,REVIEWER,E2E}.
+  BOUCLE_FALLBACK_PROVIDER: ""
+  # ── Vision model routing (describe-then-inject) ──
+  # When issue/MR attachments contain images, bin/describe-images runs the
+  # vision model to generate text descriptions, which bin/jc injects into the
+  # agent prompt. The worker stays on its default model (deepseek-v4-flash) —
+  # only the description step uses the vision model.
+  # BOUCLE_VISION_ROUTING: "enabled" (default) or "disabled" — master switch.
+  # BOUCLE_VISION_MODEL: vision model to use (default: minimax-m3, on OpenRouter).
+  # BOUCLE_VISION_ROLES: comma-separated eligible roles (default: triage,worker,reviewer).
+  # e2e is excluded (curl+grep, no image consumption).
+  BOUCLE_VISION_ROUTING: "enabled"
+  BOUCLE_VISION_MODEL: "minimax-m3"
+  BOUCLE_VISION_ROLES: "triage,worker,reviewer"
 
 # ── Default: use node:22-slim (has node, npm, curl — much smaller than node:22) ─
 # The shared runner is a docker executor. node:22-slim is ~250MB vs ~1GB.
-# before_script installs glab + pi + wrangler (not in the image).
+# before_script installs glab + jcode + wrangler (not in the image).
 default:
   image: node:22-slim
   # Route to the project's dedicated runner. It's a shell executor (ignores
@@ -133,13 +165,26 @@ default:
         fi
       fi
 
-      # ── pi coding agent (npm install — pi needs node >=22.19) ──────
-      # pi is a Node-based CLI: @earendil-works/pi-coding-agent is the runtime
-      # and pi-agent-mode ships the custom agents in .pi/agents/.
-      if ! command -v pi &>/dev/null; then
-        echo "Installing pi coding agent + pi-agent-mode..."
-        PI_VER="${PI_VERSION:-latest}"
-        npm install -g --ignore-scripts @earendil-works/pi-coding-agent@$PI_VER pi-agent-mode
+      # ── jcode coding agent (standalone Rust binary) ──────────────
+      # jcode replaces both opencode and pi. It is a Rust binary shipped as
+      # a tarball on GitHub Releases — no Node/npm/Bun dependency.
+      # bin/jc wires jcode into the boucle role matrix (triage/worker/
+      # reviewer/e2e). Provider config is generated at runtime by bin/jc
+      # from BOUCLE_LLM_BASE_URL + BOUCLE_LLM_API_KEY env vars — no
+      # config file needed on the runner host.
+      # Asset names follow the pattern jcode-<os>-<arch>.tar.gz (e.g.
+      # jcode-linux-x86_64.tar.gz). The tarball contains a single binary
+      # named jcode-linux-x86_64.bin at its root.
+      if ! command -v jcode &>/dev/null; then
+        echo "Installing jcode coding agent (standalone binary)..."
+        JCODE_VER="${JCODE_VERSION:-v0.68.0}"
+        mkdir -p "$HOME/.local/bin"
+        curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x86_64.tar.gz" -o /tmp/jcode.tar.gz
+        tar xzf /tmp/jcode.tar.gz -C /tmp
+        # The tarball contains jcode-linux-x86_64.bin at its root.
+        mv /tmp/jcode-linux-x86_64.bin "$HOME/.local/bin/jcode"
+        chmod +x "$HOME/.local/bin/jcode"
+        rm -rf /tmp/jcode-linux-x86_64* /tmp/jcode.tar.gz
       fi
 
       # ── codebase-memory-mcp (codebase knowledge graph) ──
@@ -158,19 +203,13 @@ default:
         npm install -g wrangler 2>/dev/null || true
       fi
 
-      # ── pi auth (file-type CI variable → expected path) ──────
-      if [ -n "${PI_AUTH:-}" ] && [ -f "$PI_AUTH" ]; then
-        mkdir -p "$HOME/.pi/agent" && chmod 700 "$HOME/.pi/agent"
-        cp "$PI_AUTH" "$HOME/.pi/agent/auth.json"
-        chmod 600 "$HOME/.pi/agent/auth.json"
-      fi
-
       # ── Verify ────────────────────────────────────────────────────
       echo "=== Environment ==="
       node --version 2>/dev/null || echo "node: MISSING"
       npm --version 2>/dev/null || echo "npm: MISSING"
       glab version 2>/dev/null | head -1 || echo "glab: MISSING"
-      pi --version 2>/dev/null || echo "pi: MISSING"
+      jcode --version 2>/dev/null || echo "jcode: MISSING"
+      echo "BOUCLE_PROVIDER_PROFILE=${BOUCLE_PROVIDER_PROFILE:-ollama-cloud}"
       echo "$BOUCLE_DEPLOY_CMD" | grep -q wrangler && { wrangler --version 2>/dev/null || echo "wrangler: MISSING"; } || echo "wrangler: not needed (deploy doesn't use it)"
       codebase-memory-mcp --version 2>/dev/null || echo "codebase-memory-mcp: MISSING"
       echo "==================="
@@ -737,9 +776,14 @@ triage:
         printf '%s' "${out:-[]}"
       }
 
-      # Download images attached to the issue (capped per BOUCLE_IMAGE_*_BYTES).
+      # Download attachments uploaded to the issue (images, PDFs, archives).
       # Makes them available to the triage agent via BOUCLE_ISSUE_ATTACHMENTS.
-      ./bin/fetch-issue-images || echo "[boucle] WARN: image fetch failed — continuing without images"
+      ./bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
+
+      # Describe image attachments using a vision model (minimax-m3) so the
+      # triage agent gets visual context as text without swapping its model.
+      # Forge controls: BOUCLE_VISION_ROUTING, BOUCLE_VISION_MODEL, BOUCLE_VISION_ROLES.
+      ./bin/describe-images triage || echo "[boucle] WARN: image description failed — continuing without descriptions"
 
       # Fetch the issue body and export it so the triage agent does not
       # waste steps calling glab issue view / gh issue view (minimax-m3
@@ -778,9 +822,9 @@ triage:
       PRE_RUN_TRIAGE_ID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
         | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## Disposition"))] | first | .id // 0')
       rc=0
-      ./bin/oc triage || rc=$?
+      ./bin/jc triage || rc=$?
       if [ "$rc" -ne 0 ]; then
-        echo "WARN: ./bin/oc triage exited $rc — checking if a triage comment was posted anyway."
+        echo "WARN: ./bin/jc triage exited $rc — checking if a triage comment was posted anyway."
       fi
 
       # Parse the triage comment for Disposition and Size
@@ -1330,18 +1374,30 @@ worker:
       EOF
       fi
 
-      # Download images attached to the issue (capped per BOUCLE_IMAGE_*_BYTES).
+      # Download attachments uploaded to the issue (images, PDFs, archives).
       # Makes them available to the worker agent via BOUCLE_ISSUE_ATTACHMENTS.
-      ./bin/fetch-issue-images || echo "[boucle] WARN: image fetch failed — continuing without images"
+      ./bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
+
+      # Download attachments uploaded to MR comments (reviewer screenshots,
+      # human mockups). Mirrors bin/fetch-issue-attachments but for MR notes.
+      # Gated on MR_FOR_FEEDBACK being non-empty (no MR on first run).
+      export BOUCLE_MR_IID="$MR_FOR_FEEDBACK"
+      ./bin/fetch-mr-attachments || echo "[boucle] WARN: MR attachment fetch failed — continuing without MR attachments"
+
+      # Describe image attachments (issue + MR comments) using a vision model
+      # (minimax-m3) so the worker gets visual context as text without swapping
+      # its model. The worker stays on deepseek-v4-flash for implementation.
+      # Forge controls: BOUCLE_VISION_ROUTING, BOUCLE_VISION_MODEL, BOUCLE_VISION_ROLES.
+      ./bin/describe-images worker || echo "[boucle] WARN: image description failed — continuing without descriptions"
 
       # Run the agent. Use `|| rc=$?` to suppress set -e so the script
       # continues to the safety-net commit even if the agent exits non-zero
       # (step limit, crash, etc.). The safety-net commit below captures any
       # uncommitted work the agent produced before exiting.
       rc=0
-      ./bin/oc worker || rc=$?
+      ./bin/jc worker || rc=$?
       if [ "$rc" -ne 0 ]; then
-        echo "WARN: ./bin/oc worker exited $rc — proceeding to safety-net commit."
+        echo "WARN: ./bin/jc worker exited $rc — proceeding to safety-net commit."
       fi
 
       # Safety-net commit: the agent may run out of steps before committing.
@@ -1409,6 +1465,56 @@ worker:
       # Deploy to preview (configurable via BOUCLE_DEPLOY_CMD).
       # Happens AFTER push so the code is saved even if this step is slow or fails.
       PREVIEW_URL=$(eval "$BOUCLE_DEPLOY_CMD" 2>&1 | grep -oE "$BOUCLE_DEPLOY_URL_REGEX" | head -1)
+
+      # ── Preview URL deep-link ───────────────────────────────────────────
+      # Append the impacted page path to the preview URL so reviewers land
+      # directly on the changed page instead of the site home. Generic for
+      # any Astro SSG project: infers routes from src/pages/ file paths and
+      # falls back to the parent static route for dynamic [slug]/[...slug]
+      # components. For content-collection .md changes, maps the collection
+      # directory to its listing page when a matching dynamic route exists.
+      preview_url_for_changed_files() {
+        base_url="$1"
+        [ -z "$base_url" ] && { echo ""; return; }
+        changed=$(git diff --name-only origin/master..."$BRANCH" 2>/dev/null)
+        [ -z "$changed" ] && { echo "$base_url"; return; }
+        path=""
+        for f in $changed; do
+          case "$f" in
+            src/pages/*.astro)
+              rel="${f#src/pages/}"
+              rel="${rel%.astro}"
+              if echo "$rel" | grep -qE '\[(\.\.\.)?slug\]'; then
+                # Dynamic route component → fall back to parent static route
+                dir=$(dirname "$rel")
+                [ "$dir" = "." ] && dir=""
+                path="/$dir"
+              elif [ "$rel" = "index" ]; then
+                path="/"
+              else
+                path="/$rel"
+              fi
+              break
+              ;;
+            src/content/*/*.md)
+              # Content collection entry → map to listing page if a matching
+              # dynamic route component exists under src/pages/<col>/.
+              col=$(echo "$f" | sed -n 's|^src/content/\([^/]*\)/.*|\1|p')
+              if [ -n "$col" ]; then
+                if [ -f "src/pages/$col/[...slug].astro" ] || [ -f "src/pages/$col/[slug].astro" ]; then
+                  path="/$col"
+                  break
+                fi
+              fi
+              ;;
+          esac
+        done
+        # Normalize: collapse double slashes, strip trailing slash (except root)
+        path=$(echo "$path" | sed 's|//\+|/|g; s|/\+$||')
+        [ -z "$path" ] && path="/"
+        echo "${base_url%/}${path}"
+      }
+      PREVIEW_URL=$(preview_url_for_changed_files "$PREVIEW_URL")
 
       # Build MR description with context (printf keeps YAML-valid, no multi-line string)
       # NOTE: CI checks out a detached HEAD — there is no local `master` ref.
@@ -1482,7 +1588,13 @@ worker:
           --description "$MR_DESCRIPTION" > /dev/null
         MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?source_branch=$BRANCH" | jq -r '.[0].iid')
       else
-        echo "MR !$MR_IID already exists for $BRANCH — reusing (worker iteration $ITERATION)"
+        echo "MR !$MR_IID already exists for $BRANCH — updating title/description (worker iteration $ITERATION)"
+        # Refresh the MR title and description so iteration 2+ surfaces the
+        # new preview URL, iteration count, and commit summary. Do NOT use
+        # `|| true` — a failed update should surface, not be swallowed (the
+        # consumer repo's issue #34 fix used `|| true` and silently lost
+        # updates on API errors).
+        glab mr update "$MR_IID" --title "$MR_TITLE" --description "$MR_DESCRIPTION" > /dev/null
       fi
 
       # Assign the MR to the original issue author at creation time so they're
