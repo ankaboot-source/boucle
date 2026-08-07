@@ -10,11 +10,12 @@ cd .boucle && bin/setup --project <your-project-id-or-path>
 
 `bin/setup` configures GitLab (CI variables, labels, board, branch
 protection, webhook), writes a thin `.gitlab-ci.yml` shim that includes the
-engine pipeline, and appends `.boucle-state/` to your `.gitignore`. An
+engine pipeline, and appends `.boucle/` to your `.gitignore`. An
 existing non-boucle `.gitlab-ci.yml` is never overwritten.
 
-The consumer repo root only ever contains: `.boucle/` (engine submodule),
-`.gitlab-ci.yml` (shim), and `.boucle-state/` (gitignored per-issue state).
+The consumer repo root only ever contains: `.boucle/` (engine submodule)
+and `.gitlab-ci.yml` (shim). Per-issue state lives in `.boucle/<issue>/`
+(gitignored) inside the submodule.
 
 Then run `bin/doctor` in CI to verify all prerequisites are met.
 

@@ -1,85 +1,75 @@
 ---
 /*
  * NewsletterSignup.astro
- * ---------------------------------------------------------------------------
- * A reusable newsletter signup form. Accepts an `email` address and a
- * label/eyebrow override for context. Submitting the form runs a small
- * client-side handler that validates the email, simulates a POST, and
- * replaces the form with a French confirmation message. A
- * `sessionStorage` flag is set under `up-newsletter-subscribed` so we
- * never re-prompt the same visitor twice in the same session — used
- * by the modal variant.
- *
- * Variants (all share the same DOM):
- *  - "inline" (default): compact horizontal layout, for the site footer
- *  - "block" / "stacked": stacked layout with a title and lead text,
- *      for page sections and the modal
- *  - "footer": compact single-row treatment, no visible label/hint
+ * -----------------------------------------------------------------------------
+ * Reusable newsletter signup form with RGPD consent and a militant lede.
+ * The "block" variant is used on the homepage inside the newsletter/social
+ * two-column section; it owns a white, hard-edged, heavily-bordered card.
  *
  * Props:
- *  - id: required unique id so multiple instances on the same page don't
- *        collide (used by the input/label pair and the result region).
- *  - variant: see above.
- *  - heading/description/buttonLabel: small copy overrides.
- *  - labelledBy: optional override for the form's `aria-labelledby`.
- *    Useful when the form is rendered inside a parent that already
- *    provides a heading (e.g. the newsletter modal) so we don't end up
- *    with an empty heading as the form's accessible name.
+ *  - id: unique id to avoid collisions when multiple instances exist.
+ *  - variant: "inline" (compact, legacy) or "block" (homepage card).
+ *  - heading / description / buttonLabel: copy overrides.
  */
 interface Props {
 	id?: string;
-	variant?: "inline" | "block" | "stacked" | "footer";
+	variant?: "inline" | "block";
 	heading?: string;
 	description?: string;
 	buttonLabel?: string;
-	labelledBy?: string;
 }
 
 const {
 	id = "newsletter-signup",
-	variant = "inline",
-	heading = "Recevez nos alertes",
-	description = "Un email par mois, pas plus. Actions concrètes, rendez-vous, communiqués.",
+	variant = "block",
+	heading = "Restons en contact. Poursuivons la mobilisation.",
+	description = "On vous partage les actualités de Palestine et de la région, des analyses et notre résistance ici en France pour une Palestine libre.",
 	buttonLabel = "S'inscrire",
-	labelledBy,
 } = Astro.props;
 
-// Normalise `stacked` to `block` so the modal (which historically used
-// `stacked`) and pages (which use `block`) render identically.
-const normalisedVariant: "inline" | "block" | "footer" =
-	variant === "stacked" ? "block" : variant;
-
-// The form's accessible name is normally the h3 below, but a parent can
-// override it via the `labelledBy` prop.
-const formLabelledBy = labelledBy ?? `${id}-title`;
-const hasHeading = heading.trim().length > 0;
-const hasDescription = description.trim().length > 0;
+const formLabelledBy = `${id}-title`;
 ---
 
 <form
-	class:list={["newsletter", `newsletter--${normalisedVariant}`]}
+	class:list={["newsletter", `newsletter--${variant}`]}
 	data-newsletter
-	data-variant={normalisedVariant}
-	novalidate
+	data-variant={variant}
 	aria-labelledby={formLabelledBy}
+	novalidate
 >
-	{normalisedVariant !== "inline" && normalisedVariant !== "footer" && (hasHeading || hasDescription) && (
-		<div class="newsletter__intro">
-			{hasHeading && (
-				<h3 id={`${id}-title`} class="newsletter__heading">{heading}</h3>
-			)}
-			{hasDescription && (
-				<p class="newsletter__description">{description}</p>
-			)}
-		</div>
-	)}
+	<div class="newsletter__intro">
+		<h2 id={formLabelledBy} class="newsletter__heading">{heading}</h2>
+		<p class="newsletter__description">{description}</p>
+	</div>
 
-	{normalisedVariant === "inline" && hasHeading && (
-		<h3 id={`${id}-title`} class="visually-hidden newsletter__heading">{heading}</h3>
-	)}
-	{normalisedVariant === "inline" && hasDescription && (
-		<p class="visually-hidden newsletter__description">{description}</p>
-	)}
+	<fieldset class="newsletter__consent">
+		<legend class="visually-hidden">Consentement RGPD</legend>
+		<label class="newsletter__consent-label">
+			<input
+				class="newsletter__checkbox"
+				type="checkbox"
+				name="consent"
+				required
+				aria-describedby={`${id}-consent-desc`}
+			/>
+			<span class="newsletter__consent-text">
+				Je consens à être recontacté·e pour la suite de la mobilisation et que
+				le suivi de mes interactions serve à m'envoyer les communications les
+				plus pertinentes.
+				<a
+					href="/mentions-legales"
+					target="_blank"
+					rel="noopener"
+					class="newsletter__consent-link"
+				>
+					Mentions légales
+				</a>.
+			</span>
+		</label>
+		<p id={`${id}-consent-desc`} class="visually-hidden">
+			Cette case est obligatoire pour s'inscrire.
+		</p>
+	</fieldset>
 
 	<div class="newsletter__row">
 		<label class="newsletter__field">
@@ -91,23 +81,16 @@ const hasDescription = description.trim().length > 0;
 				required
 				autocomplete="email"
 				placeholder="vous@exemple.fr"
-				aria-describedby={`${id}-desc`}
+				aria-describedby={`${id}-hint`}
 			/>
 		</label>
-		<button class="btn btn--primary newsletter__submit" type="submit">
-			{buttonLabel}
-		</button>
+		<button class="newsletter__submit" type="submit">{buttonLabel}</button>
 	</div>
 
-	<p class="newsletter__hint" id={`${id}-desc`}>
-		Vos données restent en France. Désinscription en un clic.
+	<p class="newsletter__hint" id={`${id}-hint`}>
+		Désinscription en un clic.
 	</p>
 
-	<!--
-	  Success region. Hidden by default; revealed by the inline script after a
-	  successful submit. `role="status"` + `aria-live="polite"` so screen
-	  readers announce the confirmation without interrupting the user.
-	-->
 	<p
 		class="newsletter__success"
 		role="status"
@@ -129,12 +112,15 @@ const hasDescription = description.trim().length > 0;
 				stroke-linecap="round"
 				stroke-linejoin="round"
 				d="M4 12.5l5 5L20 6.5"></path>
-		</svg>
-		<span>
-			Merci&nbsp;! Votre inscription est enregistrée. Un email de
-			confirmation vous attend.
-		</span>
-	</p>
+			</svg>
+			<span>
+				Merci ! Votre inscription est enregistrée. Un email de confirmation
+				vous attend.
+			</span>
+			<span class="newsletter__followup" data-newsletter-followup hidden>
+				Suivez aussi nos réseaux et soutenez notre action.
+			</span>
+		</p>
 
 	<p
 		class="newsletter__error"
@@ -142,16 +128,20 @@ const hasDescription = description.trim().length > 0;
 		aria-live="assertive"
 		data-newsletter-error
 		hidden
-	>
-	</p>
+	></p>
 </form>
 
 <style>
 	.newsletter {
 		display: flex;
 		flex-direction: column;
-		gap: var(--space-s);
+		gap: var(--space-m);
 		width: 100%;
+		border: 2px solid var(--color-ink);
+		background: var(--color-bg);
+		color: var(--color-text);
+		border-radius: var(--radius-sharp);
+		padding: clamp(var(--space-m), 4vw, var(--space-xl));
 	}
 
 	.newsletter__intro {
@@ -162,40 +152,95 @@ const hasDescription = description.trim().length > 0;
 
 	.newsletter__heading {
 		font-family: var(--font-heading);
-		font-size: var(--text-xl);
+		font-size: var(--text-2xl);
 		font-weight: var(--weight-bold);
 		color: var(--color-ink);
 		margin: 0;
 		letter-spacing: var(--tracking-tight);
+		line-height: var(--leading-tight);
 	}
 
 	.newsletter__description {
-		font-size: var(--text-sm);
+		font-size: var(--text-base);
 		color: var(--color-text-muted);
 		margin: 0;
 		max-width: 56ch;
+	}
+
+	.newsletter__consent {
+		margin: 0;
+		padding: 0;
+		border: 0;
+	}
+
+	.newsletter__consent-label {
+		display: flex;
+		align-items: flex-start;
+		gap: var(--space-xs);
+		cursor: pointer;
+	}
+
+	.newsletter__checkbox {
+		appearance: none;
+		flex: 0 0 auto;
+		width: 28px;
+		height: 28px;
+		margin: 0;
+		border: 2px solid var(--color-ink);
+		background: var(--color-bg);
+		border-radius: var(--radius-sharp);
+		transition:
+			background-color var(--duration-fast) var(--ease-out),
+			border-color var(--duration-fast) var(--ease-out);
+	}
+
+	.newsletter__checkbox:checked {
+		background: var(--color-flag-red);
+		border-color: var(--color-flag-red);
+	}
+
+	.newsletter__checkbox:checked::after {
+		content: "";
+		display: block;
+		width: 100%;
+		height: 100%;
+		background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E")
+			center / 16px 16px no-repeat;
+	}
+
+	.newsletter__checkbox:focus-visible {
+		outline: 3px solid var(--color-flag-red);
+		outline-offset: 2px;
+	}
+
+	.newsletter__consent-text {
+		font-size: var(--text-sm);
+		color: var(--color-text-muted);
+		line-height: var(--leading-normal);
+	}
+
+	.newsletter__consent-link {
+		color: var(--color-text);
+		text-decoration: underline;
+		text-underline-offset: 0.2em;
+		font-weight: var(--weight-semibold);
+		transition: color var(--duration-fast) var(--ease-out);
+	}
+
+	.newsletter__consent-link:hover,
+	.newsletter__consent-link:focus-visible {
+		color: var(--color-flag-red);
+	}
+
+	.newsletter__consent-link:focus-visible {
+		outline: 2px solid var(--color-flag-red);
+		outline-offset: 2px;
 	}
 
 	.newsletter__row {
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-2xs);
-	}
-
-	@media (min-width: 32rem) {
-		.newsletter--inline .newsletter__row {
-			flex-direction: row;
-			align-items: flex-end;
-			gap: var(--space-s);
-		}
-		.newsletter--inline .newsletter__field {
-			flex: 1 1 auto;
-			min-width: 0;
-		}
-		.newsletter--inline .newsletter__submit {
-			flex: 0 0 auto;
-			align-self: stretch;
-		}
 	}
 
 	.newsletter__field {
@@ -220,8 +265,8 @@ const hasDescription = description.trim().length > 0;
 		font-size: var(--text-base);
 		color: var(--color-text);
 		background: var(--color-bg);
-		border: 1.5px solid var(--color-border);
-		border-radius: var(--radius-m);
+		border: 2px solid var(--color-ink);
+		border-radius: var(--radius-sharp);
 		transition:
 			border-color var(--duration-fast) var(--ease-out),
 			box-shadow var(--duration-fast) var(--ease-out);
@@ -246,14 +291,8 @@ const hasDescription = description.trim().length > 0;
 	}
 
 	.newsletter__submit {
-		min-height: 48px;
-		/*
-		 * .newsletter__submit — local override on the base .btn to align
-		 * with the CTA charter (Variant A): hard-edged red rectangle,
-		 * heading face, uppercase. Applied across all three variants
-		 * (inline, block, footer) so the same component stays consistent
-		 * wherever it ships.
-		 */
+		width: 100%;
+		min-height: 56px;
 		font-family: var(--font-heading);
 		font-size: var(--text-base);
 		font-weight: var(--weight-bold);
@@ -261,24 +300,24 @@ const hasDescription = description.trim().length > 0;
 		text-transform: uppercase;
 		background: var(--color-flag-red);
 		color: var(--color-flag-white);
-		border: 0;
+		border: 2px solid var(--color-ink);
 		border-radius: var(--radius-sharp);
 		padding: var(--space-s) var(--space-l);
+		cursor: pointer;
 		transition:
 			background-color var(--duration-fast) var(--ease-out),
-			transform var(--duration-fast) var(--ease-out),
-			opacity var(--duration-fast) var(--ease-out);
+			color var(--duration-fast) var(--ease-out),
+			border-color var(--duration-fast) var(--ease-out),
+			transform var(--duration-fast) var(--ease-out);
 	}
 
 	.newsletter__submit:hover {
 		background: var(--color-flag-red-deep);
-		color: var(--color-flag-white);
-		transform: translateY(-1px);
 	}
 
 	.newsletter__submit:focus-visible {
-		outline: 2px solid var(--color-flag-red);
-		outline-offset: 3px;
+		outline: 3px solid var(--color-flag-red);
+		outline-offset: 2px;
 	}
 
 	.newsletter__submit:disabled,
@@ -297,76 +336,73 @@ const hasDescription = description.trim().length > 0;
 	.newsletter__success,
 	.newsletter__error {
 		display: inline-flex;
-		align-items: center;
+		align-items: flex-start;
 		gap: var(--space-2xs);
 		margin: 0;
 		padding: var(--space-2xs) var(--space-s);
-		border-radius: var(--radius-s);
+		border-radius: var(--radius-sharp);
 		font-size: var(--text-sm);
 		font-weight: var(--weight-medium);
+		border: 2px solid transparent;
 	}
 
 	.newsletter__success {
-		background: color-mix(in oklch, var(--color-secondary) 16%, transparent);
+		background: var(--color-bg);
 		color: var(--color-secondary-strong);
+		border-color: var(--color-secondary);
 	}
 
 	.newsletter__error {
-		background: color-mix(in oklch, var(--color-accent) 12%, transparent);
+		background: var(--color-bg);
 		color: var(--color-accent-strong);
+		border-color: var(--color-accent);
 	}
 
-	/* ---------- Block variant (stacked, for sections + modal) ---------- */
-
-	.newsletter--block {
-		padding: clamp(var(--space-m), 4vw, var(--space-xl));
-		background: var(--color-bg-soft);
-		border: 1px solid var(--color-border);
-		border-radius: var(--radius-l);
-		gap: var(--space-m);
+	.newsletter__followup {
+		display: block;
+		margin-top: var(--space-2xs);
+		font-weight: var(--weight-semibold);
 	}
 
-	.newsletter--block .newsletter__heading {
-		font-size: var(--text-2xl);
-	}
-
-	.newsletter--block .newsletter__description {
-		font-size: var(--text-base);
-	}
-
-	/* ---------- Footer variant (compact, single row) ---------- */
-
-	.newsletter--footer {
-		gap: var(--space-2xs);
-	}
-
-	.newsletter--footer .newsletter__heading {
-		font-size: var(--text-lg);
-	}
-
-	.newsletter--footer .newsletter__row {
-		flex-direction: row;
-		align-items: stretch;
-		gap: var(--space-2xs);
-	}
-
-	.newsletter--footer .newsletter__field {
-		flex: 1 1 auto;
-		min-width: 0;
-	}
-
-	.newsletter--footer .newsletter__submit {
-		flex: 0 0 auto;
-		padding-inline: var(--space-s);
-	}
-
-	.newsletter--footer .newsletter__label,
-	.newsletter--footer .newsletter__hint {
+	.newsletter__success[hidden],
+	.newsletter__error[hidden],
+	.newsletter__followup[hidden] {
 		display: none;
 	}
 
-	/* ---------- Visually hidden helper (for inline variant) ---------- */
+	/* Inline variant — compact horizontal layout for the rare footer use. */
+	.newsletter--inline {
+		border: 0;
+		background: transparent;
+		padding: 0;
+		gap: var(--space-s);
+	}
 
+	.newsletter--inline .newsletter__intro,
+	.newsletter--inline .newsletter__consent,
+	.newsletter--inline .newsletter__hint {
+		display: none;
+	}
+
+	@media (min-width: 32rem) {
+		.newsletter--inline .newsletter__row {
+			flex-direction: row;
+			align-items: flex-end;
+			gap: var(--space-s);
+		}
+
+		.newsletter--inline .newsletter__field {
+			flex: 1 1 auto;
+			min-width: 0;
+		}
+
+		.newsletter--inline .newsletter__submit {
+			width: auto;
+			min-height: 48px;
+		}
+	}
+
+	/* Visually hidden helper */
 	.visually-hidden {
 		position: absolute;
 		width: 1px;
@@ -382,14 +418,9 @@ const hasDescription = description.trim().length > 0;
 
 <script>
 	/*
-	 * Client-side submit handler. Each <form data-newsletter> becomes
-	 * a self-contained widget: validates the email, simulates a POST,
-	 * then swaps the row for a French success message. Marks the
-	 * widget as "subscribed" via sessionStorage so the modal variant
-	 * (and any other instances on the same page) know not to re-prompt.
-	 *
-	 * Kept as a vanilla IIFE so it works on pages that ship multiple
-	 * newsletter forms (footer + home section) without a framework.
+	 * Client-side submit handler. Validates email + RGPD consent, simulates
+	 * a POST, then swaps the form controls for a success message. Also hides
+	 * the introductory copy so the success message is the only thing visible.
 	 */
 	type NewsletterForm = HTMLFormElement & { dataset: DOMStringMap };
 
@@ -407,18 +438,13 @@ const hasDescription = description.trim().length > 0;
 		try {
 			sessionStorage.setItem(STORAGE_KEY, "1");
 		} catch {
-			// Private mode / disabled storage — silently ignore; the user
-			// can still subscribe, we just won't remember it for this tab.
+			// Private mode / disabled storage — ignore.
 		}
 	};
 
 	const showError = (form: NewsletterForm, message: string): void => {
-		const error = form.querySelector<HTMLElement>(
-			"[data-newsletter-error]",
-		);
-		const success = form.querySelector<HTMLElement>(
-			"[data-newsletter-success]",
-		);
+		const error = form.querySelector<HTMLElement>("[data-newsletter-error]");
+		const success = form.querySelector<HTMLElement>("[data-newsletter-success]");
 		if (success) success.hidden = true;
 		if (error) {
 			error.textContent = message;
@@ -429,24 +455,34 @@ const hasDescription = description.trim().length > 0;
 	const hideFormRows = (form: NewsletterForm): void => {
 		const row = form.querySelector<HTMLElement>(".newsletter__row");
 		const intro = form.querySelector<HTMLElement>(".newsletter__intro");
+		const consent = form.querySelector<HTMLElement>(".newsletter__consent");
 		const hint = form.querySelector<HTMLElement>(".newsletter__hint");
-		const success = form.querySelector<HTMLElement>(
-			"[data-newsletter-success]",
-		);
+		const success = form.querySelector<HTMLElement>("[data-newsletter-success]");
+		const followup = form.querySelector<HTMLElement>("[data-newsletter-followup]");
 		if (row) row.hidden = true;
 		if (intro) intro.hidden = true;
+		if (consent) consent.hidden = true;
 		if (hint) hint.hidden = true;
-		if (success) success.hidden = false;
+		if (success) {
+			success.hidden = false;
+			if (followup) followup.hidden = false;
+		}
 	};
 
 	const handleSubmit = async (form: NewsletterForm): Promise<void> => {
 		const error = form.querySelector<HTMLElement>("[data-newsletter-error]");
 		if (error) error.hidden = true;
 
+		const consent = form.querySelector<HTMLInputElement>('input[type="checkbox"][name="consent"]');
 		const input = form.querySelector<HTMLInputElement>('input[type="email"]');
-		if (!input) return;
+		if (!input || !consent) return;
 
-		// Native validity check first (handles required + type=email).
+		if (!consent.checked) {
+			showError(form, "Veuillez cocher la case de consentement pour vous inscrire.");
+			consent.focus();
+			return;
+		}
+
 		if (!input.checkValidity()) {
 			showError(
 				form,
@@ -464,18 +500,11 @@ const hasDescription = description.trim().length > 0;
 			submit.dataset["busy"] = "1";
 		}
 
-		// Simulate a network call. In a real deployment this would POST
-		// to a subscription endpoint; for now we resolve after a short
-		// delay so the loading state is visible to the user.
 		await new Promise((resolve) => setTimeout(resolve, 350));
 
 		markSubscribed();
-
 		hideFormRows(form);
 
-		// Notify the modal (and any other listener) that the user just
-		// converted, so it can stop tracking inactivity and clear any
-		// pending timer.
 		document.dispatchEvent(
 			new CustomEvent("up:newsletter:subscribed", {
 				bubbles: false,
@@ -486,14 +515,10 @@ const hasDescription = description.trim().length > 0;
 
 	const init = (): void => {
 		const subscribed = isSubscribed();
-		const forms =
-			document.querySelectorAll<NewsletterForm>("form[data-newsletter]");
+		const forms = document.querySelectorAll<NewsletterForm>("form[data-newsletter]");
 
 		forms.forEach((form) => {
 			if (subscribed) {
-				// Already subscribed this session: skip the input row,
-				// show the success state immediately, and dispatch the
-				// event so the modal closes its timer too.
 				hideFormRows(form);
 				document.dispatchEvent(
 					new CustomEvent("up:newsletter:subscribed", {

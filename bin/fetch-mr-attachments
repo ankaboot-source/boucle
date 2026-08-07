@@ -13,8 +13,8 @@
 # The MR attachments have their OWN total budget tracking — independent from
 # issue attachments — but reuse the same cap env vars.
 #
-# Output: writes .boucle-state/$ISSUE/.mr-attachments.env (sourced by bin/jc)
-#         and .boucle-state/$ISSUE/mr-attachments/MANIFEST.md (human-readable log).
+# Output: writes .boucle/$ISSUE/.mr-attachments.env (sourced by bin/jc)
+#         and .boucle/$ISSUE/mr-attachments/MANIFEST.md (human-readable log).
 #
 # If BOUCLE_MR_IID is empty (no MR exists on first run), the script exits
 # cleanly with an empty BOUCLE_MR_ATTACHMENTS="" env file. This is normal —
@@ -23,9 +23,9 @@ set -euo pipefail
 
 ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
 CI_PROJECT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
-# .boucle-state/$ISSUE is gitignored per-issue state; .boucle/ is the engine
-# submodule (kept clean of state so `git submodule update` never clobbers it).
-STATE_DIR="$CI_PROJECT_DIR/.boucle-state/$ISSUE"
+# .boucle/$ISSUE is gitignored per-issue state (kept inside the engine dir so
+# state rides along with the submodule and survives `git submodule update`).
+STATE_DIR="$CI_PROJECT_DIR/.boucle/$ISSUE"
 ATT_DIR="$STATE_DIR/mr-attachments"
 ENV_FILE="$STATE_DIR/.mr-attachments.env"
 

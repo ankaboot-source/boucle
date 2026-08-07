@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================================
+  PLACEHOLDER IMAGE — TEMPORARY
+  ============================================================================
+  This SVG is a deliberately abstract, royalty-free placeholder used by the
+  `MobilisationBlock` component on the home page until the author supplies
+  a real photograph of a manifestation.
+
+  Why an SVG and not a remote Unsplash/Wikimedia URL?
+  - The Astro build must not require network access at compile time, so the
+    placeholder is served from the same origin (`/mobilisation/...`).
+  - It carries a `data-placeholder="true"` marker via the file path
+    (`_placeholder`) so a future grep-and-replace can find every consumer.
+  - It is intentionally abstract: silhouettes + keffieh-red horizontal
+    stripes, no faces, no copyrighted shapes. The militant feel is
+    delivered by composition (mass + flag band), not by copied imagery.
+
+  Replacement sources (the issue calls these out as the canonical
+  alternatives — pick one, drop it in place, and remove this SVG):
+    - static/mobilisation/boycott/   (Boycott-Ramadan-2025.png, etc.)
+    - static/mobilisation/kit-militant/ (affiche-manifestation-*.jpeg, etc.)
+    - static/mobilisation/prisonniers/  (18-avril-2026-prisonnier.es-...)
+    - Wikimedia Commons — category "Pro-Palestinian protests" (CC BY-SA)
+    - Unsplash — search "solidarity protest", filter by "free to use"
+  ============================================================================
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900"
+     width="1600" height="900"
+     preserveAspectRatio="xMidYMid slice"
+     role="img" aria-label="Silhouettes de manifestant·es — image placeholder temporaire">
+  <title>Manifestation — placeholder</title>
+  <desc>SVG abstrait : foule de silhouettes sous un ciel noir, traversé par un
+  bandeau rouge. Sert d'image temporaire en attendant les photos de l'auteur.</desc>
+
+  <!-- Ciel / arrière-plan : encre presque noire, dégradé plat (pas décoratif :
+       c'est la couleur d'encre, pas un effet). -->
+  <rect width="1600" height="900" fill="oklch(15% 0 0)"/>
+
+  <!-- Soleil / disque de fumée bas, simple aplat, pas un halo diffus. -->
+  <circle cx="1180" cy="260" r="140" fill="oklch(28% 0 0)"/>
+
+  <!-- Bandeau drapeau palestinien — quatre bandes horizontales, plein
+       chrome, franc. Visible mais ne couvre pas les visages. -->
+  <rect x="0"   y="380" width="1600" height="14" fill="oklch(15% 0 0)"/>
+  <rect x="0"   y="394" width="1600" height="14" fill="oklch(99% 0 0)"/>
+  <rect x="0"   y="408" width="1600" height="14" fill="oklch(45% 0.13 145)"/>
+  <rect x="0"   y="422" width="1600" height="14" fill="oklch(53% 0.21 27)"/>
+
+  <!-- Foule : rangée de silhouettes. Pas de visage, pas de détail copiable.
+       La répétition suffit à dire "manifestation" sans reproduire personne. -->
+  <g fill="oklch(10% 0 0)">
+    <path d="M -20 900 V 640 q 40 -40 80 0 V 900 Z"/>
+    <path d="M  60 900 V 660 q 35 -50 70 0 V 900 Z"/>
+    <path d="M 130 900 V 630 q 50 -60 100 0 V 900 Z"/>
+    <path d="M 230 900 V 650 q 40 -55 80 0 V 900 Z"/>
+    <path d="M 310 900 V 670 q 50 -55 100 0 V 900 Z"/>
+    <path d="M 410 900 V 640 q 40 -45 80 0 V 900 Z"/>
+    <path d="M 490 900 V 660 q 55 -55 110 0 V 900 Z"/>
+    <path d="M 600 900 V 635 q 50 -55 100 0 V 900 Z"/>
+    <path d="M 700 900 V 655 q 45 -50 90 0 V 900 Z"/>
+    <path d="M 790 900 V 645 q 55 -55 110 0 V 900 Z"/>
+    <path d="M 900 900 V 670 q 45 -55 90 0 V 900 Z"/>
+    <path d="M 990 900 V 640 q 50 -50 100 0 V 900 Z"/>
+    <path d="M1090 900 V 660 q 45 -50 90 0 V 900 Z"/>
+    <path d="M1180 900 V 645 q 50 -55 100 0 V 900 Z"/>
+    <path d="M1280 900 V 660 q 45 -50 90 0 V 900 Z"/>
+    <path d="M1370 900 V 650 q 50 -55 100 0 V 900 Z"/>
+    <path d="M1470 900 V 665 q 50 -55 100 0 V 900 Z"/>
+    <path d="M1570 900 V 640 q 25 -50 50 0 V 900 Z"/>
+  </g>
+
+  <!-- Quelques keffiehs stylisés (damier noir et blanc) brandis : -->
+  <g>
+    <rect x="220" y="600" width="44" height="44" fill="oklch(99% 0 0)"/>
+    <g fill="oklch(15% 0 0)">
+      <rect x="220" y="600" width="11" height="11"/>
+      <rect x="242" y="622" width="11" height="11"/>
+      <rect x="253" y="600" width="11" height="11"/>
+    </g>
+
+    <rect x="540" y="590" width="48" height="48" fill="oklch(99% 0 0)"/>
+    <g fill="oklch(15% 0 0)">
+      <rect x="540" y="590" width="12" height="12"/>
+      <rect x="564" y="614" width="12" height="12"/>
+      <rect x="576" y="590" width="12" height="12"/>
+    </g>
+
+    <rect x="980" y="595" width="44" height="44" fill="oklch(99% 0 0)"/>
+    <g fill="oklch(15% 0 0)">
+      <rect x="980" y="595" width="11" height="11"/>
+      <rect x="1002" y="617" width="11" height="11"/>
+      <rect x="1013" y="595" width="11" height="11"/>
+    </g>
+
+    <rect x="1320" y="605" width="44" height="44" fill="oklch(99% 0 0)"/>
+    <g fill="oklch(15% 0 0)">
+      <rect x="1320" y="605" width="11" height="11"/>
+      <rect x="1342" y="627" width="11" height="11"/>
+      <rect x="1353" y="605" width="11" height="11"/>
+    </g>
+  </g>
+</svg>

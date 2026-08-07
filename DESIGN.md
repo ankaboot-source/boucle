@@ -88,8 +88,9 @@ revu avant publication.
   traitement. Ces familles signalent immédiatement un site générique.
 - ❌ **Structure « tout en MAJUSCULES AVEC LETTER-SPACING ÉNORME »** —
   la combinaison « H1 gras + uppercase + tracking 0.2em + 36px » est un
-  marqueur IA bien documenté. On l'utilise **avec parcimonie**, jamais par
-  défaut sur tout.
+  marqueur IA bien documenté. **Petits sous-titres en majuscules + tracking
+  0.18em+ au-dessus des titres (`.eyebrow` et équivalents) sont interdits
+  par défaut, proscrits.**
 - ❌ **Centrage systématique** des titres et paragraphes.
 - ❌ **Hiérarchie molle** : si on ne sait pas distinguer H1 / H2 / H3 du
   premier coup d'œil, on refait.
@@ -144,6 +145,27 @@ Ombre **rare et franche** quand elle existe :
 
 Jamais d'ombres douces diffuses continues — c'est l'un des tout premiers
 signaux de design générique.
+
+#### Ombres d'animation (Hard Shadow Lift)
+
+Les **animations** (hover/active des cards, boutons, images) utilisent une
+ombre **dure** au lieu de `--shadow-lift` : un bloc offset plein, encre
+solide, **blur radius strictement à 0** — le relief « hard shadow lift »
+du mouvement brutaliste.
+
+```css
+--shadow-hard-offset: 6px;
+--shadow-hard: var(--shadow-hard-offset) var(--shadow-hard-offset) 0px
+	var(--color-ink);
+```
+
+- Au `:hover`/`:focus-visible`, l'élément monte en diagonale
+  (`translateY(-6px) translateX(2px)`) et projette `--shadow-hard`.
+- Au `:active`, il retombe à plat : `transform: none` + `box-shadow: none`
+  (le « snap » du lift).
+- `--shadow-lift` reste réservé aux **reliefs statiques** (non animés) ;
+  tout `box-shadow` d'animation doit consommer `--shadow-hard`.
+- Seules `transform` et `opacity` sont animées — jamais de reflow layout.
 
 ### 3.3 Typographie
 
@@ -234,6 +256,67 @@ où elles portent un signal politique** :
 | `--color-secondary`, `--color-secondary-strong` | `--color-flag-green*` |
 | `--color-link`, `--color-link-hover` | ink → flag-red |
 
+> **Note sémantique** : lorsque la palette du drapeau sert à différencier deux
+> sous-ensembles d'une même page (par exemple les deux groupes de la section
+> `Nos alliés dans la résistance.` dans `/right-to-resist/`), on peut utiliser
+> `--color-flag-red` pour le premier groupe (front de libération / accent
+> principal) et `--color-flag-green` pour le second (sœurs et frères de lutte /
+> accent secondaire). Cette distinction reste un accent de 4 px ou un
+> marqueur de section, jamais un fond de carte colorée à grande surface.
+
+### 3.4.1 Section « Alliés »
+
+La section alliées est intégrée dans `/right-to-resist/` (l'ancienne URL
+`/allies/` redirige vers `/right-to-resist/`). Son titre mobilisateur est
+**« Nos alliés dans la résistance. »**. Elle obéit aux règles suivantes :
+
+1. **Grille uniforme sans trous**. Les organisations sont disposées dans une
+   grille de cellules carrées égales, taillée pour les petits logos. Elle se
+   remplit bord à bord quel que soit le nombre de collectifs dans un groupe
+   (3, 5, 3…). Aucune cellule géante ni `nth-child` à portées fixes conçue
+   pour de grandes photos, qui laisserait des « trous » avec un nombre
+   variable d'items — le nombre de colonnes est piloté par la largeur
+   disponible (`auto-fit`). Les coins sont droits, les fonds restent
+   monochrome ou noir, aucune carte SaaS, aucun gradient décoratif.
+
+2. **Hover / focus reveal**. Chaque cellule affiche le logo et le nom par
+   défaut ; au survol ou au focus clavier, un volet noir glisse par-dessus
+   pour révéler la présentation complète et le CTA « Visiter → ». Sous
+   `@media (prefers-reduced-motion: reduce)`, le volet est statique et
+   toujours visible en partie inférieure de la cellule : aucun contenu ne
+   dépend de l'interaction pour être lu.
+
+3. **Logos, aplat et présentations**. Chaque entrée de la collection
+   `allies` expose un champ `logo` (chemin d'actif statique root-rel), un
+   champ optionnel `aplat` (grande image de fond de cellule) et un champ
+   `presentation` (texte long). Le résumé sur la page d'accueil montre
+   **tous** les logos des organisations (liste complète, dans l'ordre
+   d'affichage) et un lien d'ancrage vers la section détaillée. Les
+   logos doivent être les vrais logos des organisations (téléchargés depuis
+   leur site ou réseau social) ; aucun SVG généré artificiellement n'est
+   accepté.
+
+4. **Différenciation des groupes**. Les trois groupes éditoriaux (« Notre front
+   pour la libération et la dignité », « Nos sœurs et frères de lutte » et
+   « Nos voix palestinien·nes ») sont différenciés par une barre verticale de
+   4 px à gauche de chaque cellule : rouge pour le front, vert pour les sœurs
+   et frères de lutte, noir pour les voix palestinien·nes.
+
+5. **Aplat d'image par collectif**. Chaque cellule de la mosaïque porte un
+   grand aplat d'image : photo iconique du collectif quand un champ `aplat`
+   est renseigné ; en son absence, un motif keffieh façon scanline en
+   arrière-plan. L'aplat est désaturé et assombri par défaut pour garantir
+   la lisibilité du nom et du logo ; au survol ou au focus clavier la couleur
+   et la luminosité reviennent.
+
+6. **Restauration de la couleur au survol**. Les logos de la page d'accueil
+   (résumé) et de la mosaïque `/right-to-resist/` sont affichés en niveaux
+   de gris par défaut. Au survol ou au focus, le logo (et l'aplat de la
+   cellule) retrouvent leurs couleurs d'origine. Sur la page d'accueil, le
+   fond de l'item reste clair (paper-soft) au survol afin qu'un logo foncé
+   (ex. Agir Collectif) reste visible une fois sa couleur restaurée — le
+   fond ne passe pas au noir.
+
 ### 3.5 Espacement et grille
 
 Grille **8 pt** classique, avec rampes fluides pour les grands
@@ -281,6 +364,8 @@ Conteneurs (largeurs max) :
 | --- | --- |
 | `--ease-out` | `cubic-bezier(0.22, 1, 0.36, 1)` |
 | `--ease-in-out` | `cubic-bezier(0.65, 0, 0.35, 1)` (à utiliser **rarement**) |
+| `--ease-brutal-lift` | `cubic-bezier(0.2, 0.8, 0.2, 1)` — lift des cards/boutons |
+| `--ease-brutal-reveal` | `cubic-bezier(0.1, 0.7, 1.0, 0.1)` — révélations au scroll |
 | `--duration-fast` | `140 ms` |
 | `--duration-base` | `240 ms` |
 | `--duration-slow` | `420 ms` |
@@ -288,12 +373,136 @@ Conteneurs (largeurs max) :
 `@media (prefers-reduced-motion: reduce)` ramène toutes les durées à
 `0 ms` — toujours.
 
-### 3.7 Le « vibe » en une phrase
+#### Courbes et timings d'animation (globales)
+
+| Gesture | Durée | Easing | Ampitude |
+| --- | --- | --- | --- |
+| Hard Lift (hover/active) | `--duration-base` (240 ms), active `--duration-fast` | `--ease-brutal-lift` | `translateY(-6px) translateX(2px)` + `--shadow-hard` |
+| Staggered Slide-Up Brutal (révélation texte) | `200 ms` / élément | `--ease-brutal-reveal` | `translateY(20px)` → `0` desktop, `10px` mobile |
+| Stagger delay | `50–75 ms` / élément (par défaut `60 ms`) | — | via `transition-delay` + `--reveal-index` |
+| Snap au tap (active) | `--duration-fast` | `--ease-brutal-lift` | `transform: none` + `box-shadow: none` |
+
+- La révélation « Staggered Slide-Up Brutal » est portée par
+  `.reveal` (élément isolé) et `.reveal-stagger` (groupe dont chaque enfant
+  porte un `--reveal-index`), pilotés par un `IntersectionObserver` dans
+  `src/layouts/Layout.astro`.
+- **Mobile** : l'amplitude du translateY du stagger est réduite à `10px`
+  (vs `20px` desktop).
+- **Écrans tactiles** (`@media (hover: none) and (pointer: coarse)`) : le
+  hover complexe (lift complet) est désactivé au profit d'un état actif clair
+  au tap (léger `translateY(-2px)` + `--shadow-hard`).
+- **`prefers-reduced-motion: reduce`** : toutes les translations, delays de
+  stagger et ombres d'animation sont supprimés ; seuls les changements
+  d'état visuels instantanés (couleur, opacité) sont conservés.
+
+### 3.7 Variante « angled-split » des CTA
+
+La variante `angled-split` du composant `GeneralCTA` (implémentée dans
+[`src/components/AngledSplitCTA.astro`](src/components/AngledSplitCTA.astro))
+impose les règles suivantes, en complément de la charte brute du collectif :
+
+1. **Le fond coloré épouse la largeur du texte**, pas celle du conteneur.
+   Chaque stripe est rendu avec `display: inline-block; width: fit-content`.
+   Le texte est enveloppé dans un `<span>` inline portant le fond et le
+   padding ; `box-decoration-break: clone` (y compris le préfixe WebKit)
+   garantit que chaque fragment de ligne wrap garde son propre fond serré,
+   sans bandeau plein-largeur entre les lignes.
+
+2. **Composition en deux bandes centrées, l'une au-dessus de l'autre.**
+   La stripe verte porte le titre principal et conserve un bord inférieur
+   **strictement horizontal** — c'est un fond de texte stable, pas un bloc
+   plein-largeur. La stripe rouge est inclinée vers le haut à droite avec
+   une pente ascendante et **déborde légèrement au-dessus du bord inférieur
+   de la stripe verte** : elle porte un `z-index` supérieur et un
+   `margin-top` négatif, ce qui crée un chevauchement visuel au lieu d'un
+   empilement séparé. L'angle visible doit rester discret, compris **entre
+   2° et 4°** ; la valeur retenue est `--cta-angle: 2deg`.
+
+3. **Le texte rouge suit la pente du fond rouge.** Le label CTA est
+   transformé avec le **même `skewY`** que sa bande ; il n'est jamais
+   contre-incliné pour redevenir horizontal. Cela crée la dynamique de
+   progression visuelle attendue : le sous-titre « monte » avec son fond.
+
+4. **Entrée animée des deux blocs.** Au premier rendu, les deux stripes
+   apparaissent par un léger glissement vers le haut accompagné d'un fondu
+   (`transform: translateY(18px)` → `0`, `opacity: 0` → `1`). La stripe
+   verte démarre en premier, la stripe rouge suit avec un délai. L'animation
+   utilise uniquement `transform` et `opacity` (propriétés composites),
+   reste dans `--duration-slow` (420 ms), et est annulée sous
+   `@media (prefers-reduced-motion: reduce)`.
+
+Ces contraintes préservent les exigences d'accessibilité existantes :
+hit-area vertical ≥ 44 px sur les deux stripes, texte blanc sur fond vert
+ou rouge du drapeau (contraste AA), et `aria-labelledby` pointant vers
+le `<h2>` du titre. La stripe rouge décorative porte `aria-hidden="true"`
+pour ne pas ajouter de bruit au lecteur d'écran.
+
+### 3.8 Le « vibe » en une phrase
 
 **Le site ressemble à un tract imprime sur du papier offset noir et
 rouge par un comité de rédaction qui sait ce qu'il fait.** Pas un tract
 agressif pour autant — un tract **tenu**, lisible, qui assume son sujet
 sans crier plus fort que nécessaire.
+
+### 3.9 « Right to Resist » — lien featured (hover brutaliste cinétique)
+
+Le lien **« Right to Resist »** dans le header principal (`navItems[3]`
+dans [`src/components/Header.astro`](src/components/Header.astro))
+bénéficie d'un surligné **brutaliste cinétique** : au `:hover` et
+`:focus-visible`, le texte se décale vers le haut-gauche
+(`translate(-2px, -2px)`) pendant qu'un **bloc plein à arête dure** (même
+relief que `--shadow-hard`, DESIGN.md §3.2) **claque** derrière lui avec un
+timeline `steps(3, end)` (pas de lissage), puis disparaît lorsque
+l'interaction se termine. Il ne faut jamais se substituer à un
+`text-decoration: underline`.
+
+#### Contrastes par surface
+
+| Surface du header | Fond du surligné | Texte au hover/focus | Contraste |
+| --- | --- | --- | --- |
+| Étendu (fond noir) | `--color-flag-white` | `--color-flag-red` | Rouge sur blanc ≥ 4.5:1 (AA) |
+| Défilé (fond rouge sang) | `--color-flag-white` | `--color-flag-red` | Rouge sur blanc ≥ 4.5:1 (AA) |
+| Clair (fond blanc, futur) | `--color-flag-red` | `--color-flag-white` | Blanc sur rouge ≥ 4.5:1 (AA) |
+
+> Le cas blanc-sur-rouge au hover a été abandonné pour le header
+> scrollé : le blanc sur le rouge sang `--color-flag-red`
+> (`oklch(53% 0.21 27)`) n'atteint pas 4.5:1 à la taille de texte
+> `--text-sm`. On garde donc le surligné **blanc** et on inverse
+> le texte en rouge.
+
+#### Règles d'implémentation
+
+- Le surligné est un pseudo-élément `::after` positionné en arrière-plan
+  (`z-index: -1`) avec `left: 0; right: 0; bottom: 2px; height: 70%`.
+- Le surligné est un **bloc plein** (`background: var(--featured-highlight-bg)`),
+  à arête dure, sans flou ni texture — le même registre que `--shadow-hard`
+  (DESIGN.md §3.2).
+- La couleur du surligné est pilotée par `--featured-highlight-bg`,
+  la couleur du texte au hover/focus par
+  `--featured-text-on-highlight`. Les deux tokens changent en fonction
+  de la surface (default / scrolled / light).
+- La révélation est **cinétique** : le `::after` part décalé
+  (`transform: translate(6px, 6px) scaleX(0)`) et claque en place
+  (`transform: translate(0, 0) scaleX(1)`) avec un timeline
+  `steps(3, end)` et `--ease-brutal-lift`, pendant que le texte lui-même
+  se décale vers le haut-gauche (`translate(-2px, -2px)`). Lorsque le
+  pointeur quitte l'élément ou que le focus disparaît, le surligné et le
+  texte retombent dans leur état masqué.
+- Sous `@media (prefers-reduced-motion: reduce)`, la transition du
+  pseudo-élément est annulée (`transition: none`), le surligné reste
+  masqué et le décalage du texte est supprimé (`transform: none`). Les
+  tokens de durée étant déjà réduits à `0ms`, aucune animation ne
+  persiste.
+
+#### Accessibilité
+
+- La hit-area verticale du lien reste ≥ 44 px héritée de
+  `.site-header__link` (`min-height: 44px`).
+- L'outline `:focus-visible` de 2 px
+  (`outline: 2px solid var(--color-flag-red)`) est préservée sur le
+  lien featured.
+- Aucune information n'est véhiculée par la couleur seule : le texte
+  reste lisible même sans surligné.
 
 ---
 
