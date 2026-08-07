@@ -77,6 +77,6 @@ Print a concise summary at the end:
 echo "[$TS] agent health check starting..." >> "$LOG"
 
 # Run the agent headless with auto-approve (needs shell/sqlite3/gh access)
-  jcode run --auto --dir "$POC_DIR" --format json --title "looper-health-check-$TS" "$PROMPT" >> "$LOG" 2>&1 || true
+jcode run --auto --dir "$POC_DIR" --format json --title "looper-health-check-$TS" "$PROMPT" >> "$LOG" 2>&1 || true
 
 echo "[$TS] agent health check done" >> "$LOG"
