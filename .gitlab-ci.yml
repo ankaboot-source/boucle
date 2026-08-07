@@ -304,6 +304,55 @@ dispatch:
   # pipeline will show as "failed" on no-op webhook events — that's
   # expected and harmless: it just means "nothing to do".
   #
+  # Minimal before_script override: dispatch is pure bash (jq + glab + curl)
+  # and sources lib/boucle.sh. It does NOT use node/npm/jcode/
+  # codebase-memory-mcp/wrangler, so we skip installing them. This is the
+  # hottest job in the loop (one run per webhook event — measured at ~220
+  # runs with 100% no-op failure), and on the shared docker runner nothing
+  # persists between runs, so every global-before_script install (node ~30MB,
+  # jcode, codebase-memory-mcp) was paid on EVERY dispatch run. Cutting them
+  # shrinks dispatch from ~17s to ~4s per run.
+  before_script:
+    - |
+      [[ "${CI_DEBUG_TRACE:-false}" == "true" ]] && set -x
+      export PATH="$HOME/.local/bin:$PATH"
+      export GITLAB_TOKEN="$BOUCLE_TOKEN"
+      export GITLAB_HOST="$BOUCLE_FORGE_HOST"
+      # Silence glab update notifier (spams stderr on every call otherwise).
+      export GLAB_NO_UPDATE_NOTIFIER=true
+
+      # ── curl + jq + git (dispatch needs only these + glab) ─────────
+      if ! command -v curl &>/dev/null || ! command -v jq &>/dev/null || ! command -v git &>/dev/null; then
+        echo "Installing curl + jq + git..."
+        apt-get update -qq && apt-get install -y -qq curl jq git
+      fi
+
+      # ── glab CLI ───────────────────────────────────────────────────
+      if ! command -v glab &>/dev/null; then
+        echo "Installing glab..."
+        mkdir -p "$HOME/.local/bin"
+        GLAB_VER="1.50.0"
+        curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VER}/downloads/glab_${GLAB_VER}_linux_amd64.tar.gz" -o /tmp/glab.tar.gz
+        tar xzf /tmp/glab.tar.gz -C /tmp
+        cp /tmp/bin/glab "$HOME/.local/bin/glab" 2>/dev/null || cp /tmp/glab "$HOME/.local/bin/glab"
+        chmod +x "$HOME/.local/bin/glab"
+      fi
+
+      # ── BOUCLE_BOT_ID resolution (set_boucle_label reassigns to the
+      # bot on boucle::status::bot, but only when BOUCLE_BOT_ID is set) ──
+      if [ -z "${BOUCLE_BOT_ID:-}" ] && [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ]; then
+        BOUCLE_BOT_USERNAME="${BOUCLE_BOT_USERNAME:-up-bot}"
+        RESOLVED_ID=$(curl -sf --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+          "https://$BOUCLE_FORGE_HOST/api/v4/users?username=$BOUCLE_BOT_USERNAME" \
+          2>/dev/null | jq -r '.[0].id // empty' 2>/dev/null || true)
+        if [ -n "$RESOLVED_ID" ]; then
+          export BOUCLE_BOT_ID="$RESOLVED_ID"
+          echo "Resolved BOUCLE_BOT_ID=$BOUCLE_BOT_ID by username ($BOUCLE_BOT_USERNAME)"
+        fi
+      fi
+
+      # ── Shared boucle helpers (set_boucle_label, chain_to_role, ...) ──
+      source "${CI_PROJECT_DIR:-$(pwd)}/lib/boucle.sh"
   script:
     - |
       # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
