@@ -1,0 +1,58 @@
+# boucle agents image
+#
+# Image for boucle control-plane jobs (dispatch / merger / post-merge /
+# catchup / doctor) AND agent jobs (triage / worker / reviewer / e2e)
+# that run on docker-based runners (tags: [] fallback like the shared
+# Framasoft runner). Pre-bakes the full toolchain so the before_script
+# does not download node / glab / jcode / codebase-memory-mcp on every
+# run (docker runners persist nothing between runs).
+#
+# Toolchain mirror of the global before_script in .gitlab-ci.yml:
+#   - node 22 (base image)          — build/deploy/preview jobs
+#   - python3 + pip                 — with_server.py (webapp-testing skill)
+#   - curl, jq, git, ca-certificates
+#   - glab 1.50.0                   — GitLab CLI (API calls)
+#   - jcode v0.68.0                 — agent runtime (Rust binary, replaces opencode/pi)
+#   - codebase-memory-mcp           — knowledge-graph MCP server
+#
+# NOTE: lib/boucle.sh is sourced from ${CI_PROJECT_DIR} at job runtime,
+# it is NOT baked into the image (it ships with each consumer repo).
+
+FROM node:22-slim
+
+# apt: curl, jq, git, python3 (+pip for skills that shell out to python)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        git \
+        jq \
+        python3 \
+        python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# glab — GitLab CLI
+ARG GLAB_VERSION=1.50.0
+RUN curl -fsSL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_amd64.tar.gz" -o /tmp/glab.tar.gz \
+    && tar -xzf /tmp/glab.tar.gz -C /tmp \
+    && cp /tmp/bin/glab /usr/local/bin/glab \
+    && chmod +x /usr/local/bin/glab \
+    && rm -rf /tmp/glab.tar.gz /tmp/bin
+
+# jcode — agent runtime (standalone Rust binary, no node dependency)
+ARG JCODE_VERSION=v0.68.0
+RUN curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VERSION}/jcode-linux-x86_64.tar.gz" -o /tmp/jcode.tar.gz \
+    && tar -xzf /tmp/jcode.tar.gz -C /tmp \
+    && mv /tmp/jcode-linux-x86_64.bin /usr/local/bin/jcode \
+    && chmod +x /usr/local/bin/jcode \
+    && rm -f /tmp/jcode.tar.gz
+
+# codebase-memory-mcp — knowledge-graph MCP server (installer copies a static binary)
+RUN curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh | bash \
+    || echo "codebase-memory-mcp install failed (non-fatal, before_script retries)"
+
+# default env for all boucle jobs
+ENV PATH="/usr/local/bin:${PATH}" \
+    GLAB_NO_UPDATE_NOTIFIER="true"
+
+WORKDIR /workspace
