@@ -50,8 +50,7 @@ happens asynchronously, driven by labels and comments.
 | Forge | GitLab (MVP), GitHub (planned) |
 | CI/CD | GitLab CI (8 stages) |
 | AI agents | jcode (4 agents: triage, worker, reviewer, e2e) |
-| Models | glm-5.2 (triage, reviewer), deepseek-v4-flash (worker, e2e) — open-weight preference |
-| Coding agent | pi (`.pi/agents/*.md`) |
+| Models | glm-5.2 (triage, e2e), deepseek-v4-flash:0731 (worker, reviewer) — open-weight preference |
 | Knowledge graph | codebase-memory-mcp |
 | Deployment | Cloudflare Pages (wrangler) — MVP, other targets planned |
 | Tests | bats (shell), shellcheck, shfmt |
@@ -105,7 +104,7 @@ Contributions to boucle must align with this line.
 - **Post-early**: agents must post FIRST, refine AFTER. Step waste is bug
   #1. An incomplete draft posted is ALWAYS better than a refinement never
   posted.
-- **Idempotence**: all `bin/*` scripts (`setup`, `doctor`, `update`, `oc`)
+- **Idempotence**: all `bin/*` scripts (`setup`, `doctor`, `update`, `jc`)
   must be idempotent. Re-running a script must produce no additional side
   effects.
 - **Serial merge**: `resource_group: boucle-merge` serializes all merges.

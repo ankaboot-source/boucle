@@ -83,5 +83,3 @@ Any error (network failure, permissions, corrupt tarball) logs a warning and con
 ### Version tracking
 
 `.boucle-version` at the repo root records the current version (tag name in release mode, commit SHA in dev mode). It is created automatically on first run — no manual setup needed.
-
-See issue #1 (boucle MVP spec) and issue #7 (install design) for details.
