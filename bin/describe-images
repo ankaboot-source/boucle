@@ -130,7 +130,7 @@ FAIL_COUNT=0
 for img in "${IMAGE_FILES[@]}"; do
   filename=$(basename "$img")
   # Get dimensions/metadata via `file`
-  meta=$(file "$img" 2>/dev/null || echo "unknown")
+  meta=$(file "$img" 2> /dev/null || echo "unknown")
 
   echo "## ${filename}" >> "$DESC_FILE"
   echo "" >> "$DESC_FILE"
@@ -151,7 +151,7 @@ Read the file at that path and describe it. Output only the description, no prea
   desc_output=""
   if desc_output=$(timeout "$VISION_TIMEOUT" \
     jcode --provider-profile "$PROVIDER_PROFILE" --model "$VISION_MODEL" --tools '*' \
-    run --quiet "$DESC_PROMPT" 2>/dev/null); then
+    run --quiet "$DESC_PROMPT" 2> /dev/null); then
     if [ -n "$desc_output" ]; then
       echo "Description:" >> "$DESC_FILE"
       echo "" >> "$DESC_FILE"

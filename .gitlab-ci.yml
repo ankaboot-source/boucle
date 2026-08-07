@@ -166,6 +166,15 @@ default:
         fi
       fi
 
+      # ── Shared boucle helpers (single source of truth) ────────────
+      # lib/boucle.sh exports set_boucle_label, resolve_reporter_id,
+      # get_work_item_children, close_issue, maybe_close_parent,
+      # preview_url_for_changed_files, and chain_to_role. Previously
+      # these were copy-pasted into each job's script block (8 copies of
+      # set_boucle_label, 3 of resolve_reporter_id, etc.) with subtle
+      # drift between variants. Now sourced once here.
+      source "${CI_PROJECT_DIR:-$(pwd)}/lib/boucle.sh"
+
       # ── jcode coding agent (standalone Rust binary) ──────────────
       # jcode replaces both opencode and pi. It is a Rust binary shipped as
       # a tarball on GitHub Releases — no Node/npm/Bun dependency.
@@ -341,9 +350,7 @@ dispatch:
               exit 0
             fi
             echo "MR !${MR_IID} approved (native GitLab approval) for issue #$MR_ISSUE_IID — triggering merger"
-            curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-              -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-              -F "variables[BOUCLE_ISSUE]=$MR_ISSUE_IID" -F "variables[BOUCLE_ROLE]=merger" > /dev/null
+            chain_to_role "$MR_ISSUE_IID" "merger"
             exit 0
             ;;
           update)
@@ -364,9 +371,7 @@ dispatch:
               fi
             fi
             echo "MR !${MR_IID} updated — re-triggering reviewer for issue #$MR_ISSUE_IID"
-            curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-              -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-              -F "variables[BOUCLE_ISSUE]=$MR_ISSUE_IID" -F "variables[BOUCLE_ROLE]=reviewer" > /dev/null
+            chain_to_role "$MR_ISSUE_IID" "reviewer"
             exit 0
             ;;
           close)
@@ -382,17 +387,13 @@ dispatch:
               glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID" \
                 -f labels="${NON_BOUCLE:+$NON_BOUCLE,}boucle:todo,boucle::status::bot" > /dev/null
             fi
-            curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-              -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-              -F "variables[BOUCLE_ISSUE]=$MR_ISSUE_IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+            chain_to_role "$MR_ISSUE_IID" "worker"
             exit 0
             ;;
           reopen)
             # MR reopened — re-trigger the reviewer to re-review it.
             echo "MR !${MR_IID} reopened — re-triggering reviewer for issue #$MR_ISSUE_IID"
-            curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-              -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-              -F "variables[BOUCLE_ISSUE]=$MR_ISSUE_IID" -F "variables[BOUCLE_ROLE]=reviewer" > /dev/null
+            chain_to_role "$MR_ISSUE_IID" "reviewer"
             exit 0
             ;;
           unapproved)
@@ -407,9 +408,7 @@ dispatch:
               glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID" \
                 -f labels="${NON_BOUCLE:+$NON_BOUCLE,}boucle:review,boucle::status::bot" > /dev/null
             fi
-            curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-              -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-              -F "variables[BOUCLE_ISSUE]=$MR_ISSUE_IID" -F "variables[BOUCLE_ROLE]=reviewer" > /dev/null
+            chain_to_role "$MR_ISSUE_IID" "reviewer"
             exit 0
             ;;
           merge)
@@ -421,10 +420,7 @@ dispatch:
             # MR_ISSUE_IID was extracted from the branch name above (line 173);
             # non-boucle branches already exited at line 174-176.
             echo "MR !${MR_IID} merged directly (action=merge) for issue #$MR_ISSUE_IID — triggering catchup"
-            curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-              -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-              -F "variables[BOUCLE_ISSUE]=$MR_ISSUE_IID" \
-              -F "variables[BOUCLE_ROLE]=catchup" > /dev/null
+            chain_to_role "$MR_ISSUE_IID" "catchup"
             exit 0
             ;;
           open)
@@ -467,9 +463,7 @@ dispatch:
             glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$MR_NOTE_ISSUE_IID" \
               -f labels="${NON_BOUCLE:+$NON_BOUCLE,}boucle:todo,boucle::status::bot" > /dev/null
           fi
-          curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-            -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-            -F "variables[BOUCLE_ISSUE]=$MR_NOTE_ISSUE_IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+          chain_to_role "$MR_NOTE_ISSUE_IID" "worker"
           exit 0
         fi
         IID=$(jq -r '.issue.iid // .work_item.iid // .epic.iid // empty' "$TRIGGER_PAYLOAD")
@@ -493,46 +487,6 @@ dispatch:
       # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
       # starts with "boucle:"), so we strip all boucle-managed labels when
       # writing a new pair. Caller passes detail as $2 and gross as $3.
-      set_boucle_label() {
-        local iid="$1" new="$2" gross="$3"
-        local current resp current_all
-        resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
-        current_all=$(echo "$resp" | jq -r '.labels | join(",")')
-        # Idempotence: skip the PUT when every label in "$new,$gross" is already
-        # on the issue. GitLab records a Resource Label Event on every PUT even
-        # if the label set is unchanged — this guard prevents the no-op writes
-        # that surface as spurious "status changes" on the board.
-        local all_present=true lbl
-        for lbl in $(echo "$new,$gross" | tr ',' ' '); do
-          [ -z "$lbl" ] && continue
-          echo "$current_all" | tr ',' '\n' | grep -qx "$lbl" || { all_present=false; break; }
-        done
-        [ "$all_present" = true ] && return 0
-        local merged="${current:+$current,}$new,$gross"
-        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
-        # When the issue moves to the bot side, assign it to the bot user so
-        # the board reflects who owns the next action and humans aren't spammed.
-        # BOUCLE_BOT_ID is the GitLab user ID of the bot (set via bin/setup).
-        # Best-effort: skip silently if unset (backward compat with setups
-        # that haven't run bin/setup --bot-id yet).
-        if [ "$gross" = "boucle::status::bot" ] && [ -n "${BOUCLE_BOT_ID:-}" ]; then
-          curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
-            --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-            --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || { if [ -n "${BOUCLE_BOT_ID:-}" ]; then echo "ERROR: bot reassign failed for issue (BOUCLE_BOT_ID=$BOUCLE_BOT_ID set but API call failed)" >&2; exit 1; fi; }
-        elif [ "$gross" = "boucle::status::human" ]; then
-          # Reassign the issue to the human reporter (walks up parent chain to skip
-          # bot-authored sub-issues). Best-effort: skip silently if resolve fails.
-          local human_id
-          human_id=$(resolve_reporter_id "$iid" 2>/dev/null)
-          if [ -n "$human_id" ] && [ "$human_id" != "null" ] && [ "$human_id" != "${BOUCLE_BOT_ID:-}" ]; then
-            curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
-              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-              --data-urlencode "assignee_ids[]=$human_id" 2>/dev/null || true
-          fi
-        fi
-      }
-
       # Get current labels
       LABELS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID" | jq -r '.labels | join(",")')
 
@@ -648,9 +602,7 @@ dispatch:
         fi
       elif [ "$SHOULD_WORK" = "true" ]; then
         echo "Triggering worker for issue #$IID (boucle:todo re-trigger)"
-        curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-          -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-          -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+        chain_to_role "$IID" "worker"
         exit 0
       else
         echo "No action needed for issue #$IID (labels: $LABELS)"
@@ -700,46 +652,6 @@ triage:
       # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
       # starts with "boucle:"), so we strip all boucle-managed labels when
       # writing a new pair. Caller passes detail as $2 and gross as $3.
-      set_boucle_label() {
-        local iid="$1" new="$2" gross="$3"
-        local current resp current_all
-        resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
-        current_all=$(echo "$resp" | jq -r '.labels | join(",")')
-        # Idempotence: skip the PUT when every label in "$new,$gross" is already
-        # on the issue. GitLab records a Resource Label Event on every PUT even
-        # if the label set is unchanged — this guard prevents the no-op writes
-        # that surface as spurious "status changes" on the board.
-        local all_present=true lbl
-        for lbl in $(echo "$new,$gross" | tr ',' ' '); do
-          [ -z "$lbl" ] && continue
-          echo "$current_all" | tr ',' '\n' | grep -qx "$lbl" || { all_present=false; break; }
-        done
-        [ "$all_present" = true ] && return 0
-        local merged="${current:+$current,}$new,$gross"
-        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
-        # When the issue moves to the bot side, assign it to the bot user so
-        # the board reflects who owns the next action and humans aren't spammed.
-        # BOUCLE_BOT_ID is the GitLab user ID of the bot (set via bin/setup).
-        # Best-effort: skip silently if unset (backward compat with setups
-        # that haven't run bin/setup --bot-id yet).
-        if [ "$gross" = "boucle::status::bot" ] && [ -n "${BOUCLE_BOT_ID:-}" ]; then
-          curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
-            --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-            --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || { if [ -n "${BOUCLE_BOT_ID:-}" ]; then echo "ERROR: bot reassign failed for issue (BOUCLE_BOT_ID=$BOUCLE_BOT_ID set but API call failed)" >&2; exit 1; fi; }
-        elif [ "$gross" = "boucle::status::human" ]; then
-          # Reassign the issue to the human reporter (walks up parent chain to skip
-          # bot-authored sub-issues). Best-effort: skip silently if resolve fails.
-          local human_id
-          human_id=$(resolve_reporter_id "$iid" 2>/dev/null)
-          if [ -n "$human_id" ] && [ "$human_id" != "null" ] && [ "$human_id" != "${BOUCLE_BOT_ID:-}" ]; then
-            curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
-              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-              --data-urlencode "assignee_ids[]=$human_id" 2>/dev/null || true
-          fi
-        fi
-      }
-
       # Resolve the human reporter to notify on NEEDS-INFO. For a sub-issue
       # created by the bot via NEEDS-SPLIT, the issue's own author is up-bot
       # (useless to assign). The human who must answer is the PARENT issue's
@@ -749,26 +661,6 @@ triage:
       # NOTE: use printf '%s' (not echo) to feed JSON to jq — echo in some
       # shells (zsh) interprets backslash escapes and corrupts JSON whose
       # description contains literal control characters.
-      resolve_reporter_id() {
-        local iid="$1" data parent_iid parent_data reporter_id author_username
-        local bot_user="${BOUCLE_BOT_USERNAME:-up-bot}"
-        local depth=0 max_depth=10
-        data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null) || { echo ""; return; }
-        reporter_id=$(printf '%s' "$data" | jq -r '.author.id // empty')
-        author_username=$(printf '%s' "$data" | jq -r '.author.username // empty')
-        # Walk up the parent chain until we find a non-bot author.
-        while [ "$author_username" = "$bot_user" ] && [ "$depth" -lt "$max_depth" ]; do
-          parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
-          [ -z "$parent_iid" ] && break
-          parent_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid" 2>/dev/null) || break
-          reporter_id=$(printf '%s' "$parent_data" | jq -r '.author.id // empty')
-          author_username=$(printf '%s' "$parent_data" | jq -r '.author.username // empty')
-          data="$parent_data"
-          depth=$((depth + 1))
-        done
-        echo "$reporter_id"
-      }
-
       # Fetch the global work-item ID for an issue (needed as parent_id for
       # the child-items hierarchy API). Issues and work items share the same
       # IID space since 16.0, so /work_items/:iid works for issues too.
@@ -776,15 +668,6 @@ triage:
       # NOTE: glab may exit 0 on HTTP 403 (e.g. when the work_item_rest_api
       # feature flag is disabled) and print the error JSON to stdout, so we
       # validate the response shape rather than rely on the exit code.
-      get_work_item_global_id() {
-        local iid="$1" wi_data out
-        wi_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/-/work_items/$iid" 2>/dev/null) || { echo ""; return; }
-        # Only accept a JSON object that actually has an .id field; anything
-        # else (403 error object, empty, non-JSON) is treated as a miss.
-        out=$(printf '%s' "$wi_data" | jq -r 'if (type == "object" and has("id")) then .id else empty end' 2>/dev/null)
-        printf '%s' "$out"
-      }
-
       # List child work items of a parent. Returns JSON array (empty array on
       # failure). Each child has .iid, .state ("opened"|"closed"), .title.
       # NOTE: glab may exit 0 on HTTP 403 (e.g. when the work_item_rest_api
@@ -793,16 +676,6 @@ triage:
       # not an array — jq 'length' on an object returns its key count (1),
       # which would falsely trip the idempotency guard. We therefore validate
       # that the response is a JSON ARRAY and return [] otherwise.
-      get_work_item_children() {
-        local parent_iid="$1" children out
-        children=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/-/work_items/$parent_iid/children" 2>/dev/null) || { echo "[]"; return; }
-        # Only pass through genuine arrays; coerce anything else (403 error
-        # object, empty, non-JSON) to []. Capture jq output so empty input
-        # (jq emits nothing, exits 0) still yields [].
-        out=$(printf '%s' "$children" | jq -c 'if type == "array" then . else [] end' 2>/dev/null)
-        printf '%s' "${out:-[]}"
-      }
-
       # Download attachments uploaded to the issue (images, PDFs, archives).
       # Makes them available to the triage agent via BOUCLE_ISSUE_ATTACHMENTS.
       ./bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
@@ -1047,15 +920,11 @@ triage:
                   # Do NOT chain to worker — leave at boucle:todo. Doctor recovers it.
                 else
                   # Chain to worker
-                  curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-                    -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-                    -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+                  chain_to_role "$IID" "worker"
                 fi
               else
                 # Chain to worker (cap disabled)
-                curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-                  -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-                  -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+                chain_to_role "$IID" "worker"
               fi
             fi
           fi
@@ -1206,9 +1075,7 @@ triage:
                   fi
                   # Trigger triage directly via trigger API (bot-created issues would
                   # hit the anti-loop guard in dispatch because ACTOR=up-bot).
-                  curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-                    -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-                    -F "variables[BOUCLE_ISSUE]=$NEW_IID" > /dev/null
+                  chain_to_role "$NEW_IID" ""
                 else
                   echo "  → FAIL to create sub-issue: $CREATED_JSON" >&2
                   PARSE_FAILURES=$((PARSE_FAILURES + 1))
@@ -1306,71 +1173,11 @@ worker:
       # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
       # starts with "boucle:"), so we strip all boucle-managed labels when
       # writing a new pair. Caller passes detail as $2 and gross as $3.
-      set_boucle_label() {
-        local iid="$1" new="$2" gross="$3"
-        local current resp current_all
-        resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
-        current_all=$(echo "$resp" | jq -r '.labels | join(",")')
-        # Idempotence: skip the PUT when every label in "$new,$gross" is already
-        # on the issue. GitLab records a Resource Label Event on every PUT even
-        # if the label set is unchanged — this guard prevents the no-op writes
-        # that surface as spurious "status changes" on the board.
-        local all_present=true lbl
-        for lbl in $(echo "$new,$gross" | tr ',' ' '); do
-          [ -z "$lbl" ] && continue
-          echo "$current_all" | tr ',' '\n' | grep -qx "$lbl" || { all_present=false; break; }
-        done
-        [ "$all_present" = true ] && return 0
-        local merged="${current:+$current,}$new,$gross"
-        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
-        # When the issue moves to the bot side, assign it to the bot user so
-        # the board reflects who owns the next action and humans aren't spammed.
-        # BOUCLE_BOT_ID is the GitLab user ID of the bot (set via bin/setup).
-        # Best-effort: skip silently if unset (backward compat with setups
-        # that haven't run bin/setup --bot-id yet).
-        if [ "$gross" = "boucle::status::bot" ] && [ -n "${BOUCLE_BOT_ID:-}" ]; then
-          curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
-            --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-            --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || { if [ -n "${BOUCLE_BOT_ID:-}" ]; then echo "ERROR: bot reassign failed for issue (BOUCLE_BOT_ID=$BOUCLE_BOT_ID set but API call failed)" >&2; exit 1; fi; }
-        elif [ "$gross" = "boucle::status::human" ]; then
-          # Reassign the issue to the human reporter (walks up parent chain to skip
-          # bot-authored sub-issues). Best-effort: skip silently if resolve fails.
-          local human_id
-          human_id=$(resolve_reporter_id "$iid" 2>/dev/null)
-          if [ -n "$human_id" ] && [ "$human_id" != "null" ] && [ "$human_id" != "${BOUCLE_BOT_ID:-}" ]; then
-            curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
-              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-              --data-urlencode "assignee_ids[]=$human_id" 2>/dev/null || true
-          fi
-        fi
-      }
-
       # Resolve the human reporter (issue author, or parent issue author for
       # sub-issues created via NEEDS-SPLIT). Used to assign the MR to the
       # reporter at creation time so they're notified even if the reviewer
       # never runs (e.g. preview URL assertion fails before reviewer chains).
       # Mirrors the definition in triage/reviewer jobs.
-      resolve_reporter_id() {
-        local iid="$1" data parent_iid parent_data reporter_id author_username
-        local bot_user="${BOUCLE_BOT_USERNAME:-up-bot}"
-        local depth=0 max_depth=10
-        data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null) || { echo ""; return; }
-        reporter_id=$(printf '%s' "$data" | jq -r '.author.id // empty')
-        author_username=$(printf '%s' "$data" | jq -r '.author.username // empty')
-        # Walk up the parent chain until we find a non-bot author.
-        while [ "$author_username" = "$bot_user" ] && [ "$depth" -lt "$max_depth" ]; do
-          parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
-          [ -z "$parent_iid" ] && break
-          parent_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid" 2>/dev/null) || break
-          reporter_id=$(printf '%s' "$parent_data" | jq -r '.author.id // empty')
-          author_username=$(printf '%s' "$parent_data" | jq -r '.author.username // empty')
-          data="$parent_data"
-          depth=$((depth + 1))
-        done
-        echo "$reporter_id"
-      }
-
       # Set working label
       set_boucle_label "$BOUCLE_ISSUE" "boucle:working" "boucle::status::bot"
 
@@ -1478,10 +1285,7 @@ worker:
           set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
           glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
             -f body="🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh master (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null
-          curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-            -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-            -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=worker" \
-            -F "variables[BOUCLE_ITERATION]=$((ITERATION+1))" > /dev/null
+          chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=$((ITERATION+1))
         else
           echo "Escalating to human (boucle:human) — iteration cap ($MAX_ITER) reached after repeated rebase conflicts." >&2
           set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
@@ -1517,47 +1321,6 @@ worker:
       # falls back to the parent static route for dynamic [slug]/[...slug]
       # components. For content-collection .md changes, maps the collection
       # directory to its listing page when a matching dynamic route exists.
-      preview_url_for_changed_files() {
-        base_url="$1"
-        [ -z "$base_url" ] && { echo ""; return; }
-        changed=$(git diff --name-only origin/master..."$BRANCH" 2>/dev/null)
-        [ -z "$changed" ] && { echo "$base_url"; return; }
-        path=""
-        for f in $changed; do
-          case "$f" in
-            src/pages/*.astro)
-              rel="${f#src/pages/}"
-              rel="${rel%.astro}"
-              if echo "$rel" | grep -qE '\[(\.\.\.)?slug\]'; then
-                # Dynamic route component → fall back to parent static route
-                dir=$(dirname "$rel")
-                [ "$dir" = "." ] && dir=""
-                path="/$dir"
-              elif [ "$rel" = "index" ]; then
-                path="/"
-              else
-                path="/$rel"
-              fi
-              break
-              ;;
-            src/content/*/*.md)
-              # Content collection entry → map to listing page if a matching
-              # dynamic route component exists under src/pages/<col>/.
-              col=$(echo "$f" | sed -n 's|^src/content/\([^/]*\)/.*|\1|p')
-              if [ -n "$col" ]; then
-                if [ -f "src/pages/$col/[...slug].astro" ] || [ -f "src/pages/$col/[slug].astro" ]; then
-                  path="/$col"
-                  break
-                fi
-              fi
-              ;;
-          esac
-        done
-        # Normalize: collapse double slashes, strip trailing slash (except root)
-        path=$(echo "$path" | sed 's|//\+|/|g; s|/\+$||')
-        [ -z "$path" ] && path="/"
-        echo "${base_url%/}${path}"
-      }
       PREVIEW_URL=$(preview_url_for_changed_files "$PREVIEW_URL")
 
       # Build MR description with context (printf keeps YAML-valid, no multi-line string)
@@ -1690,9 +1453,7 @@ worker:
       set_boucle_label "$BOUCLE_ISSUE" "boucle:review" "boucle::status::bot"
 
       # Chain to reviewer
-      curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-        -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-        -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=reviewer" > /dev/null
+      chain_to_role "$BOUCLE_ISSUE" "reviewer"
   # Worker wall-clock cap. 30 min default — a stuck worker shouldn't hog the
   # data runner for an hour. The doctor re-triggers if the job times out and
   # the issue is still at boucle:working. Increase to 60m for heavy issues.
@@ -1720,46 +1481,6 @@ reviewer:
       # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
       # starts with "boucle:"), so we strip all boucle-managed labels when
       # writing a new pair. Caller passes detail as $2 and gross as $3.
-      set_boucle_label() {
-        local iid="$1" new="$2" gross="$3"
-        local current resp current_all
-        resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
-        current_all=$(echo "$resp" | jq -r '.labels | join(",")')
-        # Idempotence: skip the PUT when every label in "$new,$gross" is already
-        # on the issue. GitLab records a Resource Label Event on every PUT even
-        # if the label set is unchanged — this guard prevents the no-op writes
-        # that surface as spurious "status changes" on the board.
-        local all_present=true lbl
-        for lbl in $(echo "$new,$gross" | tr ',' ' '); do
-          [ -z "$lbl" ] && continue
-          echo "$current_all" | tr ',' '\n' | grep -qx "$lbl" || { all_present=false; break; }
-        done
-        [ "$all_present" = true ] && return 0
-        local merged="${current:+$current,}$new,$gross"
-        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
-        # When the issue moves to the bot side, assign it to the bot user so
-        # the board reflects who owns the next action and humans aren't spammed.
-        # BOUCLE_BOT_ID is the GitLab user ID of the bot (set via bin/setup).
-        # Best-effort: skip silently if unset (backward compat with setups
-        # that haven't run bin/setup --bot-id yet).
-        if [ "$gross" = "boucle::status::bot" ] && [ -n "${BOUCLE_BOT_ID:-}" ]; then
-          curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
-            --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-            --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || { if [ -n "${BOUCLE_BOT_ID:-}" ]; then echo "ERROR: bot reassign failed for issue (BOUCLE_BOT_ID=$BOUCLE_BOT_ID set but API call failed)" >&2; exit 1; fi; }
-        elif [ "$gross" = "boucle::status::human" ]; then
-          # Reassign the issue to the human reporter (walks up parent chain to skip
-          # bot-authored sub-issues). Best-effort: skip silently if resolve fails.
-          local human_id
-          human_id=$(resolve_reporter_id "$iid" 2>/dev/null)
-          if [ -n "$human_id" ] && [ "$human_id" != "null" ] && [ "$human_id" != "${BOUCLE_BOT_ID:-}" ]; then
-            curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
-              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-              --data-urlencode "assignee_ids[]=$human_id" 2>/dev/null || true
-          fi
-        fi
-      }
-
       # Find the MR for this issue
       MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?state=opened" \
         | jq -r '.[] | select(.source_branch == "boucle/'"$BOUCLE_ISSUE"'") | .iid' | head -1)
@@ -1785,10 +1506,7 @@ reviewer:
         glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
           -f body="🔄 Worker shipped zero commits (MR !${MR_IID} has empty diff). Re-running the worker (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null
         if [ "$ITERATION" -lt "$MAX_ITER" ]; then
-          curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-            -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-            -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=worker" \
-            -F "variables[BOUCLE_ITERATION]=$((ITERATION+1))" > /dev/null
+          chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=$((ITERATION+1))
         else
           set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
           glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
@@ -1884,25 +1602,6 @@ reviewer:
           # merge_request webhook (action=approved) triggers the merger job,
           # which merges serially to avoid conflicts.
           # Resolve the reporter id (handles sub-issues: use parent author).
-          resolve_reporter_id() {
-            local iid="$1" data parent_iid parent_data reporter_id author_username
-            local bot_user="${BOUCLE_BOT_USERNAME:-up-bot}"
-            local depth=0 max_depth=10
-            data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null) || { echo ""; return; }
-            reporter_id=$(printf '%s' "$data" | jq -r '.author.id // empty')
-            author_username=$(printf '%s' "$data" | jq -r '.author.username // empty')
-            # Walk up the parent chain until we find a non-bot author.
-            while [ "$author_username" = "$bot_user" ] && [ "$depth" -lt "$max_depth" ]; do
-              parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
-              [ -z "$parent_iid" ] && break
-              parent_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid" 2>/dev/null) || break
-              reporter_id=$(printf '%s' "$parent_data" | jq -r '.author.id // empty')
-              author_username=$(printf '%s' "$parent_data" | jq -r '.author.username // empty')
-              data="$parent_data"
-              depth=$((depth + 1))
-            done
-            echo "$reporter_id"
-          }
           AUTHOR_ID=$(resolve_reporter_id "$BOUCLE_ISSUE")
           if [ -n "$AUTHOR_ID" ] && [ "$AUTHOR_ID" != "null" ]; then
             # Assign the MR to the issue author (curl — glab array-param is broken)
@@ -1922,10 +1621,7 @@ reviewer:
           if [ "$ITERATION" -lt "$MAX_ITER" ]; then
             set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
             # Chain back to worker with incremented iteration
-            curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-              -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-              -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=worker" \
-              -F "variables[BOUCLE_ITERATION]=$((ITERATION+1))" > /dev/null
+            chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=$((ITERATION+1))
           else
             # Final reviewer FAIL after $MAX_ITER attempts: fused into boucle:human
             # (was boucle:blocked, deleted). Configurable via BOUCLE_MAX_ITERATIONS.
@@ -1949,10 +1645,7 @@ reviewer:
         echo "FAIL: agent did not post a verdict for sha $MR_HEAD (iteration $ITERATION/$MAX_ITER)" >&2
         if [ "$ITERATION" -lt "$MAX_ITER" ]; then
           echo "Re-triggering reviewer (iteration $((ITERATION+1))/$MAX_ITER)."
-          curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-            -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-            -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=reviewer" \
-            -F "variables[BOUCLE_ITERATION]=$((ITERATION+1))" > /dev/null
+          chain_to_role "$BOUCLE_ISSUE" "reviewer" BOUCLE_ITERATION=$((ITERATION+1))
         else
           echo "Max iterations reached — escalating to human."
           set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
@@ -1997,46 +1690,6 @@ merger:
       # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
       # starts with "boucle:"), so we strip all boucle-managed labels when
       # writing a new pair. Caller passes detail as $2 and gross as $3.
-      set_boucle_label() {
-        local iid="$1" new="$2" gross="$3"
-        local current resp current_all
-        resp=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid")
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
-        current_all=$(echo "$resp" | jq -r '.labels | join(",")')
-        # Idempotence: skip the PUT when every label in "$new,$gross" is already
-        # on the issue. GitLab records a Resource Label Event on every PUT even
-        # if the label set is unchanged — this guard prevents the no-op writes
-        # that surface as spurious "status changes" on the board.
-        local all_present=true lbl
-        for lbl in $(echo "$new,$gross" | tr ',' ' '); do
-          [ -z "$lbl" ] && continue
-          echo "$current_all" | tr ',' '\n' | grep -qx "$lbl" || { all_present=false; break; }
-        done
-        [ "$all_present" = true ] && return 0
-        local merged="${current:+$current,}$new,$gross"
-        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null
-        # When the issue moves to the bot side, assign it to the bot user so
-        # the board reflects who owns the next action and humans aren't spammed.
-        # BOUCLE_BOT_ID is the GitLab user ID of the bot (set via bin/setup).
-        # Best-effort: skip silently if unset (backward compat with setups
-        # that haven't run bin/setup --bot-id yet).
-        if [ "$gross" = "boucle::status::bot" ] && [ -n "${BOUCLE_BOT_ID:-}" ]; then
-          curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
-            --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-            --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || { if [ -n "${BOUCLE_BOT_ID:-}" ]; then echo "ERROR: bot reassign failed for issue (BOUCLE_BOT_ID=$BOUCLE_BOT_ID set but API call failed)" >&2; exit 1; fi; }
-        elif [ "$gross" = "boucle::status::human" ]; then
-          # Reassign the issue to the human reporter (walks up parent chain to skip
-          # bot-authored sub-issues). Best-effort: skip silently if resolve fails.
-          local human_id
-          human_id=$(resolve_reporter_id "$iid" 2>/dev/null)
-          if [ -n "$human_id" ] && [ "$human_id" != "null" ] && [ "$human_id" != "${BOUCLE_BOT_ID:-}" ]; then
-            curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
-              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-              --data-urlencode "assignee_ids[]=$human_id" 2>/dev/null || true
-          fi
-        fi
-      }
-
       # Set merging label
       set_boucle_label "$BOUCLE_ISSUE" "boucle:merging" "boucle::status::bot"
 
@@ -2079,10 +1732,7 @@ merger:
         set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
         glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
           -f body="🔄 Merger could not rebase MR !${MR_IID} onto master (conflict). Re-running the worker on fresh master to regenerate the MR." > /dev/null
-        curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-          -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-          -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=worker" \
-          -F "variables[BOUCLE_ITERATION]=1" > /dev/null
+        chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=1
         exit 1
       fi
 
@@ -2184,11 +1834,7 @@ post-merge:
       fi
 
       # Trigger e2e WITH BOUCLE_ISSUE set → enables maybe_close_parent
-      curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-        -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-        -F "variables[BOUCLE_ROLE]=e2e" \
-        -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" \
-        -F "variables[BOUCLE_LIVE_URL]=$LIVE_URL" > /dev/null 2>&1 || true
+      chain_to_role "$BOUCLE_ISSUE" "e2e" BOUCLE_LIVE_URL=$LIVE_URL
       echo "Triggered e2e for issue #$BOUCLE_ISSUE with LIVE_URL=$LIVE_URL"
   timeout: 20m
 
@@ -2230,143 +1876,9 @@ catchup:
       # starts with "boucle:"), so we strip all boucle-managed labels when
       # writing a new pair. Caller passes detail as $2 and gross as $3.
       # Tolerate glab non-zero exit (version warnings, transient API errors).
-      set_boucle_label() {
-        local iid="$1" new="$2" gross="$3"
-        local current resp current_all
-        resp=$(set +e; glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null) || true
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")' 2>/dev/null) || true
-        current_all=$(echo "$resp" | jq -r '.labels | join(",")' 2>/dev/null) || true
-        # Idempotence: skip the PUT when every label in "$new,$gross" is already
-        # on the issue. GitLab records a Resource Label Event on every PUT even
-        # if the label set is unchanged — this guard prevents the no-op writes
-        # that surface as spurious "status changes" on the board.
-        local all_present=true lbl
-        for lbl in $(echo "$new,$gross" | tr ',' ' '); do
-          [ -z "$lbl" ] && continue
-          echo "$current_all" | tr ',' '\n' | grep -qx "$lbl" || { all_present=false; break; }
-        done
-        [ "$all_present" = true ] && return 0
-        local merged="${current:+$current,}$new,$gross"
-        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null 2>&1 || true
-        # When the issue moves to the bot side, assign it to the bot user so
-        # the board reflects who owns the next action. Best-effort: skip
-        # silently if BOUCLE_BOT_ID is unset (backward compat).
-        if [ "$gross" = "boucle::status::bot" ] && [ -n "${BOUCLE_BOT_ID:-}" ]; then
-          curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
-            --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-            --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || { if [ -n "${BOUCLE_BOT_ID:-}" ]; then echo "ERROR: bot reassign failed for issue (BOUCLE_BOT_ID=$BOUCLE_BOT_ID set but API call failed)" >&2; exit 1; fi; }
-        elif [ "$gross" = "boucle::status::human" ]; then
-          # Reassign the issue to the human reporter (walks up parent chain to skip
-          # bot-authored sub-issues). Best-effort: skip silently if resolve fails.
-          local human_id
-          human_id=$(resolve_reporter_id "$iid" 2>/dev/null)
-          if [ -n "$human_id" ] && [ "$human_id" != "null" ] && [ "$human_id" != "${BOUCLE_BOT_ID:-}" ]; then
-            curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
-              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-              --data-urlencode "assignee_ids[]=$human_id" 2>/dev/null || true
-          fi
-        fi
-      }
-
-      # Close a GitLab issue (boucle:done is a board label, not a close state)
-      close_issue() {
-        local iid="$1"
-        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" \
-          -f state_event=close > /dev/null 2>&1 || true
-      }
-
-      # List child work items of a parent. Returns JSON array (empty on failure).
-      get_work_item_children() {
-        local parent_iid="$1" children out
-        children=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/-/work_items/$parent_iid/children" 2>/dev/null) || { echo "[]"; return; }
-        out=$(printf '%s' "$children" | jq -c 'if type == "array" then . else [] end' 2>/dev/null)
-        printf '%s' "${out:-[]}"
-      }
-
       # Parent-close cascade: if this issue is a sub-issue (has a "## Parent
       # issue" section in its body), check whether ALL its sibling sub-issues
       # are closed. If so, close the parent too. No-op if not a sub-issue.
-      maybe_close_parent() {
-        local child_iid="$1"
-        local child_data parent_iid
-        child_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$child_iid" 2>/dev/null) || { echo "maybe_close_parent: can't fetch issue #$child_iid — skipping."; return 0; }
-        parent_iid=$(echo "$child_data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
-        if [ -z "$parent_iid" ]; then
-          echo "maybe_close_parent: no parent issue link in #$child_iid — not a sub-issue."
-          return 0
-        fi
-        local parent_data parent_state
-        parent_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid" 2>/dev/null) || { echo "maybe_close_parent: can't fetch parent #$parent_iid — skipping."; return 0; }
-        parent_state=$(echo "$parent_data" | jq -r '.state')
-        if [ "$parent_state" = "closed" ]; then
-          echo "maybe_close_parent: parent #$parent_iid already closed."
-          return 0
-        fi
-        local children_data sibling_iids
-        children_data=$(get_work_item_children "$parent_iid")
-        sibling_iids=$(echo "$children_data" | jq -r '[.[].iid] | join(",")' 2>/dev/null)
-        if [ -z "$sibling_iids" ]; then
-          local parent_notes
-          parent_notes=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid/notes" 2>/dev/null) || { echo "maybe_close_parent: can't fetch parent notes — skipping."; return 0; }
-          sibling_iids=$(echo "$parent_notes" | jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | first | .body // empty' | grep -oE 'iids=[0-9,]+' | cut -d= -f2)
-          if [ -z "$sibling_iids" ]; then
-            echo "maybe_close_parent: no children via hierarchy API and no split-parent marker on #$parent_iid — checking REST links..."
-            local links_data
-            links_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid/links" 2>/dev/null) || links_data="[]"
-            sibling_iids=$(echo "$links_data" | jq -r '[.[] | select(.iid != null) | .iid] | join(",")')
-            if [ -z "$sibling_iids" ]; then
-              echo "maybe_close_parent: parent #$parent_iid has no children, no marker, and no REST links — can't check siblings."
-              return 0
-            fi
-            echo "maybe_close_parent: found $sibling_iids via REST links fallback"
-            local all_closed=true iid
-            for iid in $(echo "$sibling_iids" | tr ',' ' '); do
-              local sib_state
-              sib_state=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null | jq -r '.state // "unknown"')
-              if [ "$sib_state" != "closed" ]; then
-                echo "maybe_close_parent: sibling #$iid is $sib_state — parent #$parent_iid stays open."
-                all_closed=false
-                break
-              fi
-            done
-            if [ "$all_closed" = "true" ]; then
-              echo "maybe_close_parent: all sub-issues of #$parent_iid are closed — closing parent."
-              close_issue "$parent_iid"
-            fi
-            return 0
-          fi
-          echo "maybe_close_parent: found $sibling_iids via legacy split-parent marker"
-          local all_closed=true iid
-          for iid in $(echo "$sibling_iids" | tr ',' ' '); do
-            local sib_state
-            sib_state=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null | jq -r '.state // "unknown"')
-            if [ "$sib_state" != "closed" ]; then
-              echo "maybe_close_parent: sibling #$iid is $sib_state — parent #$parent_iid stays open."
-              all_closed=false
-              break
-            fi
-          done
-          if [ "$all_closed" = "true" ]; then
-            echo "maybe_close_parent: all sub-issues of #$parent_iid are closed — closing parent."
-            close_issue "$parent_iid"
-          fi
-          return 0
-        fi
-        local all_closed=true
-        local open_count
-        open_count=$(echo "$children_data" | jq '[.[] | select(.state != "closed")] | length' 2>/dev/null || echo 1)
-        if [ "${open_count:-1}" -gt 0 ]; then
-          local open_iids
-          open_iids=$(echo "$children_data" | jq -r '[.[] | select(.state != "closed") | .iid] | join(",")')
-          echo "maybe_close_parent: open sub-issue(s) #$open_iids — parent #$parent_iid stays open."
-          all_closed=false
-        fi
-        if [ "$all_closed" = "true" ]; then
-          echo "maybe_close_parent: all sub-issues of #$parent_iid are closed — closing parent."
-          close_issue "$parent_iid"
-        fi
-      }
-
       # ── Main: inspect issue state, branch, close, cascade ──────────────
       # Disable errexit for the main flow: GitLab Runner runs `- |` blocks with
       # set -eo pipefail, and grep (no match) / glab (transient API error)
@@ -2522,164 +2034,13 @@ e2e:
       # starts with "boucle:"), so we strip all boucle-managed labels when
       # writing a new pair. Caller passes detail as $2 and gross as $3.
       # Tolerate glab non-zero exit (version warnings, transient API errors).
-      set_boucle_label() {
-        local iid="$1" new="$2" gross="$3"
-        local current resp current_all
-        resp=$(set +e; glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null) || true
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")' 2>/dev/null) || true
-        current_all=$(echo "$resp" | jq -r '.labels | join(",")' 2>/dev/null) || true
-        # Idempotence: skip the PUT when every label in "$new,$gross" is already
-        # on the issue. GitLab records a Resource Label Event on every PUT even
-        # if the label set is unchanged — this guard prevents the no-op writes
-        # that surface as spurious "status changes" on the board.
-        local all_present=true lbl
-        for lbl in $(echo "$new,$gross" | tr ',' ' '); do
-          [ -z "$lbl" ] && continue
-          echo "$current_all" | tr ',' '\n' | grep -qx "$lbl" || { all_present=false; break; }
-        done
-        [ "$all_present" = true ] && return 0
-        local merged="${current:+$current,}$new,$gross"
-        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" -f labels="$merged" > /dev/null 2>&1 || true
-        # When the issue moves to the bot side, assign it to the bot user so
-        # the board reflects who owns the next action and humans aren't spammed.
-        # BOUCLE_BOT_ID is the GitLab user ID of the bot (set via bin/setup).
-        # Best-effort: skip silently if unset (backward compat with setups
-        # that haven't run bin/setup --bot-id yet).
-        if [ "$gross" = "boucle::status::bot" ] && [ -n "${BOUCLE_BOT_ID:-}" ]; then
-          curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
-            --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-            --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || { if [ -n "${BOUCLE_BOT_ID:-}" ]; then echo "ERROR: bot reassign failed for issue (BOUCLE_BOT_ID=$BOUCLE_BOT_ID set but API call failed)" >&2; exit 1; fi; }
-        elif [ "$gross" = "boucle::status::human" ]; then
-          # Reassign the issue to the human reporter (walks up parent chain to skip
-          # bot-authored sub-issues). Best-effort: skip silently if resolve fails.
-          local human_id
-          human_id=$(resolve_reporter_id "$iid" 2>/dev/null)
-          if [ -n "$human_id" ] && [ "$human_id" != "null" ] && [ "$human_id" != "${BOUCLE_BOT_ID:-}" ]; then
-            curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
-              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-              --data-urlencode "assignee_ids[]=$human_id" 2>/dev/null || true
-          fi
-        fi
-      }
-
-      # Close a GitLab issue (boucle:done is a board label, not a close state)
-      close_issue() {
-        local iid="$1"
-        glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$iid" \
-          -f state_event=close > /dev/null 2>&1 || true
-      }
-
       # List child work items of a parent. Returns JSON array (empty on failure).
       # Each child has .iid, .state ("opened"|"closed"), .title.
       # NOTE: glab may exit 0 on HTTP 403 (work_item_rest_api feature flag
       # disabled) and print the error JSON to stdout; validate array shape.
-      get_work_item_children() {
-        local parent_iid="$1" children out
-        children=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/-/work_items/$parent_iid/children" 2>/dev/null) || { echo "[]"; return; }
-        out=$(printf '%s' "$children" | jq -c 'if type == "array" then . else [] end' 2>/dev/null)
-        printf '%s' "${out:-[]}"
-      }
-
       # Parent-close cascade: if this issue is a sub-issue (has a "## Parent issue"
       # section in its body), check whether ALL its sibling sub-issues are closed.
       # If so, close the parent too. No-op if the issue is not a sub-issue.
-      maybe_close_parent() {
-        local child_iid="$1"
-        # Parse parent IID from the sub-issue body ("## Parent issue\n#N — <url>")
-        local child_data parent_iid
-        child_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$child_iid" 2>/dev/null) || { echo "maybe_close_parent: can't fetch issue #$child_iid — skipping."; return 0; }
-        parent_iid=$(echo "$child_data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
-        if [ -z "$parent_iid" ]; then
-          echo "maybe_close_parent: no parent issue link in #$child_iid — not a sub-issue."
-          return 0
-        fi
-
-        # Fetch parent; skip if already closed
-        local parent_data parent_state
-        parent_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid" 2>/dev/null) || { echo "maybe_close_parent: can't fetch parent #$parent_iid — skipping."; return 0; }
-        parent_state=$(echo "$parent_data" | jq -r '.state')
-        if [ "$parent_state" = "closed" ]; then
-          echo "maybe_close_parent: parent #$parent_iid already closed."
-          return 0
-        fi
-
-        # Check children via the work-items hierarchy API (source of truth).
-        # The children endpoint returns each child's .state directly, so we
-        # can check all siblings in one call. Fall back to the legacy
-        # split-parent marker comment and REST links for data produced by
-        # older boucle versions that didn't use the hierarchy API.
-        local children_data sibling_iids
-        children_data=$(get_work_item_children "$parent_iid")
-        sibling_iids=$(echo "$children_data" | jq -r '[.[].iid] | join(",")' 2>/dev/null)
-        if [ -z "$sibling_iids" ]; then
-          # No children via hierarchy API — fall back to legacy marker comment
-          local parent_notes
-          parent_notes=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid/notes" 2>/dev/null) || { echo "maybe_close_parent: can't fetch parent notes — skipping."; return 0; }
-          sibling_iids=$(echo "$parent_notes" | jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | first | .body // empty' | grep -oE 'iids=[0-9,]+' | cut -d= -f2)
-          if [ -z "$sibling_iids" ]; then
-            # No legacy marker either — fall back to REST issue links API
-            echo "maybe_close_parent: no children via hierarchy API and no split-parent marker on #$parent_iid — checking REST links..."
-            local links_data
-            links_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid/links" 2>/dev/null) || links_data="[]"
-            sibling_iids=$(echo "$links_data" | jq -r '[.[] | select(.iid != null) | .iid] | join(",")')
-            if [ -z "$sibling_iids" ]; then
-              echo "maybe_close_parent: parent #$parent_iid has no children, no marker, and no REST links — can't check siblings."
-              return 0
-            fi
-            echo "maybe_close_parent: found $sibling_iids via REST links fallback"
-            # REST links fallback: check each sibling state individually
-            local all_closed=true iid
-            for iid in $(echo "$sibling_iids" | tr ',' ' '); do
-              local sib_state
-              sib_state=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null | jq -r '.state // "unknown"')
-              if [ "$sib_state" != "closed" ]; then
-                echo "maybe_close_parent: sibling #$iid is $sib_state — parent #$parent_iid stays open."
-                all_closed=false
-                break
-              fi
-            done
-            if [ "$all_closed" = "true" ]; then
-              echo "maybe_close_parent: all sub-issues of #$parent_iid are closed — closing parent."
-              close_issue "$parent_iid"
-            fi
-            return 0
-          fi
-          echo "maybe_close_parent: found $sibling_iids via legacy split-parent marker"
-          # Legacy marker fallback: check each sibling state individually
-          local all_closed=true iid
-          for iid in $(echo "$sibling_iids" | tr ',' ' '); do
-            local sib_state
-            sib_state=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null | jq -r '.state // "unknown"')
-            if [ "$sib_state" != "closed" ]; then
-              echo "maybe_close_parent: sibling #$iid is $sib_state — parent #$parent_iid stays open."
-              all_closed=false
-              break
-            fi
-          done
-          if [ "$all_closed" = "true" ]; then
-            echo "maybe_close_parent: all sub-issues of #$parent_iid are closed — closing parent."
-            close_issue "$parent_iid"
-          fi
-          return 0
-        fi
-
-        # Hierarchy API path: children response includes .state directly,
-        # so we can check all siblings in one call (no per-sibling fetch).
-        local all_closed=true
-        local open_count
-        open_count=$(echo "$children_data" | jq '[.[] | select(.state != "closed")] | length' 2>/dev/null || echo 1)
-        if [ "${open_count:-1}" -gt 0 ]; then
-          local open_iids
-          open_iids=$(echo "$children_data" | jq -r '[.[] | select(.state != "closed") | .iid] | join(",")')
-          echo "maybe_close_parent: open sub-issue(s) #$open_iids — parent #$parent_iid stays open."
-          all_closed=false
-        fi
-        if [ "$all_closed" = "true" ]; then
-          echo "maybe_close_parent: all sub-issues of #$parent_iid are closed — closing parent."
-          close_issue "$parent_iid"
-        fi
-      }
-
       # Deploy-triggered e2e: no issue context. Run a deterministic HTTP smoke test.
       if [ -z "${BOUCLE_ISSUE:-}" ]; then
         echo "Deploy-triggered e2e — no issue context. Running HTTP smoke test."
@@ -2775,62 +2136,19 @@ doctor:
     - |
       # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
       set +o pipefail
-      HOST="$BOUCLE_FORGE_HOST"
-      PID="$CI_PROJECT_ID"
       RECOVERED=0
       # Emoji reactions that count as spec approval (GitLab internal alpha codes).
       # Must mirror the dispatch job's constant — each CI job runs its own shell.
       BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup|white_check_mark|ballot_box_with_check|heavy_check_mark|ok|ok_hand"
-
-      # Label helper: preserve non-boucle labels when writing a boucle label.
-      # Same definition as the other jobs — included here so the doctor can
-      # call it (it calls set_boucle_label below for spec-review and orphan
-      # recovery). Also assigns the issue to the bot when moving to the bot
-      # side, matching the behavior of the rest of the loop.
-      set_boucle_label() {
-        local iid="$1" new="$2" gross="$3"
-        local current resp current_all
-        resp=$(glab api --hostname "$HOST" "/projects/$PID/issues/$iid")
-        current=$(echo "$resp" | jq -r '.labels | map(select(startswith("boucle:") | not)) | join(",")')
-        current_all=$(echo "$resp" | jq -r '.labels | join(",")')
-        # Idempotence: skip the PUT when every label in "$new,$gross" is already
-        # on the issue. GitLab records a Resource Label Event on every PUT even
-        # if the label set is unchanged — this guard prevents the no-op writes
-        # that surface as spurious "status changes" on the board.
-        local all_present=true lbl
-        for lbl in $(echo "$new,$gross" | tr ',' ' '); do
-          [ -z "$lbl" ] && continue
-          echo "$current_all" | tr ',' '\n' | grep -qx "$lbl" || { all_present=false; break; }
-        done
-        [ "$all_present" = true ] && return 0
-        local merged="${current:+$current,}$new,$gross"
-        glab api --hostname "$HOST" -X PUT "/projects/$PID/issues/$iid" -f labels="$merged" > /dev/null
-        if [ "$gross" = "boucle::status::bot" ] && [ -n "${BOUCLE_BOT_ID:-}" ]; then
-          curl -s -o /dev/null -X PUT "https://$HOST/api/v4/projects/$PID/issues/$iid" \
-            --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-            --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || { if [ -n "${BOUCLE_BOT_ID:-}" ]; then echo "ERROR: bot reassign failed for issue (BOUCLE_BOT_ID=$BOUCLE_BOT_ID set but API call failed)" >&2; exit 1; fi; }
-        elif [ "$gross" = "boucle::status::human" ]; then
-          # Reassign the issue to the human reporter (walks up parent chain to skip
-          # bot-authored sub-issues). Best-effort: skip silently if resolve fails.
-          local human_id
-          human_id=$(resolve_reporter_id "$iid" 2>/dev/null)
-          if [ -n "$human_id" ] && [ "$human_id" != "null" ] && [ "$human_id" != "${BOUCLE_BOT_ID:-}" ]; then
-            curl -s -o /dev/null -X PUT "https://$HOST/api/v4/projects/$PID/issues/$iid" \
-              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-              --data-urlencode "assignee_ids[]=$human_id" 2>/dev/null || true
-          fi
-        fi
-      }
-
       # Fetch all open issues with boucle:needs-info label
-      NEEDS_INFO_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:needs-info&per_page=100" \
+      NEEDS_INFO_ISSUES=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues?state=opened&labels=boucle:needs-info&per_page=100" \
         | jq -r '.[].iid')
 
       for IID in $NEEDS_INFO_ISSUES; do
         echo "Checking #$IID (boucle:needs-info)..."
 
         # Fetch notes for the issue (GitLab returns newest-first)
-        NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
+        NOTES=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$IID/notes")
 
         # Find the last triage comment (has <!-- boucle:triage marker)
         LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
@@ -2849,9 +2167,7 @@ doctor:
           # Re-trigger: set boucle:triage label (preserve non-boucle labels)
           set_boucle_label "$IID" "boucle:triage" "boucle::status::bot"
           # Trigger triage pipeline
-          curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
-            -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-            -F "variables[BOUCLE_ISSUE]=$IID" > /dev/null
+          chain_to_role "$IID" ""
           echo "  → re-triggered triage for #$IID"
           RECOVERED=$((RECOVERED + 1))
         else
@@ -2864,12 +2180,12 @@ doctor:
       # pipeline was canceled/orphaned before it could trigger the worker.
       # Issue still has boucle:spec-review (dispatch didn't run to strip it).
       # Worker relabels to boucle:working on start, which clears it.
-      SPEC_REVIEW_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:spec-review&per_page=100" \
+      SPEC_REVIEW_ISSUES=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues?state=opened&labels=boucle:spec-review&per_page=100" \
         | jq -r '.[].iid')
 
       for IID in $SPEC_REVIEW_ISSUES; do
         echo "Checking #$IID (boucle:spec-review) for spec approval..."
-        NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
+        NOTES=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$IID/notes")
         # Find the last triage comment (same as needs-info recovery above)
         LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
         # Detect any non-bot note after the last triage comment
@@ -2887,8 +2203,8 @@ doctor:
         EMOJI_APPROVAL_FOUND=false
         for NOTE_ID in $LAST_TRIAGE_NOTE_ID $SPEC_INVITE_NOTE_ID; do
           [ "$NOTE_ID" = "0" ] || [ -z "$NOTE_ID" ] && continue
-          AWARDS=$(glab api --hostname "$HOST" \
-            "/projects/$PID/issues/$IID/notes/$NOTE_ID/award_emoji" 2>/dev/null)
+          AWARDS=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
+            "/projects/$CI_PROJECT_ID/issues/$IID/notes/$NOTE_ID/award_emoji" 2>/dev/null)
           if echo "$AWARDS" | jq -e --arg emojis "$BOUCLE_SPEC_APPROVAL_EMOJIS" '
             [.[] | select(.user.username != "up-bot") | .name]
             | map(select(. as $n | ($emojis | split("|")) | index($n)))
@@ -2901,9 +2217,7 @@ doctor:
         if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ] || [ "$EMOJI_APPROVAL_FOUND" = true ]; then
           echo "  → #$IID approved (reply=$HUMAN_REPLY_AFTER_TRIAGE, emoji=$EMOJI_APPROVAL_FOUND) — re-triggering worker"
           set_boucle_label "$IID" "boucle:todo" "boucle::status::bot"
-          curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
-            -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-            -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+          chain_to_role "$IID" "worker"
           echo "  → re-triggered worker for #$IID"
           RECOVERED=$((RECOVERED + 1))
         else
@@ -2914,7 +2228,7 @@ doctor:
       # Also check for stuck boucle:triage issues (triage label set but no
       # active pipeline running for them — e.g. pipeline was canceled).
       # These have boucle:triage but no matching running/created pipeline.
-      TRIAGE_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:triage&per_page=100" \
+      TRIAGE_ISSUES=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues?state=opened&labels=boucle:triage&per_page=100" \
         | jq -r '.[].iid')
 
       for IID in $TRIAGE_ISSUES; do
@@ -2922,7 +2236,7 @@ doctor:
         # Check if there's a running/created pipeline for this issue.
         # We can't easily map pipelines to issues, so check if the triage
         # label has been stuck for >15 min (no triage comment posted recently).
-        NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
+        NOTES=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$IID/notes")
         LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
 
         # If there's a recent triage comment (within last 15 min), skip —
@@ -2945,9 +2259,7 @@ doctor:
 
         # No recent triage comment — re-trigger
         echo "  → #$IID: boucle:triage with no recent triage comment — re-triggering"
-        curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
-          -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-          -F "variables[BOUCLE_ISSUE]=$IID" > /dev/null
+        chain_to_role "$IID" ""
         echo "  → re-triggered triage for #$IID"
         RECOVERED=$((RECOVERED + 1))
       done
@@ -2960,12 +2272,12 @@ doctor:
       # recovery above can't see these issues because they have no label
       # to filter on. Scan all unlabeled open issues for this pattern.
       echo "Scanning open issues without boucle labels for orphaned triages..."
-      UNLABELED_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&per_page=100" \
+      UNLABELED_ISSUES=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues?state=opened&per_page=100" \
         | jq -r '[.[] | select(.labels | map(startswith("boucle:")) | any | not)] | .[].iid')
 
       for IID in $UNLABELED_ISSUES; do
         echo "Checking #$IID (no boucle label) for orphaned triage..."
-        NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
+        NOTES=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$IID/notes")
 
         # Does this issue have any triage comment at all?
         LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
@@ -2991,9 +2303,7 @@ doctor:
         # answers and route the issue correctly this time.
         echo "  → #$IID: orphaned triage (triage comment + human reply, no boucle label) — re-triggering"
         set_boucle_label "$IID" "boucle:triage" "boucle::status::bot"
-        curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
-          -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-          -F "variables[BOUCLE_ISSUE]=$IID" > /dev/null
+        chain_to_role "$IID" ""
         echo "  → re-triggered triage for #$IID"
         RECOVERED=$((RECOVERED + 1))
       done
@@ -3001,13 +2311,6 @@ doctor:
       # List child work items of a parent via the hierarchy API.
       # NOTE: glab may exit 0 on HTTP 403 (work_item_rest_api feature flag
       # disabled) and print the error JSON to stdout; validate array shape.
-      get_work_item_children() {
-        local parent_iid="$1" children out
-        children=$(glab api --hostname "$HOST" "/projects/$PID/-/work_items/$parent_iid/children" 2>/dev/null) || { echo "[]"; return; }
-        out=$(printf '%s' "$children" | jq -c 'if type == "array" then . else [] end' 2>/dev/null)
-        printf '%s' "${out:-[]}"
-      }
-
       # ── Recover stuck boucle:working / boucle:review issues ────────────
       # A worker/reviewer pipeline can be interrupted (runner crash, manual
       # cancel, force-push mid-run) leaving the issue stuck at boucle:working
@@ -3018,29 +2321,27 @@ doctor:
       # BOUCLE_STALENESS_THRESHOLD, default 300s/5min) with no matching role
       # pipeline currently running.
       echo "Scanning for stuck boucle:working / boucle:review issues..."
-      STUCK_WORKING=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:working&per_page=100" \
+      STUCK_WORKING=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues?state=opened&labels=boucle:working&per_page=100" \
         | jq -r '.[].iid')
-      STUCK_REVIEW=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:review&per_page=100" \
+      STUCK_REVIEW=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues?state=opened&labels=boucle:review&per_page=100" \
         | jq -r '.[].iid')
 
       # Deferred todo issues: re-trigger when a worker slot frees up.
       # Only applies when BOUCLE_MAX_PARALLEL_ISSUES is set (> 0).
       MAX_PARALLEL="${BOUCLE_MAX_PARALLEL_ISSUES:-0}"
       if [ "$MAX_PARALLEL" -gt 0 ] 2>/dev/null; then
-        WORKING_COUNT=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:working&per_page=100" | jq 'length')
+        WORKING_COUNT=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues?state=opened&labels=boucle:working&per_page=100" | jq 'length')
         if [ "$WORKING_COUNT" -lt "$MAX_PARALLEL" ]; then
-          TODO_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:todo&per_page=100" | jq -r '.[].iid')
+          TODO_ISSUES=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues?state=opened&labels=boucle:todo&per_page=100" | jq -r '.[].iid')
           for IID in $TODO_ISSUES; do
             # Re-check working count each iteration (a previous trigger may have flipped it)
-            WORKING_COUNT=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:working&per_page=100" | jq 'length')
+            WORKING_COUNT=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues?state=opened&labels=boucle:working&per_page=100" | jq 'length')
             if [ "$WORKING_COUNT" -ge "$MAX_PARALLEL" ]; then
               echo "  → slots full again ($WORKING_COUNT/$MAX_PARALLEL) — stopping todo recovery"
               break
             fi
             echo "  → #$IID (boucle:todo): slot available ($WORKING_COUNT/$MAX_PARALLEL) — triggering worker"
-            curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
-              -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-              -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
+            chain_to_role "$IID" "worker"
             RECOVERED=$((RECOVERED + 1))
           done
         fi
@@ -3048,7 +2349,7 @@ doctor:
 
       for IID in $STUCK_WORKING $STUCK_REVIEW; do
         # Determine which role to re-trigger based on the label.
-        ISSUE_LABELS=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID" | jq -r '.labels | join(",")')
+        ISSUE_LABELS=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$IID" | jq -r '.labels | join(",")')
         if echo "$ISSUE_LABELS" | grep -q "boucle:working"; then
           ROLE="worker"
         elif echo "$ISSUE_LABELS" | grep -q "boucle:review"; then
@@ -3061,12 +2362,12 @@ doctor:
         # If so, the issue should be closed + boucle:done, NOT re-triggered.
         # This happens when a human merged the MR manually (bypassing the
         # merger job), leaving the issue stuck at working/review forever.
-        MR_STATE=$(glab api --hostname "$HOST" "/projects/$PID/merge_requests?source_branch=boucle/$IID&state=merged" 2>/dev/null \
+        MR_STATE=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests?source_branch=boucle/$IID&state=merged" 2>/dev/null \
           | jq -r '.[0].state // empty')
         if [ "$MR_STATE" = "merged" ]; then
           echo "  → #$IID ($ROLE): MR already merged — closing issue + boucle:done"
           set_boucle_label "$IID" "boucle:done" "boucle::status::done"
-          glab api --hostname "$HOST" -X PUT "/projects/$PID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
+          glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
           RECOVERED=$((RECOVERED + 1))
           continue
         fi
@@ -3077,19 +2378,17 @@ doctor:
         # approved the MR natively (the dispatch `approved` case only
         # acts on boucle:approval, so these issues would otherwise loop
         # forever re-running the worker/reviewer).
-        MR_OPEN_DATA=$(glab api --hostname "$HOST" "/projects/$PID/merge_requests?source_branch=boucle/$IID&state=opened" 2>/dev/null \
+        MR_OPEN_DATA=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests?source_branch=boucle/$IID&state=opened" 2>/dev/null \
           | jq -c '[.[] | select(.source_branch == "boucle/$IID")] | first // empty' 2>/dev/null)
         if [ -n "$MR_OPEN_DATA" ] && [ "$MR_OPEN_DATA" != "null" ]; then
           MR_OIID=$(echo "$MR_OPEN_DATA" | jq -r '.iid')
           MR_OSTATUS=$(echo "$MR_OPEN_DATA" | jq -r '.detailed_merge_status // .merge_status // "unknown"')
-          MR_OAPPROVALS=$(glab api --hostname "$HOST" "/projects/$PID/merge_requests/$MR_OIID/approvals" 2>/dev/null)
+          MR_OAPPROVALS=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests/$MR_OIID/approvals" 2>/dev/null)
           MR_OAPPROVED=$(echo "$MR_OAPPROVALS" | jq -r '[.approved_by[].user.username] | length' 2>/dev/null || echo 0)
           if [ "$MR_OSTATUS" = "mergeable" ] && [ "$MR_OAPPROVED" -gt 0 ]; then
             echo "  → #$IID ($ROLE): MR !$MR_OIID approved ($MR_OAPPROVED) + mergeable — triggering merger instead of $ROLE"
             set_boucle_label "$IID" "boucle:merging" "boucle::status::bot"
-            curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
-              -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-              -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=merger" > /dev/null
+            chain_to_role "$IID" "merger"
             echo "  → triggered merger for #$IID"
             RECOVERED=$((RECOVERED + 1))
             continue
@@ -3104,7 +2403,7 @@ doctor:
         # active" check would skip other stuck issues (false positive). The
         # resource_group (boucle-issue-$BOUCLE_ISSUE) serializes per-issue
         # runs, so a duplicate re-trigger just queues safely — no collision.
-        UPDATED_AT=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID" | jq -r '.updated_at')
+        UPDATED_AT=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$IID" | jq -r '.updated_at')
         UPDATED_EPOCH=$(date -d "$UPDATED_AT" +%s 2>/dev/null || echo 0)
         NOW_EPOCH=$(date +%s)
         AGE=$((NOW_EPOCH - UPDATED_EPOCH))
@@ -3115,9 +2414,7 @@ doctor:
         fi
 
         echo "  → #$IID ($ROLE): stuck for ${AGE}s — re-triggering $ROLE"
-        curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
-          -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-          -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=$ROLE" > /dev/null
+        chain_to_role "$IID" "$ROLE"
         echo "  → re-triggered $ROLE for #$IID"
         RECOVERED=$((RECOVERED + 1))
       done
@@ -3135,15 +2432,15 @@ doctor:
       # approval landed), the issue would otherwise wait forever for a
       # webhook that already passed.
       echo "Scanning boucle:human / boucle:approval issues for approved+mergeable MRs..."
-      HUMAN_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:human&per_page=100" \
+      HUMAN_ISSUES=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues?state=opened&labels=boucle:human&per_page=100" \
         | jq -r '.[].iid')
-      APPROVAL_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:approval&per_page=100" \
+      APPROVAL_ISSUES=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues?state=opened&labels=boucle:approval&per_page=100" \
         | jq -r '.[].iid')
 
       for IID in $HUMAN_ISSUES $APPROVAL_ISSUES; do
         echo "Checking #$IID (boucle:human/boucle:approval) for approved MR..."
         # Find an open MR for this issue (branch boucle/$IID)
-        MR_DATA=$(glab api --hostname "$HOST" "/projects/$PID/merge_requests?state=opened" \
+        MR_DATA=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests?state=opened" \
           | jq -c --arg branch "boucle/$IID" '[.[] | select(.source_branch == $branch)] | first // empty' 2>/dev/null)
         if [ -z "$MR_DATA" ] || [ "$MR_DATA" = "null" ]; then
           echo "  → #$IID: no open MR — skipping"
@@ -3152,14 +2449,12 @@ doctor:
         MR_IID=$(echo "$MR_DATA" | jq -r '.iid')
         MR_MERGE_STATUS=$(echo "$MR_DATA" | jq -r '.detailed_merge_status // .merge_status // "unknown"')
         # Check approvals on the MR
-        APPROVALS=$(glab api --hostname "$HOST" "/projects/$PID/merge_requests/$MR_IID/approvals" 2>/dev/null)
+        APPROVALS=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/approvals" 2>/dev/null)
         APPROVED_COUNT=$(echo "$APPROVALS" | jq -r '[.approved_by[].user.username] | length' 2>/dev/null || echo 0)
         if [ "$MR_MERGE_STATUS" = "mergeable" ] && [ "$APPROVED_COUNT" -gt 0 ]; then
           echo "  → #$IID: MR !$MR_IID is approved ($APPROVED_COUNT) + mergeable — triggering merger"
           set_boucle_label "$IID" "boucle:merging" "boucle::status::bot"
-          curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
-            -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-            -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=merger" > /dev/null
+          chain_to_role "$IID" "merger"
           echo "  → triggered merger for #$IID"
           RECOVERED=$((RECOVERED + 1))
         elif [ "$APPROVED_COUNT" -gt 0 ] && [ "$MR_MERGE_STATUS" != "mergeable" ]; then
@@ -3185,7 +2480,7 @@ doctor:
       # sub-issues are closed. This is the fallback cascade for sub-issues
       # closed via MR merge (Closes #N) where the deploy-triggered e2e
       # had no BOUCLE_ISSUE context and maybe_close_parent() never ran.
-      SPLIT_PARENTS=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:split&per_page=100" \
+      SPLIT_PARENTS=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues?state=opened&labels=boucle:split&per_page=100" \
         | jq -r '.[].iid')
 
       for IID in $SPLIT_PARENTS; do
@@ -3195,12 +2490,12 @@ doctor:
         SIBLING_IIDS=$(echo "$CHILDREN_DATA" | jq -r '[.[].iid] | join(",")' 2>/dev/null)
         if [ -z "$SIBLING_IIDS" ]; then
           # No children via hierarchy API — fall back to legacy marker comment
-          NOTES=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/notes")
+          NOTES=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$IID/notes")
           SIBLING_IIDS=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | first | .body // empty' | grep -oE 'iids=[0-9,]+' | cut -d= -f2)
           if [ -z "$SIBLING_IIDS" ]; then
             # No legacy marker — fall back to REST issue links API
             echo "  → #$IID: no children via hierarchy API and no split-parent marker — checking REST links..."
-            LINKS_DATA=$(glab api --hostname "$HOST" "/projects/$PID/issues/$IID/links" 2>/dev/null) || LINKS_DATA="[]"
+            LINKS_DATA=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$IID/links" 2>/dev/null) || LINKS_DATA="[]"
             SIBLING_IIDS=$(echo "$LINKS_DATA" | jq -r '[.[] | select(.iid != null) | .iid] | join(",")')
             if [ -z "$SIBLING_IIDS" ]; then
               echo "  → #$IID: no children, no marker, and no REST links — skipping"
@@ -3210,7 +2505,7 @@ doctor:
             # REST links fallback: check each sibling individually
             ALL_CLOSED=true
             for SIB in $(echo "$SIBLING_IIDS" | tr ',' ' '); do
-              SIB_STATE=$(glab api --hostname "$HOST" "/projects/$PID/issues/$SIB" 2>/dev/null | jq -r '.state // "unknown"')
+              SIB_STATE=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$SIB" 2>/dev/null | jq -r '.state // "unknown"')
               if [ "$SIB_STATE" != "closed" ]; then
                 echo "  → #$IID: sibling #$SIB is $SIB_STATE — parent stays open"
                 ALL_CLOSED=false
@@ -3219,7 +2514,7 @@ doctor:
             done
             if [ "$ALL_CLOSED" = "true" ]; then
               echo "  → #$IID: all sub-issues closed — closing parent"
-              glab api --hostname "$HOST" -X PUT "/projects/$PID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
+              glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
               RECOVERED=$((RECOVERED + 1))
             fi
             continue
@@ -3228,7 +2523,7 @@ doctor:
           # Legacy marker fallback: check each sibling individually
           ALL_CLOSED=true
           for SIB in $(echo "$SIBLING_IIDS" | tr ',' ' '); do
-            SIB_STATE=$(glab api --hostname "$HOST" "/projects/$PID/issues/$SIB" 2>/dev/null | jq -r '.state // "unknown"')
+            SIB_STATE=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$SIB" 2>/dev/null | jq -r '.state // "unknown"')
             if [ "$SIB_STATE" != "closed" ]; then
               echo "  → #$IID: sibling #$SIB is $SIB_STATE — parent stays open"
               ALL_CLOSED=false
@@ -3237,7 +2532,7 @@ doctor:
           done
           if [ "$ALL_CLOSED" = "true" ]; then
             echo "  → #$IID: all sub-issues closed — closing parent"
-            glab api --hostname "$HOST" -X PUT "/projects/$PID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
+            glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
             RECOVERED=$((RECOVERED + 1))
           fi
           continue
@@ -3247,7 +2542,7 @@ doctor:
         OPEN_COUNT=$(echo "$CHILDREN_DATA" | jq '[.[] | select(.state != "closed")] | length' 2>/dev/null || echo 1)
         if [ "${OPEN_COUNT:-1}" -eq 0 ]; then
           echo "  → #$IID: all sub-issues closed — closing parent"
-          glab api --hostname "$HOST" -X PUT "/projects/$PID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
+          glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
           RECOVERED=$((RECOVERED + 1))
         else
           OPEN_IIDS=$(echo "$CHILDREN_DATA" | jq -r '[.[] | select(.state != "closed") | .iid] | join(",")')
