@@ -375,7 +375,7 @@ echo "=== Bot CI Variables ==="
 
 # BOUCLE_BOT_ID (only when --bot-id provided; it's a public user ID, not a secret)
 if [ -n "$BOT_ID" ]; then
-  EXISTING_BOT_ID_VAR=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_BOT_ID" 2>/dev/null | jq -r '.value // empty' || true)
+  EXISTING_BOT_ID_VAR=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_BOT_ID" 2> /dev/null | jq -r '.value // empty' || true)
   if [ "$EXISTING_BOT_ID_VAR" = "$BOT_ID" ]; then
     log_skip "BOUCLE_BOT_ID CI variable (already $BOT_ID)"
   else
@@ -387,7 +387,7 @@ else
 fi
 
 # BOUCLE_BOT_USERNAME (always — drives the before_script username fallback)
-EXISTING_BOT_USERNAME_VAR=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_BOT_USERNAME" 2>/dev/null | jq -r '.value // empty' || true)
+EXISTING_BOT_USERNAME_VAR=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_BOT_USERNAME" 2> /dev/null | jq -r '.value // empty' || true)
 if [ "$EXISTING_BOT_USERNAME_VAR" = "$BOT_USERNAME" ]; then
   log_skip "BOUCLE_BOT_USERNAME CI variable (already $BOT_USERNAME)"
 else
