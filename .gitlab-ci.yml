@@ -4,13 +4,6 @@
 # Dispatcher: single entry, parses webhook payload, routes to triage
 # Runner: shared shell executor (Atchoum) — before_script bootstraps tools
 
-workflow:
-  # Auto-cancel redundant pipelines: when a new push/trigger fires on the
-  # same ref, cancel any pending/running pipelines from earlier triggers.
-  # This prevents the pipeline storm where bot MR/issue updates fire
-  # webhooks that trigger new pipelines while old ones are still running.
-  auto_cancel_pending_pipeline: true
-
 stages:
   - check
   - dispatch
