@@ -520,6 +520,16 @@ dispatch:
           curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
             --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
             --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || { if [ -n "${BOUCLE_BOT_ID:-}" ]; then echo "ERROR: bot reassign failed for issue (BOUCLE_BOT_ID=$BOUCLE_BOT_ID set but API call failed)" >&2; exit 1; fi; }
+        elif [ "$gross" = "boucle::status::human" ]; then
+          # Reassign the issue to the human reporter (walks up parent chain to skip
+          # bot-authored sub-issues). Best-effort: skip silently if resolve fails.
+          local human_id
+          human_id=$(resolve_reporter_id "$iid" 2>/dev/null)
+          if [ -n "$human_id" ] && [ "$human_id" != "null" ] && [ "$human_id" != "${BOUCLE_BOT_ID:-}" ]; then
+            curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
+              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+              --data-urlencode "assignee_ids[]=$human_id" 2>/dev/null || true
+          fi
         fi
       }
 
@@ -717,6 +727,16 @@ triage:
           curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
             --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
             --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || { if [ -n "${BOUCLE_BOT_ID:-}" ]; then echo "ERROR: bot reassign failed for issue (BOUCLE_BOT_ID=$BOUCLE_BOT_ID set but API call failed)" >&2; exit 1; fi; }
+        elif [ "$gross" = "boucle::status::human" ]; then
+          # Reassign the issue to the human reporter (walks up parent chain to skip
+          # bot-authored sub-issues). Best-effort: skip silently if resolve fails.
+          local human_id
+          human_id=$(resolve_reporter_id "$iid" 2>/dev/null)
+          if [ -n "$human_id" ] && [ "$human_id" != "null" ] && [ "$human_id" != "${BOUCLE_BOT_ID:-}" ]; then
+            curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
+              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+              --data-urlencode "assignee_ids[]=$human_id" 2>/dev/null || true
+          fi
         fi
       }
 
@@ -730,15 +750,22 @@ triage:
       # shells (zsh) interprets backslash escapes and corrupts JSON whose
       # description contains literal control characters.
       resolve_reporter_id() {
-        local iid="$1" data parent_iid parent_data reporter_id
+        local iid="$1" data parent_iid parent_data reporter_id author_username
+        local bot_user="${BOUCLE_BOT_USERNAME:-up-bot}"
+        local depth=0 max_depth=10
         data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null) || { echo ""; return; }
-        parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
-        if [ -n "$parent_iid" ]; then
-          parent_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid" 2>/dev/null) || { echo ""; return; }
+        reporter_id=$(printf '%s' "$data" | jq -r '.author.id // empty')
+        author_username=$(printf '%s' "$data" | jq -r '.author.username // empty')
+        # Walk up the parent chain until we find a non-bot author.
+        while [ "$author_username" = "$bot_user" ] && [ "$depth" -lt "$max_depth" ]; do
+          parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+          [ -z "$parent_iid" ] && break
+          parent_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid" 2>/dev/null) || break
           reporter_id=$(printf '%s' "$parent_data" | jq -r '.author.id // empty')
-        else
-          reporter_id=$(printf '%s' "$data" | jq -r '.author.id // empty')
-        fi
+          author_username=$(printf '%s' "$parent_data" | jq -r '.author.username // empty')
+          data="$parent_data"
+          depth=$((depth + 1))
+        done
         echo "$reporter_id"
       }
 
@@ -1306,6 +1333,16 @@ worker:
           curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
             --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
             --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || { if [ -n "${BOUCLE_BOT_ID:-}" ]; then echo "ERROR: bot reassign failed for issue (BOUCLE_BOT_ID=$BOUCLE_BOT_ID set but API call failed)" >&2; exit 1; fi; }
+        elif [ "$gross" = "boucle::status::human" ]; then
+          # Reassign the issue to the human reporter (walks up parent chain to skip
+          # bot-authored sub-issues). Best-effort: skip silently if resolve fails.
+          local human_id
+          human_id=$(resolve_reporter_id "$iid" 2>/dev/null)
+          if [ -n "$human_id" ] && [ "$human_id" != "null" ] && [ "$human_id" != "${BOUCLE_BOT_ID:-}" ]; then
+            curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
+              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+              --data-urlencode "assignee_ids[]=$human_id" 2>/dev/null || true
+          fi
         fi
       }
 
@@ -1315,15 +1352,22 @@ worker:
       # never runs (e.g. preview URL assertion fails before reviewer chains).
       # Mirrors the definition in triage/reviewer jobs.
       resolve_reporter_id() {
-        local iid="$1" data parent_iid parent_data reporter_id
+        local iid="$1" data parent_iid parent_data reporter_id author_username
+        local bot_user="${BOUCLE_BOT_USERNAME:-up-bot}"
+        local depth=0 max_depth=10
         data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null) || { echo ""; return; }
-        parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
-        if [ -n "$parent_iid" ]; then
-          parent_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid" 2>/dev/null) || { echo ""; return; }
+        reporter_id=$(printf '%s' "$data" | jq -r '.author.id // empty')
+        author_username=$(printf '%s' "$data" | jq -r '.author.username // empty')
+        # Walk up the parent chain until we find a non-bot author.
+        while [ "$author_username" = "$bot_user" ] && [ "$depth" -lt "$max_depth" ]; do
+          parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+          [ -z "$parent_iid" ] && break
+          parent_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid" 2>/dev/null) || break
           reporter_id=$(printf '%s' "$parent_data" | jq -r '.author.id // empty')
-        else
-          reporter_id=$(printf '%s' "$data" | jq -r '.author.id // empty')
-        fi
+          author_username=$(printf '%s' "$parent_data" | jq -r '.author.username // empty')
+          data="$parent_data"
+          depth=$((depth + 1))
+        done
         echo "$reporter_id"
       }
 
@@ -1703,6 +1747,16 @@ reviewer:
           curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
             --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
             --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || { if [ -n "${BOUCLE_BOT_ID:-}" ]; then echo "ERROR: bot reassign failed for issue (BOUCLE_BOT_ID=$BOUCLE_BOT_ID set but API call failed)" >&2; exit 1; fi; }
+        elif [ "$gross" = "boucle::status::human" ]; then
+          # Reassign the issue to the human reporter (walks up parent chain to skip
+          # bot-authored sub-issues). Best-effort: skip silently if resolve fails.
+          local human_id
+          human_id=$(resolve_reporter_id "$iid" 2>/dev/null)
+          if [ -n "$human_id" ] && [ "$human_id" != "null" ] && [ "$human_id" != "${BOUCLE_BOT_ID:-}" ]; then
+            curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
+              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+              --data-urlencode "assignee_ids[]=$human_id" 2>/dev/null || true
+          fi
         fi
       }
 
@@ -1831,15 +1885,22 @@ reviewer:
           # which merges serially to avoid conflicts.
           # Resolve the reporter id (handles sub-issues: use parent author).
           resolve_reporter_id() {
-            local iid="$1" data parent_iid parent_data reporter_id
+            local iid="$1" data parent_iid parent_data reporter_id author_username
+            local bot_user="${BOUCLE_BOT_USERNAME:-up-bot}"
+            local depth=0 max_depth=10
             data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null) || { echo ""; return; }
-            parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
-            if [ -n "$parent_iid" ]; then
-              parent_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid" 2>/dev/null) || { echo ""; return; }
+            reporter_id=$(printf '%s' "$data" | jq -r '.author.id // empty')
+            author_username=$(printf '%s' "$data" | jq -r '.author.username // empty')
+            # Walk up the parent chain until we find a non-bot author.
+            while [ "$author_username" = "$bot_user" ] && [ "$depth" -lt "$max_depth" ]; do
+              parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+              [ -z "$parent_iid" ] && break
+              parent_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid" 2>/dev/null) || break
               reporter_id=$(printf '%s' "$parent_data" | jq -r '.author.id // empty')
-            else
-              reporter_id=$(printf '%s' "$data" | jq -r '.author.id // empty')
-            fi
+              author_username=$(printf '%s' "$parent_data" | jq -r '.author.username // empty')
+              data="$parent_data"
+              depth=$((depth + 1))
+            done
             echo "$reporter_id"
           }
           AUTHOR_ID=$(resolve_reporter_id "$BOUCLE_ISSUE")
@@ -1963,6 +2024,16 @@ merger:
           curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
             --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
             --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || { if [ -n "${BOUCLE_BOT_ID:-}" ]; then echo "ERROR: bot reassign failed for issue (BOUCLE_BOT_ID=$BOUCLE_BOT_ID set but API call failed)" >&2; exit 1; fi; }
+        elif [ "$gross" = "boucle::status::human" ]; then
+          # Reassign the issue to the human reporter (walks up parent chain to skip
+          # bot-authored sub-issues). Best-effort: skip silently if resolve fails.
+          local human_id
+          human_id=$(resolve_reporter_id "$iid" 2>/dev/null)
+          if [ -n "$human_id" ] && [ "$human_id" != "null" ] && [ "$human_id" != "${BOUCLE_BOT_ID:-}" ]; then
+            curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
+              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+              --data-urlencode "assignee_ids[]=$human_id" 2>/dev/null || true
+          fi
         fi
       }
 
@@ -2157,6 +2228,16 @@ catchup:
           curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
             --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
             --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || { if [ -n "${BOUCLE_BOT_ID:-}" ]; then echo "ERROR: bot reassign failed for issue (BOUCLE_BOT_ID=$BOUCLE_BOT_ID set but API call failed)" >&2; exit 1; fi; }
+        elif [ "$gross" = "boucle::status::human" ]; then
+          # Reassign the issue to the human reporter (walks up parent chain to skip
+          # bot-authored sub-issues). Best-effort: skip silently if resolve fails.
+          local human_id
+          human_id=$(resolve_reporter_id "$iid" 2>/dev/null)
+          if [ -n "$human_id" ] && [ "$human_id" != "null" ] && [ "$human_id" != "${BOUCLE_BOT_ID:-}" ]; then
+            curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
+              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+              --data-urlencode "assignee_ids[]=$human_id" 2>/dev/null || true
+          fi
         fi
       }
 
@@ -2441,6 +2522,16 @@ e2e:
           curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
             --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
             --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || { if [ -n "${BOUCLE_BOT_ID:-}" ]; then echo "ERROR: bot reassign failed for issue (BOUCLE_BOT_ID=$BOUCLE_BOT_ID set but API call failed)" >&2; exit 1; fi; }
+        elif [ "$gross" = "boucle::status::human" ]; then
+          # Reassign the issue to the human reporter (walks up parent chain to skip
+          # bot-authored sub-issues). Best-effort: skip silently if resolve fails.
+          local human_id
+          human_id=$(resolve_reporter_id "$iid" 2>/dev/null)
+          if [ -n "$human_id" ] && [ "$human_id" != "null" ] && [ "$human_id" != "${BOUCLE_BOT_ID:-}" ]; then
+            curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/issues/$iid" \
+              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+              --data-urlencode "assignee_ids[]=$human_id" 2>/dev/null || true
+          fi
         fi
       }
 
@@ -2691,6 +2782,16 @@ doctor:
           curl -s -o /dev/null -X PUT "https://$HOST/api/v4/projects/$PID/issues/$iid" \
             --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
             --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || { if [ -n "${BOUCLE_BOT_ID:-}" ]; then echo "ERROR: bot reassign failed for issue (BOUCLE_BOT_ID=$BOUCLE_BOT_ID set but API call failed)" >&2; exit 1; fi; }
+        elif [ "$gross" = "boucle::status::human" ]; then
+          # Reassign the issue to the human reporter (walks up parent chain to skip
+          # bot-authored sub-issues). Best-effort: skip silently if resolve fails.
+          local human_id
+          human_id=$(resolve_reporter_id "$iid" 2>/dev/null)
+          if [ -n "$human_id" ] && [ "$human_id" != "null" ] && [ "$human_id" != "${BOUCLE_BOT_ID:-}" ]; then
+            curl -s -o /dev/null -X PUT "https://$HOST/api/v4/projects/$PID/issues/$iid" \
+              --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+              --data-urlencode "assignee_ids[]=$human_id" 2>/dev/null || true
+          fi
         fi
       }
 
