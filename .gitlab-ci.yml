@@ -1722,6 +1722,10 @@ merger:
   # Run on ANY available runner (tags: []) so an approved MR is never blocked
   # waiting behind a heavy worker/reviewer job on the single data runner.
   tags: []
+  # Pre-baked agent toolchain (glab/jq/git/node/python3/jcode) so docker-based
+  # runners skip the ~60s global before_script downloads. The minimal
+  # before_script below is still a no-op fallback for shell executors.
+  image: docker.io/ankabootops/boucle-agents:latest
   # Serialize all merges project-wide — one MR merges at a time.
   resource_group: boucle-merge
   needs:
@@ -1731,6 +1735,46 @@ merger:
     - if: $BOUCLE_ENABLED != "true"
       when: never
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "merger"
+  before_script:
+    - |
+      [[ "${CI_DEBUG_TRACE:-false}" == "true" ]] && set -x
+      export PATH="$HOME/.local/bin:$PATH"
+      export GITLAB_TOKEN="$BOUCLE_TOKEN"
+      export GITLAB_HOST="$BOUCLE_FORGE_HOST"
+      export GLAB_NO_UPDATE_NOTIFIER=true
+
+      # ── curl + jq + git (no-op on the agents image, fallback otherwise) ──
+      if ! command -v curl &>/dev/null || ! command -v jq &>/dev/null || ! command -v git &>/dev/null; then
+        echo "Installing curl + jq + git..."
+        apt-get update -qq && apt-get install -y -qq curl jq git
+      fi
+
+      # ── glab CLI ───────────────────────────────────────────────────
+      if ! command -v glab &>/dev/null; then
+        echo "Installing glab..."
+        mkdir -p "$HOME/.local/bin"
+        GLAB_VER="1.50.0"
+        curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VER}/downloads/glab_${GLAB_VER}_linux_amd64.tar.gz" -o /tmp/glab.tar.gz
+        tar xzf /tmp/glab.tar.gz -C /tmp
+        cp /tmp/bin/glab "$HOME/.local/bin/glab" 2>/dev/null || cp /tmp/glab "$HOME/.local/bin/glab"
+        chmod +x "$HOME/.local/bin/glab"
+      fi
+
+      # ── BOUCLE_BOT_ID resolution (set_boucle_label needs it for the bot
+      # reassignment on boucle::status::bot) ──
+      if [ -z "${BOUCLE_BOT_ID:-}" ] && [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ]; then
+        BOUCLE_BOT_USERNAME="${BOUCLE_BOT_USERNAME:-up-bot}"
+        RESOLVED_ID=$(curl -sf --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+          "https://$BOUCLE_FORGE_HOST/api/v4/users?username=$BOUCLE_BOT_USERNAME" \
+          2>/dev/null | jq -r '.[0].id // empty' 2>/dev/null || true)
+        if [ -n "$RESOLVED_ID" ]; then
+          export BOUCLE_BOT_ID="$RESOLVED_ID"
+          echo "Resolved BOUCLE_BOT_ID=$BOUCLE_BOT_ID by username ($BOUCLE_BOT_USERNAME)"
+        fi
+      fi
+
+      # ── Shared boucle helpers (set_boucle_label, chain_to_role, ...) ──
+      source "${CI_PROJECT_DIR:-$(pwd)}/lib/boucle.sh"
   script:
     - |
       # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
@@ -1849,12 +1893,54 @@ merger:
 post-merge:
   stage: merge
   tags: []
+  # Pre-baked agent toolchain (glab/jq/git/node/python3/jcode) so docker-based
+  # runners skip the ~60s global before_script downloads.
+  image: docker.io/ankabootops/boucle-agents:latest
   needs:
     - job: merger
   rules:
     - if: $BOUCLE_ENABLED != "true"
       when: never
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "merger"
+  before_script:
+    - |
+      [[ "${CI_DEBUG_TRACE:-false}" == "true" ]] && set -x
+      export PATH="$HOME/.local/bin:$PATH"
+      export GITLAB_TOKEN="$BOUCLE_TOKEN"
+      export GITLAB_HOST="$BOUCLE_FORGE_HOST"
+      export GLAB_NO_UPDATE_NOTIFIER=true
+
+      # ── curl + jq + git (no-op on the agents image, fallback otherwise) ──
+      if ! command -v curl &>/dev/null || ! command -v jq &>/dev/null || ! command -v git &>/dev/null; then
+        echo "Installing curl + jq + git..."
+        apt-get update -qq && apt-get install -y -qq curl jq git
+      fi
+
+      # ── glab CLI ───────────────────────────────────────────────────
+      if ! command -v glab &>/dev/null; then
+        echo "Installing glab..."
+        mkdir -p "$HOME/.local/bin"
+        GLAB_VER="1.50.0"
+        curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VER}/downloads/glab_${GLAB_VER}_linux_amd64.tar.gz" -o /tmp/glab.tar.gz
+        tar xzf /tmp/glab.tar.gz -C /tmp
+        cp /tmp/bin/glab "$HOME/.local/bin/glab" 2>/dev/null || cp /tmp/glab "$HOME/.local/bin/glab"
+        chmod +x "$HOME/.local/bin/glab"
+      fi
+
+      # ── BOUCLE_BOT_ID resolution ──
+      if [ -z "${BOUCLE_BOT_ID:-}" ] && [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ]; then
+        BOUCLE_BOT_USERNAME="${BOUCLE_BOT_USERNAME:-up-bot}"
+        RESOLVED_ID=$(curl -sf --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+          "https://$BOUCLE_FORGE_HOST/api/v4/users?username=$BOUCLE_BOT_USERNAME" \
+          2>/dev/null | jq -r '.[0].id // empty' 2>/dev/null || true)
+        if [ -n "$RESOLVED_ID" ]; then
+          export BOUCLE_BOT_ID="$RESOLVED_ID"
+          echo "Resolved BOUCLE_BOT_ID=$BOUCLE_BOT_ID by username ($BOUCLE_BOT_USERNAME)"
+        fi
+      fi
+
+      # ── Shared boucle helpers (set_boucle_label, chain_to_role, ...) ──
+      source "${CI_PROJECT_DIR:-$(pwd)}/lib/boucle.sh"
   script:
     - |
       set +o pipefail
@@ -1904,6 +1990,9 @@ catchup:
   # available runner (tags: []) so a direct merge is never blocked waiting
   # behind a heavy worker/reviewer job on the single data runner.
   tags: []
+  # Pre-baked agent toolchain (glab/jq/git/node/python3/jcode) so docker-based
+  # runners skip the ~60s global before_script downloads.
+  image: docker.io/ankabootops/boucle-agents:latest
   needs:
     - job: dispatch
       optional: true
@@ -1911,6 +2000,45 @@ catchup:
     - if: $BOUCLE_ENABLED != "true"
       when: never
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "catchup"
+  before_script:
+    - |
+      [[ "${CI_DEBUG_TRACE:-false}" == "true" ]] && set -x
+      export PATH="$HOME/.local/bin:$PATH"
+      export GITLAB_TOKEN="$BOUCLE_TOKEN"
+      export GITLAB_HOST="$BOUCLE_FORGE_HOST"
+      export GLAB_NO_UPDATE_NOTIFIER=true
+
+      # ── curl + jq + git (no-op on the agents image, fallback otherwise) ──
+      if ! command -v curl &>/dev/null || ! command -v jq &>/dev/null || ! command -v git &>/dev/null; then
+        echo "Installing curl + jq + git..."
+        apt-get update -qq && apt-get install -y -qq curl jq git
+      fi
+
+      # ── glab CLI ───────────────────────────────────────────────────
+      if ! command -v glab &>/dev/null; then
+        echo "Installing glab..."
+        mkdir -p "$HOME/.local/bin"
+        GLAB_VER="1.50.0"
+        curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VER}/downloads/glab_${GLAB_VER}_linux_amd64.tar.gz" -o /tmp/glab.tar.gz
+        tar xzf /tmp/glab.tar.gz -C /tmp
+        cp /tmp/bin/glab "$HOME/.local/bin/glab" 2>/dev/null || cp /tmp/glab "$HOME/.local/bin/glab"
+        chmod +x "$HOME/.local/bin/glab"
+      fi
+
+      # ── BOUCLE_BOT_ID resolution ──
+      if [ -z "${BOUCLE_BOT_ID:-}" ] && [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ]; then
+        BOUCLE_BOT_USERNAME="${BOUCLE_BOT_USERNAME:-up-bot}"
+        RESOLVED_ID=$(curl -sf --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+          "https://$BOUCLE_FORGE_HOST/api/v4/users?username=$BOUCLE_BOT_USERNAME" \
+          2>/dev/null | jq -r '.[0].id // empty' 2>/dev/null || true)
+        if [ -n "$RESOLVED_ID" ]; then
+          export BOUCLE_BOT_ID="$RESOLVED_ID"
+          echo "Resolved BOUCLE_BOT_ID=$BOUCLE_BOT_ID by username ($BOUCLE_BOT_USERNAME)"
+        fi
+      fi
+
+      # ── Shared boucle helpers (set_boucle_label, chain_to_role, ...) ──
+      source "${CI_PROJECT_DIR:-$(pwd)}/lib/boucle.sh"
   script:
     - |
       # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
