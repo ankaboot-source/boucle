@@ -1778,7 +1778,9 @@ reviewer:
       # sha=<short-sha> (git rev-parse --short output), not the full
       # 40-char SHA. contains("sha=f8e4a30") matches both short and
       # full SHA postings, so this is strictly more permissive.
-      MR_HEAD_SHORT="${MR_HEAD:0:8}"
+      # Use 7 chars (Git's minimum short SHA length) so it matches
+      # sha=6675f9e (7), sha=6675f9e1 (8), and the full 40-char SHA.
+      MR_HEAD_SHORT="${MR_HEAD:0:7}"
       COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
         | jq -r --arg sha "$MR_HEAD_SHORT" '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer") and contains("sha=\($sha)"))] | first | .body // empty')
 
