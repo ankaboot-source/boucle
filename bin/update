@@ -1,0 +1,205 @@
+#!/usr/bin/env bash
+# bin/update — boucle self-update: fetch latest from upstream and apply.
+# Runs as the first step of the dispatch job in .gitlab-ci.yml.
+# Fail-open: any error → warning + exit 0, pipeline continues with current version.
+# Usage: bin/update [--dry-run]
+
+# No -e: fail-open requires commands to fail individually without aborting the script.
+set -uo pipefail
+
+# ── Config ────────────────────────────────────────────────────────────
+UPSTREAM_REPO="ankaboot-source/boucle"
+UPSTREAM_API="https://api.github.com/repos/$UPSTREAM_REPO"
+UPSTREAM_TARBALL="https://codeload.github.com/$UPSTREAM_REPO/tarball"
+VERSION_FILE=".boucle-version"
+SYNC_PATHS="bin .pi .gitlab-ci.yml .jcode/agents .jcode/skills .jcode/UPSTREAM-FIX-WORKFLOW.md"
+
+# ── Pure functions (testable, no network) ──────────────────────────────
+
+# get_mode: echo the configured update mode (release|dev), default release.
+get_mode() {
+  echo "${BOUCLE_UPDATE_MODE:-release}"
+}
+
+# get_current_version: echo the content of .boucle-version, or empty if missing.
+get_current_version() {
+  if [ -f "$VERSION_FILE" ]; then
+    cat "$VERSION_FILE"
+  else
+    echo ""
+  fi
+}
+
+# needs_update: return 0 if update needed, 1 if not.
+# Update is needed when upstream is non-empty and differs from current.
+needs_update() {
+  local current="$1" upstream="$2"
+  [ -n "$upstream" ] || return 1
+  [ "$current" != "$upstream" ] || return 1
+  return 0
+}
+
+# ── Network functions ──────────────────────────────────────────────────
+
+# get_upstream_version <mode>: echo the latest version identifier from upstream.
+# release mode → latest tag name; dev mode → HEAD commit SHA on main.
+# Echoes empty string on failure.
+get_upstream_version() {
+  local mode="$1"
+  case "$mode" in
+    release)
+      # GitHub returns tags newest-first by default; [0] is the latest.
+      curl -fsSL "$UPSTREAM_API/tags" 2> /dev/null | jq -r '.[0].name // empty' 2> /dev/null || echo ""
+      ;;
+    dev)
+      curl -fsSL "$UPSTREAM_API/commits/main" 2> /dev/null | jq -r '.sha // empty' 2> /dev/null || echo ""
+      ;;
+    *)
+      echo ""
+      ;;
+  esac
+}
+
+# download_and_extract <mode> <version>: download tarball, extract SYNC_PATHS
+# into the working tree. Returns 0 on success, 1 on failure.
+download_and_extract() {
+  local mode="$1" version="$2" tarball_url tmpdir topdir
+
+  case "$mode" in
+    release) tarball_url="$UPSTREAM_TARBALL/refs/tags/$version" ;;
+    dev) tarball_url="$UPSTREAM_TARBALL/refs/heads/main" ;;
+    *) return 1 ;;
+  esac
+
+  tmpdir=$(mktemp -d) || return 1
+
+  # Download
+  if ! curl -fsSL "$tarball_url" -o "$tmpdir/boucle.tar.gz" 2> /dev/null; then
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  # Validate tarball (integrity check: valid gzip archive that can be listed)
+  if ! tar tzf "$tmpdir/boucle.tar.gz" > /dev/null 2>&1; then
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  # Extract
+  tar xzf "$tmpdir/boucle.tar.gz" -C "$tmpdir" 2> /dev/null || {
+    rm -rf "$tmpdir"
+    return 1
+  }
+
+  # Find top-level directory (GitHub tarballs have a single top-level dir
+  # like ankaboot-source-boucle-<short-sha>/)
+  topdir=$(find "$tmpdir" -maxdepth 1 -mindepth 1 -type d | head -1)
+  if [ -z "$topdir" ]; then
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  # Replace sync paths in the working tree with upstream versions
+  for path in $SYNC_PATHS; do
+    if [ -e "$topdir/$path" ]; then
+      rm -rf "$path"
+      cp -r "$topdir/$path" "$path"
+    fi
+  done
+
+  rm -rf "$tmpdir"
+  return 0
+}
+
+# ── Main ──────────────────────────────────────────────────────────────
+
+main() {
+  local dry_run=false mode current upstream
+
+  # Self-update guard: never push from a push-source pipeline. A push
+  # triggers a new pipeline on master; if bin/update pushes back from
+  # inside that pipeline, it creates a feedback loop (push → pipeline →
+  # bin/update → push → pipeline → ...). The loop workflow only runs on
+  # trigger-source pipelines (webhooks + chained trigger/pipeline calls),
+  # so skipping self-update on push is safe.
+  if [ "${CI_PIPELINE_SOURCE:-}" = "push" ]; then
+    echo "[boucle] self-update skipped in push pipeline (CI_PIPELINE_SOURCE=push)"
+    return 0
+  fi
+
+  [ "${1:-}" = "--dry-run" ] && dry_run=true
+
+  mode=$(get_mode)
+  # Validate mode
+  case "$mode" in
+    release | dev) ;;
+    *)
+      echo "[boucle] WARN: BOUCLE_UPDATE_MODE='$mode' invalid (expected release|dev), using release" >&2
+      mode="release"
+      ;;
+  esac
+
+  current=$(get_current_version)
+  upstream=$(get_upstream_version "$mode")
+
+  # No upstream version available
+  if [ -z "$upstream" ]; then
+    if [ "$mode" = "release" ]; then
+      echo "[boucle] WARN: no releases found upstream, staying on current version" >&2
+    else
+      echo "[boucle] WARN: could not fetch upstream commit, staying on current version" >&2
+    fi
+    return 0
+  fi
+
+  # First run: no .boucle-version → just record current version and exit.
+  # No file replacement happens on this run — we only record the baseline.
+  if [ -z "$current" ]; then
+    echo "$upstream" > "$VERSION_FILE"
+    git config user.email > /dev/null 2>&1 || git config user.email "boucle-bot@boucle.local"
+    git config user.name > /dev/null 2>&1 || git config user.name "boucle-bot"
+    git add "$VERSION_FILE"
+    git commit -m "chore(boucle): record initial version $upstream" > /dev/null 2>&1 || true
+    git push 2> /dev/null || echo "[boucle] WARN: push failed, will retry next pipeline" >&2
+    echo "[boucle] recorded initial version $upstream"
+    return 0
+  fi
+
+  # Already up to date?
+  if ! needs_update "$current" "$upstream"; then
+    echo "[boucle] up to date ($mode: $current)"
+    return 0
+  fi
+
+  echo "[boucle] update available: $current → $upstream ($mode)"
+
+  if [ "$dry_run" = "true" ]; then
+    echo "[boucle] DRY RUN — would download and apply $upstream"
+    return 0
+  fi
+
+  # Download and apply update
+  if ! download_and_extract "$mode" "$upstream"; then
+    echo "[boucle] WARN: download/extract failed, staying on current version" >&2
+    return 0
+  fi
+
+  # Update version file
+  echo "$upstream" > "$VERSION_FILE"
+
+  # Commit and push
+  git config user.email > /dev/null 2>&1 || git config user.email "boucle-bot@boucle.local"
+  git config user.name > /dev/null 2>&1 || git config user.name "boucle-bot"
+  git add $SYNC_PATHS "$VERSION_FILE"
+  git commit -m "chore(boucle): auto-update to $upstream" > /dev/null 2>&1 || true
+  git push 2> /dev/null || echo "[boucle] WARN: push failed, will retry next pipeline" >&2
+
+  echo "[boucle] updated to $upstream"
+  return 0
+}
+
+# ── Entry point (only when executed directly, not sourced by tests) ───
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@" || echo "[boucle] WARN: update failed, continuing with current version" >&2
+  exit 0
+fi

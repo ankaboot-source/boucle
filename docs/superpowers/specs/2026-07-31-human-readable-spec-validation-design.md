@@ -1,8 +1,8 @@
 # Human-Readable Spec Validation — Design Spec
 
 **Date:** 2026-07-31
-**Status:** Approved
-**Topic:** Rendre la validation des specs par l'humain lisible et non-technique, via un TL;DR en langage courant en tête du commentaire de triage, plus un aperçu visuel optionnel (PNG via Chromium) pour les issues UI/UX où un mockup aide vraiment.
+**Status:** Amended (2026-08-03 — visual preview flipped from opt-in to systematic for UI/UX)
+**Topic:** Rendre la validation des specs par l'humain lisible et non-technique, via un TL;DR en langage courant en tête du commentaire de triage, plus un aperçu visuel systématique (PNG via Chromium) pour toute issue UI/UX.
 
 ## 1. Problème
 
@@ -18,13 +18,13 @@ L'auteur humain (soupsçonné non-technique sur les issues UI/UX) se retrouve à
 
 ## 2. Objectif
 
-L'auteur humain doit pouvoir valider la spec en lisant un **TL;DR en langage courant** (2-4 phrases, résultat visible, pas de mécanisme), placé en tête du commentaire de triage. Pour les issues UI/UX où un mockup aide vraiment, un **aperçu visuel (PNG)** est produit de façon exceptionnelle et opt-in, jamais systématique.
+L'auteur humain doit pouvoir valider la spec en lisant un **TL;DR en langage courant** (2-4 phrases, résultat visible, pas de mécanisme), placé en tête du commentaire de triage. Pour les issues UI/UX, un **aperçu visuel (PNG)** est produit de façon systématique — l'agent produit un mockup pour toute issue dont le résultat visible implique le rendu frontend.
 
 Principes directeurs :
 
 - **Le TL;DR est obligatoire et toujours présent**, quelle que soit la taille ou le domaine de l'issue.
-- **Le visuel est l'exception, jamais la règle.** La plupart des issues n'ont que le TL;DR.
-- **Chromium est utilisé avec précaution extrême** — jamais par défaut, seulement quand l'agent justifie explicitement qu'un mockup aide pour cette issue précise.
+- **Le visuel est systématique pour les issues UI/UX.** L'agent produit un mockup pour toute issue dont le résultat visible implique le rendu frontend. Les issues non-UI/UX (backend, config, CI, tooling) n'ont que le TL;DR.
+- **Chromium n'est installé que pour les issues UI/UX** — le coût (~120MB) n'est payé que quand l'agent a écrit `RENDER_REQUEST` + `preview.html`. Les issues non-UI/UX n'écrivent pas ces fichiers → zéro coût Chromium.
 - **La séparation des responsabilités est stricte** : l'agent produit le contenu (TL;DR + fichiers mockup), la CI gère l'infrastructure (rendu, upload, édition du commentaire).
 
 ## 3. Décisions de design
@@ -37,7 +37,7 @@ Principes directeurs :
 | Format visuel | PNG uniquement (pas de SVG, jamais) |
 | Déclencheur visuel | Fichier `RENDER_REQUEST` non-vide + `preview.html` présents dans `.boucle/<issue>/` |
 | Rendu visuel | `@sparticuz/chromium` (~120MB) + puppeteer-core, installé à la volée dans `/tmp` |
-| Moment du rendu | Inline dans le job triage existant, dans la branche `SHOULD_GATE=true`, après le post du `SPEC_MSG` |
+| Moment du rendu | Inline dans le job triage existant, après le routage READY (hors de la branche `SHOULD_GATE`), fires for all READY dispositions |
 | Échec du rendu | Isolé : note de fallback postée, boucle non bloquée, exit code du job inchangé |
 | Idempotence | `RENDER_REQUEST` supprimé après succès → pas de re-render au retry |
 | Édition du commentaire | `PUT /projects/:id/issues/:iid/notes/:note_id` (édite le commentaire de triage existant, pas un nouveau commentaire) |
@@ -47,7 +47,7 @@ Principes directeurs :
 ### Justification des choix
 
 - **TL;DR obligatoire et en premier** : c'est ce que l'humain lit en premier. Si l'agent ne peut pas résumer l'issue en 2-4 phrases courantes, c'est probablement que l'issue est mal scoppée (NEEDS-SPLIT) ou manque d'info (NEEDS-INFO) — le TL;DR devient un signal de qualité.
-- **Visuel opt-in et rare** : l'utilisateur a été clair — Chromium doit être « très précautionneux, jamais systématique ». Le défaut est donc « ne rien faire » ; l'agent doit justifier chaque fois. Cela évite d'ajouter ~120MB de dépendance et un step de rendu sur chaque triage.
+- **Visuel systématique pour UI/UX** : l'utilisateur a été clair — toute issue UI/UX doit avoir un mockup. Le coût Chromium (~120MB) n'est payé que pour les issues UI/UX (l'agent écrit `RENDER_REQUEST` uniquement pour celles-ci). Les issues non-UI/UX n'écrivent pas ces fichiers → zéro coût.
 - **PNG via Chromium, pas de SVG** : décision utilisateur ferme. SVG exclu dans tous les chemins. Chromium reste le seul moteur de rendu réel validé (les alternatives légères — Obscura, Lightpanda — ne produisent pas de vraies screenshots, confirmé par recherche).
 - **`@sparticuz/chromium` plutôt que Chromium complet** : ~120MB vs ~400MB+, même moteur Blink, suffisant pour un mockup statique. Pas persisté — installé dans `/tmp` seulement quand le bloc rendu s'exécute.
 - **Rendu inline dans le job triage, pas de job séparé** : la décision de gate (`SHOULD_GATE`) et l'IID sont déjà en scope ; un job séparé devrait passer des artifacts et ne peut pas utiliser `rules:` (l'existence du `RENDER_REQUEST` n'est connue qu'au runtime). Inline = zéro overhead sur le chemin par défaut.
@@ -64,26 +64,28 @@ Issue GitLab → webhook → pipeline → job triage:
      - analyse l'issue
      - poste le commentaire de triage AVEC ## TL;DR en tête
        (commentaire reste text-only à ce stade)
-     - SI issue UI/UX ET mockup justifié:
-         écrit .boucle/<issue>/preview.html
-         écrit .boucle/<issue>/RENDER_REQUEST (1 ligne de justification)
+      - SI issue UI/UX (obligatoire):
+          écrit .boucle/<issue>/preview.html
+          écrit .boucle/<issue>/RENDER_REQUEST (1 ligne de justification)
   2. CI parse le commentaire (Disposition, Size) — inchangé
-  3. CI: branche SHOULD_GATE=true (Size M en mode product):
-     a. set label boucle:spec-review
-     b. assigne à l'auteur
-     c. post SPEC_MSG (repointé vers TL;DR)
-     d. NOUVEAU — bloc rendu visuel:
-        - si RENDER_REQUEST + preview.html présents et non-vides:
-            - résout note_id du commentaire de triage
-            - npm install puppeteer-core @sparticuz/chromium dans /tmp
-            - rend preview.html → preview.png (1280x800, fullPage)
-            - upload PNG via POST /projects/:id/uploads
-            - fetch commentaire, append "## Aperçu\n![...](url)"
-            - PUT /projects/:id/issues/:iid/notes/:note_id
-            - rm RENDER_REQUEST (idempotence)
-        - sinon: skip (défaut, zéro coût Chromium)
-        - sur échec: post note fallback, ne bloque pas
-  4. Boucle en pause à boucle:spec-review, attend validation humaine
+   3. CI: routage par disposition (case READY):
+      a. if Size L → boucle:human,size:l
+      b. else: spec gate logic (SHOULD_GATE)
+         - if SHOULD_GATE=true: set label boucle:spec-review, assigne à l'auteur, post SPEC_MSG
+         - else: set label boucle:todo, chain to worker
+      c. APRES le if/else SHOULD_GATE (fires for ALL READY dispositions):
+         - bloc rendu visuel:
+           - si RENDER_REQUEST + preview.html présents et non-vides:
+               - résout note_id du commentaire de triage
+               - npm install puppeteer-core @sparticuz/chromium dans /tmp
+               - rend preview.html → preview.png (1280x800, fullPage)
+               - upload PNG via POST /projects/:id/uploads
+               - fetch commentaire, append "## Aperçu\n![...](url)"
+               - PUT /projects/:id/issues/:iid/notes/:note_id
+               - rm RENDER_REQUEST (idempotence)
+           - sinon: skip (non-UI/UX, zéro coût Chromium)
+           - sur échec: post note fallback, ne bloque pas
+   4. Boucle en pause à boucle:spec-review (si SHOULD_GATE=true), attend validation humaine
 ```
 
 ### 4.2 Côté agent — `.opencode/agents/triage.md`
@@ -121,9 +123,9 @@ Règles du TL;DR (ajoutées aux "Rules" de l'agent) :
 
 Règles du visuel (ajoutées aux "Rules" de l'agent) :
 
-- Le défaut est de **ne rien faire**. La plupart des issues n'ont que le TL;DR.
-- Uniquement pour les issues UI/UX où un mockup aide vraiment à valider la spec.
-- Si justifié, écrire deux fichiers dans `.boucle/<issue>/` :
+- **Pour toute issue UI/UX, produire un mockup est obligatoire.** Une issue UI/UX est une issue dont le résultat visible implique le rendu frontend (layout, design, interaction). En cas de doute, produire le mockup.
+- Pour les issues non-UI/UX (backend, config, CI, tooling), le mockup n'est pas nécessaire — le TL;DR suffit.
+- Écrire deux fichiers dans `.boucle/<issue>/` :
   - `preview.html` — mockup HTML self-contained (CSS inline, pas de dépendance externe, mobile+desktop dans un seul fichier).
   - `RENDER_REQUEST` — une ligne de justification (pourquoi ce mockup aide pour cette issue).
 - `RENDER_REQUEST` vide ou générique → la CI ignore la demande.
@@ -148,14 +150,20 @@ Review the **TL;DR** above. If it matches what you want: react with 👍 ✅ ☑
 
 Le critères d'acceptation restent pour le worker — le TL;DR ne les remplace pas.
 
-#### 4.3.2 Bloc rendu visuel (inline, après `SPEC_MSG`)
+> **Évolution (2026-08)** : le `SPEC_MSG` est désormais **ajouté au commentaire
+> de triage** (PUT sur la note existante, section `## Validation`) plutôt que
+> posté comme note séparée — l'humain n'a qu'un seul message à lire/approuver.
+> Fallback : note séparée si la note de triage est introuvable ou le PUT échoue.
+> Garde d'idempotence : skip si `## Validation` déjà présent (re-runs triage).
 
-Inséré dans la branche `SHOULD_GATE=true`, juste après le post du `SPEC_MSG`. Structure :
+#### 4.3.2 Bloc rendu visuel (inline, après le routage READY)
+
+Inséré après le routage READY (hors de la branche `SHOULD_GATE`), fires for all READY dispositions. Structure :
 
 ```bash
-# ── Aperçu visuel (opt-in, exceptionnel) ──────────────────────────
-# Ne s'exécute QUE si l'agent a écrit RENDER_REQUEST + preview.html.
-# Défaut: skip total, zéro coût Chromium.
+# ── Aperçu visuel (systematic for UI/UX issues) ───────────────────
+# Fires for ALL READY dispositions if RENDER_REQUEST + preview.html present.
+# Non-UI/UX: no RENDER_REQUEST → skip (zéro coût Chromium).
 PREVIEW_HTML="$CI_PROJECT_DIR/.boucle/$IID/preview.html"
 RENDER_REQUEST_FILE="$CI_PROJECT_DIR/.boucle/$IID/RENDER_REQUEST"
 
@@ -191,7 +199,14 @@ if [ -s "$RENDER_REQUEST_FILE" ] && [ -s "$PREVIEW_HTML" ]; then
           EXISTING_BODY=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
             "/projects/$CI_PROJECT_ID/issues/$IID/notes/$TRIAGE_NOTE_ID" 2>/dev/null \
             | jq -r '.body' 2>/dev/null)
-          NEW_BODY=$(printf '%s\n\n## Aperçu\n%s\n' "$EXISTING_BODY" "$IMG_URL")
+          NEW_BODY=$(printf '%s\n' "$EXISTING_BODY" | awk -v img="$IMG_URL" '
+            /^## TL;DR/ { in_tldr=1; print; next }
+            in_tldr && /^## / && !inserted {
+              print "## Aperçu"; print img; print ""; inserted=1; in_tldr=0
+            }
+            { print }
+            END { if (!inserted) { print ""; print "## Aperçu"; print img } }
+          ')
           glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT \
             "/projects/$CI_PROJECT_ID/issues/$IID/notes/$TRIAGE_NOTE_ID" \
             -f body="$NEW_BODY" >/dev/null 2>&1
@@ -246,7 +261,7 @@ const [,, input, output] = process.argv;
 })().catch(e => { console.error(e); process.exit(1); });
 ```
 
-### 4.4 Chemin par défaut (non-UI/UX, ou UI/UX sans mockup justifié)
+### 4.4 Chemin par défaut (non-UI/UX)
 
 Aucun changement. L'agent poste le commentaire avec `## TL;DR` en tête. La CI parse, applique le gate, poste le `SPEC_MSG` repointé vers le TL;DR. Le bloc rendu est entièrement skippé (pas de `RENDER_REQUEST` → la condition `[ -s "$RENDER_REQUEST_FILE" ]` échoue immédiatement). Zéro coût Chromium, zéro install, zéro overhead.
 
@@ -271,8 +286,9 @@ Vérification minimale, ciblée :
 
 - **TL;DR présent** : toute issue triée doit avoir `## TL;DR` en tête du commentaire, avant `## Analysis`. Vérifiable par grep sur le commentaire posté.
 - **SPEC_MSG repointé** : le message posté par la CI mentionne « TL;DR » et les réactions d'approbation.
-- **Chemin par défaut** : une issue non-UI/UX ne déclenche ni `RENDER_REQUEST` ni install Chromium (vérifier l'absence de log `[boucle] RENDER_REQUEST found`).
-- **Chemin visuel** : une issue UI/UX avec `RENDER_REQUEST` + `preview.html` produit un commentaire édité avec `## Aperçu` contenant une image markdown.
+- **Chemin par défaut (non-UI/UX)** : une issue non-UI/UX ne déclenche ni `RENDER_REQUEST` ni install Chromium (vérifier l'absence de log `[boucle] RENDER_REQUEST found`).
+- **Chemin visuel (UI/UX, Size S non-gated)** : une issue UI/UX Size S avec `RENDER_REQUEST` + `preview.html` produit un commentaire édité avec `## Aperçu` contenant une image markdown — même sans spec gate (SHOULD_GATE=false).
+- **Chemin visuel (UI/UX, Size M gated)** : une issue UI/UX Size M avec `RENDER_REQUEST` + `preview.html` produit un commentaire édité avec `## Aperçu` inséré juste après le `## TL;DR` (avant le `## Validation`).
 - **Idempotence** : un retry du job triage après succès rendu ne re-render pas (RENDER_REQUEST supprimé).
 - **Échec isolé** : si Chromium indisponible, note fallback postée, exit code du job triage inchangé.
 
