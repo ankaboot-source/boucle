@@ -7,11 +7,6 @@ import Footer from "../components/Footer.astro";
 interface Props {
 	title?: string;
 	description?: string;
-	/**
-	 * Reserved for future use. Pages that want to inject a modal (e.g. the
-	 * NewsletterModal) pass it through the named `modal` slot so the dialog
-	 * is rendered as part of the same layout.
-	 */
 }
 
 const {
@@ -54,7 +49,60 @@ const {
 	<body>
 		<Header />
 		<slot />
-		<slot name="modal" />
 		<Footer />
 	</body>
 </html>
+
+<script>
+	/*
+	 * Staggered Slide-Up Brutal — scroll reveal.
+	 * -------------------------------------------
+	 * Adds `.is-revealed` to every `.reveal` element and to the children of
+	 * every `.reveal-stagger` container as they enter the viewport, driving
+	 * the CSS transition-delay cascade (50-75ms) defined in sections.css.
+	 * Uses only `transform` + `opacity` (composite properties) and is fully
+	 * disabled under `prefers-reduced-motion: reduce`. Elements that miss
+	 * the threshold still snap to their final (visible) state via the
+	 * `.is-revealed` fallback in the reduced-motion CSS block.
+	 */
+	function initReveal() {
+		if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+		const targets = document.querySelectorAll(".reveal, .reveal-stagger");
+		if (!targets.length) return;
+
+		const reveal = (el: Element) => {
+			if (el.classList.contains("reveal")) {
+				el.classList.add("is-revealed");
+				return;
+			}
+			// `.reveal-stagger` — cascade its children.
+			el.classList.add("is-revealed");
+			const children = el.querySelectorAll(":scope > *");
+			children.forEach((child, i) => {
+				(child as HTMLElement).style.setProperty("--reveal-index", String(i));
+				child.classList.add("is-revealed");
+			});
+		};
+
+		const observer = new IntersectionObserver(
+			(entries) => {
+				entries.forEach((entry) => {
+					if (entry.isIntersecting) {
+						reveal(entry.target);
+						observer.unobserve(entry.target);
+					}
+				});
+			},
+			{ threshold: 0.15, rootMargin: "0px 0px -40px 0px" }
+		);
+
+		targets.forEach((el) => observer.observe(el));
+	}
+
+	if (document.readyState === "loading") {
+		document.addEventListener("DOMContentLoaded", initReveal);
+	} else {
+		initReveal();
+	}
+</script>

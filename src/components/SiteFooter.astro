@@ -1,14 +1,13 @@
 ---
-import NewsletterSignup from "./NewsletterSignup.astro";
-
 /*
  * SiteFooter.astro
  * ---------------------------------------------------------------------------
- * The site-wide footer. Renders the tri-color flag stripe, a brand
- * statement, a small nav column, and the compact newsletter signup
- * component (which is required to be embedded in the footer per the
- * issue acceptance criteria).
+ * Site-wide footer: brand statement, navigation, social links and legal
+ * copy. The newsletter signup now lives in a single dedicated block on the
+ * homepage, so the footer only links to social networks.
  */
+import { socialLinks } from "../data/social-links.ts";
+
 const year = new Date().getFullYear();
 ---
 
@@ -26,7 +25,6 @@ const year = new Date().getFullYear();
 
 	<div class="site-footer__inner">
 		<div class="site-footer__brand">
-			<p class="eyebrow">Urgence Palestine</p>
 			<h2 id="site-footer-title" class="site-footer__title">
 				Solidarité avec la Palestine.
 			</h2>
@@ -45,15 +43,20 @@ const year = new Date().getFullYear();
 			</ul>
 		</nav>
 
-		<div class="site-footer__newsletter">
-			<NewsletterSignup
-				id="newsletter-footer"
-				variant="footer"
-				heading="La newsletter"
-				description=""
-				buttonLabel="OK"
-			/>
-		</div>
+		<nav class="site-footer__nav" aria-label="Réseaux sociaux">
+			<h3 class="site-footer__col-title">Réseaux sociaux</h3>
+			<ul>
+				{
+					socialLinks.map((link) => (
+						<li>
+							<a href={link.href} target="_blank" rel="noopener">
+								{link.label}
+							</a>
+						</li>
+					))
+				}
+			</ul>
+		</nav>
 	</div>
 
 	<div class="site-footer__legal">
@@ -109,10 +112,6 @@ const year = new Date().getFullYear();
 		margin: 0;
 	}
 
-	.site-footer .eyebrow {
-		color: color-mix(in oklch, var(--color-ink-on-dark) 70%, transparent);
-	}
-
 	.site-footer__col-title {
 		font-family: var(--font-body);
 		font-size: var(--text-xs);
@@ -143,45 +142,6 @@ const year = new Date().getFullYear();
 	.site-footer__nav a:hover,
 	.site-footer__nav a:focus-visible {
 		color: var(--color-flag-red);
-	}
-
-	/*
-	  Force light-coloured form controls over the dark footer. The
-	  NewsletterSignup component already has its own tokens-driven
-	  palette; we just re-bind a few local variables so the
-	  foreground/background align with the inverted surface.
-	*/
-	.site-footer .newsletter__heading {
-		color: var(--color-ink-on-dark);
-	}
-
-	.site-footer .newsletter__input {
-		background: color-mix(in oklch, var(--color-ink-on-dark) 8%, transparent);
-		border-color: color-mix(in oklch, var(--color-ink-on-dark) 24%, transparent);
-		color: var(--color-ink-on-dark);
-	}
-
-	.site-footer .newsletter__input::placeholder {
-		color: color-mix(in oklch, var(--color-ink-on-dark) 55%, transparent);
-	}
-
-	.site-footer .newsletter__input:hover {
-		border-color: color-mix(in oklch, var(--color-ink-on-dark) 50%, transparent);
-	}
-
-	.site-footer .newsletter__input:focus-visible {
-		border-color: var(--color-ink-on-dark);
-		box-shadow: 0 0 0 3px
-			color-mix(in oklch, var(--color-ink-on-dark) 18%, transparent);
-	}
-
-	.site-footer .newsletter__hint {
-		color: color-mix(in oklch, var(--color-ink-on-dark) 60%, transparent);
-	}
-
-	.site-footer .newsletter__success {
-		background: color-mix(in oklch, var(--color-flag-green) 30%, transparent);
-		color: var(--color-ink-on-dark);
 	}
 
 	.site-footer__legal {
