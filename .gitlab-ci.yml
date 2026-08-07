@@ -3135,6 +3135,20 @@ doctor:
             -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=merger" > /dev/null
           echo "  → triggered merger for #$IID"
           RECOVERED=$((RECOVERED + 1))
+        elif [ "$APPROVED_COUNT" -gt 0 ] && [ "$MR_MERGE_STATUS" != "mergeable" ]; then
+          # Approved but NOT mergeable (conflict/checking/blocked). Trigger
+          # the merger anyway: it will rebase onto fresh master. On conflict
+          # the merger reverts to boucle:todo + worker (iter 1) to
+          # regenerate the MR. Without this, an approved MR with conflicts
+          # at boucle:approval/boucle:human hangs forever — no other path
+          # triggers the merger for these labels.
+          echo "  → #$IID: MR !$MR_IID approved ($APPROVED_COUNT) but not mergeable ($MR_MERGE_STATUS) — triggering merger to rebase/recover"
+          set_boucle_label "$IID" "boucle:merging" "boucle::status::bot"
+          curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
+            -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+            -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=merger" > /dev/null
+          echo "  → triggered merger for #$IID (recovery path)"
+          RECOVERED=$((RECOVERED + 1))
         else
           echo "  → #$IID: MR !$MR_IID status=$MR_MERGE_STATUS, approvals=$APPROVED_COUNT — not ready, skipping"
         fi
