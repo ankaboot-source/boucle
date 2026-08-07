@@ -900,6 +900,57 @@ Présent dans `index.astro` (homepage), `SiteFooter.astro` (footer), et `right-t
 
 ---
 
+## 7. Boucle state machine — sub-issue lifecycle
+
+The boucle loop manages sub-issues through a state machine. When a parent issue is classified as NEEDS-SPLIT, the triage agent proposes sub-issues with optional `Depends on:` declarations. The split job creates the sub-issues and resolves sibling indices to real GitLab IIDs.
+
+### State table
+
+| Label | Meaning | Set by | Cleared by |
+|-------|---------|--------|------------|
+| `boucle:todo` | Ready for worker, waiting for a slot | Triage READY / doctor capacity-free | Worker starts (→ `boucle:working`) |
+| `boucle:working` | Worker is implementing | Worker job | Worker exits (→ `boucle:review`) |
+| `boucle:review` | MR is under review | Worker exits | Reviewer PASS (→ e2e) or FAIL (→ `boucle:todo`) |
+| `boucle:done` | Issue closed, work complete | Catchup / e2e PASS | — |
+| `boucle:blocked` | Sub-issue waiting on a sibling dependency to close; recovered by `maybe_unblock_dependents()` when the dep closes, NOT by the doctor capacity scan | Dispatch gate (dep open) | `maybe_unblock_dependents()` (dep closes → `boucle:todo`) |
+
+### Split → blocked → unblock flow
+
+```mermaid
+graph TD
+    PARENT["Parent issue<br/>NEEDS-SPLIT"] --> SPLIT["Split job<br/>creates sub-issues"]
+    SPLIT --> INDEP1["Sub-issue 1<br/>(no deps)"]
+    SPLIT --> INDEP2["Sub-issue 2<br/>(no deps)"]
+    SPLIT --> DEP1["Sub-issue 3<br/>Depends on: #1"]
+
+    INDEP1 --> WORKER1["Worker triggers<br/>(boucle:todo → working)"]
+    INDEP2 --> WORKER2["Worker triggers<br/>(boucle:todo → working)"]
+    DEP1 --> BLOCKED["Dispatch gate<br/>boucle:blocked"]
+
+    WORKER1 --> CLOSE1["Sub-issue 1 closes"]
+    WORKER2 --> CLOSE2["Sub-issue 2 closes"]
+
+    CLOSE1 --> UNBLOCK["maybe_unblock_dependents()<br/>checks blocked siblings"]
+    UNBLOCK --> DEP_UNBLOCKED["Sub-issue 3<br/>boucle:blocked → todo"]
+    DEP_UNBLOCKED --> WORKER3["Worker triggers"]
+    WORKER3 --> CLOSE3["Sub-issue 3 closes"]
+
+    CLOSE1 --> PARENT_CHECK["maybe_close_parent()<br/>all siblings closed?"]
+    CLOSE2 --> PARENT_CHECK
+    CLOSE3 --> PARENT_CHECK
+    PARENT_CHECK --> PARENT_DONE["Parent → boucle:done"]
+```
+
+### Key rules
+
+- **Dependency gate runs BEFORE the capacity cap** — a blocked issue does NOT consume a worker slot.
+- **`boucle:blocked` is NOT re-triggered by the doctor** — only `maybe_unblock_dependents()` flips it to `boucle:todo` when a dependency closes.
+- **Cycle detection at split time** — the split job runs a DFS cycle check and escalates to a human if a cycle is found. Sub-issues are created but without the `## Depends on` section.
+- **Orphan recovery** — the doctor scans `boucle:blocked` issues whose parent is closed and closes them with `boucle:done`.
+- **Race safety** — `issue_has_active_pipeline` guards against double-trigger when two deps close near-simultaneously.
+
+See [AGENTS.md](AGENTS.md) lesson #49 for the full rationale and [LOOP.md](LOOP.md) for per-consumer configuration.
+
 ## Documentation self-maintenance
 
 Ce document est maintenu par la boucle autonome Boucle. Le triage identifie les docs impactés, le worker les met à jour dans le même MR que le code, le reviewer vérifie la conformité et l'exhaustivité, l'e2e vérifie que les docs correspondent à la production.

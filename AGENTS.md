@@ -993,6 +993,25 @@ atomic.
       (per-role model) and #819 (capability-based routing) — remove when
       jcode implements native capability-based routing.
 
+49. **Sub-issue dependencies must be gated, not hinted**
+    - ❌ DO NOT trigger a sub-issue's worker in parallel with its siblings
+      when the triage declared an explicit `Depends on:` — the worker
+      cannot express "I need sibling #N's artifact first" and will either
+      fabricate the artifact or block silently. A dependency that is not
+      enforced at dispatch is a dependency that does not exist.
+    - ❌ DO NOT reuse `boucle:todo` for dependency-blocked issues. The
+      doctor's capacity-free scan re-triggers `boucle:todo` on every slot
+      opening, hitting the dep gate each time, wasting API calls, and
+      re-posting the blocked note.
+    - ✅ DO: gate the worker trigger on a `## Depends on` section in the
+      sub-issue body (portable marker `<!-- boucle:depends-on iids=N,M -->`,
+      forge-native "is this issue closed?" primitive only). Set
+      `boucle:blocked` (not `boucle:todo`) when a dep is open. Unblock
+      via a symmetric `maybe_unblock_dependents()` when a dep closes —
+      NOT via the doctor's capacity scan. Detect cycles at split time
+      and escalate to a human; never let a cycle deadlock the loop
+      silently.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
