@@ -96,11 +96,21 @@ else
 fi
 
 # ── Agents parse ───────────────────────────────────────────────────────
+# Consumers install the engine as a .boucle/ submodule (BOUCLE_HOME); the
+# boucle repo itself (dogfood) keeps agents at root .jcode/. Check both.
+BOUCLE_HOME="${BOUCLE_HOME:-}"
+if [ -z "$BOUCLE_HOME" ]; then
+  if [ -d "$(dirname "$0")/../.jcode" ]; then
+    BOUCLE_HOME="$(cd "$(dirname "$0")/.." && pwd)"
+  elif [ -d "$(dirname "$0")/../.boucle" ]; then
+    BOUCLE_HOME="$(cd "$(dirname "$0")/.." && pwd)/.boucle"
+  fi
+fi
 for role in triage worker reviewer e2e; do
-  if [ -f ".jcode/agents/$role.md" ]; then
+  if [ -f "$BOUCLE_HOME/.jcode/agents/$role.md" ]; then
     pass "agent $role.md exists"
   else
-    fail "agent $role.md missing"
+    fail "agent $role.md missing ($BOUCLE_HOME/.jcode/agents/$role.md)"
   fi
 done
 

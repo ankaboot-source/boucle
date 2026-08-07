@@ -5,12 +5,13 @@
 # Replaces the old bin/detect-vision-need approach which swapped the worker's
 # model to a vision model for the whole run. Instead, this script runs the
 # vision model (minimax-m3) ONLY to describe images, then writes the
-# descriptions to .boucle/$ISSUE/.image-descriptions.md. bin/jc reads that
-# file and injects the descriptions into the agent prompt as text — so the
+# descriptions to .boucle-state/$ISSUE/.image-descriptions.md. bin/jc reads
+# that file and injects the descriptions into the agent prompt as text — so the
 # worker/reviewer/triage stay on their default models (deepseek-v4-flash,
 # glm-5.2) and get image context as text, not as raw binaries.
 #
-# Output: writes .boucle/$ISSUE/.image-descriptions.md (markdown with one
+# Output: writes .boucle-state/$ISSUE/.image-descriptions.md (markdown with
+#         one
 #         section per image: filename, dimensions, description).
 #         If no images found, exits 0 without writing the file.
 #
@@ -24,7 +25,9 @@ set -euo pipefail
 ROLE="${1:?usage: bin/describe-images <role>}"
 ISSUE="${BOUCLE_ISSUE:-}"
 CI_PROJECT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
-STATE_DIR="$CI_PROJECT_DIR/.boucle/$ISSUE"
+# .boucle-state/$ISSUE is gitignored per-issue state; .boucle/ is the engine
+# submodule (kept clean of state so `git submodule update` never clobbers it).
+STATE_DIR="$CI_PROJECT_DIR/.boucle-state/$ISSUE"
 DESC_FILE="$STATE_DIR/.image-descriptions.md"
 
 # ── Master switch ──────────────────────────────────────────────────────
