@@ -190,7 +190,10 @@ fi
 
 # ── Paths ──────────────────────────────────────────────────────────────
 CI_PROJECT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
-STATE_DIR="$CI_PROJECT_DIR/.boucle/$ISSUE"
+# Per-issue state lives in .boucle-state/ (gitignored). The .boucle/ dir is
+# reserved for the engine submodule in consumer repos — keeping state out of
+# it means `git submodule update` can never clobber in-flight work.
+STATE_DIR="$CI_PROJECT_DIR/.boucle-state/$ISSUE"
 STATE_FILE="$STATE_DIR/state.md"
 ITERATIONS_FILE="$STATE_DIR/iterations.md"
 # jcode has no SQLite DB (run mode is ephemeral), so no DB isolation needed.
@@ -383,13 +386,23 @@ is_api_down() {
 }
 
 # ── Write role-specific prompt-overlay.md ──────────────────────────────
-# jcode loads .jcode/prompt-overlay.md from cwd in addition to AGENTS.md.
-# We write the role-specific agent prompt (body after YAML frontmatter)
-# to this file before each invocation so jcode sees the correct system
-# prompt for the role.
+# jcode loads .jcode/prompt-overlay.md from cwd AND $JCODE_HOME/prompt-overlay.md
+# in addition to AGENTS.md. We write the role-specific agent prompt (body
+# after YAML frontmatter) to one of those before each invocation so jcode
+# sees the correct system prompt for the role.
+#
+# In CI, JCODE_HOME is project-isolated (.boucle-state/.jcode, see the
+# before_script) and the runner is ephemeral — writing the overlay there
+# keeps the consumer repo root clean (no stray .jcode/ dir). In local dev
+# (no CI env), keep the legacy cwd-relative .jcode/prompt-overlay.md path.
 write_prompt_overlay() {
   local agent_file="$1"
-  local overlay_dir="$CI_PROJECT_DIR/.jcode"
+  local overlay_dir
+  if [ "${CI:-}" = "true" ]; then
+    overlay_dir="${JCODE_HOME:-$CI_PROJECT_DIR/.jcode}"
+  else
+    overlay_dir="$CI_PROJECT_DIR/.jcode"
+  fi
   local overlay_file="$overlay_dir/prompt-overlay.md"
   mkdir -p "$overlay_dir"
   # Extract body after YAML frontmatter (skip lines between --- and ---).
@@ -410,7 +423,7 @@ fi
 mkdir -p "$STATE_DIR"
 
 # ── 3a. Load issue attachments (if bin/fetch-issue-attachments ran) ──
-# The fetch script writes .boucle/$ISSUE/.attachments.env with
+# The fetch script writes .boucle-state/$ISSUE/.attachments.env with
 # BOUCLE_ISSUE_ATTACHMENTS="path1 path2 ...". Empty string = no attachments.
 ATTACHMENTS_ENV="$STATE_DIR/.attachments.env"
 if [ -f "$ATTACHMENTS_ENV" ]; then

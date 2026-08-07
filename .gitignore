@@ -29,7 +29,7 @@ pnpm-debug.log*
 .idea/
 
 # boucle state files (per-issue work state, not for version control)
-.boucle/
+.boucle-state/
 .wrangler/
 
 # bats test artifacts

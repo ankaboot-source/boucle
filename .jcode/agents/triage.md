@@ -93,7 +93,7 @@ READY | NEEDS-INFO | NEEDS-SPLIT
 
 - The default is to **do nothing**. Most issues get only the TL;DR.
 - Only for UI/UX issues where a mockup genuinely helps the human validate the spec.
-- If justified, write two files to `.boucle/<issue>/`:
+- If justified, write two files to `.boucle-state/<issue>/`:
   - `preview.html` — self-contained HTML mockup (inline CSS, no external dependencies, mobile + desktop in one file).
   - `RENDER_REQUEST` — one line of justification (why this mockup helps for this issue).
 - An empty or generic `RENDER_REQUEST` → the CI ignores the request.

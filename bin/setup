@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
 # bin/setup — Day 0 infrastructure setup for boucle on a target GitLab repo.
 # Idempotent: safe to run multiple times. Checks before creating.
-# Usage: bin/setup --project <id-or-path> --host <forge-host> [--bot-id <id>] [--bot-token <pat>] [--cf-token <token>] [--skip-cf] [--dry-run]
+# Usage: bin/setup --project <id-or-path> --host <forge-host> [--bot-id <id>] [--bot-token <pat>] [--cf-token <token>] [--skip-cf] [--non-interactive] [--dry-run]
 
 set -euo pipefail
 
 # ── Args ──────────────────────────────────────────────────────────────
-PROJECT=""
-HOST="framagit.org"
-BOT_ID=""
+# Every flag has a BOUCLE_* env fallback so bin/setup --non-interactive
+# works with zero prompts (AI-agent-driven installs).
+PROJECT="${BOUCLE_PROJECT:-}"
+HOST="${BOUCLE_HOST:-framagit.org}"
+BOT_ID="${BOUCLE_BOT_ID:-}"
 BOT_USERNAME="${BOUCLE_BOT_USERNAME:-up-bot}"
-BOT_TOKEN=""
-CF_TOKEN=""
-RUNNER_TAG=""
+BOT_TOKEN="${BOUCLE_BOT_TOKEN:-}"
+CF_TOKEN="${BOUCLE_CF_TOKEN:-}"
+RUNNER_TAG="${BOUCLE_RUNNER_TAG:-}"
 SKIP_CF=false
 DRY_RUN=false
+NON_INTERACTIVE=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -54,6 +57,10 @@ while [[ $# -gt 0 ]]; do
       DRY_RUN=true
       shift
       ;;
+    --non-interactive)
+      NON_INTERACTIVE=true
+      shift
+      ;;
     -h | --help)
       echo "Usage: bin/setup --project <id-or-path> --host <forge-host> [options]"
       echo ""
@@ -64,9 +71,16 @@ while [[ $# -gt 0 ]]; do
       echo "  --bot-username <name>    Bot username (default: up-bot; used to seed BOUCLE_BOT_USERNAME CI variable)"
       echo "  --bot-token <pat>        Bot PAT (used as BOUCLE_TOKEN CI variable)"
       echo "  --cf-token <token>       Cloudflare API token (for Pages project)"
-      echo "  --runner-tag <tag>       Runner tag to use in .gitlab-ci.yml (default: boucle)"
+      echo "  --runner-tag <tag>       Runner tag baked into the root .gitlab-ci.yml shim (default: data)"
       echo "  --skip-cf                Skip Cloudflare Pages project creation"
       echo "  --dry-run                 Print what would be done, don't execute"
+      echo "  --non-interactive        No prompts: read config from BOUCLE_* env vars only."
+      echo "                           If BOUCLE_LLM_API_KEY is unset, it is skipped and must be"
+      echo "                           added manually as a masked CI/CD variable."
+      echo ""
+      echo "Env fallbacks: BOUCLE_PROJECT BOUCLE_HOST BOUCLE_BOT_ID BOUCLE_BOT_USERNAME"
+      echo "               BOUCLE_BOT_TOKEN BOUCLE_CF_TOKEN BOUCLE_RUNNER_TAG"
+      echo "               BOUCLE_LLM_API_KEY BOUCLE_LLM_BASE_URL"
       exit 0
       ;;
     *)
@@ -120,6 +134,9 @@ PROJECT_ID=$(resolve_project_id)
   exit 1
 }
 echo "Project ID: $PROJECT_ID"
+# Resolve the project web URL once (used for CI/CD variables manual-entry link).
+PROJECT_URL=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID" 2> /dev/null | jq -r '.web_url // empty')
+[ -n "$PROJECT_URL" ] && echo "Project URL: $PROJECT_URL"
 echo ""
 
 # Dry-run wrapper
@@ -159,22 +176,84 @@ print_webhook_recommendations() {
   echo "      pipelines from being created at all."
 }
 
-# ── 0. Runner tag ─────────────────────────────────────────────────────
-echo "=== Runner tag ==="
-# The default tag in .gitlab-ci.yml is "boucle" (a portable placeholder).
-# If --runner-tag is provided, rewrite it to match the project's runner.
-# This is a local file edit (not a CI variable) because GitLab CI does not
-# support variable interpolation in the `tags:` field.
+# ── 0. Root .gitlab-ci.yml shim ───────────────────────────────────────
+echo "=== Root .gitlab-ci.yml ==="
+# The consumer's root CI file is a thin shim that includes the engine
+# pipeline via `include: remote`. GitLab cannot `include: local` a file
+# inside a git submodule — submodule content is not part of the main
+# project tree (gitlab issue #25249).
+# An existing non-boucle .gitlab-ci.yml is NEVER overwritten: we print the
+# include block to merge manually instead, so a consumer's own pipeline is
+# never clobbered.
 GITLAB_CI="${GITLAB_CI:-.gitlab-ci.yml}"
-if [ -n "$RUNNER_TAG" ]; then
-  if [ -f "$GITLAB_CI" ] && grep -q "tags: \[boucle\]" "$GITLAB_CI"; then
-    run "sed -i \"s/tags: \[boucle\]/tags: [$RUNNER_TAG]/g\" \"$GITLAB_CI\""
-    log_pass "runner tag set to '$RUNNER_TAG' in $GITLAB_CI"
+# Pin the include to the engine's current commit so the shim and the
+# checked-out submodule always match. Resolve HEAD inside the engine repo
+# itself (dirname "$0"/..), NOT in the consumer's cwd.
+ENGINE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ENGINE_REF="main"
+if (cd "$ENGINE_ROOT" && git rev-parse --is-inside-work-tree > /dev/null 2>&1); then
+  ENGINE_REF="$(cd "$ENGINE_ROOT" && git rev-parse --short=12 HEAD)"
+fi
+ENGINE_INCLUDE="https://raw.githubusercontent.com/ankaboot-source/boucle/${ENGINE_REF}/.gitlab-ci.yml"
+TAGS_BLOCK="default:
+  tags: [${RUNNER_TAG:-data}]
+"
+if [ -f "$GITLAB_CI" ]; then
+  if grep -q "boucle engine" "$GITLAB_CI"; then
+    log_skip "root $GITLAB_CI already references the boucle engine"
   else
-    log_skip "runner tag (no 'tags: [boucle]' placeholder found in $GITLAB_CI — already configured?)"
+    log_skip "existing $GITLAB_CI left untouched — add the boucle include block manually:"
+    cat << SHIM
+include:
+  - remote: '$ENGINE_INCLUDE'
+$TAGS_BLOCK
+variables:
+  BOUCLE_FORGE_HOST: "$HOST"
+SHIM
   fi
 else
-  log_skip "runner tag (no --runner-tag provided; .gitlab-ci.yml keeps default 'boucle')"
+  if [ "$DRY_RUN" = "true" ]; then
+    echo "  [dry-run] write $GITLAB_CI (boucle engine shim, ref $ENGINE_REF)"
+  else
+    cat > "$GITLAB_CI" << SHIM
+# boucle engine shim (generated by bin/setup — safe to re-run).
+# Includes the boucle engine pipeline from the .boucle/ submodule.
+# Add your own jobs below this block; they run after the engine stages.
+include:
+  - remote: '$ENGINE_INCLUDE'
+
+$TAGS_BLOCK
+variables:
+  BOUCLE_FORGE_HOST: "$HOST"
+SHIM
+  fi
+  log_pass "root $GITLAB_CI written (boucle engine shim, ref $ENGINE_REF)"
+fi
+
+# ── 0b. Consumer .gitignore ───────────────────────────────────────────
+# Per-issue state lives in .boucle-state/ at the consumer root (gitignored).
+# Never clobber an existing .gitignore — only append the entry if missing.
+GITIGNORE_ENTRY='# boucle per-issue state (generated by bin/setup)
+.boucle-state/
+'
+if [ -f .gitignore ]; then
+  if grep -qxF ".boucle-state/" .gitignore; then
+    log_skip ".gitignore already ignores .boucle-state/"
+  else
+    if [ "$DRY_RUN" = "true" ]; then
+      echo "  [dry-run] append .boucle-state/ to .gitignore"
+    else
+      printf '%s' "$GITIGNORE_ENTRY" >> .gitignore
+    fi
+    log_pass ".gitignore updated with .boucle-state/"
+  fi
+else
+  if [ "$DRY_RUN" = "true" ]; then
+    echo "  [dry-run] create .gitignore with .boucle-state/"
+  else
+    printf '%s' "$GITIGNORE_ENTRY" > .gitignore
+  fi
+  log_pass ".gitignore created with .boucle-state/"
 fi
 
 # ── 1. CI Variables ───────────────────────────────────────────────────
@@ -225,15 +304,29 @@ else
   log_pass "BOUCLE_SPEC_PROFILE set"
 fi
 
-# BOUCLE_LLM_API_KEY (masked) — required for jcode to authenticate
+# BOUCLE_LLM_API_KEY (masked) — required for jcode to authenticate.
+# Interactive mode: prompt silently. Non-interactive mode: read from
+# BOUCLE_LLM_API_KEY env; if unset, SKIP and print the URL where the human
+# adds it manually as a masked variable — the key never appears in prompts,
+# command lines or logs (AI-agent-driven installs stay credential-free).
 EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_LLM_API_KEY" 2> /dev/null | jq -r '.key // empty')
 if [ -n "$EXISTING" ]; then
   log_skip "BOUCLE_LLM_API_KEY already exists"
 else
-  read -r -p "BOUCLE_LLM_API_KEY value (masked): " LLM_API_KEY
+  LLM_API_KEY="${BOUCLE_LLM_API_KEY:-}"
+  if [ -z "$LLM_API_KEY" ] && [ "$NON_INTERACTIVE" = "false" ]; then
+    read -r -p "BOUCLE_LLM_API_KEY value (masked): " LLM_API_KEY || true
+  fi
   if [ -n "$LLM_API_KEY" ]; then
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables --field key=BOUCLE_LLM_API_KEY --field value=$LLM_API_KEY --field masked=true >/dev/null"
+    if [ "$DRY_RUN" = "true" ]; then
+      echo "  [dry-run] set BOUCLE_LLM_API_KEY (masked) — value omitted from dry-run output"
+    else
+      glab api --hostname "$HOST" -X POST "/projects/$PROJECT_ID/variables" --field key=BOUCLE_LLM_API_KEY --field value="$LLM_API_KEY" --field masked=true > /dev/null
+    fi
     log_pass "BOUCLE_LLM_API_KEY set (masked)"
+  elif [ "$NON_INTERACTIVE" = "true" ]; then
+    CI_VARS_URL="${PROJECT_URL:-https://$HOST/$PROJECT}/-/settings/ci_cd"
+    log_skip "BOUCLE_LLM_API_KEY — set it manually as a masked CI/CD variable: $CI_VARS_URL"
   else
     log_fail "BOUCLE_LLM_API_KEY — no value provided"
   fi
@@ -244,8 +337,9 @@ EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_L
 if [ -n "$EXISTING" ]; then
   log_skip "BOUCLE_LLM_BASE_URL already exists"
 else
-  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables --field key=BOUCLE_LLM_BASE_URL --field value=https://ollama.com/v1 >/dev/null"
-  log_pass "BOUCLE_LLM_BASE_URL set (default: https://ollama.com/v1)"
+  LLM_BASE_URL="${BOUCLE_LLM_BASE_URL:-https://ollama.com/v1}"
+  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables --field key=BOUCLE_LLM_BASE_URL --field value=$LLM_BASE_URL >/dev/null"
+  log_pass "BOUCLE_LLM_BASE_URL set (${BOUCLE_LLM_BASE_URL:-default: https://ollama.com/v1})"
 fi
 
 echo ""
@@ -513,20 +607,21 @@ fi
 echo "Day 0 setup complete."
 echo ""
 echo "Next steps:"
-echo "  1. Ensure a GitLab runner with your tag is available for this project."
-if [ -n "$RUNNER_TAG" ]; then
-  echo "     Tag '$RUNNER_TAG' was configured via --runner-tag."
+echo "  1. Make the engine a git submodule (if not already done):"
+echo "     git submodule add https://github.com/ankaboot-source/boucle .boucle"
+echo "  2. Commit the engine and the root shim:"
+echo "     git add .gitmodules .boucle $GITLAB_CI"
+echo "     git commit -m \"chore: install boucle engine\""
+echo "     (Push the commit — the runner needs GIT_SUBMODULE_STRATEGY to fetch .boucle/.)"
+echo "  3. Runner: make sure a GitLab runner with tag '${RUNNER_TAG:-data}' is available."
+echo "     (The tag is baked into $GITLAB_CI. Re-run with --runner-tag <tag> to change it.)"
+if [ -n "${CI_VARS_URL:-}" ]; then
+  echo "  4. CI/CD variables: $CI_VARS_URL"
+  echo "     - BOUCLE_LLM_API_KEY (masked) if bin/setup skipped it."
 else
-  echo "     Default tag is 'boucle' — re-run with --runner-tag <your-tag> to change it."
+  echo "  4. CI/CD variables: add BOUCLE_LLM_API_KEY (masked) under Settings > CI/CD."
 fi
-echo "     Register one on your build machine (docker executor) or enable a shared runner with the tag."
-echo "  2. Apply the loop template to the target repo:"
-echo "     cp -r boucle/boucle/bin <target-repo>/"
-echo "     cp -r boucle/boucle/.jcode <target-repo>/"
-echo "     cp boucle/boucle/.gitlab-ci.yml <target-repo>/"
-echo "     cp boucle/boucle/LOOP.md <target-repo>/"
-echo "  3. Run bin/doctor in CI to verify all prerequisites are met."
-echo "  4. Create your first issue — the webhook will trigger triage."
+echo "  5. Create your first issue — the webhook will trigger triage."
 
 print_webhook_recommendations
 
