@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# bin/detect-vision-need — detect image attachments and override model to vision-capable
+# Called after bin/fetch-issue-attachments / bin/fetch-mr-attachments, before bin/jc.
+#
+# Emits `export BOUCLE_MODEL_<ROLE>=<vision_model>` to stdout when images are
+# found. The caller MUST eval the stdout to propagate the export:
+#   eval "$(./bin/detect-vision-need triage)"
+# Diagnostic messages go to stderr (visible in CI logs, not eval'd).
+#
+# Forge controls (all optional, with defaults):
+#   BOUCLE_VISION_ROUTING  — "enabled" (default) or "disabled" (master switch)
+#   BOUCLE_VISION_MODEL    — vision model to use (default: minimax-m3)
+#   BOUCLE_VISION_ROLES    — comma-separated eligible roles (default: triage,worker,reviewer)
+set -u
+
+ROLE="${1:-}"
+if [ -z "${ROLE}" ]; then
+	echo "[detect-vision-need] ERROR: role argument required" >&2
+	exit 1
+fi
+
+# Master switch
+if [ "${BOUCLE_VISION_ROUTING:-enabled}" = "disabled" ]; then
+	echo "[detect-vision-need] routing disabled (BOUCLE_VISION_ROUTING=disabled) — skipping" >&2
+	exit 0
+fi
+
+# Role eligibility
+ELIGIBLE_ROLES="${BOUCLE_VISION_ROLES:-triage,worker,reviewer}"
+case ",${ELIGIBLE_ROLES}," in
+*",${ROLE},"*) : ;; # eligible
+*)
+	echo "[detect-vision-need] role=${ROLE} not in BOUCLE_VISION_ROLES='${ELIGIBLE_ROLES}' — skipping" >&2
+	exit 0
+	;;
+esac
+
+# Check that `file` command is available
+if ! command -v file >/dev/null 2>&1; then
+	echo "[detect-vision-need] WARNING: 'file' command not found — treating as no images" >&2
+	echo "[detect-vision-need] role=${ROLE} images=0 → no override (staying on default model)" >&2
+	exit 0
+fi
+
+# Scan attachment dirs for images
+ISSUE="${BOUCLE_ISSUE:-}"
+IMAGE_COUNT=0
+for dir in ".boucle/${ISSUE}/attachments" ".boucle/${ISSUE}/mr-attachments"; do
+	[ -d "${dir}" ] || continue
+	while IFS= read -r -d '' f; do
+		mime=$(file --mime-type -b "${f}" 2>/dev/null || echo "")
+		case "${mime}" in
+		image/*) IMAGE_COUNT=$((IMAGE_COUNT + 1)) ;;
+		esac
+	done < <(find "${dir}" -maxdepth 1 -type f -print0 2>/dev/null || true)
+done
+
+# Emit export to stdout (for eval) when images found; diagnostics to stderr
+VISION_MODEL="${BOUCLE_VISION_MODEL:-minimax-m3}"
+OVERRIDE_VAR="BOUCLE_MODEL_$(echo "${ROLE}" | tr '[:lower:]' '[:upper:]')"
+if [ "${IMAGE_COUNT}" -gt 0 ]; then
+	echo "[detect-vision-need] role=${ROLE} images=${IMAGE_COUNT} → ${OVERRIDE_VAR}=${VISION_MODEL}" >&2
+	echo "export ${OVERRIDE_VAR}=${VISION_MODEL}"
+else
+	echo "[detect-vision-need] role=${ROLE} images=0 → no override (staying on default model)" >&2
+fi

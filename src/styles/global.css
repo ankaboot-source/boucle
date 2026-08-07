@@ -184,16 +184,6 @@ p {
 	text-transform: uppercase;
 }
 
-/* Eyebrow / kicker style for editorial headers. */
-.eyebrow {
-	font-family: var(--font-body);
-	font-size: var(--text-xs);
-	font-weight: var(--weight-semibold);
-	letter-spacing: var(--tracking-mega);
-	text-transform: uppercase;
-	color: var(--color-text-muted);
-}
-
 /* Site container helper. */
 .container {
 	width: min(100% - 2 * var(--space-s), var(--container-wide));

@@ -10,6 +10,235 @@
 	padding-block: var(--space-xl) var(--space-3xl);
 }
 
+/* ---------- Home lead: two-column hero + feed ---------- */
+
+.home__lead {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-xl);
+	width: min(100% - 2 * var(--space-s), var(--container-wide));
+	margin-inline: auto;
+}
+
+@media (min-width: 64rem) {
+	.home__lead {
+		display: grid;
+		grid-template-columns: minmax(0, 2fr) auto minmax(0, 1fr);
+		align-items: start;
+		gap: 0;
+		column-gap: var(--space-3xl);
+	}
+}
+
+.home__lead > .hero {
+	width: 100%;
+	margin-inline: 0;
+}
+
+@media (min-width: 64rem) {
+	.home__lead > .hero {
+		position: sticky;
+		top: var(--header-height);
+		align-self: start;
+	}
+}
+
+/* Vertical keffiyeh divider between the two lead columns. */
+.home__divider {
+	display: none;
+	align-items: center;
+	justify-content: center;
+	align-self: stretch;
+}
+
+@media (min-width: 64rem) {
+	.home__divider {
+		display: flex;
+	}
+}
+
+.home__divider img {
+	width: clamp(26px, 2vw, 39px);
+	height: auto;
+	max-height: 120px;
+	object-fit: contain;
+	opacity: 0.85;
+}
+
+/* ---------- Featured feed ("À la une") ---------- */
+
+.featured-feed {
+	display: flex;
+	flex-direction: column;
+}
+
+@media (min-width: 64rem) {
+	.featured-feed {
+		min-height: 120vh;
+		padding-bottom: var(--space-xl);
+	}
+}
+
+.featured-feed__list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-s);
+}
+
+@media (min-width: 64rem) {
+	.featured-feed__list {
+		gap: var(--space-m);
+	}
+}
+
+.featured-feed__item {
+	display: flex;
+}
+
+.featured-feed__card {
+	position: relative;
+	display: block;
+	width: 100%;
+	overflow: hidden;
+	border: 2px solid var(--color-ink);
+	border-radius: var(--radius-sharp);
+	background: var(--color-ink);
+	color: var(--color-ink-on-dark);
+	text-decoration: none;
+	transition:
+		border-color var(--duration-base) var(--ease-brutal-lift),
+		box-shadow var(--duration-base) var(--ease-brutal-lift),
+		transform var(--duration-base) var(--ease-brutal-lift);
+}
+
+.featured-feed__card:hover,
+.featured-feed__card:focus-visible {
+	border-color: var(--color-ink);
+	transform: translateY(-6px) translateX(2px);
+	box-shadow: var(--shadow-hard);
+}
+
+.featured-feed__card:active {
+	transform: none;
+	box-shadow: none;
+}
+
+.featured-feed__card:focus-visible {
+	outline: 2px solid var(--color-accent);
+	outline-offset: 3px;
+}
+
+.featured-feed__card--ratio-1-1 {
+	aspect-ratio: 1 / 1;
+}
+
+.featured-feed__card--ratio-4-5 {
+	aspect-ratio: 4 / 5;
+}
+
+.featured-feed__card--ratio-4-3 {
+	aspect-ratio: 4 / 3;
+}
+
+.featured-feed__image {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	/* No scale transform on hover: the card animates like the others (translateY
+	 * + border + shadow) and the image stays still so the visual remains fully
+	 * visible and stable. */
+}
+
+/*
+ * The overlay is a solid black strip anchored at the bottom of the card.
+ * It covers at most ~40% of the card height; title and date are hidden by
+ * default and revealed on hover/focus so the visual stays fully visible at
+ * rest. The link already has an aria-label for screen readers, so the overlay
+ * is marked aria-hidden in the component to avoid redundant announcements.
+ */
+.featured-feed__overlay {
+	position: absolute;
+	inset: auto 0 0 0;
+	display: flex;
+	flex-direction: column;
+	justify-content: flex-end;
+	gap: var(--space-2xs);
+	min-height: 30%;
+	max-height: 40%;
+	padding: var(--space-s);
+	background: var(--color-flag-black);
+	color: var(--color-ink-on-dark);
+	clip-path: inset(100% 0 0 0);
+	transform: translateY(0);
+	transition:
+		clip-path var(--duration-slow) var(--ease-out),
+		transform var(--duration-slow) var(--ease-out),
+		background-color var(--duration-base) var(--ease-out);
+}
+
+.featured-feed__card:hover .featured-feed__overlay,
+.featured-feed__card:focus-visible .featured-feed__overlay {
+	clip-path: inset(0 0 0 0);
+	background: var(--color-ink);
+	transform: translateY(0);
+}
+
+.featured-feed__title,
+.featured-feed__date {
+	transform: translateY(12px);
+	opacity: 0;
+	transition:
+		transform var(--duration-slow) var(--ease-out),
+		opacity var(--duration-slow) var(--ease-out);
+}
+
+.featured-feed__card:hover .featured-feed__title,
+.featured-feed__card:focus-visible .featured-feed__title,
+.featured-feed__card:hover .featured-feed__date,
+.featured-feed__card:focus-visible .featured-feed__date {
+	transform: translateY(0);
+	opacity: 1;
+}
+
+.featured-feed__title {
+	font-family: var(--font-heading);
+	font-size: var(--text-base);
+	line-height: var(--leading-snug);
+	font-weight: var(--weight-bold);
+	color: var(--color-ink-on-dark);
+}
+
+.featured-feed__date {
+	font-family: var(--font-body);
+	font-size: var(--text-xs);
+	color: var(--color-ink-on-dark);
+	opacity: 0;
+}
+
+.featured-feed__card:hover .featured-feed__date,
+.featured-feed__card:focus-visible .featured-feed__date {
+	opacity: 0.85;
+}
+
+/* Reveal animation for featured cards. */
+.featured-feed__item[data-reveal] {
+	opacity: 0;
+	transform: translateY(12px);
+	transition:
+		opacity var(--duration-slow) var(--ease-out),
+		transform var(--duration-slow) var(--ease-out);
+}
+
+.featured-feed__item[data-reveal].is-revealed {
+	opacity: 1;
+	transform: translateY(0);
+}
+
 /* ---------- Hero ---------- */
 
 .hero {
@@ -78,7 +307,7 @@ img.hero__symbol {
 
 /*
  * `.accent-inline` — a 32-48 px decorative image nestled inside a line of
- * text (eyebrow, lede, etc.). Sized so it never dominates the line.
+ * body text (lede, intro, etc.). Sized so it never dominates the line.
  */
 .accent-inline {
 	display: inline-block;
@@ -99,6 +328,86 @@ img.hero__symbol {
 .section-head__lede--centered .accent-inline {
 	width: 48px;
 	height: 48px;
+}
+
+/* =============================================================================
+ * Shared brutalist motion system
+ * -----------------------------------------------------------------------------
+ * Hard-Lift (cards, buttons, images) + Staggered Slide-Up Brutal (reveals).
+ * All hover animations use ONLY transform + opacity and the hard shadow token
+ * (blur strictly 0) — see DESIGN.md §3.2 and §3.6. Reduced motion collapses
+ * every transform/delay to nothing (see the block at the end of this file).
+ * ========================================================================== */
+
+/*
+ * `.hard-lift` — the shared interactive relief. Applied to cards, image
+ * links and CTA wrappers. On hover/focus the element moves down-and-right
+ * by the token offset and casts a solid ink hard-edge block behind it; on
+ * active it snaps back flat with no shadow. Amplitude and shadow are
+ * token-driven so every component stays homogeneous.
+ */
+.hard-lift {
+	transition:
+		transform var(--duration-base) var(--ease-brutal-lift),
+		box-shadow var(--duration-base) var(--ease-brutal-lift),
+		border-color var(--duration-base) var(--ease-brutal-lift),
+		background-color var(--duration-base) var(--ease-brutal-lift);
+}
+
+.hard-lift:hover,
+.hard-lift:focus-visible,
+.hard-lift:focus-within {
+	transform: translateY(calc(-1 * var(--shadow-hard-offset)))
+		translateX(calc(var(--shadow-hard-offset) / 3));
+	box-shadow: var(--shadow-hard);
+}
+
+.hard-lift:active {
+	transform: none;
+	box-shadow: none;
+}
+
+/*
+ * Staggered Slide-Up Brutal — scroll-reveal for heading groups and cards.
+ * Each `.reveal` element starts 20px below, faded out; when `.is-revealed`
+ * is added (via IntersectionObserver in Layout.astro) it snaps up with the
+ * reveal easing. A child-per-item `.reveal-stagger` with a CSS var index
+ * drives a 50-75ms cascade via transition-delay.
+ */
+.reveal {
+	opacity: 0;
+	transform: translateY(20px);
+	transition:
+		opacity 200ms var(--ease-brutal-reveal),
+		transform 200ms var(--ease-brutal-reveal);
+	transition-delay: 0ms;
+}
+
+.reveal.is-revealed {
+	opacity: 1;
+	transform: translateY(0);
+}
+
+/* Mobile: reduced amplitude (10px vs 20px desktop) for reveals. */
+@media (max-width: 47.99rem) {
+	.reveal {
+		transform: translateY(10px);
+	}
+}
+
+.reveal-stagger > * {
+	opacity: 0;
+	transform: translateY(20px);
+	transition:
+		opacity 200ms var(--ease-brutal-reveal),
+		transform 200ms var(--ease-brutal-reveal);
+	transition-delay: calc(var(--reveal-index, 0) * 60ms);
+}
+
+.reveal-stagger > *.is-revealed,
+.reveal-stagger.is-revealed > * {
+	opacity: 1;
+	transform: translateY(0);
 }
 
 /* ---------- Buttons (homepage) ---------- */
@@ -125,8 +434,15 @@ img.hero__symbol {
 		transform var(--duration-fast) var(--ease-out);
 }
 
-.btn:hover {
-	transform: translateY(-1px);
+.btn:hover,
+.btn:focus-visible {
+	transform: translateY(-6px) translateX(2px);
+	box-shadow: var(--shadow-hard);
+}
+
+.btn:active {
+	transform: none;
+	box-shadow: none;
 }
 
 .btn--primary {
@@ -208,8 +524,24 @@ img.hero__symbol {
 	gap: var(--space-2xs);
 	padding: var(--space-l);
 	background: var(--color-bg-soft);
-	border-radius: var(--radius-l);
+	border-radius: var(--radius-sharp);
 	border: 1px solid var(--color-border);
+	transition:
+		transform var(--duration-base) var(--ease-brutal-lift),
+		border-color var(--duration-base) var(--ease-brutal-lift),
+		box-shadow var(--duration-base) var(--ease-brutal-lift);
+}
+
+.pillar:hover,
+.pillar:focus-within {
+	transform: translateY(-6px) translateX(2px);
+	border-color: var(--color-ink);
+	box-shadow: var(--shadow-hard);
+}
+
+.pillar:active {
+	transform: none;
+	box-shadow: none;
 }
 
 .pillar__index {
@@ -260,10 +592,6 @@ img.hero__symbol {
 	display: flex;
 	flex-direction: column;
 	gap: var(--space-2xs);
-}
-
-.site-footer__eyebrow {
-	color: var(--color-flag-red);
 }
 
 .site-footer__title {
@@ -328,9 +656,123 @@ img.hero__symbol {
 	color: oklch(70% 0 0);
 }
 
-/* ---------- Newsletter section (homepage) ---------- */
+/* ---------- Newsletter + social section (homepage) ---------- */
 
 .newsletter-section {
-	width: min(100% - 2 * var(--space-s), var(--container-base));
+	width: min(100% - 2 * var(--space-s), var(--container-wide));
 	margin-inline: auto;
+}
+
+.newsletter-section__grid {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: var(--space-s);
+	align-items: stretch;
+}
+
+@media (min-width: 48rem) {
+	.newsletter-section__grid {
+		grid-template-columns: 1fr 1fr;
+		gap: var(--space-l);
+	}
+}
+
+.newsletter-section .visually-hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
+
+/* Respect users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+	.featured-feed__card,
+	.featured-feed__overlay,
+	.featured-feed__title,
+	.featured-feed__date,
+	.featured-feed__item[data-reveal],
+	.featured-feed__image,
+	.pillar,
+	.pillar:hover,
+	.pillar:focus-within {
+		transition: none;
+		animation: none;
+	}
+
+	.featured-feed__overlay {
+		clip-path: inset(0 0 0 0);
+		transform: none;
+	}
+
+	.featured-feed__title,
+	.featured-feed__date {
+		opacity: 1;
+		transform: none;
+	}
+
+	.featured-feed__date {
+		opacity: 0.85;
+	}
+
+	.featured-feed__item[data-reveal] {
+		opacity: 1;
+		transform: none;
+	}
+
+	.pillar,
+	.pillar:hover,
+	.pillar:focus-within {
+		transform: none;
+		box-shadow: none;
+	}
+
+	/* Hard-Lift + reveal: kill all translations, staggers and delays; keep
+	 * only instant visual state changes (colour, opacity). */
+	.hard-lift,
+	.hard-lift:hover,
+	.hard-lift:focus-visible,
+	.hard-lift:focus-within,
+	.hard-lift:active,
+	.btn,
+	.btn:hover,
+	.btn:focus-visible,
+	.btn:active,
+	.reveal,
+	.reveal-stagger > * {
+		transition: none;
+		transform: none;
+		box-shadow: none;
+	}
+
+	.reveal,
+	.reveal-stagger > * {
+		opacity: 1;
+	}
+}
+
+/*
+ * Touch devices: hover is a phantom state (no persistent pointer), so the
+ * complex lift/hover gestures are disabled in favour of a clear active
+ * state at tap. The hard-shadow still flashes on :active to give tap
+ * feedback, but the -6px lift and its 6px offset shadow are suppressed so
+ * they don't linger after the finger lifts.
+ */
+@media (hover: none) and (pointer: coarse) {
+	.hard-lift:hover,
+	.btn:hover,
+	.btn:focus-visible {
+		transform: none;
+		box-shadow: none;
+	}
+
+	.hard-lift:active,
+	.btn:active {
+		transform: translateY(-2px);
+		box-shadow: var(--shadow-hard);
+	}
 }

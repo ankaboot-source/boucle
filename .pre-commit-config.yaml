@@ -18,7 +18,7 @@ repos:
       - id: check-shebang-scripts-are-executable
         exclude: ^\.jcode/
       - id: end-of-file-fixer
-        exclude: ^(src/|docs/|\.jcode/)
+        exclude: ^(src/|docs/|\.jcode/|\.boucle-version$)
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
         exclude: ^(src/|docs/|\.jcode/)
@@ -26,7 +26,13 @@ repos:
         args: [--fix=lf]
       - id: check-added-large-files
         args: [--maxkb=512]
+        exclude: ^\.jcode/
       - id: check-yaml
+        # .gitlab-ci.yml contains shell heredocs (cat << EOF ... EOF) whose
+        # body text is NOT valid YAML (lines without colons, `---` separators
+        # parsed as doc boundaries). GitLab validates the file server-side;
+        # the hook would reject every commit that touches a heredoc body.
+        exclude: ^\.gitlab-ci\.yml$
       - id: check-json
       - id: check-case-conflict
       - id: detect-private-key
@@ -35,7 +41,7 @@ repos:
   # Local hook: the koalaman/shellcheck-precommit hook pulls a Docker image,
   # which fails in CI/hosts without a daemon. We use the system binary
   # (brew install shellcheck) via the Makefile's lint target instead.
-  # Exclude .jcode/ — upstream-vendored scripts.
+  # Exclude .jcode/ — upstream-vendored scripts synced by bin/update.
   - repo: local
     hooks:
       - id: shellcheck
@@ -46,7 +52,8 @@ repos:
         exclude: ^\.jcode/
 
   # ── shfmt (formatting) ──
-  # Exclude .jcode/ — reformatting vendored scripts creates churn.
+  # Exclude .jcode/ — reformatting vendored scripts creates churn that
+  # the next bin/update overwrites.
   - repo: https://github.com/scop/pre-commit-shfmt
     rev: v3.13.1-1
     hooks:

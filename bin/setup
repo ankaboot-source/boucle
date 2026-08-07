@@ -310,6 +310,31 @@ fi
 # adds it manually as a masked variable — the key never appears in prompts,
 # command lines or logs (AI-agent-driven installs stay credential-free).
 EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_LLM_API_KEY" 2> /dev/null | jq -r '.key // empty')
+
+# BOUCLE_DND_ENABLED — enables Do-Not-Disturb mode (auto-validate spec gate
+# during the quiet window so the loop runs autonomously up to the MR).
+# Default true (good default — preserves the human's quality of life). Set to
+# false to opt out. Companion vars BOUCLE_DND_START/END/TZ/EXCLUDE_DAYS are
+# optional and read with defaults at runtime — no need to seed them.
+EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_DND_ENABLED" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
+if [ -n "$EXISTING" ]; then
+  log_skip "BOUCLE_DND_ENABLED already exists"
+else
+  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_DND_ENABLED -f value=true -f masked=false -f protected=false >/dev/null"
+  log_pass "BOUCLE_DND_ENABLED set (true — good default)"
+fi
+
+# BOUCLE_UPDATE_MODE — controls self-update behavior.
+# Values: release (default, fetch latest tag) | dev (fetch latest commit on main).
+# If unset, bin/update defaults to release.
+EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_UPDATE_MODE" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
+if [ -n "$EXISTING" ]; then
+  log_skip "BOUCLE_UPDATE_MODE already exists"
+else
+  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_UPDATE_MODE -f value=release -f masked=false -f protected=false >/dev/null"
+  log_pass "BOUCLE_UPDATE_MODE set to release"
+fi
+
 if [ -n "$EXISTING" ]; then
   log_skip "BOUCLE_LLM_API_KEY already exists"
 else
@@ -369,6 +394,30 @@ for size in s m l; do
     log_pass "size:$size created"
   fi
 done
+
+# boucle:autonomous — flag label (not a state). Applied at issue creation to
+# mark an issue as autonomous: the triage job auto-validates the spec gate
+# regardless of the DND window, so the loop runs up to the MR without
+# contacting the human. Distinct color (purple) to separate flags from states.
+EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:autonomous" 2> /dev/null | jq -r '.[0].name // empty')
+if [ -n "$EXISTING" ]; then
+  log_skip "boucle:autonomous already exists"
+else
+  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/labels -f name=boucle:autonomous -f color=#6927C5 -f 'description=Flag: issue runs autonomously (spec gate auto-validated at triage)' >/dev/null"
+  log_pass "boucle:autonomous created"
+fi
+
+# boucle:dnd — flag label (not a state). Applied at triage when the
+# Do-Not-Disturb window auto-validates the spec gate, so the board shows
+# WHY the gate was skipped. Mirrors boucle:autonomous. Distinct color
+# (deep indigo — night theme) to distinguish from autonomous (purple).
+EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:dnd" 2> /dev/null | jq -r '.[0].name // empty')
+if [ -n "$EXISTING" ]; then
+  log_skip "boucle:dnd already exists"
+else
+  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/labels -f name=boucle:dnd -f color=#1A237E -f 'description=Flag: spec gate auto-validated by DND window at triage' >/dev/null"
+  log_pass "boucle:dnd created"
+fi
 
 echo ""
 

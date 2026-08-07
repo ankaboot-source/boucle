@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a mandatory non-technical TL;DR to the triage comment (so non-technical humans can validate specs) plus an opt-in, rare PNG visual preview (via Chromium) for UI/UX issues where a mockup genuinely helps.
+**Goal:** Add a mandatory non-technical TL;DR to the triage comment (so non-technical humans can validate specs) plus a systematic, mandatory PNG visual preview (via Chromium) for UI/UX issues. Non-UI/UX issues never trigger Chromium — zero overhead because they don't write `RENDER_REQUEST`.
 
-**Architecture:** Agent produces content (TL;DR text + optional `preview.html`/`RENDER_REQUEST` files to `.boucle/<issue>/`). CI handles infrastructure (Chromium render, GitLab upload, comment edit). Default path never touches Chromium — zero overhead. Visual is the exception, never the rule. Strict separation: agent=content, CI=infrastructure.
+**Architecture:** Agent produces content (TL;DR text + `preview.html`/`RENDER_REQUEST` files to `.boucle/<issue>/` for UI/UX issues). CI handles infrastructure (Chromium render, GitLab upload, comment edit). For UI/UX issues, the visual preview is mandatory; for non-UI/UX issues, the absence of `RENDER_REQUEST` skips the block entirely (zero cost). The visual-preview block fires for ALL READY dispositions (Size S/M/L, gated or not) — it sits after the READY case routing, outside the `SHOULD_GATE` if/else. Strict separation: agent=content, CI=infrastructure.
 
 **Tech Stack:** Bash (GitLab CI), Node.js (render script), `puppeteer-core` + `@sparticuz/chromium` (installed on-demand in `/tmp`, never persisted), GitLab uploads API + notes API.
 
@@ -18,8 +18,8 @@
 
 | File | Action | Responsibility |
 |---|---|---|
-| `.opencode/agents/triage.md` | Modify | Add mandatory `## TL;DR` section (first) + optional visual rules to agent output format |
-| `.gitlab-ci.yml` | Modify | (1) Repoint `SPEC_MSG` to TL;DR (line 616), (2) insert inline render block after SPEC_MSG post (after line 618, inside `SHOULD_GATE=true` branch) |
+| `.opencode/agents/triage.md` | Modify | Add mandatory `## TL;DR` section (first) + mandatory visual rules (for UI/UX) to agent output format |
+| `.gitlab-ci.yml` | Modify | (1) Repoint `SPEC_MSG` to TL;DR (line 616), (2) insert inline render block after READY case routing (after line 618, outside `SHOULD_GATE` if/else — fires for all READY dispositions) |
 | `bin/render-preview.cjs` | Create | Self-contained Node script: renders `preview.html` → `preview.png` via `@sparticuz/chromium` + puppeteer-core |
 
 **Write ownership:** Tasks 1 and 3 touch independent files (`.opencode/agents/triage.md` and `bin/render-preview.cjs`) — parallelizable. Tasks 2 and 4 both modify `.gitlab-ci.yml` — must be sequential (Task 2 before Task 4, both edit the same region). Task 4 depends on Task 3 (CI calls the render script).
@@ -81,11 +81,11 @@ In the `## Rules` section (after line 54 `- **Do NOT** write any \`boucle:*\` la
 Immediately after the TL;DR rules block added in Step 3, add:
 
 ```
-### Visual preview rules (optional, exceptional)
+### Visual preview rules (mandatory for UI/UX)
 
-- The default is to **do nothing**. Most issues get only the TL;DR.
-- Only for UI/UX issues where a mockup genuinely helps the human validate the spec.
-- If justified, write two files to `.boucle/<issue>/`:
+- **Mandatory for UI/UX issues** — every UI/UX triage MUST write the two files below. Non-UI/UX issues (backend, infra, docs, chore, refactor) MUST NOT write them (no `RENDER_REQUEST` → CI skips the block → zero Chromium cost).
+- The default is mandatory for UI/UX issues; for non-UI/UX issues, the default is zero overhead.
+- If justified (i.e. the issue is UI/UX), write two files to `.boucle/<issue>/`:
   - `preview.html` — self-contained HTML mockup (inline CSS, no external dependencies, mobile + desktop in one file).
   - `RENDER_REQUEST` — one line of justification (why this mockup helps for this issue).
 - An empty or generic `RENDER_REQUEST` → the CI ignores the request.
@@ -110,7 +110,7 @@ Expected: `2` (mentioned in visual rules: the file write rule + the empty/generi
 
 ```bash
 git add .opencode/agents/triage.md
-git commit -m "feat(triage): add mandatory TL;DR section + optional visual preview rules"
+git commit -m "feat(triage): add mandatory TL;DR section + mandatory visual preview rules for UI/UX"
 ```
 
 ---
@@ -182,7 +182,8 @@ Create `bin/render-preview.cjs`:
 ```js
 #!/usr/bin/env node
 // bin/render-preview.cjs — renders preview.html → preview.png via @sparticuz/chromium
-// Called by the triage CI job's visual-preview block (opt-in, exceptional).
+// Called by the triage CI job's visual-preview block (mandatory for UI/UX,
+// skipped for non-UI/UX since they don't write RENDER_REQUEST).
 // Usage: NODE_PATH=/tmp/node_modules node bin/render-preview.cjs <input.html> <output.png>
 //
 // Self-contained: no project dependencies. Relies on puppeteer-core +
@@ -238,7 +239,7 @@ Expected: no output
 
 ```bash
 git add bin/render-preview.cjs
-git commit -m "feat(bin): add render-preview.cjs for opt-in HTML→PNG via @sparticuz/chromium"
+git commit -m "feat(bin): add render-preview.cjs for UI/UX HTML→PNG via @sparticuz/chromium"
 ```
 
 ---
@@ -246,7 +247,7 @@ git commit -m "feat(bin): add render-preview.cjs for opt-in HTML→PNG via @spar
 ## Task 4: Insert inline visual render block in CI
 
 **Files:**
-- Modify: `.gitlab-ci.yml` (insert after line 618, inside `SHOULD_GATE=true` branch, before the `else` at line 619)
+- Modify: `.gitlab-ci.yml` (insert after line 618, after the READY case routing, OUTSIDE the `SHOULD_GATE` if/else — fires for all READY dispositions, gated or not)
 
 **Depends on:** Task 3 (CI calls `bin/render-preview.cjs`).
 
@@ -279,10 +280,12 @@ with:
               glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
                 -f body="$SPEC_MSG" > /dev/null
 
-              # ── Aperçu visuel (opt-in, exceptionnel) ────────────────────────
-              # Ne s'exécute QUE si l'agent a écrit RENDER_REQUEST + preview.html.
-              # Défaut: skip total, zéro coût Chromium. Échec isolé: ne bloque
-              # jamais la boucle (note fallback postée, exit code inchangé).
+              # ── Aperçu visuel (systématique pour les issues UI/UX) ──────────
+              # S'exécute pour toute disposition READY (Size S/M/L, gated ou non)
+              # si l'agent a écrit RENDER_REQUEST + preview.html (UI/UX uniquement).
+              # Issues non-UI/UX: pas de RENDER_REQUEST → bloc skippé, zéro coût
+              # Chromium. Échec isolé: ne bloque jamais la boucle (note fallback
+              # postée, exit code inchangé).
               PREVIEW_HTML="$CI_PROJECT_DIR/.boucle/$IID/preview.html"
               RENDER_REQUEST_FILE="$CI_PROJECT_DIR/.boucle/$IID/RENDER_REQUEST"
 
@@ -353,7 +356,7 @@ with:
 
 - [ ] **Step 3: Verify the block is present and the else still follows**
 
-Run: `grep -c 'Aperçu visuel (opt-in, exceptionnel)' .gitlab-ci.yml`
+Run: `grep -c 'Aperçu visuel (systématique pour les issues UI/UX)' .gitlab-ci.yml`
 Expected: `1`
 
 Run: `grep -c 'RENDER_REQUEST found — attempting visual preview' .gitlab-ci.yml`
@@ -384,7 +387,7 @@ If `yamllint` is available: `yamllint -d relaxed .gitlab-ci.yml` (warnings OK, e
 
 ```bash
 git add .gitlab-ci.yml
-git commit -m "feat(ci): add opt-in inline visual preview block (Chromium, exceptionnel)"
+git commit -m "feat(ci): add systematic visual preview block for UI/UX issues (Chromium only when triggered)"
 ```
 
 ---
@@ -410,7 +413,7 @@ Run: `grep -c '\[ -s "$RENDER_REQUEST_FILE" \] && \[ -s "$PREVIEW_HTML" \]' .git
 Expected: `1` (the guard condition that skips the whole block by default)
 
 Confirm the guard is the FIRST thing in the block (before any npm install):
-Run: `awk '/Aperçu visuel \(opt-in/{f=1} f&&/npm install --prefix \/tmp/{print NR; exit}' .gitlab-ci.yml`
+Run: `awk '/Aperçu visuel \(systématique/{f=1} f&&/npm install --prefix \/tmp/{print NR; exit}' .gitlab-ci.yml`
 Expected: a line number GREATER than the guard line (npm install only runs inside the guard)
 
 - [ ] **Step 4: Verify render script exists and is syntactically valid**
@@ -433,7 +436,7 @@ Expected: `3` (all three fallback notes point human back to TL;DR)
 
 - [ ] **Step 7: Verify no exit 1 / exit non-zero in the render block (loop never blocked)**
 
-Run: `awk '/Aperçu visuel \(opt-in/,/^            else$/' .gitlab-ci.yml | grep -c 'exit 1\|exit 2'`
+Run: `awk '/Aperçu visuel \(systématique/,/^            else$/' .gitlab-ci.yml | grep -c 'exit 1\|exit 2'`
 Expected: `0` (the render block never exits the job — failures post a note and continue)
 
 - [ ] **Step 8: Final commit check (if any verification fixed something)**
@@ -450,10 +453,10 @@ git add -A && git commit -m "fix: integration verification corrections"
 
 Run: `git log --oneline -5`
 Expected: 4 commits on top of `f62890b` (the spec commit), one per task:
-1. `feat(triage): add mandatory TL;DR section + optional visual preview rules`
+1. `feat(triage): add mandatory TL;DR section + mandatory visual preview rules for UI/UX`
 2. `feat(ci): repoint spec-review message to TL;DR instead of acceptance criteria`
-3. `feat(bin): add render-preview.cjs for opt-in HTML→PNG via @sparticuz/chromium`
-4. `feat(ci): add opt-in inline visual preview block (Chromium, exceptionnel)`
+3. `feat(bin): add render-preview.cjs for UI/UX HTML→PNG via @sparticuz/chromium`
+4. `feat(ci): add systematic visual preview block for UI/UX issues (Chromium only when triggered)`
 
 ---
 

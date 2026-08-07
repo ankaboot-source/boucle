@@ -2,22 +2,32 @@
 import "../styles/sections.css";
 import Layout from "../layouts/Layout.astro";
 import NewsletterSignup from "../components/NewsletterSignup.astro";
-import NewsletterModal from "../components/NewsletterModal.astro";
+import SocialCTA from "../components/SocialCTA.astro";
 import DonationCTA from "../components/DonationCTA.astro";
 import GeneralCTA from "../components/GeneralCTA.astro";
+import MobilisationBlock from "../components/MobilisationBlock.astro";
+import FeaturedFeed from "../components/FeaturedFeed.astro";
+import AlliesSummary from "../components/AlliesSummary.astro";
 ---
 
 <Layout>
 	<main id="main" class="home">
 		<!--
 		  ============================================================
-		  Top brand band: statement headline, optional symbol, and
-		  the four flag colors as a thin tri-color stripe.
+		  Home lead: two-column band at ≥ 64rem.
+		  Column 1 (2/3) = the existing hero, pinned while the reader
+		  scrolls through the feed. Column 2 (1/3) = the "À la une" feed
+		  of six curated prises de parole. The vertical keffiyeh divider
+		  sits between the two columns as a cultural/political seam.
 		  ============================================================
 		-->
-		<section class="hero" aria-labelledby="hero-title">
-			<div class="hero__inner">
-				<p class="eyebrow">Urgence Palestine</p>
+		<section
+			class="home__lead"
+			aria-label="Présentation du collectif et prises de parole à la une"
+			role="region"
+		>
+			<section class="hero" aria-labelledby="hero-title">
+			<div class="hero__inner reveal-stagger">
 				<h1 id="hero-title" class="display font-display tracking-tight text-ink">
 					Solidarité<br />avec la Palestine.
 				</h1>
@@ -42,6 +52,21 @@ import GeneralCTA from "../components/GeneralCTA.astro";
 			</div>
 		</section>
 
+		<!-- Vertical keffiyeh divider between the hero and the feed. -->
+		<div class="home__divider" aria-hidden="true">
+			<img
+				src="/symbols/vertical_keffiyeh.png"
+				alt=""
+				width="52"
+				height="100"
+				loading="eager"
+				decoding="async"
+			/>
+		</div>
+
+		<FeaturedFeed />
+		</section>
+
 		<!--
 		  ============================================================
 		  General CTA: a non-clickable, two-stripe visual harness for
@@ -49,36 +74,25 @@ import GeneralCTA from "../components/GeneralCTA.astro";
 		  ============================================================
 		-->
 		<GeneralCTA
-			eyebrow="S'informer"
+			variant="angled-split"
 			title="S'informer, c'est déjà résister"
 			ctaLabel="Lire les derniers articles"
 		/>
 
 		<!--
 		  ============================================================
-		  Tailwind utility callout: exercises the Palestinian flag color
-		  tokens (bg-palestine-red) and the font-display utility, proving
-		  that the Tailwind integration is wired into the build. Kept
-		  intentionally small: page content beyond the placeholder is
-		  owned by parent issue #1.
+		  Mobilisation: a photo of a manifestation, covered by a solid
+		  flag-red overlay, with the title sitting on the overlay and
+		  the body lede + CTA living below the photo on a clean paper
+		  surface. No body paragraph, no CTA floats over the photo.
+		  Image is a temporary placeholder (see
+		  `static/mobilisation/_placeholder-manifestation.svg` and
+		  `data-placeholder="true"` on the rendered element). When the
+		  author supplies a real photograph, swap the `backgroundImage`
+		  prop and drop `isPlaceholder` to `false`.
 		  ============================================================
 		-->
-		<DonationCTA />
-
-		<!-- Decorative olive branch above the flag stripe. -->
-		<p class="section-head__lede section-head__lede--centered" aria-hidden="false">
-			<img
-				class="accent-inline"
-				src="/symbols/olive_branch_-_ccnisa.png"
-				alt="Branche d'olivier, symbole de la Palestine"
-				loading="lazy"
-				decoding="async"
-				width="48"
-				height="48"
-			/>
-			Aucune image ne représente mieux la Palestine que l'olivier&nbsp;:
-			arbre millénaire, source d'huile et de lien.
-		</p>
+		<MobilisationBlock />
 
 		<!--
 		  ============================================================
@@ -95,24 +109,20 @@ import GeneralCTA from "../components/GeneralCTA.astro";
 
 		<!--
 		  ============================================================
+		  Alliés summary: a compact band on the home page that links to
+		  the detailed mosaic on /right-to-resist/. Mirrors the amended
+		  spec: logos + mobilizing name + link to the full section.
+		  ============================================================
+		-->
+		<AlliesSummary />
+
+		<!--
+		  ============================================================
 		  Three pillars: the visual brand distilled.
 		  ============================================================
 		-->
 		<section class="pillars" aria-labelledby="pillars-title">
 			<header class="section-head">
-				<p class="eyebrow">
-					<img
-						class="accent-inline"
-						src="/symbols/vecteezy_red-simple-watercolor-flower_27102639.png"
-						alt=""
-						loading="lazy"
-						decoding="async"
-						width="32"
-						height="32"
-						aria-hidden="true"
-					/>
-					Notre identité
-				</p>
 				<h2 id="pillars-title">Trois piliers, un message clair.</h2>
 			</header>
 
@@ -140,18 +150,26 @@ import GeneralCTA from "../components/GeneralCTA.astro";
 
 		<!--
 		  ============================================================
-		  Newsletter: a dedicated content section that re-uses the
-		  <NewsletterSignup /> component.
+		  Newsletter + social: two-column block sharing a single militant
+		  title. Each column is a hard-edged brutalist card with a heavy
+		  border. The donation CTA lives as its own separate section below.
 		  ============================================================
 		-->
 		<section class="newsletter-section" aria-labelledby="newsletter-section-title">
-			<header class="section-head">
-				<p class="eyebrow">Newsletter</p>
-				<h2 id="newsletter-section-title">Suivez nos actions.</h2>
-			</header>
-			<NewsletterSignup variant="block" />
+		<h2 id="newsletter-section-title" class="visually-hidden">
+			Restons en contact. Poursuivons la mobilisation.
+		</h2>
+		<div class="newsletter-section__grid">
+			<NewsletterSignup id="newsletter-home" variant="block" />
+			<SocialCTA id="social-home" />
+		</div>
 		</section>
-	</main>
 
-	<NewsletterModal slot="modal" />
+		<!--
+		  ============================================================
+		  Donation CTA: stands alone outside the newsletter flow.
+		  ============================================================
+		-->
+		<DonationCTA />
+	</main>
 </Layout>
