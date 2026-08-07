@@ -517,6 +517,14 @@ ${feedback}
 ---
 "
       fi
+      if [ -n "${BOUCLE_SIBLINGS:-}" ] && [ "${BOUCLE_SIBLINGS}" != "[]" ]; then
+        prompt="${prompt}
+Sibling sub-issues (context only — the dispatch gate already ensured any dependency is closed before you started; do NOT wait for or block on these):
+---
+${BOUCLE_SIBLINGS}
+---
+"
+      fi
       ;;
     reviewer)
       # Inject the issue body (fetched by CI as BOUCLE_ISSUE_BODY) so the
