@@ -1774,8 +1774,13 @@ reviewer:
       # so we only pick up a verdict for THIS version of the code, not a stale
       # one from a previous worker iteration. Use `last` (newest) in case the
       # agent posts multiple notes.
+      # Use the short (8-char) SHA for matching: the agent posts
+      # sha=<short-sha> (git rev-parse --short output), not the full
+      # 40-char SHA. contains("sha=f8e4a30") matches both short and
+      # full SHA postings, so this is strictly more permissive.
+      MR_HEAD_SHORT="${MR_HEAD:0:8}"
       COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
-        | jq -r --arg sha "$MR_HEAD" '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer") and contains("sha=\($sha)"))] | first | .body // empty')
+        | jq -r --arg sha "$MR_HEAD_SHORT" '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer") and contains("sha=\($sha)"))] | first | .body // empty')
 
       VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
 
@@ -1790,8 +1795,10 @@ reviewer:
           # Extract the drafted verdict comment: from the boucle:verdict marker
           # (matching this MR's head SHA) to the VERDICT line. The agent prints
           # the full comment in its stdout when it can't call glab.
-          DRAFTED_VERDICT=$(awk -v sha="$MR_HEAD" '
-            $0 ~ "<!-- boucle:verdict v=1 role=reviewer sha=" sha " -->" { found=1 }
+          # Match on short SHA prefix (no " -->" suffix) so it works whether
+          # the agent used short or full SHA in the marker.
+          DRAFTED_VERDICT=$(awk -v sha="$MR_HEAD_SHORT" '
+            $0 ~ "<!-- boucle:verdict v=1 role=reviewer sha=" sha { found=1 }
             found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
           ' "$AGENT_LOG" 2>/dev/null || echo "")
           if [ -n "$DRAFTED_VERDICT" ] && echo "$DRAFTED_VERDICT" | grep -qiE 'VERDICT: (PASS|FAIL|UNCERTAIN)'; then
@@ -1802,7 +1809,7 @@ reviewer:
               -f body="$DRAFTED_VERDICT" > /dev/null 2>&1 || true
             # Re-fetch and re-parse the now-posted verdict.
             COMMENT=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?order_by=created_at&sort=desc" \
-              | jq -r --arg sha "$MR_HEAD" '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer") and contains("sha=\($sha)"))] | first | .body // empty')
+              | jq -r --arg sha "$MR_HEAD_SHORT" '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer") and contains("sha=\($sha)"))] | first | .body // empty')
             VERDICT=$(echo "$COMMENT" | grep -oE 'VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
             if [ -n "$VERDICT" ]; then
               echo "[boucle] Step-limit fallback succeeded: recovered verdict=$VERDICT."
