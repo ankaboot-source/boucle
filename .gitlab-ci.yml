@@ -2466,9 +2466,7 @@ doctor:
           # triggers the merger for these labels.
           echo "  → #$IID: MR !$MR_IID approved ($APPROVED_COUNT) but not mergeable ($MR_MERGE_STATUS) — triggering merger to rebase/recover"
           set_boucle_label "$IID" "boucle:merging" "boucle::status::bot"
-          curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
-            -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
-            -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=merger" > /dev/null
+          chain_to_role "$IID" "merger"
           echo "  → triggered merger for #$IID (recovery path)"
           RECOVERED=$((RECOVERED + 1))
         else
