@@ -2934,6 +2934,31 @@ doctor:
           continue
         fi
 
+        # If the MR is open, approved, and mergeable, trigger the merger
+        # instead of re-running the worker/reviewer. This recovers issues
+        # stuck at boucle:working/boucle:review where a human already
+        # approved the MR natively (the dispatch `approved` case only
+        # acts on boucle:approval, so these issues would otherwise loop
+        # forever re-running the worker/reviewer).
+        MR_OPEN_DATA=$(glab api --hostname "$HOST" "/projects/$PID/merge_requests?source_branch=boucle/$IID&state=opened" 2>/dev/null \
+          | jq -c '[.[] | select(.source_branch == "boucle/$IID")] | first // empty' 2>/dev/null)
+        if [ -n "$MR_OPEN_DATA" ] && [ "$MR_OPEN_DATA" != "null" ]; then
+          MR_OIID=$(echo "$MR_OPEN_DATA" | jq -r '.iid')
+          MR_OSTATUS=$(echo "$MR_OPEN_DATA" | jq -r '.detailed_merge_status // .merge_status // "unknown"')
+          MR_OAPPROVALS=$(glab api --hostname "$HOST" "/projects/$PID/merge_requests/$MR_OIID/approvals" 2>/dev/null)
+          MR_OAPPROVED=$(echo "$MR_OAPPROVALS" | jq -r '[.approved_by[].user.username] | length' 2>/dev/null || echo 0)
+          if [ "$MR_OSTATUS" = "mergeable" ] && [ "$MR_OAPPROVED" -gt 0 ]; then
+            echo "  → #$IID ($ROLE): MR !$MR_OIID approved ($MR_OAPPROVED) + mergeable — triggering merger instead of $ROLE"
+            set_boucle_label "$IID" "boucle:merging" "boucle::status::bot"
+            curl -s -X POST "https://$HOST/api/v4/projects/$PID/trigger/pipeline" \
+              -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+              -F "variables[BOUCLE_ISSUE]=$IID" -F "variables[BOUCLE_ROLE]=merger" > /dev/null
+            echo "  → triggered merger for #$IID"
+            RECOVERED=$((RECOVERED + 1))
+            continue
+          fi
+        fi
+
         # Time heuristic: check the issue's updated_at. If it was updated
         # within the last 15 min, a pipeline may have just started — skip.
         # We intentionally do NOT check for an active role pipeline: GitLab's
@@ -2960,19 +2985,26 @@ doctor:
         RECOVERED=$((RECOVERED + 1))
       done
 
-      # ── Recover boucle:human issues with approved+mergeable MRs ────────
+      # ── Recover boucle:human / boucle:approval issues with approved+mergeable MRs ──
       # The reviewer agent may escalate to boucle:human after 3 failed
       # verdict attempts (agent step budget exhausted). But if a human has
       # manually approved the MR, the loop should still merge it — the
       # work is done, it just needs the merger to run. Scan boucle:human
-      # issues for an open MR that is both approved and mergeable, and
-      # trigger the merger for those.
-      echo "Scanning boucle:human issues for approved+mergeable MRs..."
+      # AND boucle:approval issues for an open MR that is both approved
+      # and mergeable, and trigger the merger for those. boucle:approval
+      # is included because the dispatch `approved` webhook handler only
+      # fires on the merge_request/approved event; if that webhook was
+      # missed (or the issue was already at boucle:approval when the
+      # approval landed), the issue would otherwise wait forever for a
+      # webhook that already passed.
+      echo "Scanning boucle:human / boucle:approval issues for approved+mergeable MRs..."
       HUMAN_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:human&per_page=100" \
         | jq -r '.[].iid')
+      APPROVAL_ISSUES=$(glab api --hostname "$HOST" "/projects/$PID/issues?state=opened&labels=boucle:approval&per_page=100" \
+        | jq -r '.[].iid')
 
-      for IID in $HUMAN_ISSUES; do
-        echo "Checking #$IID (boucle:human) for approved MR..."
+      for IID in $HUMAN_ISSUES $APPROVAL_ISSUES; do
+        echo "Checking #$IID (boucle:human/boucle:approval) for approved MR..."
         # Find an open MR for this issue (branch boucle/$IID)
         MR_DATA=$(glab api --hostname "$HOST" "/projects/$PID/merge_requests?state=opened" \
           | jq -c --arg branch "boucle/$IID" '[.[] | select(.source_branch == $branch)] | first // empty' 2>/dev/null)
