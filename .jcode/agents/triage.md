@@ -339,6 +339,8 @@ When Disposition is NEEDS-SPLIT (no blocking questions + Size L), also include t
 ### Sub-issue 1: <short title>
 <description with enough context for an implementer to start cold>
 
+Depends on: #2
+
 Acceptance criteria:
 - [ ] **Happy path** — Given <context>, When <action>, Then <observable result>
 - [ ] **Edge case** — Given <boundary>, When <action>, Then <result>
@@ -359,6 +361,10 @@ Rules for sub-issues:
 - Propose 2-4 sub-issues that cover the parent issue's scope.
 - Each sub-issue must be **Size S or M** — never L. If a piece is L, split it further.
 - Each sub-issue must have **verifiable** acceptance criteria (machine-checkable or visible on the rendered page).
-- Sub-issues must be **independent** (no required sequential ordering). Each should be implementable standalone.
+- Sub-issues should be **independent** by default (no required sequential ordering). Each should be implementable standalone.
+- **If and only if** a sub-issue genuinely cannot be implemented until a sibling produces a shared artifact (a component, a schema, a config, a utility), declare it with a `Depends on: #N` line, where `N` is the **1-based index** of the sibling sub-issue in this list (e.g. `Depends on: #1` means "wait for Sub-issue 1 to close before I start"). Place the line between the description and the Acceptance criteria, on its own line.
+- **Only reference siblings by their list index** (`#1`, `#2`, ...). Do NOT reference GitLab IIDs (they don't exist yet) or external issues. The job resolves indices to real IIDs after creating the sub-issues.
+- **Do NOT invent dependencies for parallelism.** A sub-issue that *could* be done first but *would be easier* after a sibling is NOT a dependency — it's a hint for the worker. Put hints in the description, not in `Depends on:`. A dependency means "I literally cannot start without the artifact this sibling produces."
+- **No cycles.** If Sub-issue 1 depends on #2, Sub-issue 2 must NOT depend on #1. The job rejects cycles and escalates to a human.
 - The **parent issue is NOT implemented** — only the sub-issues are. The job labels the parent `boucle:done` after the split.
 - Use `glab` to post your comment: `glab issue note <iid> --repo <project> --message "$(cat <<'EOF' ... EOF)"`
