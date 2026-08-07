@@ -2131,7 +2131,34 @@ merger:
 
       echo "Merged MR !${MR_IID} (merge_commit $MERGE_SHA) for issue #$BOUCLE_ISSUE"
 
-      # The merge pushes to master → triggers deploy → deploy triggers e2e.
+      # The deploy-wait + e2e-trigger has been moved to the post-merge job
+      # (below) which runs WITHOUT the boucle-merge resource_group lock.
+      # This releases the merge lock immediately after the merge API call
+      # so the next approved MR can start merging instead of waiting 2+ min
+      # for the deploy to finish.
+  timeout: 5m
+
+# ── Post-merge (deploy-wait + e2e trigger, unlocked) ───────────────────
+# Runs in the same trigger pipeline as the merger (needs: [merger]) but
+# WITHOUT the resource_group: boucle-merge lock. The merger releases the
+# lock as soon as the merge API call succeeds; post-merge then polls the
+# deploy pipeline and triggers e2e in parallel, so the next approved MR
+# can start merging immediately instead of waiting 2+ min for deploy.
+post-merge:
+  stage: merge
+  tags: []
+  needs:
+    - job: merger
+  rules:
+    - if: $BOUCLE_ENABLED != "true"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "merger"
+  script:
+    - |
+      set +o pipefail
+      export BOUCLE_ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
+
+      # The merge pushed to master → triggers deploy → deploy triggers e2e.
       # BUT deploy-triggered e2e has no BOUCLE_ISSUE context, so
       # maybe_close_parent never runs. Fix: trigger e2e directly WITH
       # BOUCLE_ISSUE set, so the issue gets boucle:done + closed + parent cascade.
@@ -2163,7 +2190,7 @@ merger:
         -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" \
         -F "variables[BOUCLE_LIVE_URL]=$LIVE_URL" > /dev/null 2>&1 || true
       echo "Triggered e2e for issue #$BOUCLE_ISSUE with LIVE_URL=$LIVE_URL"
-  timeout: 15m
+  timeout: 20m
 
 # ── Catchup (direct merge recovery) ────────────────────────────────────
 # Triggered by dispatch when a human merges a boucle/<iid> MR directly
