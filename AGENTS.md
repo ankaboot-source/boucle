@@ -24,9 +24,9 @@ and [LOOP.md](LOOP.md).
 | Agent   | Model                       | Steps | Temp | Role                                                                                                                |
 | ------- | ---------------------------- | ----- | ---- | ------------------------------------------------------------------------------------------------------------------- |
 | triage  | ollama-cloud/glm-5.2        | 200   | 0.3  | Analyzes issue, posts structured comment (TL;DR + Analysis + Acceptance criteria + Classification S/M/L + Questions + Disposition) |
-| worker  | ollama-cloud/deepseek-v4-flash | 100   | —    | Implements on branch `boucle/<iid>`, reads `state.md`, uses codebase-memory-mcp, conventional commit                 |
-| reviewer| ollama-cloud/glm-5.2         | 35    | 0.2  | Adversarial review against preview URL, SHA-anchored verdict                                                       |
-| e2e     | ollama-cloud/deepseek-v4-flash | 30    | —    | Verifies on production URL, SHA-anchored verdict                                                                    |
+| worker  | ollama-cloud/deepseek-v4-flash:0731 | 100   | —    | Implements on branch `boucle/<iid>`, reads `state.md`, uses codebase-memory-mcp, conventional commit                 |
+| reviewer| ollama-cloud/deepseek-v4-flash:0731 | 35    | 0.2  | Adversarial review against preview URL, SHA-anchored verdict                                                       |
+| e2e     | ollama-cloud/glm-5.2         | 30    | —    | Verifies on production URL, SHA-anchored verdict                                                                    |
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full pipeline and state machine details.
 
@@ -40,7 +40,7 @@ known recurring bug, documented in the "Lessons learned" section.
    posting) is bug #1. **Rule**: an incomplete draft posted is ALWAYS better than a
    refinement never posted.
 
-2. **Silent-failure detection** — `bin/oc` exits with code `3` if the agent has
+2. **Silent-failure detection** — `bin/jc` exits with code `3` if the agent has
    produced no posted or drafted comment. CI then escalates to a human.
    An agent that produces nothing MUST be detected, **NEVER** ignored.
 
@@ -93,7 +93,7 @@ known recurring bug, documented in the "Lessons learned" section.
 Each entry below is a **contract** that every agent and CI step MUST honor
 going forward. The `❌ DO NOT / ✅ DO` pair is the rule; the incident that
 produced it is not recorded here — it lives in git history. Numbers are
-stable (a few are cross-referenced from `.gitlab-ci.yml`, `bin/oc` and
+stable (a few are cross-referenced from `.gitlab-ci.yml`, `bin/jc` and
 agent prompts); never renumber — a pruned entry leaves a gap, not a shift.
 
 ### What is NOT a lesson
@@ -298,16 +298,19 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       with proper token-based auth. Applies to both `bin/fetch-issue-attachments`
       and `bin/fetch-mr-attachments`.
 
-32. **Use DB-growth as the provider-agnostic "API down" signal**
-    - ❌ DO NOT rely solely on log grep patterns to detect whether a provider
-      is down — some providers (e.g. `opencode-go`) emit a transcript format
-      the grep doesn't match, so a working run is false-flagged as "down" and
-      the loop escalates to a human even though the plan still has tokens.
-    - ✅ DO: `is_api_down` MUST also check the opencode SQLite DB growth
-      delta (snapshot before the run vs. after). A dead run leaves the DB at
-      the SQLite page-size baseline (4096b); a working run grows it well
-      beyond. If the DB grew by more than 16KB, the agent did real work and
-      the provider is NOT down — regardless of log patterns.
+32. **Detect provider downtime by absence of agent activity**
+    - ❌ DO NOT rely on error-pattern greps to decide a provider is down —
+      a hung or dead provider produces no error lines at all, only silence,
+      so an error-grep passes and the loop waits on a run that will never
+      produce output.
+    - ✅ DO: `is_api_down` in `bin/jc` returns "down" when the agent log is
+      empty or contains no activity traces (tool calls, file reads, git
+      operations, source paths, comment markers). A working agent always
+      leaves activity in its log; a dead provider leaves silence. This is
+      provider-agnostic — it holds for any transcript format, so a working
+      run is never false-flagged as "down". On "down", `bin/jc` exits `4`,
+      the fallback provider is tried before any human escalation, and a
+      diagnostic comment is posted on the issue.
 
 33. **Doctor MUST check active pipelines before re-triggering**
     - ❌ DO NOT use issue `updated_at` as a proxy for "is a pipeline
@@ -741,7 +744,7 @@ atomic.
 23. **Codebase graph indexed in CI but unusable by agents** (issue #35 on up/urgence-palestine.fr)
     - ❌ DO NOT instruct agents to use MCP graph tools (`search_graph`,
       `trace_path`, `get_code_snippet`) without documenting the CLI fallback
-      for CI. `bin/oc` strips MCP servers from the opencode config in CI
+      for CI. `bin/jc` strips MCP servers from the jcode config in CI
       (lesson #3, MCP handshake hangs within 30s), so the tools the agent
       prompts reference do not exist at runtime. The graph is built every run
       (`codebase-memory-mcp cli index_repository`) but never queried — wasted
@@ -755,7 +758,7 @@ atomic.
       examples, so the agent knows how to query the graph in both
       environments.
     - Context: `worker.md:12-20` told the worker to use `search_graph` and
-      `trace_path`, but `bin/oc:170` (`strip_mcp_for_ci`) removed those tools
+      `trace_path`, but `bin/jc:170` (`strip_mcp_for_ci`) removed those tools
       in CI. The worker (minimax-m3) on issue #35 iteration 4 fell back to
       `ls`/`cat`/`git log` to reconstitute the codebase, burning steps that
       should have gone to implementation. The graph was indexed but unused.
@@ -789,12 +792,12 @@ atomic.
       for merge requests. It mines `/uploads/` paths from MR notes
       (`/projects/<id>/merge_requests/<iid>/notes`), downloads them to
       `.boucle/<issue>/mr-attachments/`, and exports `BOUCLE_MR_ATTACHMENTS`
-      via `.mr-attachments.env`. `bin/oc` sources this and appends the paths
+      via `.mr-attachments.env`. `bin/jc` sources this and appends the paths
       to the agent prompt so the worker can `Read` reviewer/human screenshots.
       Gated on `MR_FOR_FEEDBACK` being non-empty (no MR on first run).
     - Context: `bin/fetch-issue-attachments` mined issue descriptions + notes +
       parent-issue notes for `/uploads/` paths, but the symmetric MR path
-      (`bin/oc:298-315` injecting `BOUCLE_REVIEWER_FEEDBACK` as plain text)
+      (`bin/jc:298-315` injecting `BOUCLE_REVIEWER_FEEDBACK` as plain text)
       never resolved embedded image links. A human commenting "this button is
       wrong" with a screenshot got the text through to the worker but the
       screenshot was dropped.
@@ -810,7 +813,7 @@ atomic.
       file, not to *adopt* it. When the worker cannot see the image (text-only
       model — `Read` on a PNG returns garbage), it fabricates a substitute
       instead of copying the uploaded file.
-    - ✅ DO: `bin/oc` and `worker.md` frame attachments as dual-nature. The
+    - ✅ DO: `bin/jc` and `worker.md` frame attachments as dual-nature. The
       worker decides based on the comment's intent: "use this file as the
       separator" → ship-as-asset (`cp` to `public/`, reference in build);
       "this is what's wrong" → inspect-for-context. The worker uses `file
@@ -883,7 +886,7 @@ atomic.
       not fire on a shell executor). The generic "no code changes"
       handler then re-triggers the worker into the same wall, wasting
       the iteration budget on a problem that re-triggering cannot fix.
-    - ✅ DO: `bin/oc` exits 4 when the worker agent log is empty or shows
+    - ✅ DO: `bin/jc` exits 4 when the worker agent log is empty or shows
       no agent activity (no tool calls, no file reads, no git operations).
       The worker job detects exit 4, posts a diagnostic comment on the
       issue with the available logs (last 2000 chars of agent-output.log),
