@@ -6,5 +6,5 @@ Human gates: spec validation (configurable, default: Size M+ via BOUCLE_SPEC_PRO
 Iteration cap: 3 worker runs per issue.
 Budget cap: (not set at MVP — token-cost logging deferred to post-MVP).
 Escalate when: cap hit | criteria unclear | size:L | destructive change proposed.
-Out of bounds: .boucle/ state files must not be deleted by agents.
+Out of bounds: .boucle-state/ state files must not be deleted by agents (the .boucle/ engine submodule is read-only).
 Bug policy: see `.jcode/UPSTREAM-FIX-WORKFLOW.md` — fix upstream in boucle first, then update the consumer, then remediate existing data. Never patch a consumer to work around a boucle defect.

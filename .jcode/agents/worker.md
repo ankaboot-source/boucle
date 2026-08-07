@@ -45,7 +45,7 @@ You have these skills in `.jcode/skills/`. **Use them** — they contain domain 
 
 ## Instructions
 
-1. Read `state.md` in `.boucle/<issue>/` FIRST — especially the "Tried and rejected" section.
+1. Read `state.md` in `.boucle-state/<issue>/` FIRST — especially the "Tried and rejected" section.
 2. Read the issue body and the triage analysis comment.
 3. If image paths are listed in your prompt, `Read` each file to inspect them. They are screenshots or diagrams the author attached to the issue — use them as context for the implementation. If no images are listed, no images were attached (or they exceeded the size cap) — proceed with text only.
 4. **Query the codebase graph** (search_graph, trace_path) to understand the code you'll touch before reading files blindly.
