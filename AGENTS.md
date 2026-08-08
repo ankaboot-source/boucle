@@ -414,6 +414,13 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       nothing or a generic `(consumer)` when pushed upstream.
     - ✅ DO: ask the human explicitly if a consumer name MUST be
       shared upstream for context — otherwise it stays private.
+    - ✅ DO: keep the origin benchmark documented. Boucle was extracted
+      from a real product — the **Urgence Palestine** humanitarian aid
+      site (see README "Why boucle?" → Origins). This is a deliberate,
+      owner-approved exception to the rules above: the origin benchmark
+      is part of boucle's identity and MUST NOT be re-anonymized. The
+      rules above protect *third-party consumers*, not the origin
+      benchmark.
 
 40. **Split bookkeeping MUST be atomic and label-first**
     - ❌ DO NOT post the human "Split into" comment, the
