@@ -479,9 +479,12 @@ else
   run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FORGE --repo \"$PROJECT_ID\" --body github 2>/dev/null"
   log_pass "BOUCLE_FORGE set to github (vars)"
 
-  # BOUCLE_RUNNER_TAG
-  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_RUNNER_TAG --repo \"$PROJECT_ID\" --body \"${RUNNER_TAG:-boucle}\" 2>/dev/null"
-  log_pass "BOUCLE_RUNNER_TAG set to ${RUNNER_TAG:-boucle} (vars)"
+  # BOUCLE_RUNS_ON — forge-agnostic runner selection (default GitHub-hosted).
+  # GitHub: 'ubuntu-latest' (hosted) or '["self-hosted", "<label>"]' (self-hosted).
+  # GitLab: maps to tags: [$BOUCLE_RUNS_ON].
+  RUNS_ON="${BOUCLE_RUNS_ON:-ubuntu-latest}"
+  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_RUNS_ON --repo \"$PROJECT_ID\" --body \"$RUNS_ON\" 2>/dev/null"
+  log_pass "BOUCLE_RUNS_ON set to $RUNS_ON (vars)"
 
   # BOUCLE_LLM_API_KEY (masked — use secret not var for maskable values)
   LLM_API_KEY="${BOUCLE_LLM_API_KEY:-}"
@@ -867,8 +870,10 @@ else
   echo "  3. The GitHub Actions workflow (.github/workflows/boucle.yml) must be present"
   echo "     in the repo — it is the receiver (on: issues, on: pull_request)."
   echo "     If missing, add it from the boucle engine."
-  echo "  4. Runner: ensure a self-hosted runner with tag '${RUNNER_TAG:-boucle}' is available."
-  echo "     (Set it up in Settings > Actions > Runners, then add the tag.)"
+  echo "  4. Runner: by default boucle uses GitHub-hosted runners (ubuntu-latest)."
+  echo "     To use your own self-hosted runner instead, set the repo variable"
+  echo "     BOUCLE_RUNS_ON to '[\"self-hosted\", \"<label>\"]' and register a runner"
+  echo "     with that label (Settings > Actions > Runners)."
   echo "  5. Repository variables and secrets should now be set in"
   echo "     Settings > Secrets and variables > Actions."
   echo "  6. Create your first issue — boucle will pick it up via the workflow trigger."
