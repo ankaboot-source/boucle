@@ -6,7 +6,7 @@
 # Spec: issue #1 (boucle MVP spec)
 # Five jobs: triage, worker, reviewer, deploy, e2e
 # Dispatcher: single entry, parses webhook payload, routes to triage
-# Runner: shared shell executor (Atchoum) — before_script bootstraps tools
+# Runner: shared shell executor — before_script bootstraps tools
 
 stages:
   - check
@@ -340,8 +340,8 @@ check:
 dispatch:
   stage: dispatch
   # Loop-critical entry point: must run on ANY available runner (including
-  # the shared docker runner Atchoum) so webhooks are never blocked waiting
-  # for the single data runner to free up. Without this, a long-running
+  # a shared runner) so webhooks are never blocked waiting
+  # for the single tagged runner to free up. Without this, a long-running
   # worker job can stall the entire loop by hogging the data runner.
   tags: []
   # Serialize dispatch jobs so a webhook storm (many issue/MR events firing
@@ -448,7 +448,7 @@ dispatch:
       trap 'if [ $? -eq 0 ] && [ ! -f .boucle-issue ]; then exit 1; fi' EXIT
 
       # Sanity-check the trigger payload before jq touches it. GitLab file-type
-      # CI variables resolve to a temp file path; on shared runners (Atchoum)
+      # CI variables resolve to a temp file path; on shared runners
       # the path can be unset, empty, or point to a deleted file. Without this
       # guard, `set -e` (GitLab default) propagates jq's exit 5 (system error,
       # file not found) and the script terminates silently with zero stdout —
@@ -4007,7 +4007,7 @@ doctor:
   stage: verify
   # Loop-critical control-plane job: makes only API calls, no build.
   # Override default.tags ([boucle]) so the doctor runs on ANY available runner
-  # (including Atchoum) and is never blocked by a busy dedicated runner — same
+  # and is never blocked by a busy dedicated runner — same
   # pattern as dispatch, merger, and catchup. Without this, the doctor fails
   # with runner_system_failure whenever a worker is running on the data runner.
   tags: []
