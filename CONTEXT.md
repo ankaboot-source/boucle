@@ -55,6 +55,7 @@ happens asynchronously, driven by labels and comments.
 | Deployment | Cloudflare Pages (wrangler) — MVP, other targets planned |
 | Tests | bats (shell), shellcheck, shfmt |
 | Hooks | pre-commit |
+| Vendored skills | `.jcode/skills/` — content borrowed from the maintainer's skill library, synced from upstream. Only one component ships executable code: `ui-ux-pro-max` (Python stdlib-only, engine of the worker's design skill). No boucle-authored Python. |
 
 Boucle is designed to be **forge-agnostic and deploy-agnostic**. Current
 limitations (GitLab only, Cloudflare only) are due to the MVP, not
