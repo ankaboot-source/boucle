@@ -5,7 +5,7 @@
 set -euo pipefail
 
 PROJECT_ID="${BOUCLE_PROJECT_ID:?BOUCLE_PROJECT_ID must be set}"
-HOST="${BOUCLE_FORGE_HOST:-framagit.org}"
+HOST="${BOUCLE_FORGE_HOST:-gitlab.example.com}"
 
 pass() { echo "  ✓ $1"; }
 warn() { echo "  ⚠ $1" >&2; }

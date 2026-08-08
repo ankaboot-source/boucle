@@ -580,12 +580,12 @@ atomic.
       summarize, paraphrase, or generate a new critique.
     - ❌ DO NOT let later amendments override earlier preservation
       instructions. The feedback channel injects the latest human
-      amendments (e.g. "fill empty spaces with keffiyeh", "single CTA")
+      amendments (e.g. "fill empty spaces with the brand pattern", "single CTA")
       WITHOUT the earlier preservation context (e.g. "keep the
       texts/visuals/videos already shared", "video in front,
       horizontal"). The worker applies the latest amendment literally
       and degrades the validated layout — replacing the video with
-      keffiyeh instead of filling the empty space below it.
+      the brand pattern instead of filling the empty space below it.
     - ✅ DO: inject `BOUCLE_ISSUE_BODY` and `BOUCLE_ISSUE_NOTES` into the
       worker job (mirroring the triage job) so the worker has the
       instructed content and the full discussion history at hand without
@@ -733,7 +733,7 @@ atomic.
       work on non-code FAILs.
     - Context: issue #35 iteration 3 produced commit `6ca8aa33` (full
       FeaturedFeed.astro + index.astro + sections.css + tokens.css, all 5
-      tahrir comments addressed). The reviewer FAILed on a stale preview
+      human comments addressed). The reviewer FAILed on a stale preview
       (lesson #21), not on the code. The next iteration's `git reset --hard
       origin/master` wiped `6ca8aa33` (now an orphan in the repo), leaving
       only `fa1699f2` (a token-only commit). The next worker spent all 50
@@ -818,11 +818,11 @@ atomic.
       <path>` (not `Read`) to get dimensions/metadata on binaries — `Read`
       on a PNG returns base64 garbage on text-only models. The worker does
       NOT need to *see* the image to *ship* it — `cp` + reference is enough.
-    - Context: issue #35, tahrir commented "il doit y avoir une séparation
+    - Context: issue #35, the human commented "il doit y avoir une séparation
       visuelle entre les colonnes avec le visuel ci-joint" + uploaded
-      `vertical_keffiyeh.png`. The worker downloaded it (21251 bytes
+      `vertical_pattern.png`. The worker downloaded it (21251 bytes
       confirmed), was told to "use as context", could not `Read` the PNG
-      (minimax-m3 is text-only), and fabricated a fake Palestinian flag +
+      (minimax-m3 is text-only), and fabricated a fake substitute graphic +
       Unicode symbol instead of `cp`-ing the uploaded file to `public/`.
 
 27. **Log-scraping fallback bypassed when a stale verdict exists** (issue #35 on a consumer repo)

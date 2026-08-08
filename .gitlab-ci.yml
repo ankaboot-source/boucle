@@ -19,12 +19,12 @@ stages:
   - verify
 
 variables:
-  BOUCLE_FORGE_HOST: framagit.org
+  BOUCLE_FORGE_HOST: gitlab.example.com
   # Runner tag for agent jobs (triage/worker/reviewer/e2e/deploy). Override via a
   # project variable of the same name (Settings > CI/CD > Variables) to route jobs
   # to a project-specific runner, e.g. BOUCLE_RUNNER_TAG=Debian. Precedence:
-  # project/group variables beat this YAML default, so unset consumers keep "data".
-  BOUCLE_RUNNER_TAG: "data"
+  # project/group variables beat this YAML default, so unset consumers keep "boucle".
+  BOUCLE_RUNNER_TAG: "boucle"
   BOUCLE_BUILD_CMD: "npm ci && npm run build"
   BOUCLE_BUILD_OUTPUT: "public"
   # Deploy: swap to any deploy command. Use $$BRANCH (escaped so eval expands it at runtime with
@@ -108,14 +108,14 @@ default:
   # Route to the project's dedicated runner. It's a shell executor (ignores
   # image:), so before_script self-installs node — but the install persists
   # across runs, making subsequent runs faster than docker (which reinstalls
-  # every time). NOTE: the shared docker runner (Atchoum) has no matching tag,
-  # so it CANNOT pick up these jobs — only the dedicated runner can.
+  # every time). NOTE: a shared docker runner without a matching tag cannot
+  # pick up these jobs — only a runner tagged with BOUCLE_RUNNER_TAG can.
   # Loop-critical control-plane jobs (dispatch, merger) override this with
-  # `tags: []` so they run on any available runner (including Atchoum) and
-  # are never blocked by a busy dedicated runner.
+  # `tags: []` so they run on any available runner and are never blocked by a
+  # busy dedicated runner.
   # The tag is project-specific infrastructure — run `bin/setup --runner-tag
   # <tag>` (or set the BOUCLE_RUNNER_TAG project variable) to configure it for
-  # your project. Default: "data" (see BOUCLE_RUNNER_TAG in `variables:` above).
+  # your project. Default: "boucle" (see BOUCLE_RUNNER_TAG in `variables:` above).
   tags: [$BOUCLE_RUNNER_TAG]
   before_script:
     - |
@@ -981,7 +981,7 @@ dispatch:
 triage:
   stage: triage
   # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
-  # The triage job inherits default.tags: [data] — if the assigned runner is broken,
+  # The triage job inherits default.tags: [boucle] — if the assigned runner is broken,
   # the job fails instantly with runner_system_failure and the issue is stranded.
   # retry lets GitLab reassign to another tagged runner.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
@@ -1755,7 +1755,7 @@ triage:
 worker:
   stage: work
   # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
-  # The worker job inherits default.tags: [data] — if the assigned runner is broken,
+  # The worker job inherits default.tags: [boucle] — if the assigned runner is broken,
   # the job fails instantly with runner_system_failure and the issue is stranded.
   # retry lets GitLab reassign to another tagged runner.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
@@ -1996,7 +1996,7 @@ worker:
       # (e.g. "garder les textes/visuels/vidéos déjà partagés") that the latest
       # amendments must NOT override. Without this, the worker only sees the
       # latest amendments via BOUCLE_REVIEWER_FEEDBACK and applies them
-      # literally, degrading validated layouts (issue #42 iteration 7: keffiyeh
+      # literally, degrading validated layouts (issue #42 iteration 7: the brand pattern
       # replaced the video in the primary media slot instead of filling the
       # empty space below the portrait visual). Mirrors the triage job.
       export BOUCLE_ISSUE_NOTES
@@ -2365,7 +2365,7 @@ worker:
       # NOTE: do NOT assign the MR to the issue author here. During
       # `boucle:working` the MR belongs to the bot — assigning it to the
       # human at every worker run is premature and confuses the user (issue
-      # #35 on a consumer repo: MR was assigned to tahrir during
+      # #35 on a consumer repo: MR was assigned to a human during
       # iteration 2, before any review). The MR is assigned to the author
       # only when their action is actually required: on reviewer PASS
       # (line ~1946, approval needed) or on `boucle:human` escalation
@@ -2448,7 +2448,7 @@ worker:
 reviewer:
   stage: review
   # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
-  # The reviewer job inherits default.tags: [data] — if the assigned runner is broken,
+  # The reviewer job inherits default.tags: [boucle] — if the assigned runner is broken,
   # the job fails instantly with runner_system_failure and the MR is stranded.
   # retry lets GitLab reassign to another tagged runner.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
@@ -3570,7 +3570,7 @@ catchup:
 deploy:
   stage: deploy
   # Auto-retry transient runner failures (runner busy/offline, OOM, daemon restart).
-  # The deploy job inherits default.tags: [data] — it can only run on the dedicated
+  # The deploy job inherits default.tags: [boucle] — it can only run on the dedicated
   # shell runner, which is shared with worker jobs. Contention produces
   # runner_system_failure; retrying recovers without human intervention.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
@@ -3640,7 +3640,7 @@ deploy:
 e2e:
   stage: verify
   # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
-  # The e2e job inherits default.tags: [data] — if the assigned runner is broken,
+  # The e2e job inherits default.tags: [boucle] — if the assigned runner is broken,
   # the job fails instantly with runner_system_failure and the issue is stranded.
   # retry lets GitLab reassign to another tagged runner.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
@@ -4006,7 +4006,7 @@ e2e:
 doctor:
   stage: verify
   # Loop-critical control-plane job: makes only API calls, no build.
-  # Override default.tags ([data]) so the doctor runs on ANY available runner
+  # Override default.tags ([boucle]) so the doctor runs on ANY available runner
   # (including Atchoum) and is never blocked by a busy dedicated runner — same
   # pattern as dispatch, merger, and catchup. Without this, the doctor fails
   # with runner_system_failure whenever a worker is running on the data runner.
