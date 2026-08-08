@@ -1,32 +1,67 @@
-# boucle — zero-code loop engineering
+# ➰ boucle — zero-code autonomous product builder
 
-> Loop engineering for builders. No laptop left half-open overnight. No Mac
+> From a ticket in your forge to a feature in production — without running
+> agents on your own machine. No laptop left half-open overnight. No Mac
 > Mini purchase required.
 
-boucle turns a ticket in your forge into a **tested, deployed feature** — end
-to end, without you running agents on your own machine. You express a need,
-boucle does the rest: analysis, implementation, review, merge, deploy,
-verification.
+boucle is zero-code **loop engineering**: you express a need in an issue,
+and boucle handles the rest — analysis, implementation, review, merge,
+deploy, verification. You stay in the forge you already use every day; you
+never touch the engine itself.
 
-The best part? boucle doesn't add a new interface. It reuses the one you
-already use every day: **your forge**.
+## ✨ Why boucle?
 
-## Why boucle?
+**End to end, from idea to shipped.** A ticket becomes a feature deployed to
+production — and you can **amend at any moment**: comment on the issue and
+the loop picks your feedback up, re-plans, and adjusts. You validate the
+result with **screenshots** of the live preview, not prose.
 
-- **End to end.** From an idea in a ticket to a tested, deployed feature —
-  no glue code, no babysitting.
-- **Fast and cheap.** Small purpose-built agents running on your existing CI
-  runner, with your own LLM credentials. No dedicated hardware, no
-  always-on laptop.
-- **Your forge is the interface.** Create an issue, label it, approve the
-  spec and the MR — everything happens in GitLab, where you already work.
-- **Batteries included.** boucle ships with a library of **skills** that give
-  its agents real expertise out of the box — design, SEO, cloud, and more.
-- **Built on jcode.** The engine runs on [jcode](https://github.com/1jehuang/jcode),
-  a standalone **Rust** binary: fast startup, small memory footprint,
-  zero runtime dependencies.
+**Fast and cheap — BYOK.** Lightweight, purpose-built agents run on your
+forge's existing CI, with your own LLM credentials. No Mac Mini, no VPS, no
+always-on laptop.
 
-## Quick start
+**No new interface.** No web app, no TUI. Your forge stays the interface:
+create an issue, label it, approve the spec and the MR — everything happens
+where you already work.
+
+**Ready to use, not a framework.** boucle ships as a working product, not a
+loop-engineering framework you assemble. One command installs it; the
+`doctor` job verifies every prerequisite; then it just runs.
+
+**Built on fast, modern tools.** jcode, a standalone **Rust** binary (fast
+startup, zero runtime dependencies), plus a **codebase knowledge graph**
+that gives agents real structural understanding of your repository instead
+of blind grep.
+
+**Not a SaaS. No server.** The whole loop runs on your forge's CI
+pipelines. Your code, your data, your tokens stay yours.
+
+**By a product builder, for product builders.** Built by an indie Product
+Builder who got tired of babysitting agents overnight.
+
+### 🩹 What most loop tools get wrong
+
+Boucle was designed against the common irritants, observed first-hand in a
+seven-run POC of a representative loop tool (see
+[docs/poc-looper-status.md](docs/poc-looper-status.md)):
+
+- **A daemon to babysit.** Local daemons die silently, need restarts, and
+  pollute your disk with worktrees and sessions. → boucle runs on your
+  forge's CI: nothing to install, nothing to restart.
+- **Deadlocks.** Single-identity loops stall because a bot can't review,
+  approve, or merge its own PRs. → boucle's label-driven state machine has
+  no self-approval path.
+- **Reviews that ship broken code.** Diff-scoped review passes while
+  deployment-dependent bugs reach production. → boucle verifies *behavior*:
+  a preview URL, screenshots, and a post-deploy e2e gate anchored to the
+  commit SHA.
+- **Frozen specs.** Human comments after review never reach the worker. →
+  boucle feeds every human note back into the loop — amend at any moment.
+- **No budget control.** Token spend with no cap or visibility. → boucle
+  ships step and iteration caps per role, and a concurrency cap on parallel
+  issues.
+
+## 🚀 Quick start
 
 **Prerequisites:** a GitLab repository with Cloudflare Pages configured as the
 deployment target, and a GitLab Personal Access Token for the bot.
@@ -91,7 +126,7 @@ environment variables.
 From there, the pipeline takes over. You only answer the human prompts:
 spec validation and MR approval.
 
-## How it works
+## ⚙️ How it works
 
 ```
 issue in GitLab
@@ -119,24 +154,24 @@ Four specialized agents — **triage**, **worker**, **reviewer**, **e2e** —
 orchestrate the whole flow. Humans only do what only humans can: validate the
 spec and approve the MR.
 
-## Configuration
+## 🛠️ Configuration
 
 The two CI variables above are the only ones you must set to get started.
 Every other option — models per agent, spec gate, update mode, vision
 routing — is documented in [LOOP.md](LOOP.md).
 
-## Roadmap
+## 🗺️ Roadmap
 
 - [ ] **GitHub support** — run boucle on GitHub issues and Actions
 - [ ] **servo rendering** — migrate preview rendering from Puppeteer to
       [servo](https://github.com/servo/servo) (Rust-native, no Chromium)
 
-## License
+## ⚖️ License
 
 boucle is free and open-source software licensed under the
 [GNU Affero General Public License v3.0](https://www.gnu.org/licenses/agpl-3.0.html).
 
-## Docs
+## 📚 Docs
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — system architecture, pipeline, state machine
 - [AGENTS.md](AGENTS.md) — agent guide, lessons learned, anti-patterns
