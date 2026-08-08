@@ -5,9 +5,12 @@
 # abstraction layer). See ARCHITECTURE.md §8.4 for the extension-point design.
 #
 # Forge: GitHub. Set BOUCLE_FORGE=github as a repo variable.
-# Runner: self-hosted with label `boucle` (configure via bin/setup --forge github).
+# Runner: GitHub-hosted by default (ubuntu-latest). To use a self-hosted runner,
+# set the forge-agnostic variable BOUCLE_RUNS_ON to '["self-hosted", "boucle"]'
+# (or any runs-on expression). BOUCLE_RUNS_ON is forge-agnostic — on GitLab it
+# maps to `tags: [$BOUCLE_RUNS_ON]` (default `boucle`).
 # Secrets: BOUCLE_TOKEN (bot PAT), CLOUDFLARE_API_TOKEN, PI_AUTH, BOUCLE_LLM_API_KEY.
-# Variables: BOUCLE_FORGE, BOUCLE_FORGE_HOST, BOUCLE_RUNNER_TAG, BOUCLE_SPEC_PROFILE,
+# Variables: BOUCLE_FORGE, BOUCLE_FORGE_HOST, BOUCLE_RUNS_ON, BOUCLE_SPEC_PROFILE,
 #   BOUCLE_UPDATE_MODE, BOUCLE_MAX_PARALLEL_ISSUES, BOUCLE_MAX_ITERATIONS, etc.
 
 name: boucle
@@ -60,7 +63,7 @@ env:
   BOUCLE_TOKEN: ${{ secrets.BOUCLE_TOKEN }}
   BOUCLE_BOT_USERNAME: ${{ vars.BOUCLE_BOT_USERNAME || 'up-bot' }}
   BOUCLE_BOT_ID: ${{ vars.BOUCLE_BOT_ID || '' }}
-  BOUCLE_RUNNER_TAG: ${{ vars.BOUCLE_RUNNER_TAG || 'boucle' }}
+  BOUCLE_RUNS_ON: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
   BOUCLE_SPEC_PROFILE: ${{ vars.BOUCLE_SPEC_PROFILE || 'product' }}
   BOUCLE_UPDATE_MODE: ${{ vars.BOUCLE_UPDATE_MODE || 'release' }}
   BOUCLE_MAX_PARALLEL_ISSUES: ${{ vars.BOUCLE_MAX_PARALLEL_ISSUES || '5' }}
@@ -143,7 +146,7 @@ jobs:
   # ── triage: analyze issue, post structured comment ───────────────────────────
   triage:
     needs: dispatch
-    runs-on: [self-hosted, "${{ vars.BOUCLE_RUNNER_TAG || 'boucle' }}"]
+    runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
     if: needs.dispatch.outputs.issue-iid != ''
     timeout-minutes: 10
     steps:
@@ -161,7 +164,7 @@ jobs:
 
   # ── worker: implement on branch boucle/<iid> ─────────────────────────────────
   worker:
-    runs-on: [self-hosted, "${{ vars.BOUCLE_RUNNER_TAG || 'boucle' }}"]
+    runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
     if: |
       (github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'worker')
       || (github.event_name == 'issues' && contains(github.event.action, 'labeled'))
@@ -170,6 +173,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # Persist .boucle/<issue>/ state across worker iterations. On GitHub-hosted
+      # runners $HOME is ephemeral, so $BOUCLE_STATE_CACHE (default
+      # $HOME/.boucle-state-cache) would be lost between runs. actions/cache
+      # restores it before the worker runs and saves it after (lesson #28).
+      - name: Restore boucle state cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/boucle-state
+          key: boucle-state-${{ github.event.inputs.BOUCLE_ISSUE || github.event.issue.number || 'default' }}
       - name: Setup
         run: |
           apt-get update -qq && apt-get install -y -qq curl jq git
@@ -178,13 +190,20 @@ jobs:
         env:
           BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE || github.event.issue.number }}
           BOUCLE_ITERATION: ${{ github.event.inputs.BOUCLE_ITERATION || '1' }}
+          BOUCLE_STATE_CACHE: ${{ runner.temp }}/boucle-state
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
           bin/boucle-ci worker
+      - name: Save boucle state cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/boucle-state
+          key: boucle-state-${{ github.event.inputs.BOUCLE_ISSUE || github.event.issue.number || 'default' }}
 
   # ── reviewer: adversarial review against preview ──────────────────────────────
   reviewer:
-    runs-on: [self-hosted, "${{ vars.BOUCLE_RUNNER_TAG || 'boucle' }}"]
+    runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'reviewer'
     timeout-minutes: 30
@@ -266,7 +285,7 @@ jobs:
 
   # ── deploy: build + deploy to Cloudflare Pages (on push to default) ───────────
   deploy:
-    runs-on: [self-hosted, "${{ vars.BOUCLE_RUNNER_TAG || 'boucle' }}"]
+    runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
     if: |
       github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     timeout-minutes: 10
@@ -285,7 +304,7 @@ jobs:
 
   # ── e2e: verify on live/preview URL ───────────────────────────────────────────
   e2e:
-    runs-on: [self-hosted, "${{ vars.BOUCLE_RUNNER_TAG || 'boucle' }}"]
+    runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'e2e'
     timeout-minutes: 20
