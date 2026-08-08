@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# bin/setup — Day 0 infrastructure setup for boucle on a target GitLab repo.
+# bin/setup — Day 0 infrastructure setup for boucle on a target repo.
+# Supports GitLab (default) and GitHub (--forge github).
 # Idempotent: safe to run multiple times. Checks before creating.
-# Usage: bin/setup --project <id-or-path> --host <forge-host> [--bot-id <id>] [--bot-token <pat>] [--cf-token <token>] [--skip-cf] [--non-interactive] [--dry-run]
+# Usage: bin/setup --project <id-or-path> --host <forge-host> [--forge <gitlab|github>] [--bot-id <id>] [--bot-token <pat>] [--cf-token <token>] [--skip-cf] [--non-interactive] [--dry-run]
 
 set -euo pipefail
 
 # ── Args ──────────────────────────────────────────────────────────────
 # Every flag has a BOUCLE_* env fallback so bin/setup --non-interactive
 # works with zero prompts (AI-agent-driven installs).
+FORGE="${BOUCLE_FORGE:-gitlab}"
 PROJECT="${BOUCLE_PROJECT:-}"
 HOST="${BOUCLE_HOST:-}"
 BOT_ID="${BOUCLE_BOT_ID:-}"
@@ -21,6 +23,14 @@ NON_INTERACTIVE=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
+    --forge)
+      FORGE="$2"
+      case "$FORGE" in
+        gitlab|github) ;;
+        *) echo "Error: --forge must be 'gitlab' or 'github' (got: $FORGE)" >&2; exit 1 ;;
+      esac
+      shift 2
+      ;;
     --project)
       PROJECT="$2"
       shift 2
@@ -62,17 +72,18 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h | --help)
-      echo "Usage: bin/setup --project <id-or-path> --host <forge-host> [options]"
+      echo "Usage: bin/setup --project <id-or-path> --host <forge-host> [--forge <gitlab|github>] [options]"
       echo ""
       echo "Options:"
-      echo "  --project <id-or-path>   Target GitLab project ID or path (e.g. 123456 or group/project)"
+      echo "  --forge <gitlab|github>  Forge type (default: gitlab)"
+      echo "  --project <id-or-path>   Target project ID or path (e.g. 123456, group/project, or owner/repo)"
       echo "                           Optional: auto-detected from the origin git remote"
-      echo "  --host <forge-host>      GitLab host (default: gitlab.example.com; auto-detected from origin)"
+      echo "  --host <forge-host>      Forge host (default: gitlab.example.com; auto-detected from origin)"
       echo "  --bot-id <id>            Bot user ID (for adding as project member)"
       echo "  --bot-username <name>    Bot username (default: up-bot; used to seed BOUCLE_BOT_USERNAME CI variable)"
       echo "  --bot-token <pat>        Bot PAT (used as BOUCLE_TOKEN CI variable)"
       echo "  --cf-token <token>       Cloudflare API token (for Pages project)"
-      echo "  --runner-tag <tag>       Runner tag baked into the root .gitlab-ci.yml shim (default: boucle)"
+      echo "  --runner-tag <tag>       Runner tag baked into the root CI shim (default: boucle)"
       echo "  --skip-cf                Skip Cloudflare Pages project creation"
       echo "  --dry-run                 Print what would be done, don't execute"
       echo "  --non-interactive        No prompts: read config from BOUCLE_* env vars only."
@@ -82,7 +93,7 @@ while [[ $# -gt 0 ]]; do
       echo "  Project and host are auto-detected from the origin git remote when not"
       echo "  passed, so an install can be a pure copy/paste inside the target repo."
       echo ""
-      echo "Env fallbacks: BOUCLE_PROJECT BOUCLE_HOST BOUCLE_BOT_ID BOUCLE_BOT_USERNAME"
+      echo "Env fallbacks: BOUCLE_FORGE BOUCLE_PROJECT BOUCLE_HOST BOUCLE_BOT_ID BOUCLE_BOT_USERNAME"
       echo "               BOUCLE_BOT_TOKEN BOUCLE_CF_TOKEN BOUCLE_RUNNER_TAG"
       echo "               BOUCLE_LLM_API_KEY BOUCLE_LLM_BASE_URL"
       exit 0
@@ -130,11 +141,30 @@ if [ -z "$PROJECT" ] || [ -z "$HOST" ]; then
       echo "Auto-detected from origin remote: project=$PROJECT host=$HOST"
   fi
 fi
-HOST="${HOST:-gitlab.example.com}"
+
+# Default host per forge
+if [ -z "$HOST" ]; then
+  if [ "$FORGE" = "github" ]; then
+    HOST="github.com"
+  else
+    HOST="gitlab.example.com"
+  fi
+fi
+
 [ -z "$PROJECT" ] && {
   echo "Error: --project is required (run inside the target repo or set BOUCLE_PROJECT)" >&2
   exit 1
 }
+
+# Source forge helpers — forge_ci_var_set, forge_label_create, forge_branch_protect, etc.
+FORGE_BACKEND="$(cd "$(dirname "$0")" && pwd)/forge/${FORGE}.sh"
+if [ -f "$FORGE_BACKEND" ]; then
+  # shellcheck disable=SC1090
+  source "$FORGE_BACKEND"
+else
+  echo "Error: forge backend not found: $FORGE_BACKEND" >&2
+  exit 1
+fi
 
 # ── Helpers ───────────────────────────────────────────────────────────
 PASS=0
@@ -153,30 +183,41 @@ log_skip() {
   SKIP=$((SKIP + 1))
 }
 
-# Resolve project ID (if path given, look up ID)
-resolve_project_id() {
-  if [[ "$PROJECT" =~ ^[0-9]+$ ]]; then
-    echo "$PROJECT"
-  else
-    # URL-encode the path
-    ENCODED=$(echo "$PROJECT" | sed 's/\//%2F/g')
-    glab api --hostname "$HOST" "/projects/$ENCODED" 2> /dev/null | jq -r '.id'
-  fi
-}
+# Resolve project ID/owner-repo
+if [ "$FORGE" = "gitlab" ]; then
+  resolve_project_id() {
+    if [[ "$PROJECT" =~ ^[0-9]+$ ]]; then
+      echo "$PROJECT"
+    else
+      ENCODED=$(echo "$PROJECT" | sed 's/\//%2F/g')
+      glab api --hostname "$HOST" "/projects/$ENCODED" 2> /dev/null | jq -r '.id'
+    fi
+  }
+fi
 
 echo "boucle setup — Day 0 infrastructure"
+echo "Forge: $FORGE"
 echo "Project: $PROJECT on $HOST"
 echo ""
 
-PROJECT_ID=$(resolve_project_id)
-[ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "null" ] && {
-  echo "Error: could not resolve project ID" >&2
-  exit 1
-}
-echo "Project ID: $PROJECT_ID"
-# Resolve the project web URL once (used for CI/CD variables manual-entry link).
-PROJECT_URL=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID" 2> /dev/null | jq -r '.web_url // empty' || true)
-[ -n "$PROJECT_URL" ] && echo "Project URL: $PROJECT_URL"
+# GitLab: resolve numeric project ID
+if [ "$FORGE" = "gitlab" ]; then
+  PROJECT_ID=$(resolve_project_id)
+  [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "null" ] && {
+    echo "Error: could not resolve project ID" >&2
+    exit 1
+  }
+  echo "Project ID: $PROJECT_ID"
+  # Resolve the project web URL once (used for CI/CD variables manual-entry link).
+  PROJECT_URL=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID" 2> /dev/null | jq -r '.web_url // empty' || true)
+  [ -n "$PROJECT_URL" ] && echo "Project URL: $PROJECT_URL"
+else
+  # GitHub: PROJECT is already owner/repo
+  PROJECT_ID="$PROJECT"
+  PROJECT_URL="https://github.com/$PROJECT"
+  echo "Project: $PROJECT_ID"
+  echo "Project URL: $PROJECT_URL"
+fi
 echo ""
 
 # Dry-run wrapper
@@ -189,10 +230,7 @@ run() {
   fi
 }
 
-# configure_webhook <hook_id> <url> — (re)configure a project webhook so it
-# only fires the events boucle acts on (issue/note/MR). Everything else is
-# disabled at source so boucle's own activity (bot comments, label changes,
-# MR updates, pipeline runs) does not re-trigger a no-op dispatch pipeline.
+# configure_webhook <hook_id> <url> — GitLab only
 configure_webhook() {
   local hook_id="$1"
   local url="$2"
@@ -200,9 +238,7 @@ configure_webhook() {
   log_pass "webhook (ID: $hook_id) configured — only Issue + Note + Merge Request events (amplification events disabled)"
 }
 
-# print_webhook_recommendations — operator-facing guidance for the GitLab UI
-# (Project → Settings → Webhooks). Emitted at the end of setup as a reference
-# even when the webhook is already automated via the API.
+# print_webhook_recommendations — GitLab only
 print_webhook_recommendations() {
   echo ""
   echo "  Webhook event filtering (recommended):"
@@ -216,46 +252,44 @@ print_webhook_recommendations() {
   echo "      pipelines from being created at all."
 }
 
-# ── 0. Root .gitlab-ci.yml shim ───────────────────────────────────────
-echo "=== Root .gitlab-ci.yml ==="
-# The consumer's root CI file is a thin shim that includes the engine
-# pipeline via `include: remote`. GitLab cannot `include: local` a file
-# inside a git submodule — submodule content is not part of the main
-# project tree (gitlab issue #25249).
-# An existing non-boucle .gitlab-ci.yml is NEVER overwritten: we print the
-# include block to merge manually instead, so a consumer's own pipeline is
-# never clobbered.
-GITLAB_CI="${GITLAB_CI:-.gitlab-ci.yml}"
-# Pin the include to the engine's current commit so the shim and the
-# checked-out submodule always match. Resolve HEAD inside the engine repo
-# itself (dirname "$0"/..), NOT in the consumer's cwd.
-ENGINE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ENGINE_REF="main"
-if (cd "$ENGINE_ROOT" && git rev-parse --is-inside-work-tree > /dev/null 2>&1); then
-  ENGINE_REF="$(cd "$ENGINE_ROOT" && git rev-parse --short=12 HEAD)"
-fi
-ENGINE_INCLUDE="https://raw.githubusercontent.com/ankaboot-source/boucle/${ENGINE_REF}/.gitlab-ci.yml"
-TAGS_BLOCK="default:
+# ── 0. Root CI shim ───────────────────────────────────────────────────
+if [ "$FORGE" = "gitlab" ]; then
+  echo "=== Root .gitlab-ci.yml ==="
+  # The consumer's root CI file is a thin shim that includes the engine
+  # pipeline via `include: remote`. GitLab cannot `include: local` a file
+  # inside a git submodule — submodule content is not part of the main
+  # project tree (gitlab issue #25249).
+  # An existing non-boucle .gitlab-ci.yml is NEVER overwritten: we print the
+  # include block to merge manually instead, so a consumer's own pipeline is
+  # never clobbered.
+  GITLAB_CI="${GITLAB_CI:-.gitlab-ci.yml}"
+  ENGINE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+  ENGINE_REF="main"
+  if (cd "$ENGINE_ROOT" && git rev-parse --is-inside-work-tree > /dev/null 2>&1); then
+    ENGINE_REF="$(cd "$ENGINE_ROOT" && git rev-parse --short=12 HEAD)"
+  fi
+  ENGINE_INCLUDE="https://raw.githubusercontent.com/ankaboot-source/boucle/${ENGINE_REF}/.gitlab-ci.yml"
+  TAGS_BLOCK="default:
   tags: [${RUNNER_TAG:-boucle}]
 "
-if [ -f "$GITLAB_CI" ]; then
-  if grep -q "boucle engine" "$GITLAB_CI"; then
-    log_skip "root $GITLAB_CI already references the boucle engine"
-  else
-    log_skip "existing $GITLAB_CI left untouched — add the boucle include block manually:"
-    cat << SHIM
+  if [ -f "$GITLAB_CI" ]; then
+    if grep -q "boucle engine" "$GITLAB_CI"; then
+      log_skip "root $GITLAB_CI already references the boucle engine"
+    else
+      log_skip "existing $GITLAB_CI left untouched — add the boucle include block manually:"
+      cat << SHIM
 include:
   - remote: '$ENGINE_INCLUDE'
 $TAGS_BLOCK
 variables:
   BOUCLE_FORGE_HOST: "$HOST"
 SHIM
-  fi
-else
-  if [ "$DRY_RUN" = "true" ]; then
-    echo "  [dry-run] write $GITLAB_CI (boucle engine shim, ref $ENGINE_REF)"
+    fi
   else
-    cat > "$GITLAB_CI" << SHIM
+    if [ "$DRY_RUN" = "true" ]; then
+      echo "  [dry-run] write $GITLAB_CI (boucle engine shim, ref $ENGINE_REF)"
+    else
+      cat > "$GITLAB_CI" << SHIM
 # boucle engine shim (generated by bin/setup — safe to re-run).
 # Includes the boucle engine pipeline from the .boucle/ submodule.
 # Add your own jobs below this block; they run after the engine stages.
@@ -266,11 +300,13 @@ $TAGS_BLOCK
 variables:
   BOUCLE_FORGE_HOST: "$HOST"
 SHIM
+    fi
+    log_pass "root $GITLAB_CI written (boucle engine shim, ref $ENGINE_REF)"
   fi
-  log_pass "root $GITLAB_CI written (boucle engine shim, ref $ENGINE_REF)"
+  echo ""
 fi
 
-# ── 0b. Consumer .gitignore ───────────────────────────────────────────
+# ── 0b. Consumer .gitignore — forge-agnostic ──────────────────────────
 # Per-issue state lives in .boucle-state/ at the consumer root (gitignored).
 # Never clobber an existing .gitignore — only append the entry if missing.
 GITIGNORE_ENTRY='# boucle per-issue state (generated by bin/setup)
@@ -296,115 +332,179 @@ else
   log_pass ".gitignore created with .boucle-state/"
 fi
 
-# ── 1. CI Variables ───────────────────────────────────────────────────
+echo ""
+
+# ── 1. CI Variables / Secrets ────────────────────────────────────────
 echo "=== CI Variables ==="
 
-# BOUCLE_TOKEN (from --bot-token)
-if [ -n "$BOT_TOKEN" ]; then
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_TOKEN" 2> /dev/null | jq -r '.key // empty' || true)
-  if [ -n "$EXISTING" ]; then
-    log_skip "BOUCLE_TOKEN already exists"
+if [ "$FORGE" = "gitlab" ]; then
+  # BOUCLE_TOKEN (from --bot-token)
+  if [ -n "$BOT_TOKEN" ]; then
+    EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_TOKEN" 2> /dev/null | jq -r '.key // empty' || true)
+    if [ -n "$EXISTING" ]; then
+      log_skip "BOUCLE_TOKEN already exists"
+    else
+      run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_TOKEN -f value='$BOT_TOKEN' -f masked=true -f protected=true >/dev/null"
+      log_pass "BOUCLE_TOKEN set"
+    fi
   else
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_TOKEN -f value='$BOT_TOKEN' -f masked=true -f protected=true >/dev/null"
-    log_pass "BOUCLE_TOKEN set"
+    log_skip "BOUCLE_TOKEN (no --bot-token provided)"
+  fi
+
+  # CLOUDFLARE_API_TOKEN (from --cf-token)
+  if [ -n "$CF_TOKEN" ]; then
+    EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/CLOUDFLARE_API_TOKEN" 2> /dev/null | jq -r '.key // empty' || true)
+    if [ -n "$EXISTING" ]; then
+      log_skip "CLOUDFLARE_API_TOKEN already exists"
+    else
+      run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=CLOUDFLARE_API_TOKEN -f value='$CF_TOKEN' -f masked=true -f protected=true >/dev/null"
+      log_pass "CLOUDFLARE_API_TOKEN set"
+    fi
+  else
+    log_skip "CLOUDFLARE_API_TOKEN (no --cf-token provided)"
+  fi
+
+  # BOUCLE_ENABLED
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_ENABLED" 2> /dev/null | jq -r '.key // empty' || true)
+  if [ -n "$EXISTING" ]; then
+    log_skip "BOUCLE_ENABLED already exists"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_ENABLED -f value=true -f masked=false -f protected=false >/dev/null"
+    log_pass "BOUCLE_ENABLED set"
+  fi
+
+  # BOUCLE_SPEC_PROFILE
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_SPEC_PROFILE" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
+  if [ -n "$EXISTING" ]; then
+    log_skip "BOUCLE_SPEC_PROFILE already exists"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_SPEC_PROFILE -f value=product -f masked=false -f protected=false >/dev/null"
+    log_pass "BOUCLE_SPEC_PROFILE set"
+  fi
+
+  # BOUCLE_LLM_API_KEY
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_LLM_API_KEY" 2> /dev/null | jq -r '.key // empty' || true)
+
+  # BOUCLE_DND_ENABLED
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_DND_ENABLED" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
+  if [ -n "$EXISTING" ]; then
+    log_skip "BOUCLE_DND_ENABLED already exists"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_DND_ENABLED -f value=true -f masked=false -f protected=false >/dev/null"
+    log_pass "BOUCLE_DND_ENABLED set (true — good default)"
+  fi
+
+  # BOUCLE_UPDATE_MODE
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_UPDATE_MODE" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
+  if [ -n "$EXISTING" ]; then
+    log_skip "BOUCLE_UPDATE_MODE already exists"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_UPDATE_MODE -f value=release -f masked=false -f protected=false >/dev/null"
+    log_pass "BOUCLE_UPDATE_MODE set to release"
+  fi
+
+  if [ -n "$EXISTING" ]; then
+    log_skip "BOUCLE_LLM_API_KEY already exists"
+  else
+    LLM_API_KEY="${BOUCLE_LLM_API_KEY:-}"
+    if [ -z "$LLM_API_KEY" ] && [ "$NON_INTERACTIVE" = "false" ]; then
+      read -r -p "BOUCLE_LLM_API_KEY value (masked): " LLM_API_KEY || true
+    fi
+    if [ -n "$LLM_API_KEY" ]; then
+      if [ "$DRY_RUN" = "true" ]; then
+        echo "  [dry-run] set BOUCLE_LLM_API_KEY (masked) — value omitted from dry-run output"
+      else
+        glab api --hostname "$HOST" -X POST "/projects/$PROJECT_ID/variables" --field key=BOUCLE_LLM_API_KEY --field value="$LLM_API_KEY" --field masked=true > /dev/null
+      fi
+      log_pass "BOUCLE_LLM_API_KEY set (masked)"
+    elif [ "$NON_INTERACTIVE" = "true" ]; then
+      CI_VARS_URL="${PROJECT_URL:-https://$HOST/$PROJECT}/-/settings/ci_cd"
+      log_skip "BOUCLE_LLM_API_KEY — set it manually as a masked CI/CD variable: $CI_VARS_URL"
+    else
+      log_fail "BOUCLE_LLM_API_KEY — no value provided"
+    fi
+  fi
+
+  # BOUCLE_LLM_BASE_URL
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_LLM_BASE_URL" 2> /dev/null | jq -r '.key // empty' || true)
+  if [ -n "$EXISTING" ]; then
+    log_skip "BOUCLE_LLM_BASE_URL already exists"
+  else
+    LLM_BASE_URL="${BOUCLE_LLM_BASE_URL:-https://ollama.com/v1}"
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables --field key=BOUCLE_LLM_BASE_URL --field value=$LLM_BASE_URL >/dev/null"
+    log_pass "BOUCLE_LLM_BASE_URL set (${BOUCLE_LLM_BASE_URL:-default: https://ollama.com/v1})"
   fi
 else
-  log_skip "BOUCLE_TOKEN (no --bot-token provided)"
-fi
-
-# CLOUDFLARE_API_TOKEN (from --cf-token)
-if [ -n "$CF_TOKEN" ]; then
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/CLOUDFLARE_API_TOKEN" 2> /dev/null | jq -r '.key // empty' || true)
-  if [ -n "$EXISTING" ]; then
-    log_skip "CLOUDFLARE_API_TOKEN already exists"
+  # ── GitHub: repo secrets via gh secret set ──────────────────────────
+  # BOUCLE_TOKEN (from --bot-token)
+  if [ -n "$BOT_TOKEN" ]; then
+    run "echo \"$BOT_TOKEN\" | GH_TOKEN=\"$BOT_TOKEN\" gh secret set BOUCLE_TOKEN --repo \"$PROJECT_ID\" 2>/dev/null"
+    log_pass "BOUCLE_TOKEN set (secrets)"
   else
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=CLOUDFLARE_API_TOKEN -f value='$CF_TOKEN' -f masked=true -f protected=true >/dev/null"
-    log_pass "CLOUDFLARE_API_TOKEN set"
+    log_skip "BOUCLE_TOKEN (no --bot-token provided)"
   fi
-else
-  log_skip "CLOUDFLARE_API_TOKEN (no --cf-token provided)"
-fi
 
-# BOUCLE_ENABLED
-EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_ENABLED" 2> /dev/null | jq -r '.key // empty' || true)
-if [ -n "$EXISTING" ]; then
-  log_skip "BOUCLE_ENABLED already exists"
-else
-  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_ENABLED -f value=true -f masked=false -f protected=false >/dev/null"
-  log_pass "BOUCLE_ENABLED set"
-fi
+  # CLOUDFLARE_API_TOKEN (from --cf-token)
+  if [ -n "$CF_TOKEN" ]; then
+    run "echo \"$CF_TOKEN\" | GH_TOKEN=\"$BOT_TOKEN\" gh secret set CLOUDFLARE_API_TOKEN --repo \"$PROJECT_ID\" 2>/dev/null"
+    log_pass "CLOUDFLARE_API_TOKEN set (secrets)"
+  else
+    log_skip "CLOUDFLARE_API_TOKEN (no --cf-token provided)"
+  fi
 
-# BOUCLE_SPEC_PROFILE — controls the spec-validation gate between triage and worker.
-# Values: product (gate Size M/L, S passes), off (no gate), strict (gate all sizes).
-EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_SPEC_PROFILE" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
-if [ -n "$EXISTING" ]; then
-  log_skip "BOUCLE_SPEC_PROFILE already exists"
-else
-  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_SPEC_PROFILE -f value=product -f masked=false -f protected=false >/dev/null"
-  log_pass "BOUCLE_SPEC_PROFILE set"
-fi
+  # PI_AUTH (base64-encoded BOT_TOKEN). On GitHub, the Actions workflow
+  # uses PI_AUTH for forge API calls.
+  if [ -n "$BOT_TOKEN" ]; then
+    PI_AUTH_B64=$(echo -n "$BOT_TOKEN" | base64 -w0 2>/dev/null || echo -n "$BOT_TOKEN" | base64)
+    run "echo \"$PI_AUTH_B64\" | GH_TOKEN=\"$BOT_TOKEN\" gh secret set PI_AUTH --repo \"$PROJECT_ID\" 2>/dev/null"
+    log_pass "PI_AUTH set (base64-encoded BOT_TOKEN, secrets)"
+  else
+    log_skip "PI_AUTH (no --bot-token provided)"
+  fi
 
-# BOUCLE_LLM_API_KEY (masked) — required for jcode to authenticate.
-# Interactive mode: prompt silently. Non-interactive mode: read from
-# BOUCLE_LLM_API_KEY env; if unset, SKIP and print the URL where the human
-# adds it manually as a masked variable — the key never appears in prompts,
-# command lines or logs (AI-agent-driven installs stay credential-free).
-EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_LLM_API_KEY" 2> /dev/null | jq -r '.key // empty' || true)
+  # ── GitHub: repo vars via gh variable set ───────────────────────────
+  # BOUCLE_ENABLED
+  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_ENABLED --repo \"$PROJECT_ID\" --body true 2>/dev/null"
+  log_pass "BOUCLE_ENABLED set (vars)"
 
-# BOUCLE_DND_ENABLED — enables Do-Not-Disturb mode (auto-validate spec gate
-# during the quiet window so the loop runs autonomously up to the MR).
-# Default true (good default — preserves the human's quality of life). Set to
-# false to opt out. Companion vars BOUCLE_DND_START/END/TZ/EXCLUDE_DAYS are
-# optional and read with defaults at runtime — no need to seed them.
-EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_DND_ENABLED" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
-if [ -n "$EXISTING" ]; then
-  log_skip "BOUCLE_DND_ENABLED already exists"
-else
-  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_DND_ENABLED -f value=true -f masked=false -f protected=false >/dev/null"
-  log_pass "BOUCLE_DND_ENABLED set (true — good default)"
-fi
+  # BOUCLE_SPEC_PROFILE
+  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_SPEC_PROFILE --repo \"$PROJECT_ID\" --body product 2>/dev/null"
+  log_pass "BOUCLE_SPEC_PROFILE set to product (vars)"
 
-# BOUCLE_UPDATE_MODE — controls self-update behavior.
-# Values: release (default, fetch latest tag) | dev (fetch latest commit on main).
-# If unset, bin/update defaults to release.
-EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_UPDATE_MODE" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
-if [ -n "$EXISTING" ]; then
-  log_skip "BOUCLE_UPDATE_MODE already exists"
-else
-  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_UPDATE_MODE -f value=release -f masked=false -f protected=false >/dev/null"
-  log_pass "BOUCLE_UPDATE_MODE set to release"
-fi
+  # BOUCLE_UPDATE_MODE
+  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_UPDATE_MODE --repo \"$PROJECT_ID\" --body release 2>/dev/null"
+  log_pass "BOUCLE_UPDATE_MODE set to release (vars)"
 
-if [ -n "$EXISTING" ]; then
-  log_skip "BOUCLE_LLM_API_KEY already exists"
-else
+  # BOUCLE_FORGE
+  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FORGE --repo \"$PROJECT_ID\" --body github 2>/dev/null"
+  log_pass "BOUCLE_FORGE set to github (vars)"
+
+  # BOUCLE_RUNNER_TAG
+  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_RUNNER_TAG --repo \"$PROJECT_ID\" --body \"${RUNNER_TAG:-boucle}\" 2>/dev/null"
+  log_pass "BOUCLE_RUNNER_TAG set to ${RUNNER_TAG:-boucle} (vars)"
+
+  # BOUCLE_LLM_API_KEY (masked — use secret not var for maskable values)
   LLM_API_KEY="${BOUCLE_LLM_API_KEY:-}"
   if [ -z "$LLM_API_KEY" ] && [ "$NON_INTERACTIVE" = "false" ]; then
     read -r -p "BOUCLE_LLM_API_KEY value (masked): " LLM_API_KEY || true
   fi
   if [ -n "$LLM_API_KEY" ]; then
     if [ "$DRY_RUN" = "true" ]; then
-      echo "  [dry-run] set BOUCLE_LLM_API_KEY (masked) — value omitted from dry-run output"
+      echo "  [dry-run] set BOUCLE_LLM_API_KEY (secret, masked) — value omitted"
     else
-      glab api --hostname "$HOST" -X POST "/projects/$PROJECT_ID/variables" --field key=BOUCLE_LLM_API_KEY --field value="$LLM_API_KEY" --field masked=true > /dev/null
+      echo "$LLM_API_KEY" | GH_TOKEN="$BOT_TOKEN" gh secret set BOUCLE_LLM_API_KEY --repo "$PROJECT_ID" 2>/dev/null
     fi
-    log_pass "BOUCLE_LLM_API_KEY set (masked)"
+    log_pass "BOUCLE_LLM_API_KEY set (secrets, masked)"
   elif [ "$NON_INTERACTIVE" = "true" ]; then
-    CI_VARS_URL="${PROJECT_URL:-https://$HOST/$PROJECT}/-/settings/ci_cd"
-    log_skip "BOUCLE_LLM_API_KEY — set it manually as a masked CI/CD variable: $CI_VARS_URL"
+    log_skip "BOUCLE_LLM_API_KEY — set it manually as a repo secret in Settings > Secrets > Actions"
   else
     log_fail "BOUCLE_LLM_API_KEY — no value provided"
   fi
-fi
 
-# BOUCLE_LLM_BASE_URL — OpenAI-compatible endpoint
-EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_LLM_BASE_URL" 2> /dev/null | jq -r '.key // empty' || true)
-if [ -n "$EXISTING" ]; then
-  log_skip "BOUCLE_LLM_BASE_URL already exists"
-else
+  # BOUCLE_LLM_BASE_URL (var, not secret)
   LLM_BASE_URL="${BOUCLE_LLM_BASE_URL:-https://ollama.com/v1}"
-  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables --field key=BOUCLE_LLM_BASE_URL --field value=$LLM_BASE_URL >/dev/null"
-  log_pass "BOUCLE_LLM_BASE_URL set (${BOUCLE_LLM_BASE_URL:-default: https://ollama.com/v1})"
+  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_LLM_BASE_URL --repo \"$PROJECT_ID\" --body \"$LLM_BASE_URL\" 2>/dev/null"
+  log_pass "BOUCLE_LLM_BASE_URL set to ${BOUCLE_LLM_BASE_URL:-default: https://ollama.com/v1} (vars)"
 fi
 
 echo ""
@@ -412,255 +512,259 @@ echo ""
 # ── 2. Labels ─────────────────────────────────────────────────────────
 echo "=== Labels ==="
 
-# boucle:* labels (14)
-# shellcheck disable=SC1010 # 'done' is a label name, not the loop keyword
-for label in triage needs-info todo working review human blocked done split approval approved spec-review spec-approved merging; do
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2> /dev/null | jq -r '.[0].name // empty' || true)
+if [ "$FORGE" = "gitlab" ]; then
+  # boucle:* labels (14)
+  # shellcheck disable=SC1010 # 'done' is a label name, not the loop keyword
+  for label in triage needs-info todo working review human blocked done split approval approved spec-review spec-approved merging; do
+    EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2> /dev/null | jq -r '.[0].name // empty' || true)
+    if [ -n "$EXISTING" ]; then
+      log_skip "boucle:$label already exists"
+    else
+      run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/labels -f name=boucle:$label -f color=#0033CC -f 'description=boucle state: $label' >/dev/null"
+      log_pass "boucle:$label created"
+    fi
+  done
+
+  # size:* labels (3)
+  for size in s m l; do
+    EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=size:$size" 2> /dev/null | jq -r '.[0].name // empty' || true)
+    if [ -n "$EXISTING" ]; then
+      log_skip "size:$size already exists"
+    else
+      run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/labels -f name=size:$size -f color=#F0AD4E -f 'description=size: $size' >/dev/null"
+      log_pass "size:$size created"
+    fi
+  done
+
+  # boucle:autonomous
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:autonomous" 2> /dev/null | jq -r '.[0].name // empty' || true)
   if [ -n "$EXISTING" ]; then
-    log_skip "boucle:$label already exists"
+    log_skip "boucle:autonomous already exists"
   else
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/labels -f name=boucle:$label -f color=#0033CC -f 'description=boucle state: $label' >/dev/null"
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/labels -f name=boucle:autonomous -f color=#6927C5 -f 'description=Flag: issue runs autonomously (spec gate auto-validated at triage)' >/dev/null"
+    log_pass "boucle:autonomous created"
+  fi
+
+  # boucle:dnd
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:dnd" 2> /dev/null | jq -r '.[0].name // empty' || true)
+  if [ -n "$EXISTING" ]; then
+    log_skip "boucle:dnd already exists"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/labels -f name=boucle:dnd -f color=#1A237E -f 'description=Flag: spec gate auto-validated by DND window at triage' >/dev/null"
+    log_pass "boucle:dnd created"
+  fi
+else
+  # GitHub: forge_label_create (idempotent, uses gh label create)
+  # boucle:* labels (14) — same names/colors as GitLab
+  # shellcheck disable=SC1010 # 'done' is a label name, not the loop keyword
+  for label in triage needs-info todo working review human blocked done split approval approved spec-review spec-approved merging; do
+    run "forge_label_create 'boucle:$label' '#0033CC'"
     log_pass "boucle:$label created"
-  fi
-done
+  done
 
-# size:* labels (3)
-for size in s m l; do
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=size:$size" 2> /dev/null | jq -r '.[0].name // empty' || true)
-  if [ -n "$EXISTING" ]; then
-    log_skip "size:$size already exists"
-  else
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/labels -f name=size:$size -f color=#F0AD4E -f 'description=size: $size' >/dev/null"
+  # size:* labels (3)
+  for size in s m l; do
+    run "forge_label_create 'size:$size' '#F0AD4E'"
     log_pass "size:$size created"
-  fi
-done
+  done
 
-# boucle:autonomous — flag label (not a state). Applied at issue creation to
-# mark an issue as autonomous: the triage job auto-validates the spec gate
-# regardless of the DND window, so the loop runs up to the MR without
-# contacting the human. Distinct color (purple) to separate flags from states.
-EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:autonomous" 2> /dev/null | jq -r '.[0].name // empty' || true)
-if [ -n "$EXISTING" ]; then
-  log_skip "boucle:autonomous already exists"
-else
-  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/labels -f name=boucle:autonomous -f color=#6927C5 -f 'description=Flag: issue runs autonomously (spec gate auto-validated at triage)' >/dev/null"
+  # boucle:autonomous
+  run "forge_label_create 'boucle:autonomous' '#6927C5'"
   log_pass "boucle:autonomous created"
-fi
 
-# boucle:dnd — flag label (not a state). Applied at triage when the
-# Do-Not-Disturb window auto-validates the spec gate, so the board shows
-# WHY the gate was skipped. Mirrors boucle:autonomous. Distinct color
-# (deep indigo — night theme) to distinguish from autonomous (purple).
-EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:dnd" 2> /dev/null | jq -r '.[0].name // empty' || true)
-if [ -n "$EXISTING" ]; then
-  log_skip "boucle:dnd already exists"
-else
-  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/labels -f name=boucle:dnd -f color=#1A237E -f 'description=Flag: spec gate auto-validated by DND window at triage' >/dev/null"
+  # boucle:dnd
+  run "forge_label_create 'boucle:dnd' '#1A237E'"
   log_pass "boucle:dnd created"
 fi
 
 echo ""
 
-# ── 3. Issue Board ────────────────────────────────────────────────────
-echo "=== Issue Board ==="
+# ── 3. Issue Board — GitLab only (GitHub doesn't have issue boards) ───
+if [ "$FORGE" = "gitlab" ]; then
+  echo "=== Issue Board ==="
 
-# Check if boucle board already exists
-BOARD_ID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/boards" 2> /dev/null | jq -r '.[] | select(.name=="boucle") | .id' | head -1 || true)
-if [ -n "$BOARD_ID" ] && [ "$BOARD_ID" != "null" ]; then
-  log_skip "boucle board already exists (ID: $BOARD_ID)"
-else
-  BOARD_RESPONSE=$(run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/boards -f name=boucle")
-  BOARD_ID=$(echo "$BOARD_RESPONSE" | jq -r '.id')
+  BOARD_ID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/boards" 2> /dev/null | jq -r '.[] | select(.name=="boucle") | .id' | head -1 || true)
   if [ -n "$BOARD_ID" ] && [ "$BOARD_ID" != "null" ]; then
-    log_pass "boucle board created (ID: $BOARD_ID)"
-    # Add lists for each boucle:* label
-    # shellcheck disable=SC1010 # 'done' is a label name, not the loop keyword
-    for label in triage needs-info todo working review human blocked done split approval spec-review spec-approved merging; do
-      LABEL_ID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2> /dev/null | jq -r '.[0].id' || true)
-      if [ -n "$LABEL_ID" ] && [ "$LABEL_ID" != "null" ]; then
-        run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/boards/$BOARD_ID/lists -f label_id=$LABEL_ID >/dev/null"
-        log_pass "  list boucle:$label added"
-      fi
-    done
+    log_skip "boucle board already exists (ID: $BOARD_ID)"
   else
-    log_fail "boucle board creation failed"
+    BOARD_RESPONSE=$(run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/boards -f name=boucle")
+    BOARD_ID=$(echo "$BOARD_RESPONSE" | jq -r '.id')
+    if [ -n "$BOARD_ID" ] && [ "$BOARD_ID" != "null" ]; then
+      log_pass "boucle board created (ID: $BOARD_ID)"
+      # shellcheck disable=SC1010
+      for label in triage needs-info todo working review human blocked done split approval spec-review spec-approved merging; do
+        LABEL_ID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2> /dev/null | jq -r '.[0].id' || true)
+        if [ -n "$LABEL_ID" ] && [ "$LABEL_ID" != "null" ]; then
+          run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/boards/$BOARD_ID/lists -f label_id=$LABEL_ID >/dev/null"
+          log_pass "  list boucle:$label added"
+        fi
+      done
+    else
+      log_fail "boucle board creation failed"
+    fi
   fi
+  echo ""
 fi
-
-echo ""
 
 # ── 4. Branch Protection ─────────────────────────────────────────────
 echo "=== Branch Protection ==="
 
-# Get default branch
-DEFAULT_BRANCH=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID" 2> /dev/null | jq -r '.default_branch' || true)
-if [ -z "$DEFAULT_BRANCH" ] || [ "$DEFAULT_BRANCH" = "null" ]; then
-  log_fail "could not determine default branch"
-  DEFAULT_BRANCH="main"
-fi
+if [ "$FORGE" = "gitlab" ]; then
+  DEFAULT_BRANCH=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID" 2> /dev/null | jq -r '.default_branch' || true)
+  if [ -z "$DEFAULT_BRANCH" ] || [ "$DEFAULT_BRANCH" = "null" ]; then
+    log_fail "could not determine default branch"
+    DEFAULT_BRANCH="main"
+  fi
 
-# Check if branch is already protected
-PROTECTION=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/protected_branches/$DEFAULT_BRANCH" 2> /dev/null || true)
-if [ -n "$PROTECTION" ] && echo "$PROTECTION" | jq -e '.name' > /dev/null 2>&1; then
-  # Already protected — verify both merge and push access levels
-  MERGE_LEVEL=$(echo "$PROTECTION" | jq -r '.merge_access_levels[0].access_level // empty')
-  PUSH_LEVEL=$(echo "$PROTECTION" | jq -r '.push_access_levels[0].access_level // empty')
-  NEEDS_UPDATE=false
-  if [ "$MERGE_LEVEL" != "40" ]; then
-    echo "  ! $DEFAULT_BRANCH merge_access_level=$MERGE_LEVEL (expected 40)"
-    NEEDS_UPDATE=true
-  fi
-  if [ "$PUSH_LEVEL" != "30" ]; then
-    echo "  ! $DEFAULT_BRANCH push_access_level=$PUSH_LEVEL (expected 30 for bot push)"
-    NEEDS_UPDATE=true
-  fi
-  if [ "$NEEDS_UPDATE" = "true" ]; then
-    # GitLab does not support PUT (404) on protected_branches, and PATCH
-    # silently ignores access_level changes — the only reliable way to
-    # change access levels is to delete and recreate the protection.
-    run "glab api --hostname $HOST -X DELETE /projects/$PROJECT_ID/protected_branches/$DEFAULT_BRANCH >/dev/null"
+  PROTECTION=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/protected_branches/$DEFAULT_BRANCH" 2> /dev/null || true)
+  if [ -n "$PROTECTION" ] && echo "$PROTECTION" | jq -e '.name' > /dev/null 2>&1; then
+    MERGE_LEVEL=$(echo "$PROTECTION" | jq -r '.merge_access_levels[0].access_level // empty')
+    PUSH_LEVEL=$(echo "$PROTECTION" | jq -r '.push_access_levels[0].access_level // empty')
+    NEEDS_UPDATE=false
+    if [ "$MERGE_LEVEL" != "40" ]; then
+      echo "  ! $DEFAULT_BRANCH merge_access_level=$MERGE_LEVEL (expected 40)"
+      NEEDS_UPDATE=true
+    fi
+    if [ "$PUSH_LEVEL" != "30" ]; then
+      echo "  ! $DEFAULT_BRANCH push_access_level=$PUSH_LEVEL (expected 30 for bot push)"
+      NEEDS_UPDATE=true
+    fi
+    if [ "$NEEDS_UPDATE" = "true" ]; then
+      run "glab api --hostname $HOST -X DELETE /projects/$PROJECT_ID/protected_branches/$DEFAULT_BRANCH >/dev/null"
+      run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/protected_branches -f name=$DEFAULT_BRANCH -f merge_access_level=40 -f push_access_level=30 >/dev/null"
+      log_pass "$DEFAULT_BRANCH access levels updated (merge=Maintainer, push=Developer)"
+    else
+      log_skip "$DEFAULT_BRANCH protected (merge=Maintainer, push=Developer)"
+    fi
+  else
     run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/protected_branches -f name=$DEFAULT_BRANCH -f merge_access_level=40 -f push_access_level=30 >/dev/null"
-    log_pass "$DEFAULT_BRANCH access levels updated (merge=Maintainer, push=Developer)"
-  else
-    log_skip "$DEFAULT_BRANCH protected (merge=Maintainer, push=Developer)"
+    log_pass "$DEFAULT_BRANCH protected (merge=Maintainer, push=Developer)"
   fi
 else
-  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/protected_branches -f name=$DEFAULT_BRANCH -f merge_access_level=40 -f push_access_level=30 >/dev/null"
-  log_pass "$DEFAULT_BRANCH protected (merge=Maintainer, push=Developer)"
+  # GitHub: use forge_branch_protect
+  # Detect default branch
+  GH_INFO=$(forge_project_get 2>/dev/null || echo '{"default_branch":"main"}')
+  DEFAULT_BRANCH=$(echo "$GH_INFO" | jq -r '.default_branch // "main"' 2>/dev/null || echo "main")
+  run "forge_branch_protect '$DEFAULT_BRANCH' 30 40"
+  log_pass "$DEFAULT_BRANCH protected (required PR reviews, no direct push)"
 fi
 
 echo ""
 
-# ── 5. Bot Member ────────────────────────────────────────────────────
-echo "=== Bot Member ==="
+# ── 5. Bot Member — GitLab only (GitHub uses the PAT directly) ───────
+if [ "$FORGE" = "gitlab" ]; then
+  echo "=== Bot Member ==="
 
-if [ -n "$BOT_ID" ]; then
-  # Check if bot is already a member — members/all includes group-inherited
-  # members (a project-scoped GET /members/$BOT_ID 404s for inherited ones,
-  # and POST then fails with "must be greater than or equal to inherited
-  # membership"). Take the max access level across direct + inherited.
-  EXISTING_MEMBER=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/members/all?user_ids=$BOT_ID" 2> /dev/null | jq -r '[.[] | .access_level] | max // empty' || true)
-  if [ -n "$EXISTING_MEMBER" ]; then
-    if [ "$EXISTING_MEMBER" -ge 30 ]; then
-      log_skip "bot (ID: $BOT_ID) already member (access_level=$EXISTING_MEMBER)"
+  if [ -n "$BOT_ID" ]; then
+    EXISTING_MEMBER=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/members/all?user_ids=$BOT_ID" 2> /dev/null | jq -r '[.[] | .access_level] | max // empty' || true)
+    if [ -n "$EXISTING_MEMBER" ]; then
+      if [ "$EXISTING_MEMBER" -ge 30 ]; then
+        log_skip "bot (ID: $BOT_ID) already member (access_level=$EXISTING_MEMBER)"
+      else
+        run "glab api --hostname $HOST -X PUT /projects/$PROJECT_ID/members/$BOT_ID -f access_level=30 >/dev/null"
+        log_pass "bot (ID: $BOT_ID) access level updated to Developer"
+      fi
     else
-      run "glab api --hostname $HOST -X PUT /projects/$PROJECT_ID/members/$BOT_ID -f access_level=30 >/dev/null"
-      log_pass "bot (ID: $BOT_ID) access level updated to Developer"
+      run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/members -f user_id=$BOT_ID -f access_level=30 >/dev/null"
+      log_pass "bot (ID: $BOT_ID) added as Developer"
     fi
   else
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/members -f user_id=$BOT_ID -f access_level=30 >/dev/null"
-    log_pass "bot (ID: $BOT_ID) added as Developer"
+    log_skip "bot member (no --bot-id provided)"
   fi
-else
-  log_skip "bot member (no --bot-id provided)"
-fi
 
-# ── 5b. Bot ID + Username CI variables ─────────────────────────────────
-# set_boucle_label reassigns issues to the bot via assignee_ids[], which
-# requires a numeric user ID. Seed BOUCLE_BOT_ID when --bot-id is provided
-# so the loop can reassign without a username lookup at runtime. Always
-# seed BOUCLE_BOT_USERNAME (default up-bot) so the before_script fallback
-# can resolve the ID by username when BOUCLE_BOT_ID is unset.
-echo "=== Bot CI Variables ==="
+  # ── 5b. Bot ID + Username CI variables ───────────────────────────────
+  echo "=== Bot CI Variables ==="
 
-# BOUCLE_BOT_ID (only when --bot-id provided; it's a public user ID, not a secret)
-if [ -n "$BOT_ID" ]; then
-  EXISTING_BOT_ID_VAR=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_BOT_ID" 2> /dev/null | jq -r '.value // empty' || true)
-  if [ "$EXISTING_BOT_ID_VAR" = "$BOT_ID" ]; then
-    log_skip "BOUCLE_BOT_ID CI variable (already $BOT_ID)"
+  if [ -n "$BOT_ID" ]; then
+    EXISTING_BOT_ID_VAR=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_BOT_ID" 2> /dev/null | jq -r '.value // empty' || true)
+    if [ "$EXISTING_BOT_ID_VAR" = "$BOT_ID" ]; then
+      log_skip "BOUCLE_BOT_ID CI variable (already $BOT_ID)"
+    else
+      run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_BOT_ID -f value=$BOT_ID -f masked=false -f protected=false >/dev/null"
+      log_pass "BOUCLE_BOT_ID CI variable set to $BOT_ID"
+    fi
   else
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_BOT_ID -f value=$BOT_ID -f masked=false -f protected=false >/dev/null"
-    log_pass "BOUCLE_BOT_ID CI variable set to $BOT_ID"
+    log_skip "BOUCLE_BOT_ID CI variable (no --bot-id provided; before_script will resolve by username)"
   fi
-else
-  log_skip "BOUCLE_BOT_ID CI variable (no --bot-id provided; before_script will resolve by username)"
+
+  EXISTING_BOT_USERNAME_VAR=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_BOT_USERNAME" 2> /dev/null | jq -r '.value // empty' || true)
+  if [ "$EXISTING_BOT_USERNAME_VAR" = "$BOT_USERNAME" ]; then
+    log_skip "BOUCLE_BOT_USERNAME CI variable (already $BOT_USERNAME)"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_BOT_USERNAME -f value=$BOT_USERNAME -f masked=false -f protected=false >/dev/null"
+    log_pass "BOUCLE_BOT_USERNAME CI variable set to $BOT_USERNAME"
+  fi
+
+  echo ""
 fi
 
-# BOUCLE_BOT_USERNAME (always — drives the before_script username fallback)
-EXISTING_BOT_USERNAME_VAR=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_BOT_USERNAME" 2> /dev/null | jq -r '.value // empty' || true)
-if [ "$EXISTING_BOT_USERNAME_VAR" = "$BOT_USERNAME" ]; then
-  log_skip "BOUCLE_BOT_USERNAME CI variable (already $BOT_USERNAME)"
-else
-  run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_BOT_USERNAME -f value=$BOT_USERNAME -f masked=false -f protected=false >/dev/null"
-  log_pass "BOUCLE_BOT_USERNAME CI variable set to $BOT_USERNAME"
-fi
+# ── 6. Trigger Token — GitLab only ────────────────────────────────────
+if [ "$FORGE" = "gitlab" ]; then
+  echo "=== Trigger Token ==="
 
-echo ""
+  TRIGGER_TOKEN=""
+  EXISTING_TRIGGERS=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/triggers" 2> /dev/null || true)
+  BOUCLE_TRIGGER=$(echo "$EXISTING_TRIGGERS" | jq -r '.[] | select(.description=="boucle-loop") | .token' | head -1)
+  if [ -n "$BOUCLE_TRIGGER" ]; then
+    TRIGGER_TOKEN="$BOUCLE_TRIGGER"
+    log_skip "trigger token already exists"
+  else
+    TRIGGER_RESPONSE=$(run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/triggers -f description=boucle-loop")
+    TRIGGER_TOKEN=$(echo "$TRIGGER_RESPONSE" | jq -r '.token')
+    if [ -n "$TRIGGER_TOKEN" ] && [ "$TRIGGER_TOKEN" != "null" ]; then
+      log_pass "trigger token created"
+    else
+      log_fail "trigger token creation failed (needs Owner access)"
+    fi
+  fi
 
-# ── 6. Trigger Token ──────────────────────────────────────────────────
-echo "=== Trigger Token ==="
-
-# Check if trigger token already exists
-TRIGGER_TOKEN=""
-EXISTING_TRIGGERS=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/triggers" 2> /dev/null || true)
-BOUCLE_TRIGGER=$(echo "$EXISTING_TRIGGERS" | jq -r '.[] | select(.description=="boucle-loop") | .token' | head -1)
-if [ -n "$BOUCLE_TRIGGER" ]; then
-  TRIGGER_TOKEN="$BOUCLE_TRIGGER"
-  log_skip "trigger token already exists"
-else
-  TRIGGER_RESPONSE=$(run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/triggers -f description=boucle-loop")
-  TRIGGER_TOKEN=$(echo "$TRIGGER_RESPONSE" | jq -r '.token')
   if [ -n "$TRIGGER_TOKEN" ] && [ "$TRIGGER_TOKEN" != "null" ]; then
-    log_pass "trigger token created"
-  else
-    log_fail "trigger token creation failed (needs Owner access)"
-  fi
-fi
-
-# Store trigger token as CI variable
-if [ -n "$TRIGGER_TOKEN" ] && [ "$TRIGGER_TOKEN" != "null" ]; then
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_TRIGGER_TOKEN" 2> /dev/null | jq -r '.key // empty' || true)
-  if [ -n "$EXISTING" ]; then
-    log_skip "BOUCLE_TRIGGER_TOKEN CI variable already exists"
-  else
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_TRIGGER_TOKEN -f value=$TRIGGER_TOKEN -f masked=true -f protected=true >/dev/null"
-    log_pass "BOUCLE_TRIGGER_TOKEN stored as CI variable"
-  fi
-fi
-
-echo ""
-
-# ── 7. Webhook ────────────────────────────────────────────────────────
-echo "=== Webhook ==="
-
-if [ -n "$TRIGGER_TOKEN" ] && [ "$TRIGGER_TOKEN" != "null" ]; then
-  WEBHOOK_URL="https://$HOST/api/v4/projects/$PROJECT_ID/trigger/pipeline?token=$TRIGGER_TOKEN&ref=$DEFAULT_BRANCH"
-
-  # Check if webhook already exists. Older versions of bin/setup created the
-  # hook with emoji_events=true (a boucle self-amplification vector: bot label
-  # changes and reactions re-trigger a no-op dispatch). Reconfigure it so the
-  # webhook source filters amplification events out entirely.
-  EXISTING_WEBHOOK=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/hooks" 2> /dev/null | jq -r '.[] | select(.url | contains("trigger/pipeline")) | .id' | head -1 || true)
-  if [ -n "$EXISTING_WEBHOOK" ]; then
-    # Only PATCH when the current config still enables a now-disabled event,
-    # so idempotent re-runs stay quiet.
-    HOOK_CONFIG=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/hooks/$EXISTING_WEBHOOK" 2> /dev/null || true)
-    if echo "$HOOK_CONFIG" | jq -e '.emoji_events == true or .push_events == true or .pipeline_events == true or .tag_push_events == true or .wiki_page_events == true or .deployment_events == true or .release_events == true' > /dev/null 2>&1; then
-      configure_webhook "$EXISTING_WEBHOOK" "$WEBHOOK_URL"
+    EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_TRIGGER_TOKEN" 2> /dev/null | jq -r '.key // empty' || true)
+    if [ -n "$EXISTING" ]; then
+      log_skip "BOUCLE_TRIGGER_TOKEN CI variable already exists"
     else
-      log_skip "webhook (ID: $EXISTING_WEBHOOK) already configured — only Issue/Note/MR events"
+      run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_TRIGGER_TOKEN -f value=$TRIGGER_TOKEN -f masked=true -f protected=true >/dev/null"
+      log_pass "BOUCLE_TRIGGER_TOKEN stored as CI variable"
+    fi
+  fi
+
+  echo ""
+fi
+
+# ── 7. Webhook — GitLab only (GitHub uses workflow as receiver) ──────
+if [ "$FORGE" = "gitlab" ]; then
+  echo "=== Webhook ==="
+
+  if [ -n "$TRIGGER_TOKEN" ] && [ "$TRIGGER_TOKEN" != "null" ]; then
+    WEBHOOK_URL="https://$HOST/api/v4/projects/$PROJECT_ID/trigger/pipeline?token=$TRIGGER_TOKEN&ref=$DEFAULT_BRANCH"
+
+    EXISTING_WEBHOOK=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/hooks" 2> /dev/null | jq -r '.[] | select(.url | contains("trigger/pipeline")) | .id' | head -1 || true)
+    if [ -n "$EXISTING_WEBHOOK" ]; then
+      HOOK_CONFIG=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/hooks/$EXISTING_WEBHOOK" 2> /dev/null || true)
+      if echo "$HOOK_CONFIG" | jq -e '.emoji_events == true or .push_events == true or .pipeline_events == true or .tag_push_events == true or .wiki_page_events == true or .deployment_events == true or .release_events == true' > /dev/null 2>&1; then
+        configure_webhook "$EXISTING_WEBHOOK" "$WEBHOOK_URL"
+      else
+        log_skip "webhook (ID: $EXISTING_WEBHOOK) already configured — only Issue/Note/MR events"
+      fi
+    else
+      run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/hooks -f \"url=$WEBHOOK_URL\" -f issues_events=true -f note_events=true -f merge_requests_events=true -f push_events=false -f tag_push_events=false -f pipeline_events=false -f wiki_page_events=false -f deployment_events=false -f release_events=false -f emoji_events=false -f job_events=false -f confidential_issues_events=false -f confidential_note_events=false >/dev/null"
+      log_pass "webhook configured (Issue + Note + Merge Request events only; amplification events disabled)"
     fi
   else
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/hooks -f \"url=$WEBHOOK_URL\" -f issues_events=true -f note_events=true -f merge_requests_events=true -f push_events=false -f tag_push_events=false -f pipeline_events=false -f wiki_page_events=false -f deployment_events=false -f release_events=false -f emoji_events=false -f job_events=false -f confidential_issues_events=false -f confidential_note_events=false >/dev/null"
-    log_pass "webhook configured (Issue + Note + Merge Request events only; amplification events disabled)"
+    log_skip "webhook (no trigger token)"
   fi
-else
-  log_skip "webhook (no trigger token)"
+
+  echo ""
 fi
 
-echo ""
-
-# ── 8. Cloudflare Pages Project ──────────────────────────────────────
+# ── 8. Cloudflare Pages Project — forge-agnostic ──────────────────────
 echo "=== Cloudflare Pages Project ==="
 
 if [ "$SKIP_CF" = "true" ]; then
   log_skip "CF Pages project (--skip-cf)"
 elif [ -n "$CF_TOKEN" ]; then
   export CLOUDFLARE_API_TOKEN="$CF_TOKEN"
-  # Derive project name from repo path (last segment, TLD stripped).
-  # Override via env var or --cf-project <name> if the default is wrong.
   CF_PROJECT_NAME="${CF_PROJECT_NAME:-$(echo "$PROJECT" | sed 's|.*/||' | sed 's/\.[a-z]*$//')}"
-  # Check if project already exists
   if npx wrangler pages project list 2> /dev/null | grep -q "$CF_PROJECT_NAME"; then
     log_skip "CF Pages project already exists"
   else
@@ -671,22 +775,41 @@ elif [ -n "$CF_TOKEN" ]; then
       log_fail "CF Pages project creation failed"
     fi
   fi
-  # Store the CF Pages project name as BOUCLE_DEPLOY_PROJECT CI variable
-  # so the pipeline's deploy/worker jobs know which project to deploy to.
-  # Without this, BOUCLE_DEPLOY_CMD expands to an empty --project-name and
-  # both the deploy job and worker preview deploy fail silently.
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_DEPLOY_PROJECT" 2> /dev/null | jq -r '.key // empty' || true)
-  if [ -n "$EXISTING" ]; then
-    log_skip "BOUCLE_DEPLOY_PROJECT already exists"
+  # Store the CF Pages project name as BOUCLE_DEPLOY_PROJECT CI variable/secret
+  if [ "$FORGE" = "gitlab" ]; then
+    EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_DEPLOY_PROJECT" 2> /dev/null | jq -r '.key // empty' || true)
+    if [ -n "$EXISTING" ]; then
+      log_skip "BOUCLE_DEPLOY_PROJECT already exists"
+    else
+      run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_DEPLOY_PROJECT -f value=$CF_PROJECT_NAME -f masked=false -f protected=false >/dev/null"
+      log_pass "BOUCLE_DEPLOY_PROJECT set to '$CF_PROJECT_NAME'"
+    fi
   else
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_DEPLOY_PROJECT -f value=$CF_PROJECT_NAME -f masked=false -f protected=false >/dev/null"
-    log_pass "BOUCLE_DEPLOY_PROJECT set to '$CF_PROJECT_NAME'"
+    # GitHub: use variable
+    run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_DEPLOY_PROJECT --repo \"$PROJECT_ID\" --body \"$CF_PROJECT_NAME\" 2>/dev/null"
+    log_pass "BOUCLE_DEPLOY_PROJECT set to '$CF_PROJECT_NAME' (vars)"
   fi
 else
   log_skip "CF Pages project (no --cf-token)"
 fi
 
 echo ""
+
+# ── 9. .boucle-version — GitHub only (GitLab uses CI mirror) ─────────
+if [ "$FORGE" = "github" ]; then
+  echo "=== .boucle-version ==="
+
+  # Check if .boucle-version already exists in the repo
+  FILE_CHECK=$(GH_TOKEN="$BOT_TOKEN" gh api "/repos/$PROJECT_ID/contents/.boucle-version" 2>/dev/null || true)
+  if echo "$FILE_CHECK" | jq -e '.content' > /dev/null 2>&1; then
+    log_skip ".boucle-version already exists"
+  else
+    BOUCLE_VERSION_CONTENT=$(echo -n '0.0.0' | base64 -w0 2>/dev/null || echo -n '0.0.0' | base64)
+    run "GH_TOKEN=\"$BOT_TOKEN\" gh api -X PUT /repos/$PROJECT_ID/contents/.boucle-version -f message='init' -f content=\"$BOUCLE_VERSION_CONTENT\" >/dev/null 2>&1"
+    log_pass ".boucle-version created (0.0.0)"
+  fi
+  echo ""
+fi
 
 # ── Summary ───────────────────────────────────────────────────────────
 echo "=== Summary ==="
@@ -702,35 +825,59 @@ fi
 
 echo "Day 0 setup complete."
 echo ""
-echo "Next steps:"
-echo "  1. Make the engine a git submodule (if not already done):"
-echo "     git submodule add https://github.com/ankaboot-source/boucle .boucle"
-echo "  2. Commit the engine and the root shim:"
-echo "     git add .gitmodules .boucle $GITLAB_CI"
-echo "     git commit -m \"chore: install boucle engine\""
-echo "     (Push the commit — the runner needs GIT_SUBMODULE_STRATEGY to fetch .boucle/.)"
-echo "  3. Runner: make sure a GitLab runner with tag '${RUNNER_TAG:-boucle}' is available."
-echo "     (The tag is baked into $GITLAB_CI. Re-run with --runner-tag <tag> to change it.)"
-if [ -n "${CI_VARS_URL:-}" ]; then
-  echo "  4. CI/CD variables: $CI_VARS_URL"
-  echo "     - BOUCLE_LLM_API_KEY (masked) if bin/setup skipped it."
-else
-  echo "  4. CI/CD variables: add BOUCLE_LLM_API_KEY (masked) under Settings > CI/CD."
-fi
-echo "  5. Create your first issue — the webhook will trigger triage."
-if [ -z "$BOT_ID" ]; then
-  echo ""
-  echo "  NOTE: no --bot-id was provided, so the bot user was NOT added to the"
-  echo "  project and BOUCLE_BOT_ID was not seeded. boucle reassigns issues to"
-  echo "  the bot (assignee_ids[]) and merges MRs as it — without an account,"
-  echo "  issues stay assigned to the current user and the loop still runs."
-  echo "  To use a dedicated bot:"
-  echo "    1. Create the bot via Project → Settings → Service accounts"
-  echo "       (no platform-admin needed — a project owner can provision it)."
-  echo "    2. Create a PAT for the bot (scope: api) and note its user ID."
-  echo "    3. Re-run: bin/setup --bot-id <id> --bot-token <pat>"
-fi
 
-print_webhook_recommendations
+if [ "$FORGE" = "gitlab" ]; then
+  echo "Next steps:"
+  echo "  1. Make the engine a git submodule (if not already done):"
+  echo "     git submodule add https://github.com/ankaboot-source/boucle .boucle"
+  echo "  2. Commit the engine and the root shim:"
+  echo "     git add .gitmodules .boucle $GITLAB_CI"
+  echo "     git commit -m \"chore: install boucle engine\""
+  echo "     (Push the commit — the runner needs GIT_SUBMODULE_STRATEGY to fetch .boucle/.)"
+  echo "  3. Runner: make sure a GitLab runner with tag '${RUNNER_TAG:-boucle}' is available."
+  echo "     (The tag is baked into $GITLAB_CI. Re-run with --runner-tag <tag> to change it.)"
+  if [ -n "${CI_VARS_URL:-}" ]; then
+    echo "  4. CI/CD variables: $CI_VARS_URL"
+    echo "     - BOUCLE_LLM_API_KEY (masked) if bin/setup skipped it."
+  else
+    echo "  4. CI/CD variables: add BOUCLE_LLM_API_KEY (masked) under Settings > CI/CD."
+  fi
+  echo "  5. Create your first issue — the webhook will trigger triage."
+  if [ -z "$BOT_ID" ]; then
+    echo ""
+    echo "  NOTE: no --bot-id was provided, so the bot user was NOT added to the"
+    echo "  project and BOUCLE_BOT_ID was not seeded. boucle reassigns issues to"
+    echo "  the bot (assignee_ids[]) and merges MRs as it — without an account,"
+    echo "  issues stay assigned to the current user and the loop still runs."
+    echo "  To use a dedicated bot:"
+    echo "    1. Create the bot via Project → Settings → Service accounts"
+    echo "       (no platform-admin needed — a project owner can provision it)."
+    echo "    2. Create a PAT for the bot (scope: api) and note its user ID."
+    echo "    3. Re-run: bin/setup --bot-id <id> --bot-token <pat>"
+  fi
+
+  print_webhook_recommendations
+else
+  echo "Next steps:"
+  echo "  1. Make the engine a git submodule (if not already done):"
+  echo "     git submodule add https://github.com/ankaboot-source/boucle .boucle"
+  echo "  2. Commit:"
+  echo "     git add .gitmodules .boucle"
+  echo "     git commit -m \"chore: install boucle engine\""
+  echo "  3. The GitHub Actions workflow (.github/workflows/boucle.yml) must be present"
+  echo "     in the repo — it is the receiver (on: issues, on: pull_request)."
+  echo "     If missing, add it from the boucle engine."
+  echo "  4. Runner: ensure a self-hosted runner with tag '${RUNNER_TAG:-boucle}' is available."
+  echo "     (Set it up in Settings > Actions > Runners, then add the tag.)"
+  echo "  5. Repository variables and secrets should now be set in"
+  echo "     Settings > Secrets and variables > Actions."
+  echo "  6. Create your first issue — boucle will pick it up via the workflow trigger."
+  if [ -n "${BOT_TOKEN:-}" ]; then
+    echo "  7. (Optional) Set BOUCLE_LLM_API_KEY as a repo secret if bin/setup skipped it."
+  fi
+  echo ""
+  echo "  NOTE: GitHub does not need a trigger token, webhook, or issue board —"
+  echo "  the workflow itself acts as the receiver and GitHub labels serve as the board."
+fi
 
 exit 0
