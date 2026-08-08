@@ -20,6 +20,11 @@ stages:
 
 variables:
   BOUCLE_FORGE_HOST: framagit.org
+  # Runner tag for agent jobs (triage/worker/reviewer/e2e/deploy). Override via a
+  # project variable of the same name (Settings > CI/CD > Variables) to route jobs
+  # to a project-specific runner, e.g. BOUCLE_RUNNER_TAG=Debian. Precedence:
+  # project/group variables beat this YAML default, so unset consumers keep "data".
+  BOUCLE_RUNNER_TAG: "data"
   BOUCLE_BUILD_CMD: "npm ci && npm run build"
   BOUCLE_BUILD_OUTPUT: "public"
   # Deploy: swap to any deploy command. Use $$BRANCH (escaped so eval expands it at runtime with
@@ -109,8 +114,9 @@ default:
   # `tags: []` so they run on any available runner (including Atchoum) and
   # are never blocked by a busy dedicated runner.
   # The tag is project-specific infrastructure — run `bin/setup --runner-tag
-  # <tag>` to configure it for your project. Default placeholder: boucle.
-  tags: [data]
+  # <tag>` (or set the BOUCLE_RUNNER_TAG project variable) to configure it for
+  # your project. Default: "data" (see BOUCLE_RUNNER_TAG in `variables:` above).
+  tags: [$BOUCLE_RUNNER_TAG]
   before_script:
     - |
       # Trace commands only when CI_DEBUG_TRACE is set (GitLab's native debug flag).
