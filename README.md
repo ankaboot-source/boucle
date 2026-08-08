@@ -25,8 +25,8 @@ create an issue, label it, approve the spec and the MR — everything happens
 where you already work.
 
 **Ready to use, not a framework.** boucle ships as a working product, not a
-loop-engineering framework you assemble. One command installs it; the
-`doctor` job verifies every prerequisite; then it just runs.
+loop-engineering framework you assemble. One command installs it;
+`bin/setup` verifies every prerequisite; then it just runs.
 
 **Built on fast, modern tools.** jcode, a standalone **Rust** binary (fast
 startup, zero runtime dependencies), plus a **codebase knowledge graph**
@@ -42,8 +42,7 @@ Builder who got tired of babysitting agents overnight.
 ### 🩹 What most loop tools get wrong
 
 Boucle was designed against the common irritants, observed first-hand in a
-seven-run POC of a representative loop tool (see
-[docs/poc-looper-status.md](docs/poc-looper-status.md)):
+seven-run POC of a representative loop tool:
 
 - **A daemon to babysit.** Local daemons die silently, need restarts, and
   pollute your disk with worktrees and sessions. → boucle runs on your
@@ -64,7 +63,9 @@ seven-run POC of a representative loop tool (see
 ## 🚀 Quick start
 
 **Prerequisites:** a GitLab repository with Cloudflare Pages configured as the
-deployment target, and a GitLab Personal Access Token for the bot.
+deployment target, and a bot GitLab account with a Personal Access Token. The
+bot is a separate account that boucle acts through — see
+[The bot user](#the-bot-user) for how to create it.
 
 Pick whichever path fits you.
 
@@ -112,20 +113,45 @@ values you may need to pass explicitly are the bot and Cloudflare tokens
 (`--bot-token`, `--cf-token`), which otherwise come from the `BOUCLE_*`
 environment variables.
 
+### The bot user
+
+boucle acts through a dedicated GitLab **bot account** — it comments on
+issues, reassigns them, and merges approved MRs. `bin/setup` wires an
+existing account into your project, but **it does not create it**: creating a
+platform user requires GitLab platform-admin rights, which most project
+owners do not have.
+
+Instead, create the bot from your project's **Service accounts** page
+(GitLab → Project → Settings → Service accounts, e.g. on framagit:
+`https://<your-gitlab-host>/<group>/<project>/-/settings/service_accounts`).
+That page lets a project owner provision a bot without platform admin.
+Then:
+
+1. Create a Personal Access Token for the bot account (scope: `api`) — this
+   is the `--bot-token` value.
+2. Get its numeric user ID — this is the `--bot-id` value.
+3. Pass both to `bin/setup` (`--bot-id <id> --bot-token <pat>`), or set the
+   `BOUCLE_BOT_ID` / `BOUCLE_BOT_TOKEN` environment variables.
+
+`bin/setup` then adds the bot to the project as a Developer, seeds the
+`BOUCLE_BOT_ID` / `BOUCLE_BOT_USERNAME` / `BOUCLE_TOKEN` CI/CD variables, and
+the loop reassigns issues to it automatically.
+
 ### After install
 
 1. Add `BOUCLE_LLM_API_KEY` as a **masked** CI/CD variable (project →
    Settings → CI/CD → Variables). It is never handled by setup so it never
    crosses a conversation, a log, or a shell history.
-2. Make sure a runner with the tag from `.gitlab-ci.yml` (default `data`) is
-   available for the project.
+2. Make sure a runner is available for the project. `bin/setup` bakes the
+   runner tag into your root `.gitlab-ci.yml` (default: `boucle` — override
+   with `bin/setup --runner-tag <tag>` or the `BOUCLE_RUNNER_TAG` project
+   variable). Register a runner with that tag on your project.
 3. Create a GitLab issue with the `boucle:triage` label — or assign an
    existing issue to the boucle bot.
-4. Run the `doctor` CI job: it checks every prerequisite and must print
-   "OK" everywhere.
 
 From there, the pipeline takes over. You only answer the human prompts:
-spec validation and MR approval.
+spec validation and MR approval. The `doctor` job (a scheduled
+self-healing sweep) runs automatically — there is nothing to run by hand.
 
 ## ⚙️ How it works
 
@@ -167,7 +193,7 @@ override them only when you need to:
 | `BOUCLE_ENABLED` | `true` | Master switch. Set to `false` to pause boucle without touching the pipeline. |
 | `BOUCLE_LLM_API_KEY` | *(unset)* | LLM provider key. Set as a **masked** variable. |
 | `BOUCLE_LLM_BASE_URL` | `https://ollama.com/v1` | LLM provider endpoint (any OpenAI-compatible API). |
-| `BOUCLE_RUNNER_TAG` | `data` | Runner tag that executes agent jobs. |
+| `BOUCLE_RUNNER_TAG` | `boucle` | Runner tag that executes agent jobs. Override if your runner uses a different tag. |
 | `BOUCLE_SPEC_PROFILE` | `product` | Spec gate strictness: which issues require your spec approval. |
 | `BOUCLE_DND_ENABLED` | `true` | Auto-validates the spec gate during quiet hours (Do-Not-Disturb). |
 | `BOUCLE_DND_START` / `BOUCLE_DND_END` / `BOUCLE_DND_TZ` | `22:00` / `07:00` / `UTC` | Quiet-hours window for the spec gate. |
