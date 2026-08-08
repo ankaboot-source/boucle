@@ -66,6 +66,31 @@ Contrast rules: primary text `>= 4.5:1`, secondary `>= 3:1` in every mode. Never
 | Nav / layout | <header, footer, container rules> | |
 | States | <focus, hover, disabled, loading, empty, error> | Accessibility notes |
 
-## 5. Design system persistence (optional)
+## 5. Content & tone
+
+How is copy written on this site? Agents must mirror it, not invent a new voice.
+
+- **Voice:** <tone, formality, "I" vs "you", first vs third person>
+- **Casing & punctuation:** <sentence case? title case? Oxford comma? emoji allowed?>
+- **Examples:** <2-3 short on-brand copy samples — the more specific, the better>
+
+## 6. Iconography
+
+- **Icon system:** <built-in icon font, inline SVGs, CDN set (e.g. lucide, heroicons), unicode glyphs>
+- **Style rules:** <stroke weight, fill style, size grid, color usage>
+- **Assets:** <copy logos/icons/illustrations into the consumer repo — NEVER draw your own SVGs or generate substitute images; if a set is CDN-available, link it, otherwise flag the substitution>
+
+## 7. Visual foundations
+
+The brand's visual motifs — answer ALL of these.
+
+- **Backgrounds:** <solid? gradients? images? full-bleed? repeating patterns/textures?>
+- **Imagery vibe:** <warm? cool? b&w? grain?>
+- **Hover / press states:** <opacity? darker? lighter? shrink?>
+- **Borders & shadows:** <border widths, inner/outer shadow systems, protection gradients vs capsules>
+- **Transparency / blur:** <when is it used?>
+- **What cards look like:** <shadow, rounding, border — the shape of a default card>
+
+## 8. Design system persistence (optional)
 
 If the project uses `ui-ux-pro-max` `--persist` (MASTER.md + page overrides), the generated `design-system/MASTER.md` lives alongside this charter; this charter remains the **source of truth** and the MASTER.md mirrors it for the current session's work.
