@@ -1,6 +1,6 @@
-# Visual Charter Template
+# DESIGN Template
 
-> Template for a consumer-site visual charter. Copy this file to the consumer repo root as `VISUAL-CHARTER.md` (or keep your existing file, restructured along these sections) and fill in the values. **An agent reads this file before designing any UI** — it is the design equivalent of `AGENTS.md`: a single, human-readable file that tells an agent how this product is supposed to look.
+> Template for a consumer-site design system file (the DESIGN.md concept). Copy this file to the consumer repo root as `VISUAL-CHARTER.md` (or keep your existing file, restructured along these sections) and fill in the values. **An agent reads this file before designing any UI** — it is the design equivalent of `AGENTS.md`: a single, human-readable file that tells an agent how this product is supposed to look.
 >
 > Derivative of [superdesign-skill/DESIGN.md](https://github.com/superdesigndev/superdesign-skill) (MIT, © Superdesign). Adapted for the boucle loop: product context, tokens, motion, components — implementable **without the codebase**.
 
