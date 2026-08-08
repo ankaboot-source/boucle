@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2154  # BOUCLE_FORGE, BOUCLE_PIPELINE_SOURCE are env vars set by CI.
 # bin/update — boucle self-update: fetch latest from upstream and apply.
-# Runs as the first step of the dispatch job in .gitlab-ci.yml.
+# Runs as the first step of the dispatch job (GitLab CI or GitHub Actions).
 # Fail-open: any error → warning + exit 0, pipeline continues with current version.
 # Usage: bin/update [--dry-run]
 
@@ -12,7 +13,15 @@ UPSTREAM_REPO="ankaboot-source/boucle"
 UPSTREAM_API="https://api.github.com/repos/$UPSTREAM_REPO"
 UPSTREAM_TARBALL="https://codeload.github.com/$UPSTREAM_REPO/tarball"
 VERSION_FILE=".boucle-version"
-SYNC_PATHS="bin .pi .gitlab-ci.yml .jcode/agents .jcode/skills .jcode/UPSTREAM-FIX-WORKFLOW.md"
+
+# Forge-conditional SYNC_PATHS: sync the CI file that matches the active forge.
+# bin/forge/ is always synced (it's under bin/). lib/ is always synced
+# (lib/boucle-ci.sh + lib/boucle-ci/ live under lib/).
+if [ "${BOUCLE_FORGE:-gitlab}" = "github" ]; then
+  SYNC_PATHS="bin .pi .github/workflows/boucle.yml .jcode/agents .jcode/skills .jcode/UPSTREAM-FIX-WORKFLOW.md"
+else
+  SYNC_PATHS="bin .pi .gitlab-ci.yml .jcode/agents .jcode/skills .jcode/UPSTREAM-FIX-WORKFLOW.md"
+fi
 
 # ── Pure functions (testable, no network) ──────────────────────────────
 
@@ -122,8 +131,12 @@ main() {
   # pipeline → bin/update → push → pipeline → ...). The loop workflow
   # only runs on trigger-source pipelines (webhooks + chained
   # trigger/pipeline calls), so skipping self-update on push is safe.
-  if [ "${CI_PIPELINE_SOURCE:-}" = "push" ]; then
-    echo "[boucle] self-update skipped in push pipeline (CI_PIPELINE_SOURCE=push)"
+  # Forge-agnostic: BOUCLE_PIPELINE_SOURCE is the alias set by
+  # lib/boucle-ci.sh (CI_PIPELINE_SOURCE on GitLab, github.event_name on
+  # GitHub Actions — where update runs in workflow_dispatch/schedule
+  # context, so the check is less critical but still gated the same way).
+  if [ "${BOUCLE_PIPELINE_SOURCE:-}" = "push" ]; then
+    echo "[boucle] self-update skipped in push pipeline (BOUCLE_PIPELINE_SOURCE=push)"
     return 0
   fi
 
