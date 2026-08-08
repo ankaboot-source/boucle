@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# bin/boucle-ci — Forge-agnostic CI stage dispatcher.
+# Usage: boucle-ci <stage> [args...]
+#
+# Sources lib/boucle-ci.sh which defines stage functions,
+# then calls the requested stage function.
+set -euo pipefail
+
+BOUCLE_HOME="${BOUCLE_HOME:-$(cd "$(dirname "$0")/.." && pwd)}"
+export BOUCLE_HOME
+
+# shellcheck source=../lib/boucle-ci.sh
+. "$BOUCLE_HOME/lib/boucle-ci.sh"
+
+STAGE="${1:-}"
+shift || true
+
+if [ -z "$STAGE" ]; then
+  echo "Usage: $0 <stage> [args...]" >&2
+  echo "Stages: check dispatch triage worker reviewer merger post-merge catchup deploy e2e doctor" >&2
+  exit 1
+fi
+
+# Map stage name to function name.
+FUNC="boucle_ci_${STAGE//-/_}"
+
+if ! declare -F "$FUNC" >/dev/null 2>&1; then
+  echo "Unknown stage: $STAGE (function $FUNC not found)" >&2
+  exit 1
+fi
+
+"$FUNC" "$@"
