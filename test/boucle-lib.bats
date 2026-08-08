@@ -131,10 +131,10 @@ SCRIPT
   echo "$CAPTURED_ARGS" | grep -q 'token=tok123'
 }
 
-@test "chain_to_role forwards ref=master" {
+@test "chain_to_role forwards the default branch ref" {
   source_with_mock_curl
-  chain_to_role 42 worker
-  echo "$CAPTURED_ARGS" | grep -q 'ref=master'
+  CI_DEFAULT_BRANCH=main chain_to_role 42 worker
+  echo "$CAPTURED_ARGS" | grep -q 'ref=main'
 }
 
 # ── preview_url_for_changed_files: route mapping ──────────────────────
