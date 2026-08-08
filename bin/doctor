@@ -1,8 +1,25 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2154
 # bin/doctor — Day 0 verification. Run before anything, after every config change.
 # ~20 checks. Saves a half-day of indirect debugging.
 
 set -euo pipefail
+
+FORGE="${BOUCLE_FORGE:-gitlab}"
+
+# Parse arguments
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --forge)
+      FORGE="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 1
+      ;;
+  esac
+done
 
 PROJECT_ID="${BOUCLE_PROJECT_ID:?BOUCLE_PROJECT_ID must be set}"
 HOST="${BOUCLE_FORGE_HOST:-gitlab.example.com}"
@@ -17,9 +34,28 @@ FAILURES=0
 
 echo "boucle doctor — checking prerequisites..."
 
+# Resolve BOUCLE_HOME early (needed for forge source + agents check)
+BOUCLE_HOME="${BOUCLE_HOME:-}"
+if [ -z "$BOUCLE_HOME" ]; then
+  if [ -d "$(dirname "$0")/../.jcode" ]; then
+    BOUCLE_HOME="$(cd "$(dirname "$0")/.." && pwd)"
+  elif [ -d "$(dirname "$0")/../.boucle" ]; then
+    BOUCLE_HOME="$(cd "$(dirname "$0")/.." && pwd)/.boucle"
+  fi
+fi
+
+# Source forge backend
+if [ "$FORGE" = "github" ]; then
+  # shellcheck disable=SC1090
+  source "$BOUCLE_HOME/bin/forge/github.sh"
+fi
+
+# ── Forge-specific checks ──────────────────────────────────────────────
+if [ "$FORGE" = "gitlab" ]; then
+
 # ── Labels ─────────────────────────────────────────────────────────────
 # shellcheck disable=SC1010 # 'done' is a label name, not the loop keyword
-for label in triage needs-info todo working review human blocked done split approval spec-review spec-approved merging; do
+for label in triage needs-info todo working review human blocked done split approval approved spec-review spec-approved merging; do
   if glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2> /dev/null | jq -e '.[0]' > /dev/null 2>&1; then
     pass "label boucle:$label exists"
   else
@@ -99,17 +135,71 @@ else
   fi
 fi
 
+else
+  # ── GitHub checks ──────────────────────────────────────────────────────
+
+  # ── Labels ─────────────────────────────────────────────────────────────
+  LABEL_JSON=$(forge_label_list)
+  # shellcheck disable=SC1010 # 'done' is a label name, not the loop keyword
+  for label in triage needs-info todo working review human blocked done split approval approved spec-review spec-approved merging; do
+    if echo "$LABEL_JSON" | jq -e ".[] | select(.name == \"boucle:$label\")" > /dev/null 2>&1; then
+      pass "label boucle:$label exists"
+    else
+      fail "label boucle:$label missing"
+    fi
+  done
+
+  for size in s m l; do
+    if echo "$LABEL_JSON" | jq -e ".[] | select(.name == \"size:$size\")" > /dev/null 2>&1; then
+      pass "label size:$size exists"
+    else
+      fail "label size:$size missing"
+    fi
+  done
+
+  # ── Repo Secrets ───────────────────────────────────────────────────────
+  SECRETS=$(GH_TOKEN="$BOUCLE_TOKEN" gh secret list --repo "$BOUCLE_PROJECT_ID" 2>/dev/null | awk '{print $1}')
+  for var in BOUCLE_TOKEN CLOUDFLARE_API_TOKEN PI_AUTH BOUCLE_LLM_API_KEY; do
+    if echo "$SECRETS" | grep -qx "$var"; then
+      pass "secret $var exists"
+    else
+      fail "secret $var missing"
+    fi
+  done
+
+  # ── Repo Variables ─────────────────────────────────────────────────────
+  VARS=$(GH_TOKEN="$BOUCLE_TOKEN" gh variable list --repo "$BOUCLE_PROJECT_ID" 2>/dev/null | awk '{print $1}')
+  for var in BOUCLE_ENABLED BOUCLE_SPEC_PROFILE BOUCLE_UPDATE_MODE BOUCLE_FORGE BOUCLE_LLM_BASE_URL; do
+    if echo "$VARS" | grep -qx "$var"; then
+      pass "variable $var exists"
+    else
+      fail "variable $var missing"
+    fi
+  done
+
+  # ── Branch protection ──────────────────────────────────────────────────
+  DEFAULT_BRANCH=$(forge_project_get | jq -r '.default_branch // empty' 2>/dev/null)
+  [ -z "$DEFAULT_BRANCH" ] && DEFAULT_BRANCH="main"
+  if GH_TOKEN="$BOUCLE_TOKEN" gh api "/repos/$BOUCLE_PROJECT_ID/branches/$DEFAULT_BRANCH/protection" 2>/dev/null | jq -e '.required_pull_request_reviews' > /dev/null 2>&1; then
+    pass "$DEFAULT_BRANCH protected (PR reviews required)"
+  else
+    fail "$DEFAULT_BRANCH not protected or PR reviews not required"
+  fi
+
+  # ── Runner online ──────────────────────────────────────────────────────
+  if [ -z "${BOUCLE_RUNNER_TAG:-}" ]; then
+    warn "BOUCLE_RUNNER_TAG unset — skipping runner-online check"
+  elif forge_runner_check "$BOUCLE_RUNNER_TAG"; then
+    pass "runner with tag '$BOUCLE_RUNNER_TAG' online"
+  else
+    fail "no runner with tag '$BOUCLE_RUNNER_TAG' online"
+  fi
+
+fi
+
 # ── Agents parse ───────────────────────────────────────────────────────
 # Consumers install the engine as a .boucle/ submodule (BOUCLE_HOME); the
 # boucle repo itself (dogfood) keeps agents at root .jcode/. Check both.
-BOUCLE_HOME="${BOUCLE_HOME:-}"
-if [ -z "$BOUCLE_HOME" ]; then
-  if [ -d "$(dirname "$0")/../.jcode" ]; then
-    BOUCLE_HOME="$(cd "$(dirname "$0")/.." && pwd)"
-  elif [ -d "$(dirname "$0")/../.boucle" ]; then
-    BOUCLE_HOME="$(cd "$(dirname "$0")/.." && pwd)/.boucle"
-  fi
-fi
 for role in triage worker reviewer e2e; do
   if [ -f "$BOUCLE_HOME/.jcode/agents/$role.md" ]; then
     pass "agent $role.md exists"
