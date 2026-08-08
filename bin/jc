@@ -98,6 +98,25 @@ api_key_env = "BOUCLE_LLM_API_KEY"
 default_model = "$MODEL"
 requires_api_key = true
 TOML
+    # When a fallback provider is configured (BOUCLE_FALLBACK_PROVIDER +
+    # BOUCLE_FALLBACK_BASE_URL + BOUCLE_FALLBACK_API_KEY), also write its
+    # profile so the section-5b retry (`jcode --provider-profile
+    # $BOUCLE_FALLBACK_PROVIDER`) resolves. The key stays referenced via
+    # api_key_env — never written to disk in plaintext.
+    if [ -n "${BOUCLE_FALLBACK_PROVIDER:-}" ] \
+       && [ -n "${BOUCLE_FALLBACK_BASE_URL:-}" ] \
+       && [ -n "${BOUCLE_FALLBACK_API_KEY:-}" ]; then
+      cat >> "$config_file" << TOML
+
+[providers.$BOUCLE_FALLBACK_PROVIDER]
+type = "openai-compatible"
+base_url = "$BOUCLE_FALLBACK_BASE_URL"
+auth = "bearer"
+api_key_env = "BOUCLE_FALLBACK_API_KEY"
+default_model = "$FALLBACK_MODEL"
+requires_api_key = true
+TOML
+    fi
     export JCODE_HOME="$config_dir"
   elif [ ! -f "$config_file" ]; then
     echo "[boucle] ERROR: no jcode config. Set BOUCLE_LLM_BASE_URL + BOUCLE_LLM_API_KEY," >&2
