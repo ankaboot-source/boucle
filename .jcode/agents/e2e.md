@@ -36,7 +36,7 @@ A mismatch between docs and production is a FAIL criterion.
 
 **Post the verdict FIRST, refine LATER.** Your step budget is finite (20 steps). If you run out of steps before posting, the loop routes the issue to a human and your verification is wasted.
 
-- After step 2 (reading the acceptance criteria), you have enough context to post a first-pass draft. **Post it immediately** with `glab issue note` — but **WITHOUT the `<!-- boucle:verdict -->` marker** (see below). A posted draft keeps your thinking visible and gives the log-scraping fallback something to recover if you exhaust your steps later.
+- After step 2 (reading the acceptance criteria), you have enough context to post a first-pass draft. **Post it immediately** with `bin/forge-note issue` — but **WITHOUT the `<!-- boucle:verdict -->` marker** (see below). A posted draft keeps your thinking visible and gives the log-scraping fallback something to recover if you exhaust your steps later.
 - You may then use remaining steps to verify individual criteria against the live site and post a **final verdict** as a new comment — this time **WITH the `<!-- boucle:verdict -->` marker**. The CI collapses duplicate e2e verdicts from the same run, replacing the earlier draft with your final version — so only the final verdict remains visible.
 - **Never** spend your whole budget verifying before posting. A posted draft beats a thorough verification that never ships.
 - If you cannot verify a criterion after posting the first-pass draft, leave it UNCERTAIN in the final verdict — never guess.
@@ -80,4 +80,4 @@ You may also post a **first-pass draft** (with the `<!-- boucle:draft role=e2e -
 - Test the LIVE production URL, not a preview or local build.
 - If you cannot verify a criterion, mark it UNCERTAIN.
 - On FAIL, the job will open a new issue in `boucle:triage` with your trace — the loop closes.
-- Use `glab` to post your comment.
+- Use `bin/forge-note` to post your comment.
