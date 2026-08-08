@@ -139,10 +139,10 @@ TOML
 # triage, BOUCLE_MODEL_WORKER=deepseek-v4-flash for a faster worker).
 # The agent file default is the "good default" — override only when needed.
 AGENT_FILE=""
-for candidate in \
-  "$CI_PROJECT_DIR/.jcode/agents/${AGENT}.md" \
-  "$(pwd)/.jcode/agents/${AGENT}.md" \
-  "$(dirname "$0")/../.jcode/agents/${AGENT}.md"; do
+  for candidate in \
+    "$BOUCLE_WORKSPACE/.jcode/agents/${AGENT}.md" \
+    "$(pwd)/.jcode/agents/${AGENT}.md" \
+    "$(dirname "$0")/../.jcode/agents/${AGENT}.md"; do
   if [ -f "$candidate" ]; then
     AGENT_FILE="$candidate"
     break
@@ -208,8 +208,12 @@ if [ -n "$FALLBACK_PROVIDER" ]; then
 fi
 
 # ── Paths ──────────────────────────────────────────────────────────────
-CI_PROJECT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
-STATE_DIR="$CI_PROJECT_DIR/.boucle/$ISSUE"
+# BOUCLE_WORKSPACE is the forge-agnostic workspace root (maps to
+# CI_PROJECT_DIR on GitLab, GITHUB_WORKSPACE on GitHub). Fall back to
+# CI_PROJECT_DIR (GitLab predefined) then pwd for local dev.
+BOUCLE_WORKSPACE="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-$(pwd)}}"
+CI_PROJECT_DIR="$BOUCLE_WORKSPACE"  # backward-compat alias for existing refs
+STATE_DIR="$BOUCLE_WORKSPACE/.boucle/$ISSUE"
 STATE_FILE="$STATE_DIR/state.md"
 ITERATIONS_FILE="$STATE_DIR/iterations.md"
 # jcode has no SQLite DB (run mode is ephemeral), so no DB isolation needed.
@@ -245,7 +249,7 @@ fi
 # Export BOUCLE_DND_ACTIVE so the triage agent prompt can soften its
 # disposition (prefer READY with documented assumptions over NEEDS-INFO
 # for non-critical ambiguities) during the quiet window. 1 = active, 0 = off.
-if [ -x "$CI_PROJECT_DIR/bin/dnd" ] && "$CI_PROJECT_DIR/bin/dnd" 2> /dev/null; then
+if [ -x "$BOUCLE_WORKSPACE/bin/dnd" ] && "$BOUCLE_WORKSPACE/bin/dnd" 2> /dev/null; then
   export BOUCLE_DND_ACTIVE=1
 else
   export BOUCLE_DND_ACTIVE=0
@@ -423,7 +427,7 @@ is_quota_exhausted() {
 # prompt for the role.
 write_prompt_overlay() {
   local agent_file="$1"
-  local overlay_dir="$CI_PROJECT_DIR/.jcode"
+  local overlay_dir="$BOUCLE_WORKSPACE/.jcode"
   local overlay_file="$overlay_dir/prompt-overlay.md"
   mkdir -p "$overlay_dir"
   # Extract body after YAML frontmatter (skip lines between --- and ---).
@@ -500,7 +504,7 @@ ${notes}
 "
         fi
         prompt="${prompt}
-Post your analysis as a comment with the boucle:triage marker. Use: glab issue note ${ISSUE} --repo ${CI_PROJECT_PATH:-} --message \"\$(cat <<'EOF' ... EOF)\""
+Post your analysis as a comment with the boucle:triage marker. Use: bin/forge-note issue ${ISSUE} --message \"\$(cat <<'EOF' ... EOF)\""
       else
         prompt="Analyze issue #${ISSUE}. Post your analysis as a comment with the boucle:triage marker."
       fi
@@ -521,18 +525,18 @@ Post your analysis as a comment with the boucle:triage marker. Use: glab issue n
       local feedback="${BOUCLE_REVIEWER_FEEDBACK:-}"
       prompt="Implement issue #${ISSUE}. Read state.md first. Commit your changes with [skip ci].
 
-Preserve instructed content: the issue body below contains the EXACT content the human instructed (URLs, citations, texts, images). You MUST use them verbatim. DO NOT generate placeholders, DO NOT rewrite the instructed texts, DO NOT substitute URLs. If a field is missing from the issue, fetch the issue body via \`glab issue view\` rather than inventing. Recent amendments (in the feedback section below) AMEND the spec — they do NOT replace earlier preservation instructions. Conciliate them.
+Preserve instructed content: the issue body below contains the EXACT content the human instructed (URLs, citations, texts, images). You MUST use them verbatim. DO NOT generate placeholders, DO NOT rewrite the instructed texts, DO NOT substitute URLs. If a field is missing from the issue, fetch the issue body via \`bin/forge-note issue ${ISSUE}\` or the forge CLI rather than inventing. Recent amendments (in the feedback section below) AMEND the spec — they do NOT replace earlier preservation instructions. Conciliate them.
 "
       if [ -n "$body" ]; then
         prompt="${prompt}
-Issue body (already fetched — do NOT call glab issue view):
+Issue body (already fetched — do NOT call the forge CLI to re-fetch):
 ---
 ${body}
 ---
 "
       else
         prompt="${prompt}
-Issue body: NOT available in the prompt — fetch it via \`glab issue view ${ISSUE}\` before doing anything else.
+Issue body: NOT available in the prompt — fetch it via \`bin/forge-note issue ${ISSUE}\` or the forge CLI before doing anything else.
 "
       fi
       if [ -n "$notes" ]; then
@@ -582,7 +586,7 @@ ${body}
 "
       else
         prompt="${prompt}
-Issue body: NOT available — fetch it via \`glab issue view ${ISSUE}\` if you need to verify content fidelity.
+Issue body: NOT available — fetch it via \`bin/forge-note issue ${ISSUE}\` or the forge CLI if you need to verify content fidelity.
 "
       fi
       if [ -n "$feedback" ]; then
@@ -753,11 +757,12 @@ fi
 case "$ROLE" in
   triage | reviewer | e2e)
     if [ -s "$AGENT_LOG" ]; then
-      # A posted comment shows up as a glab issue note / glab api POST call.
-      # A drafted-but-unposted comment shows up as the boucle:triage (or
-      # boucle:verdict) marker in the log text. If neither is present, the
-      # agent produced nothing actionable.
-      if ! grep -qiE 'glab (issue note|api .* -X POST|api .*/notes)' "$AGENT_LOG" \
+      # A posted comment shows up as a forge note call (glab issue note /
+      # glab api POST / gh api POST / bin/forge-note). A drafted-but-
+      # unposted comment shows up as the boucle:triage (or boucle:verdict)
+      # marker in the log text. If neither is present, the agent produced
+      # nothing actionable.
+      if ! grep -qiE '(glab|gh) (issue note|mr note|api .* -X POST|api .*/notes)|bin/forge-note' "$AGENT_LOG" \
         && ! grep -qiE '<!-- boucle:(triage|verdict)' "$AGENT_LOG"; then
         # A persistent quota error (HTTP 429/402, AGENTS.md lesson #30)
         # leaves activity traces in the log but produces no comment — the
@@ -822,8 +827,8 @@ fi
 # ── 7. Append to iterations.md ────────────────────────────────────────
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 FILES_TOUCHED=""
-if [ -d "$CI_PROJECT_DIR" ] && command -v git &> /dev/null; then
-  FILES_TOUCHED=$(cd "$CI_PROJECT_DIR" && git diff --name-only HEAD 2> /dev/null | tr '\n' ', ' || echo "none")
+if [ -d "$BOUCLE_WORKSPACE" ] && command -v git &> /dev/null; then
+  FILES_TOUCHED=$(cd "$BOUCLE_WORKSPACE" && git diff --name-only HEAD 2> /dev/null | tr '\n' ', ' || echo "none")
 fi
 
 cat >> "$ITERATIONS_FILE" << EOF
