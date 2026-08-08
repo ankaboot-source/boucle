@@ -20,11 +20,11 @@ Boucle **frees the user from interactive chats** that demand a permanent
 presence in front of the screen — a dynamic that is often toxic. Work
 happens asynchronously, driven by labels and comments.
 
-Boucle was extracted from a real benchmark: the maintenance of **Urgence
-Palestine**, a humanitarian emergency-aid website run by the ankaboot team.
-The failure modes observed there — and in the *looper* POC that preceded
-boucle — shaped the design. See the [README](README.md) "Why boucle?" →
-Origins section.
+Boucle was extracted from a real benchmark: the maintenance of a static
+Astro website (GitLab-hosted, deployed to Cloudflare Pages). The failure
+modes observed there — and in the *looper* POC that preceded boucle —
+shaped the design. See the [README](README.md) "Why boucle?" → Origins
+section.
 
 ## 2. Features
 
