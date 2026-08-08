@@ -495,11 +495,14 @@ echo ""
 echo "=== Bot Member ==="
 
 if [ -n "$BOT_ID" ]; then
-  # Check if bot is already a member
-  EXISTING_MEMBER=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/members/$BOT_ID" 2> /dev/null | jq -r '.access_level // empty'|| true)
+  # Check if bot is already a member — members/all includes group-inherited
+  # members (a project-scoped GET /members/$BOT_ID 404s for inherited ones,
+  # and POST then fails with "must be greater than or equal to inherited
+  # membership"). Take the max access level across direct + inherited.
+  EXISTING_MEMBER=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/members/all?user_ids=$BOT_ID" 2> /dev/null | jq -r '[.[] | .access_level] | max // empty' || true)
   if [ -n "$EXISTING_MEMBER" ]; then
-    if [ "$EXISTING_MEMBER" = "30" ]; then
-      log_skip "bot (ID: $BOT_ID) already Developer"
+    if [ "$EXISTING_MEMBER" -ge 30 ]; then
+      log_skip "bot (ID: $BOT_ID) already member (access_level=$EXISTING_MEMBER)"
     else
       run "glab api --hostname $HOST -X PUT /projects/$PROJECT_ID/members/$BOT_ID -f access_level=30 >/dev/null"
       log_pass "bot (ID: $BOT_ID) access level updated to Developer"
