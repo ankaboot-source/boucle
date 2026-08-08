@@ -60,6 +60,23 @@ seven-run POC of a representative loop tool:
   ships step and iteration caps per role, and a concurrency cap on parallel
   issues.
 
+### 🏗️ Origins
+
+Boucle was not designed in a vacuum — it was extracted from a real
+benchmark: **Urgence Palestine**, a humanitarian emergency-aid website the
+maintainer ran as an indie Product Builder (an Astro static site on GitLab,
+deployed to Cloudflare Pages).
+
+Keeping that site running — while agents burned the night away on their own
+machines — is what produced the requirement list above. Before boucle, the
+maintainer ran a **seven-run POC of a representative loop tool** (*looper*):
+it covered only 57% of the autonomous flow (≥80% required), needed 3–5
+manual interventions per loop (≤1 tolerated), and its diff-scoped review
+gate shipped broken code to production (a 404 page and a migration that
+throws at runtime). The irritants above are drawn from that benchmark —
+boucle is the second iteration, designed so these failure modes are
+structurally impossible, not just discouraged.
+
 ## 🚀 Quick start
 
 **Prerequisites:** a GitLab repository with Cloudflare Pages configured as the
