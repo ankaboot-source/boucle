@@ -23,7 +23,7 @@ variables:
   BOUCLE_BUILD_CMD: "npm ci && npm run build"
   BOUCLE_BUILD_OUTPUT: "public"
   # Deploy: swap to any deploy command. Use $$BRANCH (escaped so eval expands it at runtime with
-  # the job-local BRANCH var: "master" for deploy, "boucle/$BOUCLE_ISSUE" for worker preview).
+  # the job-local BRANCH var: "$CI_DEFAULT_BRANCH" for deploy, "boucle/$BOUCLE_ISSUE" for worker preview).
   # Examples:
   #   CF Pages:  "npx wrangler pages deploy $BOUCLE_BUILD_OUTPUT --project-name $BOUCLE_DEPLOY_PROJECT --branch $$BRANCH"
   #   Netlify:   "npx netlify deploy --dir $BOUCLE_BUILD_OUTPUT --alias $$BRANCH"
@@ -302,9 +302,9 @@ check:
       when: never
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
-    # Run on pushes and MRs to master.
-    - if: $CI_COMMIT_BRANCH == "master"
-    - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"
+    # Run on pushes and MRs to $CI_DEFAULT_BRANCH.
+    - if: $CI_COMMIT_BRANCH == "$CI_DEFAULT_BRANCH"
+    - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "$CI_DEFAULT_BRANCH"
   before_script:
     - apt-get update -qq && apt-get install -y -qq curl git make xz-utils jq python3
     # Initialize bats test helper submodules
@@ -647,7 +647,7 @@ dispatch:
           merge)
             # A boucle/<iid> MR was merged directly (human clicked Merge in the
             # GitLab UI, bypassing the approval circuit → merger job). The
-            # push to master already triggered deploy → smoke e2e (no issue
+            # push to $CI_DEFAULT_BRANCH already triggered deploy → smoke e2e (no issue
             # context). Catch up: trigger the catchup job to close the issue
             # + cascade the parent, so it doesn't stay stuck at boucle:approval.
             # MR_ISSUE_IID was extracted from the branch name above (line 173);
@@ -1850,34 +1850,34 @@ worker:
       # Set working label
       set_boucle_label "$BOUCLE_ISSUE" "boucle:working" "boucle::status::bot"
 
-      # Fetch latest master so the branch is based on current master, not the
-      # stale CI clone (master may have advanced between clone and this job).
-      git fetch origin master
+      # Fetch latest $CI_DEFAULT_BRANCH so the branch is based on current $CI_DEFAULT_BRANCH, not the
+      # stale CI clone ($CI_DEFAULT_BRANCH may have advanced between clone and this job).
+      git fetch origin $CI_DEFAULT_BRANCH
 
       # Create/checkout branch (stable name — iteration 2+ reuses the branch).
       # Preserve prior worker commits across iterations: rebase onto
-      # origin/master instead of wiping. Without this, a reviewer FAIL on a
+      # origin/$CI_DEFAULT_BRANCH instead of wiping. Without this, a reviewer FAIL on a
       # stale preview (not on the code) forces the next worker to re-implement
       # from scratch — 50 steps is not enough to rebuild a complex feature
       # (issue #35 on up/urgence-palestine.fr: commit 6ca8aa33 with the full
       # FeaturedFeed.astro implementation was wiped by reset --hard, the next
       # worker exhausted its step budget reconstituting context and produced
       # zero code changes). If the branch has worker commits (diff vs
-      # origin/master is non-empty), rebase to incorporate master updates while
+      # origin/$CI_DEFAULT_BRANCH is non-empty), rebase to incorporate $CI_DEFAULT_BRANCH updates while
       # keeping the work. If the rebase conflicts or the branch has no worker
-      # commits, reset to origin/master (clean slate).
+      # commits, reset to origin/$CI_DEFAULT_BRANCH (clean slate).
       BRANCH="boucle/$BOUCLE_ISSUE"
       if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
         git checkout "$BRANCH"
-        if git log --oneline origin/master.."$BRANCH" 2>/dev/null | grep -q .; then
-          echo "[boucle] Branch has prior worker commits — rebasing onto origin/master to preserve work."
-          if ! git rebase origin/master; then
-            echo "[boucle] Rebase conflicted — resetting to origin/master (prior work lost)."
+        if git log --oneline origin/$CI_DEFAULT_BRANCH.."$BRANCH" 2>/dev/null | grep -q .; then
+          echo "[boucle] Branch has prior worker commits — rebasing onto origin/$CI_DEFAULT_BRANCH to preserve work."
+          if ! git rebase origin/$CI_DEFAULT_BRANCH; then
+            echo "[boucle] Rebase conflicted — resetting to origin/$CI_DEFAULT_BRANCH (prior work lost)."
             git rebase --abort 2>/dev/null || true
-            git reset --hard origin/master
+            git reset --hard origin/$CI_DEFAULT_BRANCH
           fi
         else
-          git reset --hard origin/master
+          git reset --hard origin/$CI_DEFAULT_BRANCH
         fi
       else
         git checkout -b "$BRANCH"
@@ -1889,7 +1889,7 @@ worker:
       # tracked despite .gitignore) and `git checkout` refuses to overwrite
       # them, failing the worker with "Your local changes would be overwritten".
       # After checkout, .boucle/ is either absent (untracked, gitignored) or
-      # at the master version (tracked) — either way, cp -a overwrites safely.
+      # at the $CI_DEFAULT_BRANCH version (tracked) — either way, cp -a overwrites safely.
       if [ -d "$ISSUE_STATE_CACHE" ]; then
         echo "[boucle] Restoring .boucle/$BOUCLE_ISSUE/ from $ISSUE_STATE_CACHE"
         mkdir -p ".boucle/$BOUCLE_ISSUE"
@@ -2113,11 +2113,11 @@ worker:
         git commit -m "chore: ignore .wrangler/ cache [skip ci]" --no-verify
       fi
 
-      # Guard: if the agent produced no changes vs master (only .gitignore
+      # Guard: if the agent produced no changes vs $CI_DEFAULT_BRANCH (only .gitignore
       # churn from the .wrangler chore above), don't create an empty MR.
       # This happens when the agent exhausts its step budget without writing
       # code. Re-trigger (iter < MAX) or escalate to human (iter == MAX).
-      DIFF_FILES=$(git diff --name-only origin/master..HEAD 2>/dev/null | grep -v '^\.gitignore$' || true)
+      DIFF_FILES=$(git diff --name-only origin/$CI_DEFAULT_BRANCH..HEAD 2>/dev/null | grep -v '^\.gitignore$' || true)
       if [ -z "$DIFF_FILES" ]; then
         ITERATION="${BOUCLE_ITERATION:-1}"
         MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
@@ -2142,7 +2142,7 @@ worker:
           glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
             -f body="🔄 Worker produced no code changes on iteration $ITERATION (agent likely exhausted its step budget). Re-running (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null
           curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-            -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+            -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=$CI_DEFAULT_BRANCH" \
             -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=worker" \
             -F "variables[BOUCLE_ITERATION]=$((ITERATION+1))" > /dev/null
         else
@@ -2154,16 +2154,16 @@ worker:
         exit 1
       fi
 
-      # Rebase onto latest master before pushing. master may have advanced
+      # Rebase onto latest $CI_DEFAULT_BRANCH before pushing. $CI_DEFAULT_BRANCH may have advanced
       # (other MRs merged) since this branch was created — without a rebase
       # the MR goes stale and GitLab reports it as conflicted, blocking merge.
       # On rebase conflict: fail fast to human instead of shipping a broken MR.
       # NOTE: rebase runs BEFORE the build — build output dirties the working
       # tree (tracked files like public/), and rebase refuses to run on a dirty
       # tree ("cannot rebase: You have unstaged changes").
-      git fetch origin master
-      if ! git rebase origin/master; then
-        echo "FAIL: rebase onto origin/master conflicted — master advanced since branch creation." >&2
+      git fetch origin $CI_DEFAULT_BRANCH
+      if ! git rebase origin/$CI_DEFAULT_BRANCH; then
+        echo "FAIL: rebase onto origin/$CI_DEFAULT_BRANCH conflicted — $CI_DEFAULT_BRANCH advanced since branch creation." >&2
         git rebase --abort 2>/dev/null || true
         ITERATION="${BOUCLE_ITERATION:-1}"
         MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
@@ -2177,16 +2177,16 @@ worker:
             echo "boucle: issue #$BOUCLE_ISSUE is closed — not re-triggering worker after rebase conflict (no-op on closed issue)"
             exit 1
           fi
-          echo "Re-triggering worker (iteration $((ITERATION+1))/$MAX_ITER) — next run resets branch to origin/master, no rebase needed." >&2
+          echo "Re-triggering worker (iteration $((ITERATION+1))/$MAX_ITER) — next run resets branch to origin/$CI_DEFAULT_BRANCH, no rebase needed." >&2
           set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
           glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-            -f body="🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh master (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null
+            -f body="🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh $CI_DEFAULT_BRANCH (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null
           chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=$((ITERATION+1))
         else
           echo "Escalating to human (boucle:human) — iteration cap ($MAX_ITER) reached after repeated rebase conflicts." >&2
           set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
           glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-            -f body="⚠️ Worker could not rebase onto master (conflict) after $MAX_ITER attempts. Master keeps advancing. Human intervention needed." > /dev/null
+            -f body="⚠️ Worker could not rebase onto $CI_DEFAULT_BRANCH (conflict) after $MAX_ITER attempts. Master keeps advancing. Human intervention needed." > /dev/null
         fi
         exit 1
       fi
@@ -2222,7 +2222,7 @@ worker:
 
       # Push branch FIRST (agent already committed; we just push).
       # This persists the agent's work even if the deploy step later times out.
-      # Use --force (not --force-with-lease): the worker resets to origin/master
+      # Use --force (not --force-with-lease): the worker resets to origin/$CI_DEFAULT_BRANCH
       # at the start of every run, so we always want to overwrite the remote
       # branch regardless of its current state (previous failed runs, stale
       # refs, etc.). --force-with-lease fails when the remote-tracking ref is
@@ -2264,11 +2264,11 @@ worker:
       PREVIEW_URL=$(preview_url_for_changed_files "$PREVIEW_URL")
 
       # Build MR description with context (printf keeps YAML-valid, no multi-line string)
-      # NOTE: CI checks out a detached HEAD — there is no local `master` ref.
-      # Use origin/master (remote-tracking ref, refreshed by the fetch above) instead.
+      # NOTE: CI checks out a detached HEAD — there is no local `$CI_DEFAULT_BRANCH` ref.
+      # Use origin/$CI_DEFAULT_BRANCH (remote-tracking ref, refreshed by the fetch above) instead.
       ITERATION="${BOUCLE_ITERATION:-1}"
-      COMMIT_COUNT=$(git log origin/master.."$BRANCH" --oneline 2>/dev/null | wc -l | tr -d ' ')
-      COMMIT_SUMMARY=$(git log origin/master.."$BRANCH" --format='- %s' 2>/dev/null | head -10)
+      COMMIT_COUNT=$(git log origin/$CI_DEFAULT_BRANCH.."$BRANCH" --oneline 2>/dev/null | wc -l | tr -d ' ')
+      COMMIT_SUMMARY=$(git log origin/$CI_DEFAULT_BRANCH.."$BRANCH" --format='- %s' 2>/dev/null | head -10)
       APPROACH=""
       if [ -f ".boucle-state/$BOUCLE_ISSUE/state.md" ]; then
         APPROACH=$(sed -n '/^## Approach/,/^## /p' ".boucle-state/$BOUCLE_ISSUE/state.md" | head -n -1 | tail -n +2 | head -20)
@@ -2338,7 +2338,7 @@ worker:
       MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?source_branch=$BRANCH&state=opened" 2>/dev/null | jq -r '.[0].iid // empty')
       if [ -z "$MR_IID" ]; then
         # Open MR with rich description
-        glab mr create --source-branch "$BRANCH" --target-branch master \
+        glab mr create --source-branch "$BRANCH" --target-branch $CI_DEFAULT_BRANCH \
           --title "$MR_TITLE" \
           --description "$MR_DESCRIPTION" > /dev/null
         MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?source_branch=$BRANCH" | jq -r '.[0].iid')
@@ -2762,7 +2762,7 @@ reviewer:
           assign_mr_to_author
           # Set boucle:approval (waits for author to approve the MR natively)
           set_boucle_label "$BOUCLE_ISSUE" "boucle:approval" "boucle::status::human"
-          APPROVAL_MSG=$(printf '✅ Reviewer verdict: **PASS**. MR !%s is ready to merge.\n\nThe MR has been assigned to you for approval. To approve and merge, click the **Approve** button on [MR !%s](%s). The merger will then rebase the MR onto master and merge it serially (avoiding conflicts with other approved MRs).' "$MR_IID" "$MR_IID" "$MR_URL")
+          APPROVAL_MSG=$(printf '✅ Reviewer verdict: **PASS**. MR !%s is ready to merge.\n\nThe MR has been assigned to you for approval. To approve and merge, click the **Approve** button on [MR !%s](%s). The merger will then rebase the MR onto $CI_DEFAULT_BRANCH and merge it serially (avoiding conflicts with other approved MRs).' "$MR_IID" "$MR_IID" "$MR_URL")
           glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
             -f body="$APPROVAL_MSG" > /dev/null
           # Race condition recovery: the human may have approved the MR
@@ -2776,7 +2776,7 @@ reviewer:
           if [ "${MR_APPROVED_COUNT:-0}" -gt 0 ]; then
             echo "MR !${MR_IID} was already approved ($MR_APPROVED_COUNT) before reviewer PASS — triggering merger (race condition recovery)"
             curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-              -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+              -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=$CI_DEFAULT_BRANCH" \
               -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=merger" > /dev/null
           fi
           ;;
@@ -2866,7 +2866,7 @@ reviewer:
 # Triggered by dispatch when an author approves a MR natively (GitLab
 # merge_request webhook, action=approved). The resource_group serializes
 # merges across all issues — only one MR merges at a time, so each merge
-# rebases onto a master that already includes the previous merge,
+# rebases onto a $CI_DEFAULT_BRANCH that already includes the previous merge,
 # eliminating the class of conflicts we hit when merging 4 MRs in parallel.
 # After merge, triggers e2e WITH BOUCLE_ISSUE set (fixes the design gap where
 # deploy-triggered e2e had no issue context and maybe_close_parent never ran).
@@ -2968,14 +2968,14 @@ merger:
         exit 1
       fi
 
-      # Refresh master so we rebase onto the latest (another MR may have just
+      # Refresh $CI_DEFAULT_BRANCH so we rebase onto the latest (another MR may have just
       # merged — the resource_group guarantees we're the only merger running,
-      # but master may have advanced since this MR was created).
+      # but $CI_DEFAULT_BRANCH may have advanced since this MR was created).
       # Also fetch the MR branch itself — CI clones with --depth=1 and only the
-      # ref that triggered the pipeline (master for merger role), so the MR
+      # ref that triggered the pipeline ($CI_DEFAULT_BRANCH for merger role), so the MR
       # branch ref is NOT present in the local clone by default.
       BRANCH="boucle/$BOUCLE_ISSUE"
-      git fetch origin master "$BRANCH"
+      git fetch origin $CI_DEFAULT_BRANCH "$BRANCH"
 
       # Set git identity BEFORE the rebase — git rebase rewrites commits and
       # needs a committer identity. On a fresh docker executor there is no
@@ -2984,23 +2984,23 @@ merger:
       git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
       git remote set-url origin "https://${BOUCLE_BOT_USERNAME:-up-bot}:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${CI_PROJECT_PATH}.git"
 
-      # Rebase the MR branch onto latest master. This is the key conflict-
+      # Rebase the MR branch onto latest $CI_DEFAULT_BRANCH. This is the key conflict-
       # avoidance mechanism: because merges are serialized, each rebase is
-      # against a master that already includes all previously-merged MRs.
+      # against a $CI_DEFAULT_BRANCH that already includes all previously-merged MRs.
       git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
-      if ! git rebase origin/master; then
-        echo "FAIL: rebase onto origin/master conflicted — even after serial merge." >&2
+      if ! git rebase origin/$CI_DEFAULT_BRANCH; then
+        echo "FAIL: rebase onto origin/$CI_DEFAULT_BRANCH conflicted — even after serial merge." >&2
         git rebase --abort 2>/dev/null || true
-        echo "Re-triggering worker (iteration 1) — the MR will be regenerated on fresh master, no rebase needed." >&2
+        echo "Re-triggering worker (iteration 1) — the MR will be regenerated on fresh $CI_DEFAULT_BRANCH, no rebase needed." >&2
         set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
         glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-          -f body="🔄 Merger could not rebase MR !${MR_IID} onto master (conflict). Re-running the worker on fresh master to regenerate the MR." > /dev/null
+          -f body="🔄 Merger could not rebase MR !${MR_IID} onto $CI_DEFAULT_BRANCH (conflict). Re-running the worker on fresh $CI_DEFAULT_BRANCH to regenerate the MR." > /dev/null
         chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=1
         exit 1
       fi
 
       # Push the rebased branch
-      # Use --force: the merger rebased onto master, so the local branch has
+      # Use --force: the merger rebased onto $CI_DEFAULT_BRANCH, so the local branch has
       # diverged from the remote. --force-with-lease fails if the remote-tracking
       # ref is stale (not fetched). We always want to overwrite with the rebased
       # branch.
@@ -3163,7 +3163,7 @@ post-merge:
       set +o pipefail
       export BOUCLE_ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
 
-      # The merge pushed to master → triggers deploy → deploy triggers e2e.
+      # The merge pushed to $CI_DEFAULT_BRANCH → triggers deploy → deploy triggers e2e.
       # BUT deploy-triggered e2e has no BOUCLE_ISSUE context, so
       # maybe_close_parent never runs. Fix: trigger e2e directly WITH
       # BOUCLE_ISSUE set, so the issue gets boucle:done + closed + parent cascade.
@@ -3171,8 +3171,8 @@ post-merge:
       # before e2e can test it). Poll for the deploy pipeline to complete.
       echo "Waiting for deploy pipeline to complete before triggering e2e..."
       for i in $(seq 1 60); do
-        # Find the latest deploy pipeline for master
-        DEPLOY_PIPELINES=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/pipelines?ref=master&per_page=5" 2>/dev/null)
+        # Find the latest deploy pipeline for $CI_DEFAULT_BRANCH
+        DEPLOY_PIPELINES=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/pipelines?ref=$CI_DEFAULT_BRANCH&per_page=5" 2>/dev/null)
         DEPLOY_STATUS=$(echo "$DEPLOY_PIPELINES" | jq -r '[.[] | select(.source == "push")] | first | .status // "unknown"')
         if [ "$DEPLOY_STATUS" = "success" ] || [ "$DEPLOY_STATUS" = "failed" ] || [ "$DEPLOY_STATUS" = "canceled" ]; then
           echo "Deploy pipeline status: $DEPLOY_STATUS"
@@ -3197,7 +3197,7 @@ post-merge:
 # ── Catchup (direct merge recovery) ────────────────────────────────────
 # Triggered by dispatch when a human merges a boucle/<iid> MR directly
 # (merge_request webhook, action=merge), bypassing the approval circuit.
-# The push to master already triggered deploy → smoke e2e (no issue
+# The push to $CI_DEFAULT_BRANCH already triggered deploy → smoke e2e (no issue
 # context). This job catches up: inspects the issue state, sets
 # boucle:done (if was at boucle:approval) or boucle:human (if merged
 # early), posts an audit comment, closes the issue, and cascades the
@@ -3469,7 +3469,7 @@ catchup:
               -f body="$unblock_body" > /dev/null 2>&1 || true
             if ! issue_has_active_pipeline "$sib_iid"; then
               curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-                -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+                -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=$CI_DEFAULT_BRANCH" \
                 -F "variables[BOUCLE_ISSUE]=$sib_iid" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
             fi
           fi
@@ -3560,7 +3560,7 @@ catchup:
       maybe_unblock_dependents "$BOUCLE_ISSUE"
   timeout: 5m
 
-# ── Deploy (on push to master) ─────────────────────────────────────────
+# ── Deploy (on push to $CI_DEFAULT_BRANCH) ─────────────────────────────────────────
 deploy:
   stage: deploy
   # Auto-retry transient runner failures (runner busy/offline, OOM, daemon restart).
@@ -3591,8 +3591,8 @@ deploy:
       # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
       set +o pipefail
       eval "$BOUCLE_BUILD_CMD"
-      # Deploy to production (configurable via BOUCLE_DEPLOY_CMD, force master branch)
-      BRANCH=master
+      # Deploy to production (configurable via BOUCLE_DEPLOY_CMD, force $CI_DEFAULT_BRANCH branch)
+      BRANCH=$CI_DEFAULT_BRANCH
       DEPLOY_URL=$(eval "$BOUCLE_DEPLOY_CMD" 2>&1 | grep -oE "$BOUCLE_DEPLOY_URL_REGEX" | head -1)
 
       # Assert: deployment URL returns 200 (production domain may not have DNS yet).
@@ -3625,7 +3625,7 @@ deploy:
 
       # Chain to e2e with the deployment URL (production domain may not have DNS yet)
       curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-        -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+        -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=$CI_DEFAULT_BRANCH" \
         -F "variables[BOUCLE_ROLE]=e2e" \
         -F "variables[BOUCLE_LIVE_URL]=$DEPLOY_URL" > /dev/null
   timeout: 10m
@@ -3758,7 +3758,7 @@ e2e:
               -f body="$unblock_body" > /dev/null 2>&1 || true
             if ! issue_has_active_pipeline "$sib_iid"; then
               curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-                -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+                -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=$CI_DEFAULT_BRANCH" \
                 -F "variables[BOUCLE_ISSUE]=$sib_iid" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
             fi
           fi
@@ -3968,7 +3968,7 @@ e2e:
         if [ "$ITERATION" -lt "$MAX_ITER" ]; then
           echo "Re-triggering e2e (iteration $((ITERATION+1))/$MAX_ITER)."
           curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-            -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master" \
+            -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=$CI_DEFAULT_BRANCH" \
             -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=e2e" \
             -F "variables[BOUCLE_ITERATION]=$((ITERATION+1))" > /dev/null
         else
@@ -4501,7 +4501,7 @@ doctor:
       # conflicts by re-triggering the worker (rebase conflict → boucle:todo
       # → worker iteration 1), so triggering the merger on a conflicted MR
       # is safe — it either merges (after successful rebase) or re-runs the
-      # worker on fresh master.
+      # worker on fresh $CI_DEFAULT_BRANCH.
       echo "Scanning boucle:human + boucle:approval issues for approved MRs..."
       RECOVERY_IIDS=""
       for RECOV_LABEL in boucle:human boucle:approval; do
@@ -4533,7 +4533,7 @@ doctor:
           RECOVERED=$((RECOVERED + 1))
         elif [ "$APPROVED_COUNT" -gt 0 ] && [ "$MR_MERGE_STATUS" != "mergeable" ]; then
           # Approved but NOT mergeable (conflict/checking/blocked). Trigger
-          # the merger anyway: it will rebase onto fresh master. On conflict
+          # the merger anyway: it will rebase onto fresh $CI_DEFAULT_BRANCH. On conflict
           # the merger reverts to boucle:todo + worker (iter 1) to
           # regenerate the MR. Without this, an approved MR with conflicts
           # at boucle:approval/boucle:human hangs forever — no other path

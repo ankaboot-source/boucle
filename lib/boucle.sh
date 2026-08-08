@@ -285,7 +285,7 @@ preview_url_for_changed_files() {
     echo ""
     return
   }
-  changed=$(git diff --name-only origin/master..."$BRANCH" 2> /dev/null)
+  changed=$(git diff --name-only origin/${CI_DEFAULT_BRANCH:-main}..."$BRANCH" 2> /dev/null)
   [ -z "$changed" ] && {
     echo "$base_url"
     return
@@ -350,7 +350,7 @@ chain_to_role() {
   # Build the curl args array dynamically — no eval needed.
   local -a args=(
     -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline"
-    -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=master"
+    -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=${CI_DEFAULT_BRANCH:-main}"
     -F "variables[BOUCLE_ISSUE]=$issue_iid"
   )
   if [ -n "$role" ]; then

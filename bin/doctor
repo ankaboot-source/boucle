@@ -59,19 +59,23 @@ else
 fi
 
 # ── Branch protection ──────────────────────────────────────────────────
-PROTECTION=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/protected_branches/master" 2> /dev/null || echo "")
+# Resolve the default branch (main/master) via the API instead of
+# hardcoding "master" — the product must work on any default branch.
+DEFAULT_BRANCH=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID" 2> /dev/null | jq -r '.default_branch // empty' 2> /dev/null)
+[ -z "$DEFAULT_BRANCH" ] && DEFAULT_BRANCH="main"
+PROTECTION=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/protected_branches/$DEFAULT_BRANCH" 2> /dev/null || echo "")
 if echo "$PROTECTION" | jq -e '.merge_access_levels[0].access_level == 40' > /dev/null 2>&1; then
-  pass "master protected, merge=Maintainer only"
+  pass "$DEFAULT_BRANCH protected, merge=Maintainer only"
 else
-  fail "master not protected or merge access too broad"
+  fail "$DEFAULT_BRANCH not protected or merge access too broad"
 fi
 
 # Check bot push permission (required for label changes, MR commits, etc.)
 PUSH_LEVEL=$(echo "$PROTECTION" | jq -r '.push_access_levels[0].access_level // empty' 2> /dev/null)
 if [ "$PUSH_LEVEL" = "30" ] || [ "$PUSH_LEVEL" = "40" ]; then
-  pass "bot can push to master (push_access_level=$PUSH_LEVEL)"
+  pass "bot can push to $DEFAULT_BRANCH (push_access_level=$PUSH_LEVEL)"
 else
-  fail "bot cannot push to master (push_access_level=${PUSH_LEVEL:-none}, need 30+)"
+  fail "bot cannot push to $DEFAULT_BRANCH (push_access_level=${PUSH_LEVEL:-none}, need 30+)"
 fi
 
 # ── Trigger token valid ────────────────────────────────────────────────
