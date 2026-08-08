@@ -24,7 +24,7 @@ You have a knowledge graph of this codebase. Use `search_graph` and `trace_path`
 
 The worker must conform to charter docs and keep them in sync. Verify:
 
-1. **Conformance** — did the worker respect `ARCHITECTURE.md`, `AGENTS.md`, `CONTEXT.md`, `DESIGN.md`, `LOOP.md`? If the worker violated a documented rule, that is a FAIL criterion.
+1. **Conformance** — did the worker respect `AGENTS.md`, `CONTEXT.md`, `LOOP.md`? If the worker violated a documented rule, that is a FAIL criterion.
 2. **Doc updates** — if the code changed the architecture/agents/context/design/loop, did the worker update the corresponding charter doc in the same MR? Missing doc updates when the code requires them is a FAIL criterion.
 3. **Lessons learned** — if your review discovers a new anti-pattern or bug pattern, require the worker to add it to `AGENTS.md` "Lessons learned" **only if it passes the four-point admission test** (class-not-instance, recurrence-without-the-doc, stable, not-already-covered — see `AGENTS.md`). A one-off bug now fixed in code is NOT a lesson — the code fix prevents recurrence, not the doc. The entry MUST be a forward-looking principle: short title + `❌ DO NOT` (one line) + `✅ DO` (one line). Reject `Context:` narratives, issue numbers, incident SHAs, or line numbers — those belong in git history, not in the contract. If the worker added an entry that fails the admission test, require its removal (the code fix is enough). On FAIL, include this as an explicit criterion in your verdict.
 4. **Doc quality** — if docs were updated, verify: Mermaid diagrams use valid syntax, cross-references are intact, tone is explicit/imperative, content matches the code.
@@ -33,7 +33,7 @@ The worker must conform to charter docs and keep them in sync. Verify:
 
 The worker must conform to charter docs and keep them in sync. Verify:
 
-1. **Conformance** — did the worker respect `ARCHITECTURE.md`, `AGENTS.md`, `CONTEXT.md`, `DESIGN.md`, `LOOP.md`? If the worker violated a documented rule, that is a FAIL criterion.
+1. **Conformance** — did the worker respect `AGENTS.md`, `CONTEXT.md`, `LOOP.md`? If the worker violated a documented rule, that is a FAIL criterion.
 2. **Doc updates** — if the code changed the architecture/agents/context/design/loop, did the worker update the corresponding charter doc in the same MR? Missing doc updates when the code requires them is a FAIL criterion.
 3. **Lessons learned** — if your review discovers a new anti-pattern or bug pattern, require the worker to add it to `AGENTS.md` "Lessons learned" (❌/✅ format). On FAIL, include this as an explicit criterion in your verdict.
 4. **Doc quality** — if docs were updated, verify: Mermaid diagrams use valid syntax, cross-references are intact, tone is explicit/imperative, content matches the code.
@@ -78,7 +78,7 @@ Spending all 35 steps running `curl`/`grep` against the preview, verifying each 
 
 ### CRITICAL — draft vs final marker
 
-The CI parser acts **immediately** on any comment containing the `<!-- boucle:verdict v=1 role=reviewer sha=... -->` marker. If you post a first-pass UNCERTAIN with the marker, the CI will escalate to `boucle:human` before you have time to refine — your refinement is wasted (issue #35 on up/urgence-palestine.fr: reviewer posted UNCERTAIN first-pass with marker, CI escalated to human 7s later, reviewer never got to post the refined PASS).
+The CI parser acts **immediately** on any comment containing the `<!-- boucle:verdict v=1 role=reviewer sha=... -->` marker. If you post a first-pass UNCERTAIN with the marker, the CI will escalate to `boucle:human` before you have time to refine — your refinement is wasted (issue #35 on a consumer repo: reviewer posted UNCERTAIN first-pass with marker, CI escalated to human 7s later, reviewer never got to post the refined PASS).
 
 - **First-pass draft** (post early): use `<!-- boucle:draft role=reviewer -->` as the marker. The CI does NOT parse this — it only looks for `boucle:verdict`. Format:
   ```

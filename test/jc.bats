@@ -166,20 +166,20 @@ extract_func_body() {
 @test "build_prompt: triage includes prior notes when BOUCLE_ISSUE_NOTES is set" {
   TMPF=$(mktemp)
   extract_func build_prompt "$TMPF"
-  run bash -c "ISSUE=27; BOUCLE_ISSUE_BODY='Amend DESIGN.md'; BOUCLE_ISSUE_NOTES='[tahrir] The Bold Font .ttf is attached
-[up-bot] Where is DESIGN.md?
-[tahrir] DESIGN.md is at repo root'; source '$TMPF'; build_prompt triage"
+  run bash -c "ISSUE=27; BOUCLE_ISSUE_BODY='Amend the README'; BOUCLE_ISSUE_NOTES='[tahrir] The Bold Font .ttf is attached
+[up-bot] Where is the README?
+[tahrir] README.md is at repo root'; source '$TMPF'; build_prompt triage"
   assert_success
   assert_output --partial "Prior discussion"
   assert_output --partial "The Bold Font .ttf is attached"
-  assert_output --partial "DESIGN.md is at repo root"
+  assert_output --partial "README.md is at repo root"
   rm -f "$TMPF"
 }
 
 @test "build_prompt: no prior-notes section when BOUCLE_ISSUE_NOTES is empty" {
   TMPF=$(mktemp)
   extract_func build_prompt "$TMPF"
-  run bash -c "ISSUE=27; BOUCLE_ISSUE_BODY='Amend DESIGN.md'; unset BOUCLE_ISSUE_NOTES; source '$TMPF'; build_prompt triage"
+  run bash -c "ISSUE=27; BOUCLE_ISSUE_BODY='Amend the README'; unset BOUCLE_ISSUE_NOTES; source '$TMPF'; build_prompt triage"
   assert_success
   refute_output --partial "Prior discussion"
   rm -f "$TMPF"
@@ -195,7 +195,7 @@ extract_func_body() {
   # Simulate an agent log that contains a glab issue note call.
   LOG=$(mktemp)
   echo "> triage · minimax-m3
-glab issue note 27 --repo up/urgence-palestine.fr --message \"$(cat <<'EOF'
+glab issue note 27 --repo up/consumer-test --message \"$(cat <<'EOF'
 <!-- boucle:triage v=1 -->
 ## TL;DR
 test

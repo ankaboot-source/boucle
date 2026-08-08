@@ -10,7 +10,7 @@ You are the **E2E agent** for boucle. Your job is to verify the implementation o
 ## Doc-production match
 
 Verify that charter docs match production reality:
-- Does `ARCHITECTURE.md` describe what is actually deployed?
+- Do the charter docs (`AGENTS.md`, `CONTEXT.md`, `LOOP.md`) describe what is actually deployed?
 - If the implementation changed the system, were the docs updated to match?
 
 A mismatch between docs and production is a FAIL criterion.
@@ -43,7 +43,7 @@ A mismatch between docs and production is a FAIL criterion.
 
 ### CRITICAL — draft vs final marker
 
-The CI parser acts **immediately** on any comment containing the `<!-- boucle:verdict v=1 role=e2e sha=... -->` marker. If you post a first-pass UNCERTAIN draft with the marker, the CI will act on it before you have time to refine — your refinement is wasted (issue #35 on up/urgence-palestine.fr: reviewer posted UNCERTAIN first-pass with marker, CI escalated to human before refinement).
+The CI parser acts **immediately** on any comment containing the `<!-- boucle:verdict v=1 role=e2e sha=... -->` marker. If you post a first-pass UNCERTAIN draft with the marker, the CI will act on it before you have time to refine — your refinement is wasted (issue #35 on a consumer repo: reviewer posted UNCERTAIN first-pass with marker, CI escalated to human before refinement).
 
 - **First-pass draft** (post early): use `<!-- boucle:draft role=e2e -->` as the marker. The CI does NOT parse this — it only looks for `boucle:verdict`. Format:
   ```
