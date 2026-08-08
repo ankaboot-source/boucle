@@ -1183,20 +1183,30 @@ triage:
       # new question asked — the exact "retour à une review humaine alors
       # qu'aucune question n'est posée" symptom.
       if [ -z "$DISPOSITION" ]; then
-        # ── Circuit breaker (silent-failure escalation) ─────────────────
+        # ── Circuit breaker (silent-failure / provider-down escalation) ─
         # bin/jc exits 3 when the agent produced NO posted comment AND NO
         # drafted comment (silent failure — e.g. hit OUTPUT_TOKEN_MAX
-        # mid-comment before reaching the glab tool call). If we leave the
-        # issue at boucle:triage, the doctor re-triggers it every 10 min
-        # and the agent fails identically every time → infinite loop
-        # (issue #27 on a consumer repo). Escalate to human instead
-        # so a human can investigate. The issue keeps its boucle:triage
-        # label for traceability but moves to boucle::status::human.
-        if [ "$rc" -eq 3 ]; then
-          echo "[boucle] Silent triage failure (bin/jc exit 3) — escalating issue #$IID to human to break doctor re-trigger loop."
+        # mid-comment before reaching the glab tool call). bin/jc exits 4
+        # when the provider is down / quota exhausted (empty log, no agent
+        # activity, or persistent HTTP 429/402 — this is also the code the
+        # fallback provider path lands on when the fallback fails too). If
+        # we leave the issue at boucle:triage, the doctor re-triggers it
+        # every 10 min and the agent fails identically every time →
+        # infinite loop (issue #27 on a consumer repo). Escalate to human
+        # instead so a human can investigate. The issue keeps its
+        # boucle:triage label for traceability but moves to
+        # boucle::status::human.
+        if [ "$rc" -eq 3 ] || [ "$rc" -eq 4 ]; then
+          if [ "$rc" -eq 4 ]; then
+            echo "[boucle] Triage provider-down failure (bin/jc exit 4) — escalating issue #$IID to human to break doctor re-trigger loop."
+            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+              -f body=":rotating_light: Triage — fournisseur d'IA indisponible ou quota épuisé (429/402) : l'agent n'a rien produit. Passage en revue humaine pour casser la boucle de re-déclenchement. Vérifiez le statut du fournisseur et les crédits. Voir les logs du job $CI_JOB_URL." > /dev/null 2>&1 || true
+          else
+            echo "[boucle] Silent triage failure (bin/jc exit 3) — escalating issue #$IID to human to break doctor re-trigger loop."
+            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
+              -f body=":rotating_light: Triage a échoué en silence (l'agent n'a produit aucun commentaire). Passage en revue humaine pour casser la boucle de re-déclenchement. Voir les logs du job $CI_JOB_URL." > /dev/null 2>&1 || true
+          fi
           set_boucle_label "$IID" "boucle:human" "boucle::status::human"
-          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-            -f body=":rotating_light: Triage a échoué en silence (l'agent n'a produit aucun commentaire). Passage en revue humaine pour casser la boucle de re-déclenchement. Voir les logs du job $CI_JOB_URL." > /dev/null 2>&1 || true
           exit 1
         fi
         echo "[boucle] No new triage comment posted by this run — leaving issue #$IID at boucle:triage, no label change."

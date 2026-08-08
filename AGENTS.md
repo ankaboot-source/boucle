@@ -276,6 +276,17 @@ justification on stdout); the reviewer MUST reject entries that fail it.
 
 30. **Fall back to a second provider before escalating**
     - ❌ DO NOT escalate to a human the moment the primary provider is down.
+    - ❌ DO NOT rely on `is_api_down` (empty log / no agent activity) as
+      the only fallback trigger. A persistent quota error (HTTP 429/402,
+      "you have reached your weekly usage limit") leaves activity traces in
+      the agent log, so `is_api_down` reports the provider as "up" and the
+      loop escalates to a human instead of falling back — even though
+      retrying cannot fix an exhausted quota.
+    - ✅ DO: treat persistent quota exhaustion (HTTP 429/402 or explicit
+      quota/credit messages, detected by `is_quota_exhausted`) as a
+      provider-down condition on the exit-4 path, gated on a non-zero run
+      exit so a successful run that merely quotes "429" is not
+      misclassified.
     - ✅ DO: when `BOUCLE_FALLBACK_PROVIDER` is set, retry with
       `$BOUCLE_FALLBACK_MODEL_<ROLE>` on the exit-4 condition; mark the
       iteration `[FALLBACK: provider/model]`. Escalate only if the fallback
