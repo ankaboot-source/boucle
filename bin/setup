@@ -9,7 +9,7 @@ set -euo pipefail
 # Every flag has a BOUCLE_* env fallback so bin/setup --non-interactive
 # works with zero prompts (AI-agent-driven installs).
 PROJECT="${BOUCLE_PROJECT:-}"
-HOST="${BOUCLE_HOST:-framagit.org}"
+HOST="${BOUCLE_HOST:-}"
 BOT_ID="${BOUCLE_BOT_ID:-}"
 BOT_USERNAME="${BOUCLE_BOT_USERNAME:-up-bot}"
 BOT_TOKEN="${BOUCLE_BOT_TOKEN:-}"
@@ -66,7 +66,8 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Options:"
       echo "  --project <id-or-path>   Target GitLab project ID or path (e.g. 123456 or group/project)"
-      echo "  --host <forge-host>      GitLab host (default: framagit.org)"
+      echo "                           Optional: auto-detected from the origin git remote"
+      echo "  --host <forge-host>      GitLab host (default: framagit.org; auto-detected from origin)"
       echo "  --bot-id <id>            Bot user ID (for adding as project member)"
       echo "  --bot-username <name>    Bot username (default: up-bot; used to seed BOUCLE_BOT_USERNAME CI variable)"
       echo "  --bot-token <pat>        Bot PAT (used as BOUCLE_TOKEN CI variable)"
@@ -77,6 +78,9 @@ while [[ $# -gt 0 ]]; do
       echo "  --non-interactive        No prompts: read config from BOUCLE_* env vars only."
       echo "                           If BOUCLE_LLM_API_KEY is unset, it is skipped and must be"
       echo "                           added manually as a masked CI/CD variable."
+      echo ""
+      echo "  Project and host are auto-detected from the origin git remote when not"
+      echo "  passed, so an install can be a pure copy/paste inside the target repo."
       echo ""
       echo "Env fallbacks: BOUCLE_PROJECT BOUCLE_HOST BOUCLE_BOT_ID BOUCLE_BOT_USERNAME"
       echo "               BOUCLE_BOT_TOKEN BOUCLE_CF_TOKEN BOUCLE_RUNNER_TAG"
@@ -91,8 +95,44 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Validate required args
+# Auto-detect host + project from the origin remote when not provided,
+# so a copy/paste install works with zero values to replace.
+if [ -z "$PROJECT" ] || [ -z "$HOST" ]; then
+  REMOTE_URL="$(git remote get-url origin 2> /dev/null || true)"
+  if [ -n "$REMOTE_URL" ]; then
+    # git@host:group/project.git  →  host, group/project
+    # https://host/group/project.git  →  host, group/project
+    case "$REMOTE_URL" in
+      git@*)
+        REMOTE_HOST="${REMOTE_URL#git@}"
+        REMOTE_HOST="${REMOTE_HOST%%:*}"
+        REMOTE_PATH="${REMOTE_URL#*:}"
+        ;;
+      https://*)
+        REMOTE_BODY="${REMOTE_URL#https://}"
+        REMOTE_HOST="${REMOTE_BODY%%/*}"
+        REMOTE_PATH="${REMOTE_BODY#*/}"
+        ;;
+      ssh://*)
+        REMOTE_BODY="${REMOTE_URL#ssh://}"
+        REMOTE_HOST="${REMOTE_BODY%%/*}"
+        REMOTE_PATH="${REMOTE_BODY#*/}"
+        ;;
+      *)
+        REMOTE_HOST=""
+        REMOTE_PATH=""
+        ;;
+    esac
+    REMOTE_PATH="${REMOTE_PATH%.git}"
+    [ -z "$PROJECT" ] && PROJECT="$REMOTE_PATH"
+    [ -z "$HOST" ] && HOST="$REMOTE_HOST"
+    [ -n "$PROJECT" ] && [ -n "$HOST" ] && \
+      echo "Auto-detected from origin remote: project=$PROJECT host=$HOST"
+  fi
+fi
+HOST="${HOST:-framagit.org}"
 [ -z "$PROJECT" ] && {
-  echo "Error: --project is required" >&2
+  echo "Error: --project is required (run inside the target repo or set BOUCLE_PROJECT)" >&2
   exit 1
 }
 
