@@ -1,0 +1,320 @@
+# .github/workflows/boucle.yml — GitHub Actions workflow for boucle.
+#
+# This is a thin wrapper around `bin/boucle-ci <stage>`. All logic lives in
+# lib/boucle-ci/*.sh (shared with .gitlab-ci.yml) and bin/forge/*.sh (forge
+# abstraction layer). See ARCHITECTURE.md §8.4 for the extension-point design.
+#
+# Forge: GitHub. Set BOUCLE_FORGE=github as a repo variable.
+# Runner: self-hosted with label `boucle` (configure via bin/setup --forge github).
+# Secrets: BOUCLE_TOKEN (bot PAT), CLOUDFLARE_API_TOKEN, PI_AUTH, BOUCLE_LLM_API_KEY.
+# Variables: BOUCLE_FORGE, BOUCLE_FORGE_HOST, BOUCLE_RUNNER_TAG, BOUCLE_SPEC_PROFILE,
+#   BOUCLE_UPDATE_MODE, BOUCLE_MAX_PARALLEL_ISSUES, BOUCLE_MAX_ITERATIONS, etc.
+
+name: boucle
+
+on:
+  issues:
+    types: [opened, reopened, edited, assigned, labeled, closed]
+  pull_request:
+    types: [opened, edited, closed, reopened, ready_for_review, review_requested]
+  pull_request_review:
+    types: [submitted, dismissed]
+  issue_comment:
+    types: [created, edited]
+  pull_request_review_comment:
+    types: [created, edited]
+  push:
+    branches: [$BOUCLE_DEFAULT_BRANCH]
+  schedule:
+    - cron: "*/10 * * * *"  # doctor runs every 10 min
+  workflow_dispatch:
+    inputs:
+      BOUCLE_ISSUE:
+        description: "Issue IID"
+        required: false
+      BOUCLE_ROLE:
+        description: "Role to trigger (triage/worker/reviewer/merger/e2e/catchup)"
+        required: false
+      BOUCLE_ITERATION:
+        description: "Iteration number"
+        required: false
+      BOUCLE_LIVE_URL:
+        description: "Live URL for e2e"
+        required: false
+      BOUCLE_PREVIEW_URL:
+        description: "Preview URL for reviewer"
+        required: false
+
+# ── Environment ────────────────────────────────────────────────────────────────
+env:
+  BOUCLE_FORGE: github
+  BOUCLE_HOME: ${{ github.workspace }}
+  BOUCLE_WORKSPACE: ${{ github.workspace }}
+  BOUCLE_PROJECT_PATH: ${{ github.repository }}
+  BOUCLE_FORGE_HOST: github.com
+  BOUCLE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  BOUCLE_PIPELINE_SOURCE: ${{ github.event_name }}
+  BOUCLE_JOB_ID: ${{ github.run_id }}
+  BOUCLE_JOB_URL: ${{ github.run_url }}
+  BOUCLE_TRIGGER_PAYLOAD: ${{ toJSON(github.event) }}
+  BOUCLE_TOKEN: ${{ secrets.BOUCLE_TOKEN }}
+  BOUCLE_BOT_USERNAME: ${{ vars.BOUCLE_BOT_USERNAME || 'up-bot' }}
+  BOUCLE_BOT_ID: ${{ vars.BOUCLE_BOT_ID || '' }}
+  BOUCLE_RUNNER_TAG: ${{ vars.BOUCLE_RUNNER_TAG || 'boucle' }}
+  BOUCLE_SPEC_PROFILE: ${{ vars.BOUCLE_SPEC_PROFILE || 'product' }}
+  BOUCLE_UPDATE_MODE: ${{ vars.BOUCLE_UPDATE_MODE || 'release' }}
+  BOUCLE_MAX_PARALLEL_ISSUES: ${{ vars.BOUCLE_MAX_PARALLEL_ISSUES || '5' }}
+  BOUCLE_MAX_ITERATIONS: ${{ vars.BOUCLE_MAX_ITERATIONS || '3' }}
+  BOUCLE_STALENESS_THRESHOLD: ${{ vars.BOUCLE_STALENESS_THRESHOLD || '2400' }}
+  BOUCLE_BUILD_CMD: ${{ vars.BOUCLE_BUILD_CMD || 'npm run build' }}
+  BOUCLE_DEPLOY_CMD: ${{ vars.BOUCLE_DEPLOY_CMD || 'npx wrangler pages deploy public --project-name=$BOUCLE_DEPLOY_PROJECT' }}
+  BOUCLE_PREVIEW_PROPAGATION_WAIT: ${{ vars.BOUCLE_PREVIEW_PROPAGATION_WAIT || '60' }}
+  BOUCLE_LLM_BASE_URL: ${{ secrets.BOUCLE_LLM_BASE_URL }}
+  BOUCLE_LLM_API_KEY: ${{ secrets.BOUCLE_LLM_API_KEY }}
+  BOUCLE_FALLBACK_PROVIDER: ${{ vars.BOUCLE_FALLBACK_PROVIDER || '' }}
+  BOUCLE_VISION_ROUTING: ${{ vars.BOUCLE_VISION_ROUTING || 'enabled' }}
+  BOUCLE_VISION_MODEL: ${{ vars.BOUCLE_VISION_MODEL || 'minimax-m3' }}
+  BOUCLE_VISION_ROLES: ${{ vars.BOUCLE_VISION_ROLES || 'triage,worker,reviewer' }}
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  PI_AUTH: ${{ secrets.PI_AUTH }}
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: write
+  metadata: read
+
+# ── Concurrency ─────────────────────────────────────────────────────────────────
+# Serial merge: only one merger job at a time (lesson #8, #10).
+# Per-issue serialization: worker/reviewer/e2e for the same issue don't overlap.
+concurrency:
+  group: boucle-${{ github.event.inputs.BOUCLE_ISSUE || github.event.issue.number || github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+# ── Jobs ────────────────────────────────────────────────────────────────────────
+jobs:
+  # ── check: lint + tests on push/PR to default branch ─────────────────────────
+  check:
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'push' || github.event_name == 'pull_request')
+      && !contains(github.event.head_commit.message, '[skip ci]')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: make check
+
+  # ── dispatch: webhook router (issues, PRs, comments, reviews) ─────────────────
+  dispatch:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'issues'
+      || github.event_name == 'pull_request'
+      || github.event_name == 'issue_comment'
+      || github.event_name == 'pull_request_review'
+      || github.event_name == 'pull_request_review_comment'
+    outputs:
+      issue-iid: ${{ steps.dispatch.outputs.issue-iid }}
+      role: ${{ steps.dispatch.outputs.role }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: |
+          apt-get update -qq && apt-get install -y -qq curl jq git
+          npm install -g glab 2>/dev/null || true
+          # Install gh CLI (pre-installed on ubuntu-latest)
+          gh --version
+      - name: Dispatch
+        id: dispatch
+        run: |
+          export BOUCLE_PROJECT_ID="${{ github.repository }}"
+          bin/boucle-ci dispatch
+          if [ -f .boucle-issue ]; then
+            echo "issue-iid=$(cat .boucle-issue)" >> "$GITHUB_OUTPUT"
+            echo "role=triage" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── triage: analyze issue, post structured comment ───────────────────────────
+  triage:
+    needs: dispatch
+    runs-on: [self-hosted, "${{ vars.BOUCLE_RUNNER_TAG || 'boucle' }}"]
+    if: needs.dispatch.outputs.issue-iid != ''
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup
+        run: |
+          apt-get update -qq && apt-get install -y -qq curl jq git
+          npm install -g glab 2>/dev/null || true
+      - name: Triage
+        env:
+          BOUCLE_ISSUE: ${{ needs.dispatch.outputs.issue-iid }}
+        run: |
+          export BOUCLE_PROJECT_ID="${{ github.repository }}"
+          bin/boucle-ci triage
+
+  # ── worker: implement on branch boucle/<iid> ─────────────────────────────────
+  worker:
+    runs-on: [self-hosted, "${{ vars.BOUCLE_RUNNER_TAG || 'boucle' }}"]
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'worker')
+      || (github.event_name == 'issues' && contains(github.event.action, 'labeled'))
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup
+        run: |
+          apt-get update -qq && apt-get install -y -qq curl jq git
+          npm install -g glab 2>/dev/null || true
+      - name: Worker
+        env:
+          BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE || github.event.issue.number }}
+          BOUCLE_ITERATION: ${{ github.event.inputs.BOUCLE_ITERATION || '1' }}
+        run: |
+          export BOUCLE_PROJECT_ID="${{ github.repository }}"
+          bin/boucle-ci worker
+
+  # ── reviewer: adversarial review against preview ──────────────────────────────
+  reviewer:
+    runs-on: [self-hosted, "${{ vars.BOUCLE_RUNNER_TAG || 'boucle' }}"]
+    if: |
+      github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'reviewer'
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup
+        run: |
+          apt-get update -qq && apt-get install -y -qq curl jq git
+          npm install -g glab 2>/dev/null || true
+      - name: Reviewer
+        env:
+          BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE }}
+          BOUCLE_ITERATION: ${{ github.event.inputs.BOUCLE_ITERATION || '1' }}
+        run: |
+          export BOUCLE_PROJECT_ID="${{ github.repository }}"
+          bin/boucle-ci reviewer
+
+  # ── merger: rebase + merge PR (serial) ────────────────────────────────────────
+  merger:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'merger'
+    timeout-minutes: 10
+    concurrency:
+      group: boucle-merge
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup
+        run: |
+          apt-get update -qq && apt-get install -y -qq curl jq git
+          npm install -g glab 2>/dev/null || true
+      - name: Merger
+        env:
+          BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE }}
+        run: |
+          export BOUCLE_PROJECT_ID="${{ github.repository }}"
+          bin/boucle-ci merger
+
+  # ── post-merge: poll deploy, trigger e2e ──────────────────────────────────────
+  post-merge:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'post-merge'
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup
+        run: |
+          apt-get update -qq && apt-get install -y -qq curl jq git
+          npm install -g glab 2>/dev/null || true
+      - name: Post-merge
+        env:
+          BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE }}
+        run: |
+          export BOUCLE_PROJECT_ID="${{ github.repository }}"
+          bin/boucle-ci post-merge
+
+  # ── catchup: close issue after merge, cascade parent ─────────────────────────
+  catchup:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup
+        run: |
+          apt-get update -qq && apt-get install -y -qq curl jq git
+          npm install -g glab 2>/dev/null || true
+      - name: Catchup
+        run: |
+          export BOUCLE_PROJECT_ID="${{ github.repository }}"
+          bin/boucle-ci catchup
+
+  # ── deploy: build + deploy to Cloudflare Pages (on push to default) ───────────
+  deploy:
+    runs-on: [self-hosted, "${{ vars.BOUCLE_RUNNER_TAG || 'boucle' }}"]
+    if: |
+      github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Deploy
+        run: |
+          export BOUCLE_PROJECT_ID="${{ github.repository }}"
+          bin/boucle-ci deploy
+
+  # ── e2e: verify on live/preview URL ───────────────────────────────────────────
+  e2e:
+    runs-on: [self-hosted, "${{ vars.BOUCLE_RUNNER_TAG || 'boucle' }}"]
+    if: |
+      github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'e2e'
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup
+        run: |
+          apt-get update -qq && apt-get install -y -qq curl jq git
+          npm install -g glab 2>/dev/null || true
+      - name: E2E
+        env:
+          BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE }}
+          BOUCLE_LIVE_URL: ${{ github.event.inputs.BOUCLE_LIVE_URL }}
+        run: |
+          export BOUCLE_PROJECT_ID="${{ github.repository }}"
+          bin/boucle-ci e2e
+
+  # ── doctor: periodic recovery (schedule) ──────────────────────────────────────
+  doctor:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup
+        run: |
+          apt-get update -qq && apt-get install -y -qq curl jq git
+          npm install -g glab 2>/dev/null || true
+      - name: Doctor
+        run: |
+          export BOUCLE_PROJECT_ID="${{ github.repository }}"
+          bin/boucle-ci doctor
