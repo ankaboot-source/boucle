@@ -90,35 +90,43 @@ echo ""
 echo "=== detect_cycle ==="
 
 # 1. No deps → no cycle
-rc=0; detect_cycle "" || rc=$?
+rc=0
+detect_cycle "" || rc=$?
 assert_exit_code "empty graph → no cycle" 1 "$rc"
 
 # 2. A→B, B→A → cycle
-rc=0; detect_cycle "0:1;1:0" || rc=$?
+rc=0
+detect_cycle "0:1;1:0" || rc=$?
 assert_exit_code "A→B, B→A → cycle" 0 "$rc"
 
 # 3. A→B→C, C→A → cycle
-rc=0; detect_cycle "0:1;1:2;2:0" || rc=$?
+rc=0
+detect_cycle "0:1;1:2;2:0" || rc=$?
 assert_exit_code "A→B→C, C→A → cycle" 0 "$rc"
 
 # 4. A→B, A→C (DAG) → no cycle
-rc=0; detect_cycle "0:1 2;1:;2:" || rc=$?
+rc=0
+detect_cycle "0:1 2;1:;2:" || rc=$?
 assert_exit_code "A→B, A→C (DAG) → no cycle" 1 "$rc"
 
 # 5. Single node self-loop A→A → cycle
-rc=0; detect_cycle "0:0" || rc=$?
+rc=0
+detect_cycle "0:0" || rc=$?
 assert_exit_code "self-loop A→A → cycle" 0 "$rc"
 
 # 6. Linear chain A→B→C (no cycle)
-rc=0; detect_cycle "0:1;1:2;2:" || rc=$?
+rc=0
+detect_cycle "0:1;1:2;2:" || rc=$?
 assert_exit_code "linear A→B→C → no cycle" 1 "$rc"
 
 # 7. Diamond DAG A→B, A→C, B→D, C→D (no cycle)
-rc=0; detect_cycle "0:1 2;1:3;2:3;3:" || rc=$?
+rc=0
+detect_cycle "0:1 2;1:3;2:3;3:" || rc=$?
 assert_exit_code "diamond DAG → no cycle" 1 "$rc"
 
 # 8. Two disconnected cycles
-rc=0; detect_cycle "0:1;1:0;2:3;3:2" || rc=$?
+rc=0
+detect_cycle "0:1;1:0;2:3;3:2" || rc=$?
 assert_exit_code "two disconnected cycles → cycle" 0 "$rc"
 
 echo ""
@@ -133,7 +141,7 @@ result=$(resolve_dep_indices "1,3" "41,42,43")
 assert_equal "indices 1,3 → 41,43" "41,43" "$result"
 
 # 3. Index 5 out of range → empty + warning
-result=$(resolve_dep_indices "5" "41,42,43" 2>/dev/null)
+result=$(resolve_dep_indices "5" "41,42,43" 2> /dev/null)
 assert_equal "index 5 out of range → empty" "" "$result"
 
 # 4. Empty raw indices → empty
@@ -145,11 +153,11 @@ result=$(resolve_dep_indices "1" "99")
 assert_equal "single element, index 1 → 99" "99" "$result"
 
 # 6. Index 0 (invalid, 1-based) → empty + warning
-result=$(resolve_dep_indices "0" "41,42,43" 2>/dev/null)
+result=$(resolve_dep_indices "0" "41,42,43" 2> /dev/null)
 assert_equal "index 0 (invalid 1-based) → empty" "" "$result"
 
 # 7. Mixed valid and invalid
-result=$(resolve_dep_indices "1,5,3" "41,42,43" 2>/dev/null)
+result=$(resolve_dep_indices "1,5,3" "41,42,43" 2> /dev/null)
 assert_equal "mixed valid+invalid → 41,43" "41,43" "$result"
 
 echo ""
