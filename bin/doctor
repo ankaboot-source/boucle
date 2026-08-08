@@ -123,15 +123,17 @@ fi
 
 # ── Runner online ──────────────────────────────────────────────────────
 # The runner tag is project-specific infrastructure — boucle must not
-# hardcode it. Require BOUCLE_RUNNER_TAG to be set (via CI variable or
+# hardcode it. Require BOUCLE_RUNS_ON to be set (via CI variable or
 # env); skip the check with a warning if unset rather than guessing.
-if [ -z "${BOUCLE_RUNNER_TAG:-}" ]; then
-  warn "BOUCLE_RUNNER_TAG unset — skipping runner-online check (set it to your project's runner tag)"
+# BOUCLE_RUNS_ON is the forge-agnostic runner selector (GitLab: runner
+# tag; GitHub: runs-on expression, default ubuntu-latest).
+if [ -z "${BOUCLE_RUNS_ON:-}" ]; then
+  warn "BOUCLE_RUNS_ON unset — skipping runner-online check (set it to your project's runner tag)"
 else
-  if glab api --hostname "$HOST" "/projects/$PROJECT_ID/runners" 2> /dev/null | jq -e ".[] | select(.status==\"online\" and (.tag_list | contains([\"$BOUCLE_RUNNER_TAG\"])))" > /dev/null 2>&1; then
-    pass "runner with tag '$BOUCLE_RUNNER_TAG' online"
+  if glab api --hostname "$HOST" "/projects/$PROJECT_ID/runners" 2> /dev/null | jq -e ".[] | select(.status==\"online\" and (.tag_list | contains([\"$BOUCLE_RUNS_ON\"])))" > /dev/null 2>&1; then
+    pass "runner with tag '$BOUCLE_RUNS_ON' online"
   else
-    fail "no runner with tag '$BOUCLE_RUNNER_TAG' online"
+    fail "no runner with tag '$BOUCLE_RUNS_ON' online"
   fi
 fi
 
@@ -187,12 +189,21 @@ else
   fi
 
   # ── Runner online ──────────────────────────────────────────────────────
-  if [ -z "${BOUCLE_RUNNER_TAG:-}" ]; then
-    warn "BOUCLE_RUNNER_TAG unset — skipping runner-online check"
-  elif forge_runner_check "$BOUCLE_RUNNER_TAG"; then
-    pass "runner with tag '$BOUCLE_RUNNER_TAG' online"
+  # GitHub-hosted runners (default: BOUCLE_RUNS_ON=ubuntu-latest) need no
+  # runner check. Only check when BOUCLE_RUNS_ON is set to a self-hosted
+  # runner (e.g. '["self-hosted", "boucle"]'). Extract the label from the
+  # runs-on expression and verify a runner with that label is online.
+  if [ -z "${BOUCLE_RUNS_ON:-}" ] || ! echo "$BOUCLE_RUNS_ON" | grep -q 'self-hosted'; then
+    warn "BOUCLE_RUNS_ON not self-hosted — skipping runner-online check (GitHub-hosted default)"
   else
-    fail "no runner with tag '$BOUCLE_RUNNER_TAG' online"
+    RUNNER_LABEL=$(echo "$BOUCLE_RUNS_ON" | grep -oE '"[a-zA-Z0-9_-]+"' | tr -d '"' | tail -1)
+    if [ -z "$RUNNER_LABEL" ]; then
+      warn "could not parse runner label from BOUCLE_RUNS_ON='$BOUCLE_RUNS_ON' — skipping runner-online check"
+    elif forge_runner_check "$RUNNER_LABEL"; then
+      pass "self-hosted runner with label '$RUNNER_LABEL' online"
+    else
+      fail "no self-hosted runner with label '$RUNNER_LABEL' online"
+    fi
   fi
 
 fi
