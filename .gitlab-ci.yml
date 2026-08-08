@@ -1292,15 +1292,6 @@ triage:
                 glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
                   -f body="$SPEC_MSG" > /dev/null
               fi
-                  fi
-                elif [ -n "$EXISTING_BODY" ]; then
-                  SPEC_MSG_APPENDED=true
-                fi
-              fi
-              if [ "$SPEC_MSG_APPENDED" != "true" ]; then
-                glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-                  -f body="$SPEC_MSG" > /dev/null
-              fi
             else
               # Include gate-skip flag labels (boucle:autonomous / boucle:dnd)
               # so the board shows WHY the gate was skipped. Consumed on the
