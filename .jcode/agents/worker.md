@@ -75,7 +75,7 @@ Before implementing, read the charter docs at the repo root. They are **imperati
 - `LOOP.md` — pipeline, state machine, per-consumer configuration. Conform to the documented loop.
 - `AGENTS.md` — agent rules, mandatory principles, lessons learned. **Never reproduce a documented anti-pattern.** Check the "Lessons learned" section before starting — it catalogs forward-looking operating principles.
 - `CONTEXT.md` — project context, tech stack, constraints, ethics. Respect the stated constraints.
-- The visual charter (consumer site, if present). Conform to typography, colors, layout, motion rules.
+- The visual charter (consumer site, if present). Conform to typography, colors, layout, motion rules. No charter yet? Use the skeleton at `.jcode/visual-charter-template.md` (product context → tokens → motion → components) to create one — the charter overrides generic design recommendations.
 - `LOOP.md` — per-consumer loop configuration. Respect cadence, gates, caps.
 
 `README.md` is for humans and contains no agent instructions — skip it.
@@ -87,7 +87,7 @@ After implementing, check whether your changes require doc updates. **Doc update
 - Changed CI pipeline / agents / bin scripts / state machine → update `LOOP.md`/`AGENTS.md` (use Mermaid syntax for diagrams, keep them in sync with the code).
 - Discovered a bug or anti-pattern → **first** check whether it is a lesson at all. A lesson prevents a *class* of mistakes from recurring — not a one-off bug now fixed in code, not a preference change, not a missing-directory discovery. Run the four-point admission test in `AGENTS.md` ("Lessons learned" → "Admission test"): class-not-instance, recurrence-without-the-doc, stable, not-already-covered. **State on stdout which tests it passes and why.** If it fails any test, fix the code and move on — do not add a lesson. If it passes, add an entry: short title + `❌ DO NOT` (one line) + `✅ DO` (one line). No `Context:` narrative, no issue numbers, no incident SHAs, no line numbers — those live in git history. Capture the lesson at the moment you learn it.
 - Changed project scope / tech stack / constraints → update `CONTEXT.md`.
-- Changed visual conventions (consumer site) → update the visual charter.
+- Changed visual conventions (consumer site) → update the visual charter (use `.jcode/visual-charter-template.md` as the skeleton).
 - Changed loop config / cadence / gates → update `LOOP.md`.
 
 Doc updates rules:

@@ -62,6 +62,7 @@ section.
 | Tests | bats (shell), shellcheck, shfmt |
 | Hooks | pre-commit |
 | Vendored skills | `.jcode/skills/` — content borrowed from the maintainer's skill library, synced from upstream. Only one component ships executable code: `ui-ux-pro-max` (Python stdlib-only, engine of the worker's design skill). No boucle-authored Python. |
+| Visual charter | `.jcode/visual-charter-template.md` — per-site design system file (product context → tokens → motion → components), derivative of superdesign-skill DESIGN.md (MIT). Consumer sites keep their own `VISUAL-CHARTER.md`; the worker reads it before any UI work and it overrides generic design recommendations. |
 
 Boucle is designed to be **forge-agnostic and deploy-agnostic**. Current
 limitations (GitLab only, Cloudflare only) are due to the MVP, not
