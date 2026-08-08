@@ -195,8 +195,6 @@ boucle is free and open-source software licensed under the
 
 ## 📚 Docs
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — system architecture, pipeline, state machine
 - [AGENTS.md](AGENTS.md) — agent guide, lessons learned, anti-patterns
 - [CONTEXT.md](CONTEXT.md) — project context, tech stack, constraints
-- [DESIGN.md](DESIGN.md) — consumer site visual charter
 - [LOOP.md](LOOP.md) — per-consumer configuration

@@ -59,7 +59,7 @@ variables:
   # Doctor staleness threshold (seconds): how long before a boucle:working or
   # boucle:review issue is considered stuck and re-triggered. Default 2400
   # (40 min). MUST be strictly greater than the longest job timeout
-  # (worker/reviewer = 30 min) plus a buffer, per ARCHITECTURE.md §9 —
+  # (worker/reviewer = 30 min) plus a buffer, per AGENTS.md (lesson 33) —
   # otherwise the doctor fires while a job is legitimately still running,
   # producing parasitic duplicate triggers. Lower = faster recovery but
   # more false-positive re-triggers.
@@ -348,7 +348,7 @@ dispatch:
   # trigger pipelines in quick succession) cannot saturate the runner pool
   # with concurrent no-op dispatches. A no-op dispatch exits in seconds, so
   # the queue drains fast; without this, 40 concurrent no-ops paralyze the
-  # shared runner for ~20 min (observed on up/urgence-palestine.fr, 2026-08).
+  # shared runner for ~20 min (observed on a consumer repo, 2026-08).
   # Unlike worker/reviewer (boucle-issue-$BOUCLE_ISSUE), this is a STATIC
   # name — BOUCLE_ISSUE is not available at dispatch eval time, and ALL
   # dispatches should queue regardless of which issue they target.
@@ -452,7 +452,7 @@ dispatch:
       # the path can be unset, empty, or point to a deleted file. Without this
       # guard, `set -e` (GitLab default) propagates jq's exit 5 (system error,
       # file not found) and the script terminates silently with zero stdout —
-      # exactly the failure that hit pipeline #1433434 on up/urgence-palestine.fr.
+      # exactly the failure that hit pipeline #1433434 on a consumer repo.
       # Always produce a breadcrumb (lessons #5, #47) so the next failure mode
       # is visible in the trace.
       echo "dispatch: begin (runner has jq=$(command -v jq 2>/dev/null || echo MISSING), TRIGGER_PAYLOAD='${TRIGGER_PAYLOAD:-unset}')"
@@ -1072,7 +1072,7 @@ triage:
       # Fetch the issue notes (comments) and export them so the triage
       # agent can see prior triage Questions AND the author's answers.
       # Without this, every re-triage re-asks questions the author already
-      # answered (issue #27: 6 repeated triage notes on up/urgence-palestine.fr).
+      # answered (issue #27: 6 repeated triage notes on a consumer repo).
       # GitLab notes API returns newest-first; we reverse to oldest-first
       # and format each note as "[<author>] <body>". We keep ALL notes
       # (including prior triage comments) so the agent can see what it
@@ -1184,7 +1184,7 @@ triage:
         # mid-comment before reaching the glab tool call). If we leave the
         # issue at boucle:triage, the doctor re-triggers it every 10 min
         # and the agent fails identically every time → infinite loop
-        # (issue #27 on up/urgence-palestine.fr). Escalate to human instead
+        # (issue #27 on a consumer repo). Escalate to human instead
         # so a human can investigate. The issue keeps its boucle:triage
         # label for traceability but moves to boucle::status::human.
         if [ "$rc" -eq 3 ]; then
@@ -1223,7 +1223,7 @@ triage:
             # so the human understands why no gate was respected. Each skip
             # path applies a flag label (visible on the board) AND posts an
             # explanatory comment. See AGENTS.md lesson "Gate-skip
-            # transparency" + ARCHITECTURE.md §4.
+            # transparency" + AGENTS.md (lesson 47).
             # Two paths flip SHOULD_GATE=false:
             #   1. boucle:autonomous label on the issue (per-issue opt-in,
             #      applied at creation — takes precedence, intentional).
@@ -1798,7 +1798,7 @@ worker:
       # every iteration starts with a fresh seed (state.md = "(to be
       # determined by worker)", iterations.md = absent) and the worker
       # rebuilds context from scratch — exhausting its step budget before
-      # implementing (issue #35 on up/urgence-palestine.fr: 2 iterations
+      # implementing (issue #35 on a consumer repo: 2 iterations
       # produced zero code changes because the worker spent all 100 steps
       # re-discovering the codebase and re-reading charter docs).
       BOUCLE_STATE_CACHE="${BOUCLE_STATE_CACHE:-${HOME}/.boucle-state-cache}"
@@ -1865,7 +1865,7 @@ worker:
       # origin/$CI_DEFAULT_BRANCH instead of wiping. Without this, a reviewer FAIL on a
       # stale preview (not on the code) forces the next worker to re-implement
       # from scratch — 50 steps is not enough to rebuild a complex feature
-      # (issue #35 on up/urgence-palestine.fr: commit 6ca8aa33 with the full
+      # (issue #35 on a consumer repo: commit 6ca8aa33 with the full
       # FeaturedFeed.astro implementation was wiped by reset --hard, the next
       # worker exhausted its step budget reconstituting context and produced
       # zero code changes). If the branch has worker commits (diff vs
@@ -1950,7 +1950,7 @@ worker:
       # On re-runs (reviewer FAIL, human MR comment, empty MR, rebase conflict),
       # the worker MUST see what the reviewer and humans said on the MR.
       # Without this, each re-run starts blind and repeats the same mistakes
-      # (issue #35 on up/urgence-palestine.fr: 3 FAIL verdicts, same root cause,
+      # (issue #35 on a consumer repo: 3 FAIL verdicts, same root cause,
       # never addressed). We fetch ALL non-system MR notes (reviewer verdicts
       # carry the boucle:verdict marker; human comments are plain text) and
       # inject them into the worker's prompt via BOUCLE_REVIEWER_FEEDBACK.
@@ -1983,7 +1983,7 @@ worker:
       # instructed content (URLs, citations, texts) at hand. Without this, the
       # worker invents placeholders (e.g. Rickroll video IDs) and rewrites the
       # instructed texts instead of preserving them (issue #42 on
-      # up/urgence-palestine.fr: worker used dQw4w9WgXcQ for 2 of 3 videos and
+      # a consumer repo: worker used dQw4w9WgXcQ for 2 of 3 videos and
       # rewrote the Hammouri/Alsoumi citations). Mirrors the triage job.
       export BOUCLE_ISSUE_BODY
       BOUCLE_ISSUE_BODY=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" 2>/dev/null | jq -r '.description // empty' 2>/dev/null || echo "")
@@ -2058,7 +2058,7 @@ worker:
       # "running" until the timeout kills it. Without this detection, the
       # failure is misdiagnosed as "agent likely exhausted its step budget"
       # and the loop re-triggers into the same wall (issue #35 on
-      # up/urgence-palestine.fr: worker hung 40 min with empty log because
+      # a consumer repo: worker hung 40 min with empty log because
       # ollama-cloud credits were exhausted). Post a diagnostic comment on
       # the issue with the available logs and escalate to human immediately
       # — re-triggering won't help if the model is unavailable.
@@ -2131,7 +2131,7 @@ worker:
         # overwrite the description. The previous description may contain a
         # detailed Approach and a working preview URL from the last successful
         # iteration — overwriting it with a "no code changes" placeholder
-        # destroys useful information (issue #35 on up/urgence-palestine.fr:
+        # destroys useful information (issue #35 on a consumer repo:
         # the worker produced a full implementation on iteration 3, then the
         # no-changes handler on a later run wiped the Approach and the working
         # preview URL, replacing them with "(no commits this iteration)").
@@ -2283,7 +2283,7 @@ worker:
       # seed placeholder or empty), note it explicitly so the MR description
       # is not the literal placeholder. The worker is instructed to fill it
       # (worker.md step 8) but consistently doesn't (issue #34 on
-      # up/urgence-palestine.fr: 3 reviewer FAIL verdicts, same root cause).
+      # a consumer repo: 3 reviewer FAIL verdicts, same root cause).
       if [ -z "$APPROACH" ] || [ "$APPROACH" = "(to be determined by worker)" ]; then
         APPROACH="(worker did not record an approach — see commit messages in 'What changed' above)"
       fi
@@ -2354,7 +2354,7 @@ worker:
         # new preview URL, iteration count, and commit summary. Without this,
         # iteration 2+ keeps the stale description from iteration 1 (wrong
         # preview URL, empty Approach) and the reviewer tests the wrong URL
-        # (issue #34 on up/urgence-palestine.fr: MR pointed at the
+        # (issue #34 on a consumer repo: MR pointed at the
         # iteration-1 URL while iteration 2 deployed to a different
         # branch-based URL). Do NOT use `|| true` — a failed update should
         # surface, not be swallowed (the issue #34 fix used `|| true` and
@@ -2365,7 +2365,7 @@ worker:
       # NOTE: do NOT assign the MR to the issue author here. During
       # `boucle:working` the MR belongs to the bot — assigning it to the
       # human at every worker run is premature and confuses the user (issue
-      # #35 on up/urgence-palestine.fr: MR was assigned to tahrir during
+      # #35 on a consumer repo: MR was assigned to tahrir during
       # iteration 2, before any review). The MR is assigned to the author
       # only when their action is actually required: on reviewer PASS
       # (line ~1946, approval needed) or on `boucle:human` escalation
@@ -2561,7 +2561,7 @@ reviewer:
       # that the MR content (texts, video URLs, citations) matches what the
       # issue actually instructed. Without this, the reviewer only sees the
       # MR diff + the human amendments and cannot detect content regressions
-      # vs. the original issue (issue #42 on up/urgence-palestine.fr: reviewer
+      # vs. the original issue (issue #42 on a consumer repo: reviewer
       # posted "Leaning PASS" on an iteration that had Rickroll placeholder
       # videos and rewritten citations, because it had no issue body to
       # compare against). Mirrors the triage and worker jobs.
@@ -2651,7 +2651,7 @@ reviewer:
       # Run the log-scraping if VERDICT is empty OR if the verdict we found is
       # SHA-stale (VERDICT_SHA_MATCHED=false). A stale verdict from a previous
       # iteration is worse than the current run's drafted verdict in stdout.
-      # (issue #35 on up/urgence-palestine.fr: reviewer posted FAIL in stdout
+      # (issue #35 on a consumer repo: reviewer posted FAIL in stdout
       # but exhausted steps before posting via glab; SHA-unanchored fallback
       # found an old UNCERTAIN verdict with a different SHA, set
       # VERDICT=UNCERTAIN, and the log-scraping was skipped — the FAIL verdict
@@ -2809,7 +2809,7 @@ reviewer:
             # Assign the MR to the issue author so they're notified that human
             # intervention is required. Without this, the user never gets a
             # signal that the loop exhausted its iterations (issue #35 on
-            # up/urgence-palestine.fr: MR stayed assigned to the bot after 3
+            # a consumer repo: MR stayed assigned to the bot after 3
             # reviewer FAILs, the user saw no notification).
             assign_mr_to_author
             ESCALATION_MSG=$(printf '⚠️ Reviewer verdict: **FAIL** after %s iterations. The loop could not satisfy the acceptance criteria automatically.\n\nThe MR has been assigned to you for manual review. Inspect [MR !%s](%s) and the reviewer verdicts, then either:\n- **Approve** the MR if the work is acceptable (the merger will rebase + merge), or\n- **Comment** with guidance and re-assign to the bot to re-trigger the worker.' "$MAX_ITER" "$MR_IID" "$MR_URL")
@@ -2823,7 +2823,7 @@ reviewer:
           # (agent crashed / step-exhausted before posting a verdict) is
           # handled by the post-case assertion below, which re-triggers the
           # reviewer instead of prematurely escalating to human. Conflating
-          # the two caused MR !40 on up/urgence-palestine.fr: the reviewer
+          # the two caused MR !40 on a consumer repo: the reviewer
           # posted only drafts on iterations 1-2 (no VERDICT line), the
           # catch-all fired, assigned the MR to the human and set
           # boucle:human BEFORE the re-triggered reviewer could finish —

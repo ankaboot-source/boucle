@@ -20,20 +20,18 @@ You have a knowledge graph of this codebase. Use `search_graph` and `get_archite
   - `codebase-memory-mcp cli get_architecture '{"aspects":["all"]}'`
 
 **Charter files at the repo root answer most design/intent questions.** Before asking the author anything, check whether the answer already lives in one of:
-- `ARCHITECTURE.md` — system architecture, CI pipeline, state machine, Mermaid diagrams
 - `AGENTS.md` — agent workflow rules, constraints, lessons learned (anti-patterns)
 - `CONTEXT.md` — project context, purpose, tech stack, constraints, ethics
-- `DESIGN.md` — visual charter (typography, colors, layout, symbols, motion style)
 - `LOOP.md` — per-consumer loop configuration (target repo, cadence, gates, caps)
 - `README.md` — project overview and setup (for humans; contains no agent instructions)
 
-If a charter file exists and answers your question, do NOT ask the author — incorporate the answer into your analysis. Asking "where is DESIGN.md?" or "does DESIGN.md specify X?" when DESIGN.md is at the repo root is a triage defect.
+If a charter file exists and answers your question, do NOT ask the author — incorporate the answer into your analysis. Asking "where is the visual charter?" or "does CONTEXT.md specify X?" when the answer is at the repo root is a triage defect.
 
 **Docs impact assessment.** In your Analysis section, identify which charter docs this issue touches (if any). This tells the worker which docs to update alongside the code. Map the issue to docs:
-- CI pipeline / agents / bin scripts / state machine changes → `ARCHITECTURE.md`
+- CI pipeline / agents / bin scripts / state machine changes → `LOOP.md` (pipeline) / `AGENTS.md` (agents, lessons)
 - Agent behavior / workflow rules / new anti-patterns → `AGENTS.md`
 - Project scope / tech stack / constraints / ethics → `CONTEXT.md`
-- Visual design / typography / layout / motion → `DESIGN.md`
+- Visual design / typography / layout / motion → the visual charter (consumer site, if present)
 - Loop config / cadence / gates / caps → `LOOP.md`
 If the issue touches none, write "Docs impact: none" in Analysis.
 
@@ -183,7 +181,7 @@ The CI sees the final marker + `## Disposition` and acts immediately — it sets
 1. **Read the issue body** (provided in your prompt as `$BOUCLE_ISSUE_BODY` — do NOT call `glab issue view` or `gh issue view`; the body is already in your prompt). If image paths are listed in your prompt, `Read` each file. If no images are listed, proceed with text only.
 2. **Read the Prior discussion** (provided in your prompt as the "Prior discussion" block, when present). This is the chronological list of prior issue notes — it includes your own previous triage comments AND the author's answers. **If a prior triage comment asked a question and the author has since answered it, do NOT re-ask the same question.** Incorporate the answer into your analysis and move the disposition forward (NEEDS-INFO → READY or NEEDS-SPLIT). Re-asking answered questions is a triage defect — it wastes a loop cycle and frustrates the author. If the author has NOT yet answered a prior question, you may keep it in your Questions section, but do not duplicate questions that are already answered.
 3. **Post a triage draft** with `glab issue note <iid> --repo <project> --message "$(cat <<'EOF' ... EOF)"`. Use the `<!-- boucle:draft role=triage -->` marker (NOT `boucle:triage`). Use a conservative disposition if unsure (NEEDS-INFO > NEEDS-SPLIT > READY) so the loop pauses safely. If you explored first (per the guideline above), post now — do not explore further.
-4. You may use tool calls to inspect the repo (`ls`, `grep`, `Read`) for a more accurate size classification or sharper criteria. Prefer `ls` and `grep` over full `Read` of large files. Do NOT read more than 2-3 files fully. **Before asking the author about design/intent, `Read` the charter files at the repo root (DESIGN.md, AGENTS.md, README.md) — they usually answer design questions.** Keep exploration tight and post the moment you have enough for a conservative first-pass draft.
+4. You may use tool calls to inspect the repo (`ls`, `grep`, `Read`) for a more accurate size classification or sharper criteria. Prefer `ls` and `grep` over full `Read` of large files. Do NOT read more than 2-3 files fully. **Before asking the author about design/intent, `Read` the charter files at the repo root (AGENTS.md, CONTEXT.md, README.md) — they usually answer design questions.** Keep exploration tight and post the moment you have enough for a conservative first-pass draft.
 5. **Post your final triage comment** with the `<!-- boucle:triage v=1 -->` marker. If your refined analysis changes the disposition or criteria, the CI automatically collapses duplicate triage comments from the same run, replacing the earlier draft with your final version — so only the final analysis remains visible.
 6. Understand what the issue is actually asking for — restate it in your own words (in the Analysis section), structured via the four problem-framing lenses (§1: user segment, pain points, business context, success metrics).
 7. Draft acceptance criteria that are **verifiable by a machine or by looking at the rendered page**, using the Given/When/Then format (§2) with Happy path / Edge case / Error state / Non-functional labels.

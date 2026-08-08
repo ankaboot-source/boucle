@@ -72,10 +72,10 @@ Both run in parallel. You reconcile and commit after both complete.
 
 Before implementing, read the charter docs at the repo root. They are **imperatives**, not suggestions:
 
-- `ARCHITECTURE.md` — system architecture, pipeline, state machine. Conform to the documented architecture.
+- `LOOP.md` — pipeline, state machine, per-consumer configuration. Conform to the documented loop.
 - `AGENTS.md` — agent rules, mandatory principles, lessons learned. **Never reproduce a documented anti-pattern.** Check the "Lessons learned" section before starting — it catalogs forward-looking operating principles.
 - `CONTEXT.md` — project context, tech stack, constraints, ethics. Respect the stated constraints.
-- `DESIGN.md` — visual charter (consumer site). Conform to typography, colors, layout, motion rules.
+- The visual charter (consumer site, if present). Conform to typography, colors, layout, motion rules.
 - `LOOP.md` — per-consumer loop configuration. Respect cadence, gates, caps.
 
 `README.md` is for humans and contains no agent instructions — skip it.
@@ -84,10 +84,10 @@ Before implementing, read the charter docs at the repo root. They are **imperati
 
 After implementing, check whether your changes require doc updates. **Doc updates go in the same commit/MR as the code change — never a separate MR.**
 
-- Changed CI pipeline / agents / bin scripts / state machine → update `ARCHITECTURE.md` (use Mermaid syntax for diagrams, keep them in sync with the code).
+- Changed CI pipeline / agents / bin scripts / state machine → update `LOOP.md`/`AGENTS.md` (use Mermaid syntax for diagrams, keep them in sync with the code).
 - Discovered a bug or anti-pattern → **first** check whether it is a lesson at all. A lesson prevents a *class* of mistakes from recurring — not a one-off bug now fixed in code, not a preference change, not a missing-directory discovery. Run the four-point admission test in `AGENTS.md` ("Lessons learned" → "Admission test"): class-not-instance, recurrence-without-the-doc, stable, not-already-covered. **State on stdout which tests it passes and why.** If it fails any test, fix the code and move on — do not add a lesson. If it passes, add an entry: short title + `❌ DO NOT` (one line) + `✅ DO` (one line). No `Context:` narrative, no issue numbers, no incident SHAs, no line numbers — those live in git history. Capture the lesson at the moment you learn it.
 - Changed project scope / tech stack / constraints → update `CONTEXT.md`.
-- Changed visual conventions (consumer site) → update `DESIGN.md`.
+- Changed visual conventions (consumer site) → update the visual charter.
 - Changed loop config / cadence / gates → update `LOOP.md`.
 
 Doc updates rules:
@@ -103,8 +103,8 @@ You have these skills in `.jcode/skills/`. **Use them** — they contain domain 
 
 **Domain skills** (load before working in that domain):
 - **astro** — before writing/editing `.astro` components, pages, or content collections.
-- **ui-ux-pro-max** — before ANY UI/visual work. This is the PRIMARY design skill. It bundles a searchable database (84 styles, 192 color palettes, 74 font pairings, 98 UX guidelines, 22 stacks) and a `--design-system` command that returns a complete design system with reasoning. Run `python3 .jcode/skills/ui-ux-pro-max/scripts/search.py "<query>" --design-system` FIRST, then cross-reference the output with `DESIGN.md` (the charter overrides generic recommendations). This skill is self-contained — it does NOT require `.impeccable.md` or any external setup.
-- **frontend-design** — before building UI components or visual layouts. NOTE: this skill requires a `.impeccable.md` file at the project root OR the `teach-impeccable` skill. If neither exists, skip it and use **ui-ux-pro-max** + `DESIGN.md` instead.
+- **ui-ux-pro-max** — before ANY UI/visual work. This is the PRIMARY design skill. It bundles a searchable database (84 styles, 192 color palettes, 74 font pairings, 98 UX guidelines, 22 stacks)   and a `--design-system` command that returns a complete design system with reasoning. Run `python3 .jcode/skills/ui-ux-pro-max/scripts/search.py "<query>" --design-system` FIRST, then cross-reference the output with the visual charter (the charter overrides generic recommendations). This skill is self-contained — it does NOT require `.impeccable.md` or any external setup.
+- **frontend-design** — before building UI components or visual layouts. NOTE: this skill requires a `.impeccable.md` file at the project root OR the `teach-impeccable` skill. If neither exists, skip it and use **ui-ux-pro-max** + the visual charter instead.
 - **effective-ui-design** — before styling (accessibility, spacing, typography, responsive).
 - **web-design-guidelines** — before HTML/CSS work (WCAG, semantic HTML, best practices).
 - **typescript-magician** — before writing TypeScript types or fixing type errors.
@@ -133,7 +133,7 @@ You have these skills in `.jcode/skills/`. **Use them** — they contain domain 
 ## Instructions
 
 1. Read `state.md` in `.boucle/<issue>/` FIRST — especially the "Tried and rejected" section.
-2. Read `iterations.md` in `.boucle/<issue>/` — it logs what each previous iteration tried and its result. Without this you will repeat rejected approaches and waste your step budget (issue #35 on up/urgence-palestine.fr: 2 iterations produced zero code changes because the worker re-discovered the codebase from scratch each time). If the file is absent or empty, this is the first iteration.
+2. Read `iterations.md` in `.boucle/<issue>/` — it logs what each previous iteration tried and its result. Without this you will repeat rejected approaches and waste your step budget (issue #35 on a consumer repo: 2 iterations produced zero code changes because the worker re-discovered the codebase from scratch each time). If the file is absent or empty, this is the first iteration.
 3. Read the issue body and the triage analysis comment.
 4. **Read the "Prior feedback on the MR" section of your prompt** (if present). It contains reviewer verdicts (`VERDICT: FAIL` with the unmet acceptance criteria) and human comments on the MR. You MUST address every actionable item before claiming done — a re-run that ignores prior feedback will FAIL the reviewer the same way again and waste the iteration budget. Map each unmet criterion to a concrete change in your implementation.
 5. **Preserve instructed content.** The "Issue body" section of your prompt contains the EXACT content the human instructed — URLs (video, site, image), citations, texts, critiques. You MUST use them verbatim:
@@ -159,7 +159,7 @@ You have these skills in `.jcode/skills/`. **Use them** — they contain domain 
   10. **Load relevant skills** with the `skill` tool — domain skills (astro, frontend-design, etc.) AND process skills (test-driven-development, etc.) based on what the issue asks for.
   11. Implement the acceptance criteria from `state.md`.
   12. Update `state.md`:
-    - **Fill in the "Approach" section with what you did.** This is NOT optional. The Approach section becomes the MR description that the reviewer reads to verify doc conformance (e.g. DESIGN.md §2 and §4 citations). An empty or placeholder Approach causes reviewer FAIL loops — issue #34 on up/urgence-palestine.fr had 3 FAIL verdicts, all blocking on the same criterion: "MR description does not cite DESIGN.md". **Format: write 3-6 bullet points (`- item`), one per aspect of your approach.** GitLab markdown renders single newlines as spaces (soft breaks), so a paragraph becomes an unreadable wall of text. Bullet points (`-`) and blank lines between sections render properly. Each bullet should cite the charter doc section you followed (e.g. "Conforms to DESIGN.md §2 — sharp corners via `--radius-sharp`").
+    - **Fill in the "Approach" section with what you did.** This is NOT optional. The Approach section becomes the MR description that the reviewer reads to verify doc conformance (e.g. visual charter §2 and §4 citations). An empty or placeholder Approach causes reviewer FAIL loops — issue #34 on a consumer repo had 3 FAIL verdicts, all blocking on the same criterion: "MR description does not cite the visual charter". **Format: write 3-6 bullet points (`- item`), one per aspect of your approach.** GitLab markdown renders single newlines as spaces (soft breaks), so a paragraph becomes an unreadable wall of text. Bullet points (`-`) and blank lines between sections render properly. Each bullet should cite the charter doc section you followed (e.g. "Conforms to the visual charter §2 — sharp corners via `--radius-sharp`").
     - **If human MR comments amended the spec** (new or changed requirements vs the triage-era criteria), update the `## Acceptance criteria` section of `state.md` to reflect the amended spec — mark each amended criterion with `(amended via MR comment)`. `state.md` is seeded once from the triage comment and never refreshed automatically; without this update the criteria drift from what the human actually asked for, and the reviewer grades against a stale spec.
     - If you tried and rejected an approach, add it to "Tried and rejected" with why.
   13. Append to `iterations.md` with what you changed.
