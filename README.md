@@ -157,9 +157,30 @@ spec and approve the MR.
 
 ## 🛠️ Configuration
 
-The two CI variables above are the only ones you must set to get started.
-Every other option — models per agent, spec gate, update mode, vision
-routing — is documented in [LOOP.md](LOOP.md).
+Boucle reads its configuration from GitLab CI/CD variables. The only one you
+**must** set to get started is `BOUCLE_LLM_API_KEY` (see
+[After install](#after-install)). The basics below all have sane defaults —
+override them only when you need to:
+
+| Variable | Default | What it controls |
+| --- | --- | --- |
+| `BOUCLE_ENABLED` | `true` | Master switch. Set to `false` to pause boucle without touching the pipeline. |
+| `BOUCLE_LLM_API_KEY` | *(unset)* | LLM provider key. Set as a **masked** variable. |
+| `BOUCLE_LLM_BASE_URL` | `https://ollama.com/v1` | LLM provider endpoint (any OpenAI-compatible API). |
+| `BOUCLE_RUNNER_TAG` | `data` | Runner tag that executes agent jobs. |
+| `BOUCLE_SPEC_PROFILE` | `product` | Spec gate strictness: which issues require your spec approval. |
+| `BOUCLE_DND_ENABLED` | `true` | Auto-validates the spec gate during quiet hours (Do-Not-Disturb). |
+| `BOUCLE_DND_START` / `BOUCLE_DND_END` / `BOUCLE_DND_TZ` | `22:00` / `07:00` / `UTC` | Quiet-hours window for the spec gate. |
+| `BOUCLE_UPDATE_MODE` | `release` | How boucle updates itself (release = pinned engine version). |
+| `BOUCLE_MAX_PARALLEL_ISSUES` | `5` | Max issues worked on in parallel (`0` = unlimited). |
+| `BOUCLE_MAX_ITERATIONS` | `3` | Max worker re-runs per issue before escalation. |
+
+Variables are edited in GitLab under **Settings → CI/CD → Variables** — see
+the [GitLab documentation on CI/CD variables](https://docs.gitlab.com/ci/variables/)
+for how to add, mask, or protect them.
+
+Every other option — models per agent, vision routing, provider fallback,
+deploy overrides — is documented in [LOOP.md](LOOP.md).
 
 ## 🗺️ Roadmap
 
