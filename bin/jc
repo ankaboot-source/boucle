@@ -466,7 +466,7 @@ build_prompt() {
       # Inject the prior discussion (fetched by CI as BOUCLE_ISSUE_NOTES) so
       # the agent sees previous triage Questions AND the author's answers.
       # Without this, every re-triage re-asks questions the author already
-      # answered (issue #27: 6 repeated triage notes on up/urgence-palestine.fr).
+      # answered (issue #27: 6 repeated triage notes on a consumer repo).
       local notes="${BOUCLE_ISSUE_NOTES:-}"
       if [ -n "$body" ]; then
         prompt="Analyze issue #${ISSUE}.
@@ -750,7 +750,7 @@ case "$ROLE" in
     # no model response. Exit 4 so the CI can post a diagnostic comment
     # on the issue with the available logs instead of the generic "agent
     # likely exhausted its step budget" message that misdiagnoses a model
-    # outage as a step-budget issue (issue #35 on up/urgence-palestine.fr:
+    # outage as a step-budget issue (issue #35 on a consumer repo:
     # worker ran for 40 min with empty log because ollama-cloud credits
     # were exhausted).
     if [ ! -s "$AGENT_LOG" ]; then

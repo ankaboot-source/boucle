@@ -23,7 +23,7 @@ happens asynchronously, driven by labels and comments.
 ## 2. Features
 
 - **Self-maintaining documentation** — boucle keeps its charter docs
-  (`ARCHITECTURE.md`, `AGENTS.md`, `CONTEXT.md`, `DESIGN.md`, `LOOP.md`) in
+  (`AGENTS.md`, `CONTEXT.md`, `LOOP.md`) in
   sync with the code as part of each work cycle. The triage identifies
   impacted docs, the worker updates them in the same MR, the reviewer
   verifies doc conformance and completeness, and the e2e verifies docs
@@ -33,7 +33,7 @@ happens asynchronously, driven by labels and comments.
   during which the spec-validation gate is auto-validated, letting the loop
   run autonomously up to the MR without contacting the human. Preserves the
   human's quality of life; MR approval stays human-gated. See
-  [ARCHITECTURE.md](ARCHITECTURE.md) §9 (`BOUCLE_DND_*` variables).
+  [LOOP.md](LOOP.md) §Do-Not-Disturb (`BOUCLE_DND_*` variables).
 
 ## 3. Target audience
 
@@ -148,7 +148,6 @@ Contributions to boucle must align with this line.
 
 ## 9. See also
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — System architecture, pipeline, Mermaid diagrams
 - [AGENTS.md](AGENTS.md) — Agent guide, lessons learned, anti-patterns
 - [README.md](README.md) — Overview, getting started, usage
 - [LOOP.md](LOOP.md) — Per-consumer configuration
