@@ -843,11 +843,16 @@ dispatch:
       # BOUCLE_FORGE_HOST, auth error on shared runner, network issue) does not
       # kill the script under set -e before routing echos fire (lesson #5).
       echo "dispatch: fetching labels for #$IID (forge=$BOUCLE_FORGE_HOST, project=$CI_PROJECT_ID)"
-      LABELS=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID" 2>/dev/null | jq -r '.labels | join(",")' 2>/dev/null || echo "")
-      if [ -z "$LABELS" ]; then
+      # Guard on the glab exit code, not on the emptiness of LABELS: an issue
+      # WITHOUT any label is a legit state (e.g. human just assigned the bot —
+      # BOT_JUST_ASSIGNED path below) and must not abort. `(.labels // [])`
+      # makes join(",") safe when the labels key is absent. ABORT fires only
+      # when glab truly fails (auth/network/404 → non-zero exit).
+      RESP=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$IID" 2>/dev/null) || {
         echo "dispatch: ABORT — glab api failed to fetch labels for #$IID (BOUCLE_FORGE_HOST=${BOUCLE_FORGE_HOST:-unset}, exit non-zero)"
         exit 1
-      fi
+      }
+      LABELS=$(echo "$RESP" | jq -r '(.labels // []) | join(",")' 2>/dev/null) || LABELS=""
       echo "dispatch: labels for #$IID: $LABELS"
 
       # Resolve: issue opened, body edited in triage/needs-info/todo, or author reply on needs-info
