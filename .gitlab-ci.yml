@@ -788,7 +788,7 @@ dispatch:
 
       # ── Dependency gate helpers ──────────────────────────────────────────
       # Source the depends-on lib for parse_depends_on.
-      source "$BOUCLE_HOME/lib/depends-on.sh"
+      source "$BOUCLE_HOME/bin/lib/depends-on.sh"
 
       # Dependency gate: if the issue has a "## Depends on" section (or the
       # boucle:depends-on marker), check that ALL dep IIDs are closed. If any
@@ -1641,7 +1641,7 @@ triage:
           # index N → the N-th IID in that list.
           if [ -n "$CREATED_IIDS" ] && [ "$SUBISSUE_COUNT" -gt 0 ]; then
             # Source the depends-on lib for detect_cycle + resolve_dep_indices.
-            source "$BOUCLE_HOME/lib/depends-on.sh"
+            source "$BOUCLE_HOME/bin/lib/depends-on.sh"
 
             # Re-parse to get per-sub-issue deps (we lost CUR_DEPS across the
             # loop boundary, so re-derive from /tmp/subissues.parsed).
@@ -3397,7 +3397,7 @@ catchup:
       }
 
       # Source the depends-on lib for parse_depends_on.
-      source "$BOUCLE_HOME/lib/depends-on.sh"
+      source "$BOUCLE_HOME/bin/lib/depends-on.sh"
 
       # Check if a pipeline with BOUCLE_ISSUE=$iid is already running.
       # Used by maybe_unblock_dependents to prevent double-trigger.
@@ -3686,7 +3686,7 @@ e2e:
       # set_boucle_label / get_work_item_children / close_issue / maybe_close_parent
       # are provided by lib/boucle.sh (sourced in before_script).
       # Source the depends-on lib for parse_depends_on.
-      source "$BOUCLE_HOME/lib/depends-on.sh"
+      source "$BOUCLE_HOME/bin/lib/depends-on.sh"
 
       # Check if a pipeline with BOUCLE_ISSUE=$iid is already running.
       # Used by maybe_unblock_dependents to prevent double-trigger.
