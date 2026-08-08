@@ -6,7 +6,7 @@
 
 **Architecture:** A new `catchup` job in `.gitlab-ci.yml`, triggered by `dispatch` when a webhook `merge_request` with `action=merge` arrives for a `boucle/<iid>` branch. Dispatch stays a pure router; `catchup` does the issue-state inspection, label write, audit comment, close, and parent cascade. No e2e agent runs (trust human judgment). Helpers are duplicated locally in the job, matching the existing per-job pattern.
 
-**Tech Stack:** GitLab CI (`.gitlab-ci.yml`), inline bash, `glab` CLI, `jq`, `curl`. No test framework exists for the inline bash — verification is via YAML lint + manual smoke test against the live `framagit.org` instance.
+**Tech Stack:** GitLab CI (`.gitlab-ci.yml`), inline bash, `glab` CLI, `jq`, `curl`. No test framework exists for the inline bash — verification is via YAML lint + manual smoke test against the live `gitlab.example.com` instance.
 
 **Spec:** `docs/superpowers/specs/2026-07-31-direct-merge-catchup-design.md`
 
@@ -422,7 +422,7 @@ per-job pattern."
 
 ## Task 3: Manual smoke test (verification before merge)
 
-**Files:** None modified — this is a verification task against the live `framagit.org` instance.
+**Files:** None modified — this is a verification task against the live `gitlab.example.com` instance.
 
 This codebase has no automated test framework for the inline bash in `.gitlab-ci.yml` (confirmed by the spec, section 7). Verification is by manual smoke test. This task documents the procedure; it is performed by a human on the live GitLab instance, not by the agent.
 
@@ -433,7 +433,7 @@ Expected: all ~20 checks pass (the catchup feature adds no new labels, no new CI
 
 - [ ] **Step 2: Document the manual smoke test procedure for the human**
 
-The human operator performs this on the `framagit.org` fork after the branch is pushed:
+The human operator performs this on the `gitlab.example.com` fork after the branch is pushed:
 
 **Test A — happy path (issue at `boucle:approval`):**
 1. Create or use an issue that has reached `boucle:approval` (reviewer PASS'd, MR open on `boucle/<iid>`).

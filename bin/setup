@@ -67,12 +67,12 @@ while [[ $# -gt 0 ]]; do
       echo "Options:"
       echo "  --project <id-or-path>   Target GitLab project ID or path (e.g. 123456 or group/project)"
       echo "                           Optional: auto-detected from the origin git remote"
-      echo "  --host <forge-host>      GitLab host (default: framagit.org; auto-detected from origin)"
+      echo "  --host <forge-host>      GitLab host (default: gitlab.example.com; auto-detected from origin)"
       echo "  --bot-id <id>            Bot user ID (for adding as project member)"
       echo "  --bot-username <name>    Bot username (default: up-bot; used to seed BOUCLE_BOT_USERNAME CI variable)"
       echo "  --bot-token <pat>        Bot PAT (used as BOUCLE_TOKEN CI variable)"
       echo "  --cf-token <token>       Cloudflare API token (for Pages project)"
-      echo "  --runner-tag <tag>       Runner tag baked into the root .gitlab-ci.yml shim (default: data)"
+      echo "  --runner-tag <tag>       Runner tag baked into the root .gitlab-ci.yml shim (default: boucle)"
       echo "  --skip-cf                Skip Cloudflare Pages project creation"
       echo "  --dry-run                 Print what would be done, don't execute"
       echo "  --non-interactive        No prompts: read config from BOUCLE_* env vars only."
@@ -130,7 +130,7 @@ if [ -z "$PROJECT" ] || [ -z "$HOST" ]; then
       echo "Auto-detected from origin remote: project=$PROJECT host=$HOST"
   fi
 fi
-HOST="${HOST:-framagit.org}"
+HOST="${HOST:-gitlab.example.com}"
 [ -z "$PROJECT" ] && {
   echo "Error: --project is required (run inside the target repo or set BOUCLE_PROJECT)" >&2
   exit 1
@@ -236,7 +236,7 @@ if (cd "$ENGINE_ROOT" && git rev-parse --is-inside-work-tree > /dev/null 2>&1); 
 fi
 ENGINE_INCLUDE="https://raw.githubusercontent.com/ankaboot-source/boucle/${ENGINE_REF}/.gitlab-ci.yml"
 TAGS_BLOCK="default:
-  tags: [${RUNNER_TAG:-data}]
+  tags: [${RUNNER_TAG:-boucle}]
 "
 if [ -f "$GITLAB_CI" ]; then
   if grep -q "boucle engine" "$GITLAB_CI"; then
@@ -709,7 +709,7 @@ echo "  2. Commit the engine and the root shim:"
 echo "     git add .gitmodules .boucle $GITLAB_CI"
 echo "     git commit -m \"chore: install boucle engine\""
 echo "     (Push the commit — the runner needs GIT_SUBMODULE_STRATEGY to fetch .boucle/.)"
-echo "  3. Runner: make sure a GitLab runner with tag '${RUNNER_TAG:-data}' is available."
+echo "  3. Runner: make sure a GitLab runner with tag '${RUNNER_TAG:-boucle}' is available."
 echo "     (The tag is baked into $GITLAB_CI. Re-run with --runner-tag <tag> to change it.)"
 if [ -n "${CI_VARS_URL:-}" ]; then
   echo "  4. CI/CD variables: $CI_VARS_URL"
@@ -718,6 +718,18 @@ else
   echo "  4. CI/CD variables: add BOUCLE_LLM_API_KEY (masked) under Settings > CI/CD."
 fi
 echo "  5. Create your first issue — the webhook will trigger triage."
+if [ -z "$BOT_ID" ]; then
+  echo ""
+  echo "  NOTE: no --bot-id was provided, so the bot user was NOT added to the"
+  echo "  project and BOUCLE_BOT_ID was not seeded. boucle reassigns issues to"
+  echo "  the bot (assignee_ids[]) and merges MRs as it — without an account,"
+  echo "  issues stay assigned to the current user and the loop still runs."
+  echo "  To use a dedicated bot:"
+  echo "    1. Create the bot via Project → Settings → Service accounts"
+  echo "       (no platform-admin needed — a project owner can provision it)."
+  echo "    2. Create a PAT for the bot (scope: api) and note its user ID."
+  echo "    3. Re-run: bin/setup --bot-id <id> --bot-token <pat>"
+fi
 
 print_webhook_recommendations
 
