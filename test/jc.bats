@@ -166,9 +166,9 @@ extract_func_body() {
 @test "build_prompt: triage includes prior notes when BOUCLE_ISSUE_NOTES is set" {
   TMPF=$(mktemp)
   extract_func build_prompt "$TMPF"
-  run bash -c "ISSUE=27; BOUCLE_ISSUE_BODY='Amend the README'; BOUCLE_ISSUE_NOTES='[tahrir] The Bold Font .ttf is attached
+  run bash -c "ISSUE=27; BOUCLE_ISSUE_BODY='Amend the README'; BOUCLE_ISSUE_NOTES='[human] The Bold Font .ttf is attached
 [up-bot] Where is the README?
-[tahrir] README.md is at repo root'; source '$TMPF'; build_prompt triage"
+[human] README.md is at repo root'; source '$TMPF'; build_prompt triage"
   assert_success
   assert_output --partial "Prior discussion"
   assert_output --partial "The Bold Font .ttf is attached"

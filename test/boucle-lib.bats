@@ -228,7 +228,7 @@ SCRIPT
     source lib/boucle.sh
     # Mock glab: return a human-authored issue
     glab() {
-      printf "%s" "{\"author\":{\"id\":999,\"username\":\"tahrir\"}}"
+      printf "%s" "{\"author\":{\"id\":999,\"username\":\"human\"}}"
     }
     result=$(resolve_reporter_id 42)
     [ "$result" = "999" ]
@@ -247,7 +247,7 @@ SCRIPT
         */issues/42)
           jq -n "{author:{id:1,username:\"up-bot\"},description:\"## Parent issue\n\n#10\"}" ;;
         */issues/10)
-          printf "%s" "{\"author\":{\"id\":777,\"username\":\"tahrir\"}}" ;;
+          printf "%s" "{\"author\":{\"id\":777,\"username\":\"human\"}}" ;;
         *) printf "%s" "{}" ;;
       esac
     }
@@ -284,7 +284,7 @@ SCRIPT
         */issues/52)
           jq -n "{author:{id:2,username:\"up-bot\"},description:\"## Parent issue\n\n#55\"}" ;;
         */issues/55)
-          printf "%s" "{\"author\":{\"id\":888,\"username\":\"tahrir\"}}" ;;
+          printf "%s" "{\"author\":{\"id\":888,\"username\":\"human\"}}" ;;
         *) printf "%s" "{}" ;;
       esac
     }
