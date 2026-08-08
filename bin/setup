@@ -135,7 +135,7 @@ PROJECT_ID=$(resolve_project_id)
 }
 echo "Project ID: $PROJECT_ID"
 # Resolve the project web URL once (used for CI/CD variables manual-entry link).
-PROJECT_URL=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID" 2> /dev/null | jq -r '.web_url // empty'|| true)
+PROJECT_URL=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID" 2> /dev/null | jq -r '.web_url // empty' || true)
 [ -n "$PROJECT_URL" ] && echo "Project URL: $PROJECT_URL"
 echo ""
 
@@ -261,7 +261,7 @@ echo "=== CI Variables ==="
 
 # BOUCLE_TOKEN (from --bot-token)
 if [ -n "$BOT_TOKEN" ]; then
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_TOKEN" 2> /dev/null | jq -r '.key // empty'|| true)
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_TOKEN" 2> /dev/null | jq -r '.key // empty' || true)
   if [ -n "$EXISTING" ]; then
     log_skip "BOUCLE_TOKEN already exists"
   else
@@ -274,7 +274,7 @@ fi
 
 # CLOUDFLARE_API_TOKEN (from --cf-token)
 if [ -n "$CF_TOKEN" ]; then
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/CLOUDFLARE_API_TOKEN" 2> /dev/null | jq -r '.key // empty'|| true)
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/CLOUDFLARE_API_TOKEN" 2> /dev/null | jq -r '.key // empty' || true)
   if [ -n "$EXISTING" ]; then
     log_skip "CLOUDFLARE_API_TOKEN already exists"
   else
@@ -286,7 +286,7 @@ else
 fi
 
 # BOUCLE_ENABLED
-EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_ENABLED" 2> /dev/null | jq -r '.key // empty'|| true)
+EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_ENABLED" 2> /dev/null | jq -r '.key // empty' || true)
 if [ -n "$EXISTING" ]; then
   log_skip "BOUCLE_ENABLED already exists"
 else
@@ -309,7 +309,7 @@ fi
 # BOUCLE_LLM_API_KEY env; if unset, SKIP and print the URL where the human
 # adds it manually as a masked variable — the key never appears in prompts,
 # command lines or logs (AI-agent-driven installs stay credential-free).
-EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_LLM_API_KEY" 2> /dev/null | jq -r '.key // empty'|| true)
+EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_LLM_API_KEY" 2> /dev/null | jq -r '.key // empty' || true)
 
 # BOUCLE_DND_ENABLED — enables Do-Not-Disturb mode (auto-validate spec gate
 # during the quiet window so the loop runs autonomously up to the MR).
@@ -358,7 +358,7 @@ else
 fi
 
 # BOUCLE_LLM_BASE_URL — OpenAI-compatible endpoint
-EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_LLM_BASE_URL" 2> /dev/null | jq -r '.key // empty'|| true)
+EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_LLM_BASE_URL" 2> /dev/null | jq -r '.key // empty' || true)
 if [ -n "$EXISTING" ]; then
   log_skip "BOUCLE_LLM_BASE_URL already exists"
 else
@@ -375,7 +375,7 @@ echo "=== Labels ==="
 # boucle:* labels (14)
 # shellcheck disable=SC1010 # 'done' is a label name, not the loop keyword
 for label in triage needs-info todo working review human blocked done split approval approved spec-review spec-approved merging; do
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2> /dev/null | jq -r '.[0].name // empty'|| true)
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2> /dev/null | jq -r '.[0].name // empty' || true)
   if [ -n "$EXISTING" ]; then
     log_skip "boucle:$label already exists"
   else
@@ -386,7 +386,7 @@ done
 
 # size:* labels (3)
 for size in s m l; do
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=size:$size" 2> /dev/null | jq -r '.[0].name // empty'|| true)
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=size:$size" 2> /dev/null | jq -r '.[0].name // empty' || true)
   if [ -n "$EXISTING" ]; then
     log_skip "size:$size already exists"
   else
@@ -399,7 +399,7 @@ done
 # mark an issue as autonomous: the triage job auto-validates the spec gate
 # regardless of the DND window, so the loop runs up to the MR without
 # contacting the human. Distinct color (purple) to separate flags from states.
-EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:autonomous" 2> /dev/null | jq -r '.[0].name // empty'|| true)
+EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:autonomous" 2> /dev/null | jq -r '.[0].name // empty' || true)
 if [ -n "$EXISTING" ]; then
   log_skip "boucle:autonomous already exists"
 else
@@ -411,7 +411,7 @@ fi
 # Do-Not-Disturb window auto-validates the spec gate, so the board shows
 # WHY the gate was skipped. Mirrors boucle:autonomous. Distinct color
 # (deep indigo — night theme) to distinguish from autonomous (purple).
-EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:dnd" 2> /dev/null | jq -r '.[0].name // empty'|| true)
+EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:dnd" 2> /dev/null | jq -r '.[0].name // empty' || true)
 if [ -n "$EXISTING" ]; then
   log_skip "boucle:dnd already exists"
 else
@@ -425,7 +425,7 @@ echo ""
 echo "=== Issue Board ==="
 
 # Check if boucle board already exists
-BOARD_ID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/boards" 2> /dev/null | jq -r '.[] | select(.name=="boucle") | .id' | head -1|| true)
+BOARD_ID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/boards" 2> /dev/null | jq -r '.[] | select(.name=="boucle") | .id' | head -1 || true)
 if [ -n "$BOARD_ID" ] && [ "$BOARD_ID" != "null" ]; then
   log_skip "boucle board already exists (ID: $BOARD_ID)"
 else
@@ -436,7 +436,7 @@ else
     # Add lists for each boucle:* label
     # shellcheck disable=SC1010 # 'done' is a label name, not the loop keyword
     for label in triage needs-info todo working review human blocked done split approval spec-review spec-approved merging; do
-      LABEL_ID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2> /dev/null | jq -r '.[0].id'|| true)
+      LABEL_ID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2> /dev/null | jq -r '.[0].id' || true)
       if [ -n "$LABEL_ID" ] && [ "$LABEL_ID" != "null" ]; then
         run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/boards/$BOARD_ID/lists -f label_id=$LABEL_ID >/dev/null"
         log_pass "  list boucle:$label added"
@@ -453,14 +453,14 @@ echo ""
 echo "=== Branch Protection ==="
 
 # Get default branch
-DEFAULT_BRANCH=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID" 2> /dev/null | jq -r '.default_branch'|| true)
+DEFAULT_BRANCH=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID" 2> /dev/null | jq -r '.default_branch' || true)
 if [ -z "$DEFAULT_BRANCH" ] || [ "$DEFAULT_BRANCH" = "null" ]; then
   log_fail "could not determine default branch"
   DEFAULT_BRANCH="master"
 fi
 
 # Check if branch is already protected
-PROTECTION=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/protected_branches/$DEFAULT_BRANCH" 2> /dev/null|| true)
+PROTECTION=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/protected_branches/$DEFAULT_BRANCH" 2> /dev/null || true)
 if [ -n "$PROTECTION" ] && echo "$PROTECTION" | jq -e '.name' > /dev/null 2>&1; then
   # Already protected — verify both merge and push access levels
   MERGE_LEVEL=$(echo "$PROTECTION" | jq -r '.merge_access_levels[0].access_level // empty')
@@ -552,7 +552,7 @@ echo "=== Trigger Token ==="
 
 # Check if trigger token already exists
 TRIGGER_TOKEN=""
-EXISTING_TRIGGERS=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/triggers" 2> /dev/null|| true)
+EXISTING_TRIGGERS=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/triggers" 2> /dev/null || true)
 BOUCLE_TRIGGER=$(echo "$EXISTING_TRIGGERS" | jq -r '.[] | select(.description=="boucle-loop") | .token' | head -1)
 if [ -n "$BOUCLE_TRIGGER" ]; then
   TRIGGER_TOKEN="$BOUCLE_TRIGGER"
@@ -569,7 +569,7 @@ fi
 
 # Store trigger token as CI variable
 if [ -n "$TRIGGER_TOKEN" ] && [ "$TRIGGER_TOKEN" != "null" ]; then
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_TRIGGER_TOKEN" 2> /dev/null | jq -r '.key // empty'|| true)
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_TRIGGER_TOKEN" 2> /dev/null | jq -r '.key // empty' || true)
   if [ -n "$EXISTING" ]; then
     log_skip "BOUCLE_TRIGGER_TOKEN CI variable already exists"
   else
@@ -590,7 +590,7 @@ if [ -n "$TRIGGER_TOKEN" ] && [ "$TRIGGER_TOKEN" != "null" ]; then
   # hook with emoji_events=true (a boucle self-amplification vector: bot label
   # changes and reactions re-trigger a no-op dispatch). Reconfigure it so the
   # webhook source filters amplification events out entirely.
-  EXISTING_WEBHOOK=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/hooks" 2> /dev/null | jq -r '.[] | select(.url | contains("trigger/pipeline")) | .id' | head -1|| true)
+  EXISTING_WEBHOOK=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/hooks" 2> /dev/null | jq -r '.[] | select(.url | contains("trigger/pipeline")) | .id' | head -1 || true)
   if [ -n "$EXISTING_WEBHOOK" ]; then
     # Only PATCH when the current config still enables a now-disabled event,
     # so idempotent re-runs stay quiet.
@@ -635,7 +635,7 @@ elif [ -n "$CF_TOKEN" ]; then
   # so the pipeline's deploy/worker jobs know which project to deploy to.
   # Without this, BOUCLE_DEPLOY_CMD expands to an empty --project-name and
   # both the deploy job and worker preview deploy fail silently.
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_DEPLOY_PROJECT" 2> /dev/null | jq -r '.key // empty'|| true)
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_DEPLOY_PROJECT" 2> /dev/null | jq -r '.key // empty' || true)
   if [ -n "$EXISTING" ]; then
     log_skip "BOUCLE_DEPLOY_PROJECT already exists"
   else
