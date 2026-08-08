@@ -21,7 +21,7 @@ setup() {
 # ── Function definitions ──────────────────────────────────────────────
 
 @test "bin/setup defines resolve_project_id function" {
-  run grep -E '^resolve_project_id\(\)' bin/setup
+  run grep -E '^\s*resolve_project_id\(\)' bin/setup
   assert_success
 }
 

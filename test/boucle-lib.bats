@@ -69,72 +69,85 @@ setup() {
 # infinite-loop bugs. chain_to_role is the single contract point for
 # forwarding state between roles; it must always forward BOUCLE_ISSUE
 # and BOUCLE_ROLE, and must forward extra vars like BOUCLE_ITERATION.
+#
+# chain_to_role now delegates to forge_trigger_role (forge abstraction).
+# We mock forge_trigger_role to capture its args, and mock forge_issue_get
+# to prevent forge_init from sourcing the real backend.
 
-# Helper: source lib/boucle.sh with a mocked curl that captures args.
-# Sets $CAPTURED_ARGS to the space-joined curl arguments.
-source_with_mock_curl() {
+# Helper: source lib/boucle.sh with mocked forge_* functions.
+# Sets $CAPTURED_ARGS to the space-joined forge_trigger_role arguments.
+source_with_mock_forge() {
   CAPTURED_ARGS=""
   export BOUCLE_FORGE_HOST="gitlab.example.com"
   export CI_PROJECT_ID="123"
   export BOUCLE_TRIGGER_TOKEN="tok123"
-  # Mock curl: capture all args, exit 0, print nothing.
-  eval "$(cat <<'SCRIPT'
-    curl() {
-      CAPTURED_ARGS="$*"
-    }
-SCRIPT
-  )"
+  # Mock forge_issue_get to prevent forge_init from sourcing the real backend
+  forge_issue_get() { :; }
+  # Mock forge_trigger_role: capture all args
+  forge_trigger_role() { CAPTURED_ARGS="$*"; }
   source lib/boucle.sh
 }
 
 @test "chain_to_role always forwards BOUCLE_ISSUE" {
-  source_with_mock_curl
+  source_with_mock_forge
   chain_to_role 42 worker
-  [ -n "$CAPTURED_ARGS" ] || skip "curl not captured"
-  echo "$CAPTURED_ARGS" | grep -q 'variables\[BOUCLE_ISSUE\]=42'
+  [ -n "$CAPTURED_ARGS" ] || skip "forge_trigger_role not captured"
+  # First arg is the issue IID
+  local first="${CAPTURED_ARGS%% *}"
+  [ "$first" = "42" ]
 }
 
 @test "chain_to_role forwards BOUCLE_ROLE when role is provided" {
-  source_with_mock_curl
+  source_with_mock_forge
   chain_to_role 42 worker
-  echo "$CAPTURED_ARGS" | grep -q 'variables\[BOUCLE_ROLE\]=worker'
+  # Second arg is the role
+  local second
+  second=$(echo "$CAPTURED_ARGS" | awk '{print $2}')
+  [ "$second" = "worker" ]
 }
 
 @test "chain_to_role does NOT forward BOUCLE_ROLE when role is empty" {
-  source_with_mock_curl
+  source_with_mock_forge
   chain_to_role 42 ""
-  ! echo "$CAPTURED_ARGS" | grep -q 'variables\[BOUCLE_ROLE\]'
+  # Second arg should be empty string
+  local second
+  second=$(echo "$CAPTURED_ARGS" | awk '{print $2}')
+  [ -z "$second" ]
 }
 
 @test "chain_to_role forwards extra vars (BOUCLE_ITERATION)" {
-  source_with_mock_curl
+  source_with_mock_forge
   chain_to_role 42 worker BOUCLE_ITERATION=2
-  echo "$CAPTURED_ARGS" | grep -q 'variables\[BOUCLE_ITERATION\]=2'
+  echo "$CAPTURED_ARGS" | grep -q 'BOUCLE_ITERATION=2'
 }
 
 @test "chain_to_role forwards multiple extra vars" {
-  source_with_mock_curl
+  source_with_mock_forge
   chain_to_role 42 reviewer BOUCLE_ITERATION=3 BOUCLE_HEAD_SHA=abc1234
-  echo "$CAPTURED_ARGS" | grep -q 'variables\[BOUCLE_ITERATION\]=3'
-  echo "$CAPTURED_ARGS" | grep -q 'variables\[BOUCLE_HEAD_SHA\]=abc1234'
+  echo "$CAPTURED_ARGS" | grep -q 'BOUCLE_ITERATION=3'
+  echo "$CAPTURED_ARGS" | grep -q 'BOUCLE_HEAD_SHA=abc1234'
 }
 
-@test "chain_to_role uses the trigger pipeline endpoint" {
-  source_with_mock_curl
+@test "chain_to_role delegates to forge_trigger_role" {
+  source_with_mock_forge
   chain_to_role 42 worker
-  echo "$CAPTURED_ARGS" | grep -q 'trigger/pipeline'
+  # forge_trigger_role must have been called (CAPTURED_ARGS non-empty)
+  [ -n "$CAPTURED_ARGS" ]
 }
 
-@test "chain_to_role forwards the trigger token" {
-  source_with_mock_curl
+@test "chain_to_role passes issue_iid as first positional arg" {
+  source_with_mock_forge
   chain_to_role 42 worker
-  echo "$CAPTURED_ARGS" | grep -q 'token=tok123'
+  local first="${CAPTURED_ARGS%% *}"
+  [ "$first" = "42" ]
 }
 
-@test "chain_to_role forwards the default branch ref" {
-  source_with_mock_curl
+@test "chain_to_role passes role as second positional arg" {
+  source_with_mock_forge
   CI_DEFAULT_BRANCH=main chain_to_role 42 worker
-  echo "$CAPTURED_ARGS" | grep -q 'ref=main'
+  local second
+  second=$(echo "$CAPTURED_ARGS" | awk '{print $2}')
+  [ "$second" = "worker" ]
 }
 
 # ── preview_url_for_changed_files: route mapping ──────────────────────
@@ -219,17 +232,17 @@ SCRIPT
 }
 
 # ── resolve_reporter_id: parent-chain walking ─────────────────────────
-# Mock glab to simulate bot-authored sub-issues with a human parent.
+# Mock forge_issue_get to simulate bot-authored sub-issues with a human parent.
 
 @test "resolve_reporter_id returns author id when author is human" {
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
     BOUCLE_BOT_USERNAME=up-bot
-    source lib/boucle.sh
-    # Mock glab: return a human-authored issue
-    glab() {
+    # Mock forge_issue_get: return a human-authored issue
+    forge_issue_get() {
       printf "%s" "{\"author\":{\"id\":999,\"username\":\"human\"}}"
     }
+    source lib/boucle.sh
     result=$(resolve_reporter_id 42)
     [ "$result" = "999" ]
   '
@@ -240,17 +253,19 @@ SCRIPT
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
     BOUCLE_BOT_USERNAME=up-bot
-    source lib/boucle.sh
-    glab() {
-      # glab api --hostname <host> <path>  → URL is $4
-      case "$4" in
-        */issues/42)
-          jq -n "{author:{id:1,username:\"up-bot\"},description:\"## Parent issue\n\n#10\"}" ;;
-        */issues/10)
-          printf "%s" "{\"author\":{\"id\":777,\"username\":\"human\"}}" ;;
+    # Mock forge_issue_get: return different data based on IID
+    forge_issue_get() {
+      case "$1" in
+        42)
+          printf "%s" "{\"author\":{\"id\":1,\"username\":\"up-bot\"},\"description\":\"## Parent issue\n\n#10\"}"
+          ;;
+        10)
+          printf "%s" "{\"author\":{\"id\":777,\"username\":\"human\"}}"
+          ;;
         *) printf "%s" "{}" ;;
       esac
     }
+    source lib/boucle.sh
     result=$(resolve_reporter_id 42)
     [ "$result" = "777" ]
   '
@@ -261,11 +276,11 @@ SCRIPT
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
     BOUCLE_BOT_USERNAME=up-bot
-    source lib/boucle.sh
-    glab() {
-      # Bot-authored issue with no parent link in description
+    # Mock forge_issue_get: bot-authored issue with no parent link
+    forge_issue_get() {
       printf "%s" "{\"author\":{\"id\":1,\"username\":\"up-bot\"},\"description\":\"No parent here\"}"
     }
+    source lib/boucle.sh
     result=$(resolve_reporter_id 42)
     [ "$result" = "1" ]
   '
@@ -276,18 +291,22 @@ SCRIPT
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
     BOUCLE_BOT_USERNAME=up-bot
-    source lib/boucle.sh
-    glab() {
-      case "$4" in
-        */issues/42)
-          jq -n "{author:{id:1,username:\"up-bot\"},description:\"## Parent issue\n\n#52\"}" ;;
-        */issues/52)
-          jq -n "{author:{id:2,username:\"up-bot\"},description:\"## Parent issue\n\n#55\"}" ;;
-        */issues/55)
-          printf "%s" "{\"author\":{\"id\":888,\"username\":\"human\"}}" ;;
+    # Mock forge_issue_get: walk up multiple parent levels
+    forge_issue_get() {
+      case "$1" in
+        42)
+          printf "%s" "{\"author\":{\"id\":1,\"username\":\"up-bot\"},\"description\":\"## Parent issue\n\n#52\"}"
+          ;;
+        52)
+          printf "%s" "{\"author\":{\"id\":2,\"username\":\"up-bot\"},\"description\":\"## Parent issue\n\n#55\"}"
+          ;;
+        55)
+          printf "%s" "{\"author\":{\"id\":888,\"username\":\"human\"}}"
+          ;;
         *) printf "%s" "{}" ;;
       esac
     }
+    source lib/boucle.sh
     result=$(resolve_reporter_id 42)
     [ "$result" = "888" ]
   '
@@ -299,21 +318,28 @@ SCRIPT
 @test "get_work_item_children returns empty array on API failure" {
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    # Mock forge_issue_get to prevent forge_init
+    forge_issue_get() { :; }
+    # Mock forge_work_item_children: return empty array on failure
+    forge_work_item_children() { echo "[]"; }
     source lib/boucle.sh
-    glab() { return 1; }
     result=$(get_work_item_children 42)
     [ "$result" = "[]" ]
   '
   assert_success
 }
 
-@test "get_work_item_children coerces 403 error object to empty array" {
+@test "get_work_item_children passes through forge_work_item_children output" {
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    # Mock forge_issue_get to prevent forge_init
+    forge_issue_get() { :; }
+    # Mock forge_work_item_children: return an error object (pass-through)
+    forge_work_item_children() { printf "%s" "{\"message\":\"403 Forbidden\"}"; }
     source lib/boucle.sh
-    glab() { printf "%s" "{\"message\":\"403 Forbidden\"}"; }
     result=$(get_work_item_children 42)
-    [ "$result" = "[]" ]
+    # get_work_item_children is a thin wrapper; passes through forge output
+    echo "$result" | grep -q "403 Forbidden"
   '
   assert_success
 }
@@ -321,8 +347,11 @@ SCRIPT
 @test "get_work_item_children passes through genuine array" {
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    # Mock forge_issue_get to prevent forge_init
+    forge_issue_get() { :; }
+    # Mock forge_work_item_children: return genuine array
+    forge_work_item_children() { printf "%s" "[{\"iid\":1,\"state\":\"opened\"},{\"iid\":2,\"state\":\"closed\"}]"; }
     source lib/boucle.sh
-    glab() { printf "%s" "[{\"iid\":1,\"state\":\"opened\"},{\"iid\":2,\"state\":\"closed\"}]"; }
     result=$(get_work_item_children 42)
     echo "$result" | grep -q "iid.*1"
     echo "$result" | grep -q "iid.*2"
@@ -335,8 +364,11 @@ SCRIPT
 @test "get_work_item_global_id returns id from valid work item" {
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    # Mock forge_issue_get to prevent forge_init
+    forge_issue_get() { :; }
+    # Mock forge_work_item_global_id: return a global ID
+    forge_work_item_global_id() { printf "%s" "gid://gitlab/WorkItem/123"; }
     source lib/boucle.sh
-    glab() { printf "%s" "{\"id\":\"gid://gitlab/WorkItem/123\"}"; }
     result=$(get_work_item_global_id 42)
     [ "$result" = "gid://gitlab/WorkItem/123" ]
   '
@@ -367,16 +399,17 @@ SCRIPT
 
 # ── close_issue ───────────────────────────────────────────────────────
 
-@test "close_issue calls glab api with state_event=close" {
+@test "close_issue calls forge_issue_close with the issue IID" {
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    # Mock forge_issue_get to prevent forge_init
+    forge_issue_get() { :; }
+    # Mock forge_issue_close: capture the IID
+    CLOSED=""
+    forge_issue_close() { CLOSED="$1"; }
     source lib/boucle.sh
-    GLAB_ARGS=""
-    glab() { GLAB_ARGS="$*"; }
     close_issue 42
-    echo "$GLAB_ARGS"
+    [ "$CLOSED" = "42" ]
   '
   assert_success
-  assert_output --partial "state_event=close"
-  assert_output --partial "42"
 }
