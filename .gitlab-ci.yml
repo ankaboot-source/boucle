@@ -490,7 +490,7 @@ dispatch:
       # the catchup is never triggered and the issue stays stuck at
       # boucle:merging forever (the merger job's e2e close path is unreliable
       # — it can fail, leaving no fallback close path).
-      if [ "$ACTOR" = "up-bot" ] && [ "$MR_ACTION" != "merge" ]; then
+      if [ "$ACTOR" = "${BOUCLE_BOT_USERNAME:-up-bot}" ] && [ "$MR_ACTION" != "merge" ]; then
         exit 0
       fi
 
@@ -763,8 +763,8 @@ dispatch:
               GUARD_BOT_IN_CURRENT=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.current // [] | map(.id | tostring) | index($bid) != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
               GUARD_BOT_IN_PREVIOUS=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.previous // [] | map(.id | tostring) | index($bid) != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
             else
-              GUARD_BOT_IN_CURRENT=$(jq -r '.changes.assignees.current // [] | map(.username) | index("up-bot") != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
-              GUARD_BOT_IN_PREVIOUS=$(jq -r '.changes.assignees.previous // [] | map(.username) | index("up-bot") != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
+              GUARD_BOT_IN_CURRENT=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.current // [] | map(.username) | index($bname) != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
+              GUARD_BOT_IN_PREVIOUS=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.previous // [] | map(.username) | index($bname) != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
             fi
             if [ "$GUARD_BOT_IN_CURRENT" = "true" ] && [ "$GUARD_BOT_IN_PREVIOUS" != "true" ]; then
               GUARD_BOT_ASSIGNED=true
@@ -870,8 +870,8 @@ dispatch:
           BOT_IN_PREVIOUS=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.previous // [] | map(.id | tostring) | index($bid) != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
         else
           # Fallback: detect by bot username "up-bot" when BOUCLE_BOT_ID is unset
-          BOT_IN_CURRENT=$(jq -r '.changes.assignees.current // [] | map(.username) | index("up-bot") != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
-          BOT_IN_PREVIOUS=$(jq -r '.changes.assignees.previous // [] | map(.username) | index("up-bot") != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
+          BOT_IN_CURRENT=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.current // [] | map(.username) | index($bname) != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
+          BOT_IN_PREVIOUS=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.previous // [] | map(.username) | index($bname) != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
         fi
         if [ "$BOT_IN_CURRENT" = "true" ] && [ "$BOT_IN_PREVIOUS" != "true" ]; then
           BOT_JUST_ASSIGNED=true
@@ -906,7 +906,7 @@ dispatch:
         SHOULD_TRIAGE=true
       elif echo "$LABELS" | grep -q "boucle:needs-info"; then
         # Check if author replied (note event by non-bot)
-        if [ "$OBJECT_KIND" = "note" ] && [ "$ACTOR" != "up-bot" ]; then
+        if [ "$OBJECT_KIND" = "note" ] && [ "$ACTOR" != "${BOUCLE_BOT_USERNAME:-up-bot}" ]; then
           SHOULD_TRIAGE=true
         fi
       elif echo "$LABELS" | grep -q "boucle:todo"; then
@@ -929,9 +929,9 @@ dispatch:
         # worker — it will relabel to boucle:working (replacing all boucle:
         # labels, including the stale boucle:spec-review). We do NOT strip
         # boucle:spec-review here.
-        if [ "$OBJECT_KIND" = "note" ] && [ "$ACTOR" != "up-bot" ]; then
+        if [ "$OBJECT_KIND" = "note" ] && [ "$ACTOR" != "${BOUCLE_BOT_USERNAME:-up-bot}" ]; then
           SHOULD_WORK=true
-        elif [ "$OBJECT_KIND" = "emoji" ] && [ "$ACTOR" != "up-bot" ]; then
+        elif [ "$OBJECT_KIND" = "emoji" ] && [ "$ACTOR" != "${BOUCLE_BOT_USERNAME:-up-bot}" ]; then
           EMOJI_NAME=$(jq -r '.object_attributes.name // empty' "$TRIGGER_PAYLOAD")
           EMOJI_ACTION=$(jq -r '.object_attributes.action // empty' "$TRIGGER_PAYLOAD")
           AWARDABLE_TYPE=$(jq -r '.object_attributes.awardable_type // empty' "$TRIGGER_PAYLOAD")
@@ -1907,8 +1907,8 @@ worker:
 
       # Configure git credentials for push
       git config user.email "bot@ankaboot.dev"
-      git config user.name "up-bot"
-      git remote set-url origin "https://up-bot:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${CI_PROJECT_PATH}.git"
+      git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+      git remote set-url origin "https://${BOUCLE_BOT_USERNAME:-up-bot}:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${CI_PROJECT_PATH}.git"
 
       # Seed state.md on first run
       if [ ! -f ".boucle-state/$BOUCLE_ISSUE/state.md" ]; then
@@ -2990,8 +2990,8 @@ merger:
       # needs a committer identity. On a fresh docker executor there is no
       # global git config, so the rebase fails with "Committer identity unknown".
       git config user.email "bot@ankaboot.dev"
-      git config user.name "up-bot"
-      git remote set-url origin "https://up-bot:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${CI_PROJECT_PATH}.git"
+      git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+      git remote set-url origin "https://${BOUCLE_BOT_USERNAME:-up-bot}:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${CI_PROJECT_PATH}.git"
 
       # Rebase the MR branch onto latest master. This is the key conflict-
       # avoidance mechanism: because merges are serialized, each rebase is
@@ -4098,8 +4098,8 @@ doctor:
         # A human reply means the reporter answered the blocking questions.
         # If that reply exists but the issue still has boucle:needs-info, the
         # triage pipeline was canceled/orphaned — re-trigger it.
-        HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" '
-          [.[] | select(.author.username != "up-bot") | select(.id > ($tid | tonumber))]
+        HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
+          [.[] | select(.author.username != $bname) | select(.id > ($tid | tonumber))]
           | length
         ')
 
@@ -4142,8 +4142,8 @@ doctor:
         # Find the last triage comment (same as needs-info recovery above)
         LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
         # Detect any non-bot note after the last triage comment
-        HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" '
-          [.[] | select(.author.username != "up-bot") | select(.id > ($tid | tonumber))]
+        HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
+          [.[] | select(.author.username != $bname) | select(.id > ($tid | tonumber))]
           | length
         ')
         # Check for an approval emoji on the triage comment AND any standalone
@@ -4160,8 +4160,8 @@ doctor:
           [ "$NOTE_ID" = "0" ] || [ -z "$NOTE_ID" ] && continue
           AWARDS=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
             "/projects/$CI_PROJECT_ID/issues/$IID/notes/$NOTE_ID/award_emoji" 2>/dev/null)
-          if echo "$AWARDS" | jq -e --arg emojis "$BOUCLE_SPEC_APPROVAL_EMOJIS" '
-            [.[] | select(.user.username != "up-bot") | .name]
+          if echo "$AWARDS" | jq -e --arg emojis "$BOUCLE_SPEC_APPROVAL_EMOJIS" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
+            [.[] | select(.user.username != $bname) | .name]
             | map(select(. as $n | ($emojis | split("|")) | index($n)))
             | length > 0
           ' >/dev/null 2>&1; then
@@ -4260,8 +4260,8 @@ doctor:
         fi
 
         # Is there a human reply after the last triage comment?
-        HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" '
-          [.[] | select(.author.username != "up-bot") | select(.id > ($tid | tonumber))]
+        HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
+          [.[] | select(.author.username != $bname) | select(.id > ($tid | tonumber))]
           | length
         ')
         if [ "$HUMAN_REPLY_AFTER_TRIAGE" -eq 0 ]; then
