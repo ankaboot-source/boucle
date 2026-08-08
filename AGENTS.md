@@ -232,8 +232,14 @@ justification on stdout); the reviewer MUST reject entries that fail it.
     - ❌ DO NOT unconditionally `git reset --hard origin/master` at the
       start of every worker iteration — it wipes validated commits on
       non-code FAILs.
-    - ✅ DO: `git rebase origin/master` when worker commits exist; fall back
-      to hard reset only on conflict or a clean slate.
+    - ❌ DO NOT fall back to `git reset --hard` when a rebase CONFLICTS on a
+      branch that holds worker commits — the reset orphans the pushed
+      commit, empties the MR (`detailed_merge_status=commits_status`) and
+      sends the merger/doctor into an infinite escalation loop.
+    - ✅ DO: `git rebase origin/master` when worker commits exist; on
+      conflict, `git rebase --abort` and PRESERVE the branch (hand the
+      conflict to the bounded re-trigger path). Fall back to hard reset
+      ONLY on a true clean slate (no worker commits).
 
 23. **Document the CLI fallback for graph tools**
     - ❌ DO NOT reference MCP graph tools in prompts without the CI fallback.
@@ -745,10 +751,12 @@ atomic.
     - ✅ DO: preserve worker commits and rebase. If
       `git log origin/master..$BRANCH --oneline` shows worker commits, run
       `git rebase origin/master` to keep the work on top of the latest master.
-      Fall back to `git reset --hard origin/master` ONLY when the rebase
-      conflicts or the branch has no worker commits (clean slate). This keeps
-      the anti-accumulation property (lesson #8) without destroying validated
-      work on non-code FAILs.
+      On rebase conflict, `git rebase --abort` and PRESERVE the branch —
+      NEVER reset it (a destructive reset orphans the pushed commit, empties
+      the MR and loops the merger/doctor). Fall back to
+      `git reset --hard origin/master` ONLY when the branch has no worker
+      commits (true clean slate). This keeps the anti-accumulation property
+      (lesson #8) without destroying validated work on non-code FAILs.
     - Context: issue #35 iteration 3 produced commit `6ca8aa33` (full
       FeaturedFeed.astro + index.astro + sections.css + tokens.css, all 5
       human comments addressed). The reviewer FAILed on a stale preview
@@ -1052,6 +1060,30 @@ atomic.
       still works on consumers that never ran `--bot-id` or ran an older
       `bin/setup`. Defense-in-depth: the fallback closes the gap even if a
       future consumer skips `--bot-id`.
+
+51. **Never reset --hard a branch that holds pushed worker commits**
+    - ❌ DO NOT let a rebase-fallback `git reset --hard origin/$CI_DEFAULT_BRANCH`
+      run on a branch that contains worker commits. The commit becomes
+      orphaned (still on the remote, but unreferenced): the MR goes empty
+      (`detailed_merge_status=commits_status`), the merger cannot fix it
+      (nothing to rebase or merge), escalates to `boucle:human`, and the
+      doctor re-triggers the merger forever on the same empty MR — an
+      infinite escalation loop.
+    - ❌ DO NOT trigger the merger on an MR in `commits_status` — the merger
+      cannot repair an empty MR; re-triggering it is precisely the infinite
+      loop.
+    - ✅ DO: on rebase conflict, `git rebase --abort` and PRESERVE the branch —
+      never reset it. Hand the conflict to the bounded re-trigger path
+      (worker iteration budget, then `boucle:human`). `git reset --hard` is
+      allowed ONLY for a true clean slate (no worker commits).
+    - ✅ DO: treat `commits_status` as a worker problem, not a merger problem —
+      recover by re-triggering the WORKER (it regenerates the MR content
+      from the preserved `state.md`/`iterations.md`), in both the merger and
+      the doctor. Admission: class — destructive rebase-fallback reset on a
+      committed branch; recurrence — any future backport/refactor may
+      reintroduce a reset fallback; stable — no line numbers; distinct from
+      lesson #22 which covers the unconditional start-of-run reset (this
+      covers the rebase-CONFLICT fallback and the recovery side).
 
 ## Documentation self-maintenance
 
