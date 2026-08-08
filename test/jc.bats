@@ -85,6 +85,68 @@ extract_func_body() {
   assert_success
 }
 
+@test "bin/jc defines is_quota_exhausted function" {
+  run grep -E '^is_quota_exhausted\(\)' bin/jc
+  assert_success
+}
+
+# ── is_quota_exhausted (extracted, run in isolation) ──────────────────
+# is_quota_exhausted detects persistent quota errors (HTTP 429/402) in the
+# agent log — the provider-down condition (AGENTS.md lesson #30) that
+# is_api_down misses because a quota error leaves activity traces.
+# Callers gate on a non-zero AGENT_EXIT; the function itself only
+# inspects the log.
+
+@test "is_quota_exhausted: HTTP 429 in log is quota-exhausted" {
+  TMPF=$(mktemp)
+  LOGF=$(mktemp)
+  extract_func is_quota_exhausted "$TMPF"
+  printf 'HTTP/1.1 429 Too Many Requests\nretrying...\n' > "$LOGF"
+  run bash -c "source '$TMPF'; is_quota_exhausted '$LOGF'"
+  assert_success
+  rm -f "$TMPF" "$LOGF"
+}
+
+@test "is_quota_exhausted: weekly usage limit message is quota-exhausted" {
+  TMPF=$(mktemp)
+  LOGF=$(mktemp)
+  extract_func is_quota_exhausted "$TMPF"
+  printf 'Error: you have reached your weekly usage limit\n' > "$LOGF"
+  run bash -c "source '$TMPF'; is_quota_exhausted '$LOGF'"
+  assert_success
+  rm -f "$TMPF" "$LOGF"
+}
+
+@test "is_quota_exhausted: insufficient credits message is quota-exhausted" {
+  TMPF=$(mktemp)
+  LOGF=$(mktemp)
+  extract_func is_quota_exhausted "$TMPF"
+  printf 'insufficient credits\n' > "$LOGF"
+  run bash -c "source '$TMPF'; is_quota_exhausted '$LOGF'"
+  assert_success
+  rm -f "$TMPF" "$LOGF"
+}
+
+@test "is_quota_exhausted: clean activity log is not quota-exhausted" {
+  TMPF=$(mktemp)
+  LOGF=$(mktemp)
+  extract_func is_quota_exhausted "$TMPF"
+  printf 'glab issue note 5 --message "done"\nread src/app.ts\n' > "$LOGF"
+  run bash -c "source '$TMPF'; is_quota_exhausted '$LOGF'"
+  assert_failure
+  rm -f "$TMPF" "$LOGF"
+}
+
+@test "is_quota_exhausted: empty log is not quota-exhausted" {
+  TMPF=$(mktemp)
+  LOGF=$(mktemp)
+  extract_func is_quota_exhausted "$TMPF"
+  : > "$LOGF"
+  run bash -c "source '$TMPF'; is_quota_exhausted '$LOGF'"
+  assert_failure
+  rm -f "$TMPF" "$LOGF"
+}
+
 @test "bin/jc defines run_with_retry function" {
   run grep -E '^run_with_retry\(\)' bin/jc
   assert_success

@@ -401,6 +401,21 @@ is_api_down() {
   return 1
 }
 
+# Detect persistent provider quota exhaustion (HTTP 429/402) in the agent
+# log. This is the companion of is_api_down (AGENTS.md lesson #30): a quota
+# error leaves activity traces (the provider's error message, sometimes tool
+# calls made before the refusal), so is_api_down alone reports "up" and the
+# fallback never triggers — retrying cannot fix an exhausted quota. Returns
+# 0 (true) when a quota error is detected, 1 (false) otherwise. Callers must
+# gate on a non-zero AGENT_EXIT: a successful run may legitimately quote
+# "429"/"quota" in its output (e.g. an issue about quota errors).
+is_quota_exhausted() {
+  local log="$1"
+  [ -s "$log" ] || return 1
+  grep -qiE '\b429\b|\b402\b|too many requests|rate ?limit|usage ?limit|insufficient credits|credits? exhausted|out of credits|payment required|quota (exceeded|reached|limit)|weekly usage limit|exceeded (your|the|monthly|weekly) ?(credit|quota|usage|limit)' "$log" || return 1
+  return 0
+}
+
 # ── Write role-specific prompt-overlay.md ──────────────────────────────
 # jcode loads .jcode/prompt-overlay.md from cwd in addition to AGENTS.md.
 # We write the role-specific agent prompt (body after YAML frontmatter)
@@ -687,22 +702,31 @@ print_metrics_line
 
 # ── 5b. Provider fallback (API-down recovery) ─────────────────────────
 # If the primary provider is down (empty log / no agent activity = the
-# exit-4 condition, AGENTS.md lesson #29), retry with the fallback provider
-# before the exit-code guard runs. This lets the loop self-recover when
-# ollama-cloud is unavailable (credits exhausted, API down) instead of
+# exit-4 condition, AGENTS.md lesson #29) or its quota is exhausted
+# (persistent HTTP 429/402, AGENTS.md lesson #30), retry with the fallback
+# provider before the exit-code guard runs. This lets the loop self-recover
+# when ollama-cloud is unavailable (credits exhausted, API down) instead of
 # escalating to a human. Gated by BOUCLE_FALLBACK_PROVIDER.
 # The fallback is a transparent retry layer: if it succeeds, the exit-code
 # guard sees the fallback's output and proceeds normally; if it also fails,
 # the primary log is restored and the existing exit-3/4 logic applies.
-if [ -n "$FALLBACK_PROVIDER" ] && is_api_down "$AGENT_LOG"; then
-  echo "[boucle:fallback] primary provider appears down (empty log / no agent activity) — retrying with $FALLBACK_PROVIDER/$FALLBACK_MODEL" >&2
+# Quota detection is gated on a non-zero AGENT_EXIT: a successful run may
+# legitimately quote "429"/"quota" in its output.
+FALLBACK_REASON=""
+if is_api_down "$AGENT_LOG"; then
+  FALLBACK_REASON="empty log / no agent activity"
+elif [ "$AGENT_EXIT" -ne 0 ] && is_quota_exhausted "$AGENT_LOG"; then
+  FALLBACK_REASON="persistent quota error (HTTP 429/402)"
+fi
+if [ -n "$FALLBACK_PROVIDER" ] && [ -n "$FALLBACK_REASON" ]; then
+  echo "[boucle:fallback] primary provider appears down ($FALLBACK_REASON) — retrying with $FALLBACK_PROVIDER/$FALLBACK_MODEL" >&2
   # Preserve the primary log for diagnosis, start fresh for the fallback.
   cp "$AGENT_LOG" "${AGENT_LOG}.primary" 2> /dev/null || true
   : > "$AGENT_LOG"
   run_with_retry -- jcode --provider-profile "$FALLBACK_PROVIDER" --model "$FALLBACK_MODEL" --tools '*' run --quiet "$PROMPT" > "$AGENT_LOG" 2>&1
   cat "$AGENT_LOG"
   print_metrics_line
-  if is_api_down "$AGENT_LOG"; then
+  if is_api_down "$AGENT_LOG" || { [ "$AGENT_EXIT" -ne 0 ] && is_quota_exhausted "$AGENT_LOG"; }; then
     # Fallback also down — restore primary log so the exit-code guard and
     # CI diagnostic capture both attempts. Escalation proceeds as before.
     echo "[boucle:fallback] fallback provider ($FALLBACK_PROVIDER) also down — escalating" >&2
@@ -735,6 +759,16 @@ case "$ROLE" in
       # agent produced nothing actionable.
       if ! grep -qiE 'glab (issue note|api .* -X POST|api .*/notes)' "$AGENT_LOG" \
         && ! grep -qiE '<!-- boucle:(triage|verdict)' "$AGENT_LOG"; then
+        # A persistent quota error (HTTP 429/402, AGENTS.md lesson #30)
+        # leaves activity traces in the log but produces no comment — the
+        # model never completed a run. Retrying cannot fix an exhausted
+        # quota, so classify it as provider-down (exit 4) to enable the
+        # fallback instead of the exit-3 silent-failure escalation.
+        if is_quota_exhausted "$AGENT_LOG"; then
+          echo "[boucle] ERROR: agent log shows persistent quota errors (HTTP 429/402) — provider down (exit 4)." >&2
+          echo "[boucle] CI should treat this as provider-down and fall back before escalating to human." >&2
+          exit 4
+        fi
         echo "[boucle] ERROR: agent produced no posted comment and no drafted comment in log — silent failure (exit 3)." >&2
         echo "[boucle] This breaks the doctor re-trigger loop. CI should escalate to human." >&2
         exit 3
@@ -766,6 +800,15 @@ case "$ROLE" in
       echo "[boucle] ERROR: worker agent log shows no tool activity — jcode exited $AGENT_EXIT with no tool activity (likely API down or out of credits, exit 4)." >&2
       echo "[boucle] Log content (first 500 chars):" >&2
       head -c 500 "$AGENT_LOG" >&2 2> /dev/null || true
+      exit 4
+    fi
+    # Persistent quota errors (HTTP 429/402) on a failed run are a
+    # provider-down condition (AGENTS.md lesson #30), not a step-budget
+    # issue — retrying cannot fix an exhausted quota. Gated on a non-zero
+    # exit so a worker that succeeded despite a transient 429 is not
+    # falsely escalated.
+    if [ "$AGENT_EXIT" -ne 0 ] && is_quota_exhausted "$AGENT_LOG"; then
+      echo "[boucle] ERROR: worker agent log shows persistent quota errors (HTTP 429/402) — provider down (exit 4)." >&2
       exit 4
     fi
     ;;
