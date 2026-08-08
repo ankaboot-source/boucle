@@ -3,21 +3,19 @@
 > **Maintenance** — This document captures lessons learned, anti-patterns
 > and operating principles for agents. **Any new lesson discovered must be
 > added here** to avoid repeating the same mistakes. See
-> [ARCHITECTURE.md](ARCHITECTURE.md) for the full system architecture.
+> [CONTEXT.md](CONTEXT.md) for the project context and tech stack.
 
 ## Reference files (charter files)
 
 Before working on any issue, agents MUST consult these files at the repo root:
 
-- [DESIGN.md](DESIGN.md) — consumer site visual charter. Any visual component MUST conform to it.
 - [AGENTS.md](AGENTS.md) — this document. Lessons learned and conventions.
 - [README.md](README.md) — project overview and getting started.
 - [LOOP.md](LOOP.md) — per-consumer configuration (target repo, cadence, gates, caps).
-- [ARCHITECTURE.md](ARCHITECTURE.md) — full system architecture.
 - [CONTEXT.md](CONTEXT.md) — project context, tech stack, constraints.
 
-**FORBIDDEN** to start any work without first reading [ARCHITECTURE.md](ARCHITECTURE.md)
-and [LOOP.md](LOOP.md).
+**FORBIDDEN** to start any work without first reading [LOOP.md](LOOP.md)
+and [CONTEXT.md](CONTEXT.md).
 
 ## Agent roles
 
@@ -28,7 +26,7 @@ and [LOOP.md](LOOP.md).
 | reviewer| ollama-cloud/deepseek-v4-flash:0731 | 35    | 0.2  | Adversarial review against preview URL, SHA-anchored verdict                                                       |
 | e2e     | ollama-cloud/glm-5.2         | 30    | —    | Verifies on production URL, SHA-anchored verdict                                                                    |
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full pipeline and state machine details.
+See [LOOP.md](LOOP.md) for the pipeline and state machine details.
 
 ## MANDATORY operating principles
 
@@ -358,7 +356,7 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       description was a single 500-char block with no visual structure.
     - ✅ DO: write the Approach as 3-6 bullet points (`- item`), one
       per aspect of the implementation. Each bullet cites the charter
-      doc section it conforms to (e.g. "Conforms to DESIGN.md §2 —
+      doc section it conforms to (e.g. "Conforms to the visual charter §2 —
       sharp corners via `--radius-sharp`"). Bullet points and blank
       lines render properly in GitLab markdown.
 
@@ -490,7 +488,7 @@ atomic.
       reviewer is still running, and 3 duplicate "unparsable" notes appear
       on the issue (one per iteration, because each iteration's case block
       fires the catch-all before the assertion re-triggers). This was
-      MR !40 on up/urgence-palestine.fr: the reviewer posted only drafts
+      MR !40 on a consumer repo: the reviewer posted only drafts
       on iterations 1-2, the catch-all fired each time, and the human saw
       "assigned mid-review" + a cascade of failed trigger pipelines.
     - ❌ DO NOT conflate "genuinely UNCERTAIN verdict" (agent posted
@@ -625,7 +623,7 @@ atomic.
       `set_boucle_label` strips `boucle:*` labels on the next state
       transition, so it is a one-step signal, not a persistent state.
 
-17. **Parent-issue attachments not inherited** (issue #34 on up/urgence-palestine.fr)
+17. **Parent-issue attachments not inherited** (issue #34 on a consumer repo)
     - ❌ DO NOT mine only the current issue for uploads when the issue is a
       sub-issue. Assets (logos, zips, mockups) are often uploaded to the
       parent issue only, and a worker that cannot find them improvises
@@ -655,7 +653,7 @@ atomic.
       Track this limitation here and remove the entry once boucle is public
       and `bin/update` succeeds unauthenticated.
 
-19. **MR description not refreshed on worker re-run** (issue #34 on up/urgence-palestine.fr)
+19. **MR description not refreshed on worker re-run** (issue #34 on a consumer repo)
     - ❌ DO NOT reuse an existing MR on iteration 2+ without updating its
       description. The worker deploys to a branch-based preview URL that
       changes between iterations, and the MR description carries the preview
@@ -667,17 +665,17 @@ atomic.
       Approach + new commit summary) on every iteration. The reuse branch
       in `.gitlab-ci.yml` now updates the MR instead of silently reusing it.
     - Context: MR !30 iteration 2 deployed to
-      `https://boucle-34.urgence-palestine.pages.dev` but the MR description
+      `https://boucle-34.<consumer>.pages.dev` but the MR description
       still pointed at the iteration-1 URL
-      `https://b87caf91.urgence-palestine.pages.dev`. The reviewer tested the
+      `https://b87caf91.<consumer>.pages.dev`. The reviewer tested the
       stale URL and validated anyway. The user saw "logos still invisible"
       because the URL in the MR was wrong.
 
-20. **Worker does not fill the Approach section in state.md** (issue #34 on up/urgence-palestine.fr)
+20. **Worker does not fill the Approach section in state.md** (issue #34 on a consumer repo)
     - ❌ DO NOT leave the `## Approach` section of `state.md` as the seed
       placeholder `(to be determined by worker)`. The Approach section
       becomes the MR description's `### Approach` block, which the reviewer
-      reads to verify doc conformance (e.g. DESIGN.md §2 and §4 citations).
+      reads to verify doc conformance (e.g. visual charter §2 and §4 citations).
       An empty Approach causes repeated reviewer FAIL verdicts on the same
       criterion, wasting the iteration budget (`BOUCLE_MAX_ITERATIONS`).
     - ✅ DO: the worker MUST fill the Approach section with 2-5 sentences
@@ -687,12 +685,12 @@ atomic.
       back to an explicit note when the section is still the placeholder, so
       the MR description is never the literal seed text.
     - Context: 3 reviewer FAIL verdicts on MR !30, all blocking on the same
-      criterion: "MR description does not cite DESIGN.md §2 and §4". The
+      criterion: "MR description does not cite the visual charter §2 and §4". The
       worker (minimax-m3) understood the requirement (visible in the job
       trace) but never wrote it into `state.md`. The reviewer eventually
       PASSed with a lenient interpretation, but the loop wasted 2 iterations.
 
-21. **Preview stale passes HTTP-200-only assertion** (issue #35 on up/urgence-palestine.fr)
+21. **Preview stale passes HTTP-200-only assertion** (issue #35 on a consumer repo)
     - ❌ DO NOT trust an HTTP 200 on the preview URL as proof that the deployed
       content matches the head commit. Three failure modes produce a 200
       with stale content: (a) the deploy step's exit code is swallowed by a
@@ -718,7 +716,7 @@ atomic.
       stale-content path remained open until this marker + retry assertion
       was added.
 
-22. **Destructive `git reset --hard` wipes validated worker commits** (issue #35 on up/urgence-palestine.fr)
+22. **Destructive `git reset --hard` wipes validated worker commits** (issue #35 on a consumer repo)
     - ❌ DO NOT unconditionally `git reset --hard origin/master` at the start
       of every worker iteration. When the reviewer FAILs on a non-code issue
       (stale preview, missing doc citation, MR description placeholder), the
@@ -741,7 +739,7 @@ atomic.
       only `fa1699f2` (a token-only commit). The next worker spent all 50
       steps reconstituting context and produced no code changes.
 
-23. **Codebase graph indexed in CI but unusable by agents** (issue #35 on up/urgence-palestine.fr)
+23. **Codebase graph indexed in CI but unusable by agents** (issue #35 on a consumer repo)
     - ❌ DO NOT instruct agents to use MCP graph tools (`search_graph`,
       `trace_path`, `get_code_snippet`) without documenting the CLI fallback
       for CI. `bin/jc` strips MCP servers from the jcode config in CI
@@ -763,7 +761,7 @@ atomic.
       `ls`/`cat`/`git log` to reconstitute the codebase, burning steps that
       should have gone to implementation. The graph was indexed but unused.
 
-24. **MR description overwritten on no-changes re-runs** (issue #35 on up/urgence-palestine.fr)
+24. **MR description overwritten on no-changes re-runs** (issue #35 on a consumer repo)
     - ❌ DO NOT overwrite the MR description when the worker produces no code
       changes. The previous description may contain a detailed Approach and a
       working preview URL from the last successful iteration — replacing them
@@ -778,7 +776,7 @@ atomic.
       placeholder.
     - Context: issue #35 iteration 3 produced a full implementation (FeaturedFeed.astro,
       index.astro, sections.css, tokens.css) with a detailed Approach citing
-      DESIGN.md. A later no-changes run overwrote the description with
+      the visual charter. A later no-changes run overwrote the description with
       "Issue #35 — iteration 1 (no code changes)" + "(no commits this
       iteration)", wiping the Approach and the working preview URL.
 
@@ -802,7 +800,7 @@ atomic.
       wrong" with a screenshot got the text through to the worker but the
       screenshot was dropped.
 
-26. **Attachment framing conflates "inspect for context" with "ship as asset"** (issue #35 on up/urgence-palestine.fr)
+26. **Attachment framing conflates "inspect for context" with "ship as asset"** (issue #35 on a consumer repo)
     - ❌ DO NOT frame all attachments (issue + MR) as "Read each file to
       inspect them… use them as context for addressing reviewer feedback".
       Attachments have a **dual nature**: they may be (a) source assets the
@@ -827,7 +825,7 @@ atomic.
       (minimax-m3 is text-only), and fabricated a fake Palestinian flag +
       Unicode symbol instead of `cp`-ing the uploaded file to `public/`.
 
-27. **Log-scraping fallback bypassed when a stale verdict exists** (issue #35 on up/urgence-palestine.fr)
+27. **Log-scraping fallback bypassed when a stale verdict exists** (issue #35 on a consumer repo)
     - ❌ DO NOT gate the log-scraping fallback on `if [ -z "$VERDICT" ]` alone.
       The SHA-unanchored fallback (which finds the newest `boucle:verdict`
       regardless of SHA) may set VERDICT to a **stale** verdict from a previous
@@ -849,7 +847,7 @@ atomic.
       to `boucle:human` with "Verdict unparsable or uncertain" instead of
       acting on the FAIL verdict that was sitting in stdout.
 
-28. **Worker state not persisted between iterations** (issue #35 on up/urgence-palestine.fr)
+28. **Worker state not persisted between iterations** (issue #35 on a consumer repo)
     - ❌ DO NOT assume `.boucle/<issue>/` survives between worker iterations.
       `.boucle/` is gitignored (state.md, iterations.md, agent-output.log
       are NOT committed), and the worker re-triggers itself via the API
@@ -871,14 +869,14 @@ atomic.
       `state.md`).
     - Context: issue #35 iterations 1 and 2 both produced zero code changes.
       The worker (kimi-k2.7-code, 100 steps) spent all its steps
-      reconstituting context — re-reading DESIGN.md, AGENTS.md,
-      ARCHITECTURE.md, re-discovering the codebase via grep — because
+      reconstituting context — re-reading the charter docs,
+      re-discovering the codebase via grep — because
       `state.md` was re-seeded to "(to be determined by worker)" and
       `iterations.md` did not exist. The "Tried and rejected" section was
       always "(none yet)". The worker had no memory of what iteration 1
       had already attempted.
 
-29. **Model/API failure misdiagnosed as step-budget exhaustion** (issue #35 on up/urgence-palestine.fr)
+29. **Model/API failure misdiagnosed as step-budget exhaustion** (issue #35 on a consumer repo)
     - ❌ DO NOT treat an empty worker log as "agent likely exhausted its
       step budget". When the model API is down or out of credits,
       opencode hangs silently — no stdout, no crash, no tool calls in the
@@ -1042,14 +1040,14 @@ atomic.
 Boucle self-maintains its own documentation as part of the autonomous loop.
 Documentation is **code**: a doc that drifts from the system it describes is a
 bug. The four agents share the responsibility of keeping the charter docs
-(`ARCHITECTURE.md`, `AGENTS.md`, `CONTEXT.md`, `DESIGN.md`, `LOOP.md`) in sync
+(`AGENTS.md`, `CONTEXT.md`, `LOOP.md`) in sync
 with reality. `README.md` is excluded — it is for human readers, not agents.
 
 ### Distributed workflow
 
 - **Triage** — Adds a `Docs impact: <docs>` line to the `Analysis` section of
   the structured comment, listing which charter docs the issue touches
-  (e.g. `Docs impact: ARCHITECTURE.md, AGENTS.md`).
+  (e.g. `Docs impact: AGENTS.md, LOOP.md`).
 - **Worker** — Reads the impacted charter docs **before** implementing. Conforms
   to them. If the change requires updating a doc (new state, new variable, new
   agent responsibility, new seam), the worker updates the doc **in the same
@@ -1071,9 +1069,9 @@ with reality. `README.md` is excluded — it is for human readers, not agents.
 - Keep docs **up to date with the code** — never let a doc describe a system
   that no longer exists.
 - **Cross-reference** related docs with relative markdown links
-  (e.g. `[ARCHITECTURE.md](ARCHITECTURE.md)`).
+  (e.g. `[AGENTS.md](AGENTS.md)`).
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) section "Documentation
+See [AGENTS.md](AGENTS.md) section "Documentation
 self-maintenance" for the pipeline diagram and the per-agent responsibilities.
 
 <!-- codebase-memory-mcp:start -->
@@ -1159,9 +1157,7 @@ there first.
 
 ## See also
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — System architecture, pipeline, Mermaid diagrams
 - [CONTEXT.md](CONTEXT.md) — Project context, tech stack, constraints
 - [README.md](README.md) — Overview, getting started, usage
-- [DESIGN.md](DESIGN.md) — Consumer site visual charter
 - [LOOP.md](LOOP.md) — Per-consumer configuration
 - [.jcode/UPSTREAM-FIX-WORKFLOW.md](.jcode/UPSTREAM-FIX-WORKFLOW.md) — Upstream fix workflow
