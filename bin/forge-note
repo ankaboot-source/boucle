@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# bin/forge-note — forge-agnostic note posting for AI agents
+#
+# Agents call this instead of `glab issue note` / `gh issue comment` directly.
+# It sources the forge shim and delegates to forge_issue_note / forge_mr_note.
+#
+# Usage:
+#   bin/forge-note issue <iid> --message "comment body"
+#   bin/forge-note issue <iid> --message-file /path/to/message
+#   bin/forge-note issue <iid> --message-stdin < file
+#   bin/forge-note mr <mr_iid> --message "comment body"
+#
+# The --message form preserves the heredoc pattern agents already use:
+#   bin/forge-note issue <iid> --message "$(cat <<'EOF'
+#   ... comment body ...
+#   EOF
+#   )"
+
+set -euo pipefail
+
+TYPE="${1:?usage: bin/forge-note <issue|mr> <iid> --message ...}"
+IID="${2:?usage: bin/forge-note <issue|mr> <iid> --message ...}"
+shift 2
+
+MESSAGE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --message) MESSAGE="${2:?--message requires a value}"; shift 2 ;;
+    --message-file) MESSAGE=$(cat "${2:?--message-file requires a path}"); shift 2 ;;
+    --message-stdin) MESSAGE=$(cat); shift ;;
+    *) echo "Unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
+
+if [ -z "$MESSAGE" ]; then
+  echo "ERROR: no message provided. Use --message, --message-file, or --message-stdin." >&2
+  exit 1
+fi
+
+# Resolve BOUCLE_HOME (repo root in CI, parent of bin/ in local dev)
+BOUCLE_HOME="${BOUCLE_HOME:-$(cd "$(dirname "$0")/.." && pwd)}"
+
+# Source the forge abstraction and initialize the active backend
+# shellcheck disable=SC1091
+source "$BOUCLE_HOME/bin/forge/common.sh"
+forge_init
+
+case "$TYPE" in
+  issue)
+    forge_issue_note "$IID" "$MESSAGE"
+    ;;
+  mr)
+    forge_mr_note "$IID" "$MESSAGE"
+    ;;
+  *)
+    echo "Unknown note type: $TYPE (expected: issue|mr)" >&2
+    exit 1
+    ;;
+esac
