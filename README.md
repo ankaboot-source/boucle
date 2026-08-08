@@ -26,23 +26,6 @@ already use every day: **your forge**.
   a standalone **Rust** binary: fast startup, small memory footprint,
   zero runtime dependencies.
 
-## How it works
-
-```mermaid
-flowchart LR
-    A[Issue in GitLab] --> B[Triage]
-    B --> C[Worker<br/>implement + deploy preview]
-    C --> D[Reviewer<br/>adversarial review]
-    D --> E[You approve the MR]
-    E --> F[Merge + deploy]
-    F --> G[E2E verification]
-    G --> H[Issue closed]
-```
-
-Four specialized agents — **triage**, **worker**, **reviewer**, **e2e** —
-orchestrate the whole flow. Humans only do what only humans can: validate the
-spec and approve the MR.
-
 ## Quick start
 
 **Prerequisites:** a GitLab repository with Cloudflare Pages configured as the
@@ -53,19 +36,26 @@ Pick whichever path fits you.
 ### Option 1 — copy/paste prompt (easiest)
 
 No terminal needed. Ask your coding agent (Claude Code, Cursor, …) to install
-boucle by pasting this prompt (fill the two placeholders first):
+boucle by pasting this prompt. **Nothing to replace**: the agent detects your
+GitLab host and project from the git remote, and it works even if you are not
+already inside the target repository.
 
-> Install boucle on this repository. Execute these steps and report back
-> what you did:
+> Install boucle on this GitLab repository. Execute these steps and report
+> back what you did:
 >
-> 1. `git submodule add https://github.com/ankaboot-source/boucle .boucle`
-> 2. Run setup in non-interactive mode:
->    `BOUCLE_PROJECT=<your-project-id-or-path> BOUCLE_HOST=<your-gitlab-host> .boucle/bin/setup --non-interactive`
-> 3. Do NOT include an API key anywhere. The API key must never appear in
+> 1. If you are not already inside the target repository — the one whose
+>    `origin` remote points to your GitLab host — ask the user for its URL,
+>    clone it, and work from the clone.
+> 2. `git submodule add https://github.com/ankaboot-source/boucle .boucle`
+> 3. Run setup in non-interactive mode. It auto-detects the GitLab host and
+>    project from `git remote get-url origin`, so no value needs to be
+>    replaced:
+>    `.boucle/bin/setup --non-interactive`
+> 4. Do NOT include an API key anywhere. The API key must never appear in
 >    this conversation. If setup tells you the key is missing, that's
 >    expected — it is configured manually in the GitLab UI afterwards.
-> 4. `git add .gitmodules .boucle .gitlab-ci.yml && git commit -m "chore: install boucle engine"`
-> 5. Show me the URL `bin/setup` printed for configuring the masked API key,
+> 5. `git add .gitmodules .boucle .gitlab-ci.yml && git commit -m "chore: install boucle engine"`
+> 6. Show me the URL `bin/setup` printed for configuring the masked API key,
 >    and any next steps it listed.
 
 ### Option 2 — command line
@@ -75,12 +65,16 @@ boucle by pasting this prompt (fill the two placeholders first):
 git submodule add https://github.com/ankaboot-source/boucle .boucle
 
 # 2. Configure everything (idempotent — safe to re-run)
-cd .boucle && BOUCLE_PROJECT=<project-id-or-path> BOUCLE_HOST=<your-gitlab-host> bin/setup --non-interactive
+.boucle/bin/setup --non-interactive
 ```
 
 `bin/setup` configures GitLab (CI variables, labels, board, branch
 protection, webhook), writes a thin `.gitlab-ci.yml` shim, and appends
 `.boucle/` to your `.gitignore`. Your existing pipeline is never overwritten.
+Project and host are read from the `origin` remote automatically — the only
+values you may need to pass explicitly are the bot and Cloudflare tokens
+(`--bot-token`, `--cf-token`), which otherwise come from the `BOUCLE_*`
+environment variables.
 
 ### After install
 
@@ -96,6 +90,34 @@ protection, webhook), writes a thin `.gitlab-ci.yml` shim, and appends
 
 From there, the pipeline takes over. You only answer the human prompts:
 spec validation and MR approval.
+
+## How it works
+
+```
+issue in GitLab
+      │  (create it, or assign one to the boucle bot)
+      ▼
+   triage          analyses the issue, posts a spec, asks for your approval
+      │  (you validate the spec)
+      ▼
+   worker          implements on a branch and deploys a preview
+      │
+      ▼
+   reviewer        adversarial review against the preview
+      │
+      ▼
+   merge + deploy  (you approve the MR, then it merges)
+      │
+      ▼
+   e2e             verifies the production URL
+      │
+      ▼
+issue closed
+```
+
+Four specialized agents — **triage**, **worker**, **reviewer**, **e2e** —
+orchestrate the whole flow. Humans only do what only humans can: validate the
+spec and approve the MR.
 
 ## Configuration
 
