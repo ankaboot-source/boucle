@@ -16,7 +16,7 @@
 
 backend:
   name: test-repo
-  branch: master
+  branch: main
 
 # Media storage — internal, served from the same origin.
 media_folder: /static/media

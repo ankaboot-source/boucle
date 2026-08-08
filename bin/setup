@@ -496,7 +496,7 @@ echo "=== Branch Protection ==="
 DEFAULT_BRANCH=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID" 2> /dev/null | jq -r '.default_branch' || true)
 if [ -z "$DEFAULT_BRANCH" ] || [ "$DEFAULT_BRANCH" = "null" ]; then
   log_fail "could not determine default branch"
-  DEFAULT_BRANCH="master"
+  DEFAULT_BRANCH="main"
 fi
 
 # Check if branch is already protected
