@@ -22,8 +22,8 @@
 # ── Ensure the forge backend is loaded ───────────────────────────────────
 # The CI before_script sources bin/forge/common.sh before this file,
 # but guard in case it didn't (e.g. local dev, tests).
-type forge_init &>/dev/null && {
-  type forge_issue_get &>/dev/null || forge_init
+type forge_init &> /dev/null && {
+  type forge_issue_get &> /dev/null || forge_init
 } || true
 
 # ── Label management ────────────────────────────────────────────────────
@@ -58,7 +58,7 @@ set_boucle_label() {
     # skip bot-authored sub-issues). Best-effort: skip silently if
     # resolve fails.
     local human_id
-    human_id=$(resolve_reporter_id "$iid" 2>/dev/null)
+    human_id=$(resolve_reporter_id "$iid" 2> /dev/null)
     if [ -n "$human_id" ] && [ "$human_id" != "null" ] && [ "$human_id" != "${BOUCLE_BOT_ID:-}" ]; then
       forge_issue_assign "$iid" "$human_id"
     fi
@@ -171,7 +171,7 @@ maybe_close_parent() {
   # versions that didn't use the hierarchy API.
   local children_data sibling_iids
   children_data=$(forge_work_item_children "$parent_iid")
-  sibling_iids=$(echo "$children_data" | jq -r '[.[].iid] | join(",")' 2>/dev/null)
+  sibling_iids=$(echo "$children_data" | jq -r '[.[].iid] | join(",")' 2> /dev/null)
   if [ -z "$sibling_iids" ]; then
     # No children via hierarchy API — fall back to legacy marker comment
     local parent_notes
@@ -207,7 +207,7 @@ maybe_close_parent() {
   # Hierarchy API path: children response includes .state directly,
   # so we can check all siblings in one call (no per-sibling fetch).
   local open_count
-  open_count=$(echo "$children_data" | jq '[.[] | select(.state != "closed")] | length' 2>/dev/null || echo 1)
+  open_count=$(echo "$children_data" | jq '[.[] | select(.state != "closed")] | length' 2> /dev/null || echo 1)
   if [ "${open_count:-1}" -gt 0 ]; then
     local open_iids
     open_iids=$(echo "$children_data" | jq -r '[.[] | select(.state != "closed") | .iid] | join(",")')
@@ -232,7 +232,7 @@ preview_url_for_changed_files() {
     echo ""
     return
   }
-  changed=$(git diff --name-only "origin/${BOUCLE_DEFAULT_BRANCH:-main}...$BRANCH" 2>/dev/null)
+  changed=$(git diff --name-only "origin/${BOUCLE_DEFAULT_BRANCH:-main}...$BRANCH" 2> /dev/null)
   [ -z "$changed" ] && {
     echo "$base_url"
     return
