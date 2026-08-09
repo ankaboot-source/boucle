@@ -16,7 +16,7 @@ never touch the engine itself.
   - [Option 1 — copy/paste prompt](#option-1-copypaste-prompt-easiest)
   - [Option 2 — command line](#option-2-command-line)
   - [After install](#after-install)
-- [⚙️ How it works](#️-how-it-works)
+- [⚙️ How it works and why it's calmer](#️-how-it-works-and-why-its-calmer)
 - [💰 Cost](#cost)
 - [🛠️ Configuration](#️-configuration)
   - [The bot user](#the-bot-user)
@@ -136,7 +136,7 @@ From there, the pipeline takes over. You only answer the human prompts:
 spec validation and MR approval. The `doctor` job (a scheduled
 self-healing sweep) runs automatically — there is nothing to run by hand.
 
-## ⚙️ How it works
+## ⚙️ How it works and why it's calmer
 
 ```mermaid
 flowchart TD
@@ -154,29 +154,29 @@ flowchart TD
     E -->|❌ fail| W
 ```
 
-Four agents — **triage**, **worker**, **reviewer**, **e2e** — orchestrate the
-flow. You only validate the spec and approve the MR. The loop runs
-asynchronously on CI; **Do-Not-Disturb** (`BOUCLE_DND_*`) auto-validates the
-spec gate during your off-hours. You approve over morning coffee; by lunch
-the MR is waiting. The agent works on its clock; you work on yours.
-
-### Determinism and skills beat raw intelligence
+The loop runs asynchronously on CI. You intervene at two named gates —
+spec approval and MR review — not in a live chat. **Do-Not-Disturb**
+(`BOUCLE_DND_*`) auto-validates the spec gate during your off-hours. You
+approve over morning coffee; by lunch the MR is waiting. The agent works on
+its clock; you work on yours.
 
 At this intelligence tier, **how** you scaffold the agent matters more than
 **which** model you pick. Raw intelligence has diminishing returns — from
 DeepSeek V4 Flash ($0.03/task) to Opus 5 ($2.34/task), cost increases 78×
 while intelligence increases 21%
-([Artificial Analysis](https://artificialanalysis.ai), v4.1.1). What closes
-the gap is structure: Anthropic's
+([Artificial Analysis](https://artificialanalysis.ai), v4.1.1).
+
+What closes the gap is structure: Anthropic's
 ["Building Effective Agents"](https://www.anthropic.com/research/building-effective-agents)
 (Dec 2024) recommends "programmatic checks (gates) on any intermediate steps"
 and notes that "code solutions are verifiable through automated tests."
 [Terminal-Bench v2.1](https://artificialanalysis.ai/evaluations/terminalbench-v2-1)
 and [SWE-bench Verified](https://www.swebench.com/) confirm this — the gate,
-not the model, decides what passes. boucle's four roles each carry a focused
-prompt and a curated skill library (UI/UX, design, frontend, codebase graph)
-— a specialized agent with the right skill outperforms a generalist with
-higher raw intelligence.
+not the model, decides what passes.
+
+boucle's four roles each carry a focused prompt and a curated skill library
+(UI/UX, design, frontend, codebase graph) — a specialized agent with the
+right skill outperforms a generalist with higher raw intelligence.
 
 **The model decides what to *attempt*; the gates and skills decide what
 *ships*.**
