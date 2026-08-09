@@ -209,10 +209,18 @@ not.
 **Bottom line:** an autonomous loop that runs unattended needs the top tier on
 either side. boucle on Ollama Max ($100/mo) gives you continuous-agent
 capacity with 10 concurrent models; Claude Code Max 20× ($200/mo) costs
-**2× more** for a duo whose per-task cost is **7–57× higher** — and whose
-intelligence edge (63 vs 53) does not change the outcome of a loop that
-validates behavior on a live preview rather than trusting the model's
-confidence.
+**2× more** for a duo whose per-task cost is **7–57× higher**.
+
+The quality gap is real but asymmetric. On the **worker** role, DeepSeek V4
+Flash 0731 reaches 95% of Sonnet 5's intelligence (52 vs 55) at 57× less
+cost — near-equal quality, overwhelming cost advantage. On the **triage**
+role, GLM-5.2 sits at 84% of Opus 5's intelligence (53 vs 63) at 7.5× less
+cost — a genuine 10-point gap. boucle compensates by routing the triage
+model's output through a human spec gate before the worker acts, and by
+verifying the worker's output on a live preview rather than trusting the
+model's confidence. The net effect: you trade a measurable slice of
+frontier reasoning for a 2× monthly saving and a 7–57× per-task saving —
+and the loop's gates, not the model, decide what ships.
 
 > Note: new Ollama Max subscriptions are temporarily paused (capacity
 > expansion); Pro remains open and Pro users can buy extra usage balance to
