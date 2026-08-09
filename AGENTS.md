@@ -1084,6 +1084,29 @@ atomic.
       lesson #22 which covers the unconditional start-of-run reset (this
       covers the rebase-CONFLICT fallback and the recovery side).
 
+52. **Standalone `merge_request_event` reference required for MR pipelines**
+    - ❌ DO NOT gate a GitLab rule as a COMBINED comparison, e.g.
+      `if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "$CI_DEFAULT_BRANCH"`,
+      when the job must run in a merge-request pipeline. The CI lint accepts
+      the combined rule (jobs evaluate correctly), but GitLab's MR-pipeline
+      CREATION only triggers on the standalone reference
+      `$CI_PIPELINE_SOURCE == "merge_request_event"` — with a combined rule
+      NO pipeline is created and the job silently never runs (observed on
+      framagit 2026-08: same branch, combined rule → no pipeline; pure rule →
+      pipeline created instantly). A rule using only MR variables
+      (`$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`) also never creates one.
+    - ✅ DO: keep the creation rule standalone
+      (`- if: $CI_PIPELINE_SOURCE == "merge_request_event"`) and enforce the
+      scoping in the job's `script:` instead
+      (`if [ "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" != "$CI_DEFAULT_BRANCH" ]; then exit 0; fi`).
+    - ✅ DO: prefer `ci/lint` with `merge_request_pipeline=true` to verify
+      rule evaluation, but remember it does NOT prove pipeline creation —
+      the creation trigger is the standalone-string detection.
+    - Admission: class — combined/bare-MR-variable rules silently disable MR
+      pipelines; recurrence — any new MR-gated job in this repo or consumer
+      shims; stable — GitLab detection behavior, version-independent so far;
+      not covered by any existing lesson.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
