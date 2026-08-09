@@ -26,8 +26,11 @@ while [[ $# -gt 0 ]]; do
     --forge)
       FORGE="$2"
       case "$FORGE" in
-        gitlab|github) ;;
-        *) echo "Error: --forge must be 'gitlab' or 'github' (got: $FORGE)" >&2; exit 1 ;;
+        gitlab | github) ;;
+        *)
+          echo "Error: --forge must be 'gitlab' or 'github' (got: $FORGE)" >&2
+          exit 1
+          ;;
       esac
       shift 2
       ;;
@@ -137,8 +140,8 @@ if [ -z "$PROJECT" ] || [ -z "$HOST" ]; then
     REMOTE_PATH="${REMOTE_PATH%.git}"
     [ -z "$PROJECT" ] && PROJECT="$REMOTE_PATH"
     [ -z "$HOST" ] && HOST="$REMOTE_HOST"
-    [ -n "$PROJECT" ] && [ -n "$HOST" ] && \
-      echo "Auto-detected from origin remote: project=$PROJECT host=$HOST"
+    [ -n "$PROJECT" ] && [ -n "$HOST" ] \
+      && echo "Auto-detected from origin remote: project=$PROJECT host=$HOST"
   fi
 fi
 
@@ -455,7 +458,7 @@ else
   # PI_AUTH (base64-encoded BOT_TOKEN). On GitHub, the Actions workflow
   # uses PI_AUTH for forge API calls.
   if [ -n "$BOT_TOKEN" ]; then
-    PI_AUTH_B64=$(echo -n "$BOT_TOKEN" | base64 -w0 2>/dev/null || echo -n "$BOT_TOKEN" | base64)
+    PI_AUTH_B64=$(echo -n "$BOT_TOKEN" | base64 -w0 2> /dev/null || echo -n "$BOT_TOKEN" | base64)
     run "echo \"$PI_AUTH_B64\" | GH_TOKEN=\"$BOT_TOKEN\" gh secret set PI_AUTH --repo \"$PROJECT_ID\" 2>/dev/null"
     log_pass "PI_AUTH set (base64-encoded BOT_TOKEN, secrets)"
   else
@@ -495,7 +498,7 @@ else
     if [ "$DRY_RUN" = "true" ]; then
       echo "  [dry-run] set BOUCLE_LLM_API_KEY (secret, masked) — value omitted"
     else
-      echo "$LLM_API_KEY" | GH_TOKEN="$BOT_TOKEN" gh secret set BOUCLE_LLM_API_KEY --repo "$PROJECT_ID" 2>/dev/null
+      echo "$LLM_API_KEY" | GH_TOKEN="$BOT_TOKEN" gh secret set BOUCLE_LLM_API_KEY --repo "$PROJECT_ID" 2> /dev/null
     fi
     log_pass "BOUCLE_LLM_API_KEY set (secrets, masked)"
   elif [ "$NON_INTERACTIVE" = "true" ]; then
@@ -508,6 +511,39 @@ else
   LLM_BASE_URL="${BOUCLE_LLM_BASE_URL:-https://ollama.com/v1}"
   run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_LLM_BASE_URL --repo \"$PROJECT_ID\" --body \"$LLM_BASE_URL\" 2>/dev/null"
   log_pass "BOUCLE_LLM_BASE_URL set to ${BOUCLE_LLM_BASE_URL:-default: https://ollama.com/v1} (vars)"
+
+  # ── GitHub: bot account (PAT identity) ───────────────────────────────
+  # GitHub has no project service accounts: the --bot-token PAT *is* the
+  # bot. Resolve which account it belongs to so the user knows who boucle
+  # acts as, seed BOUCLE_BOT_USERNAME with that login (the loop detects the
+  # bot's own comments by it — a wrong value makes the loop treat the bot's
+  # comments as human replies), and warn when the account is not yet a
+  # collaborator of the repository.
+  GH_LOGIN=""
+  if [ -n "$BOT_TOKEN" ]; then
+    GH_ME=$(GH_TOKEN="$BOT_TOKEN" gh api user 2> /dev/null || true)
+    GH_LOGIN=$(echo "$GH_ME" | jq -r '.login // empty' 2> /dev/null || true)
+    if [ -n "$GH_LOGIN" ] && [ "$GH_LOGIN" != "null" ]; then
+      if [ "$BOT_USERNAME" != "$GH_LOGIN" ] && [ "$BOT_USERNAME" != "up-bot" ]; then
+        log_skip "BOUCLE_BOT_USERNAME stays '$BOT_USERNAME' (--bot-username) — resolved PAT login is '@$GH_LOGIN'"
+      else
+        BOT_USERNAME="$GH_LOGIN"
+        run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_BOT_USERNAME --repo \"$PROJECT_ID\" --body \"$BOT_USERNAME\" 2>/dev/null"
+        log_pass "BOUCLE_BOT_USERNAME set to '$BOT_USERNAME' (vars) — boucle acts as @$GH_LOGIN"
+      fi
+      if GH_TOKEN="$BOT_TOKEN" gh api "/repos/$PROJECT_ID/collaborators/$GH_LOGIN" > /dev/null 2>&1; then
+        log_pass "bot @$GH_LOGIN is a collaborator of $PROJECT_ID"
+      else
+        log_skip "bot @$GH_LOGIN is not a collaborator of $PROJECT_ID — add it under"
+        log_skip "  Settings → Collaborators → Add people (write access), then re-run bin/setup."
+      fi
+    else
+      GH_LOGIN=""
+      log_skip "could not resolve the PAT account (gh api user failed) — BOUCLE_BOT_USERNAME not set"
+    fi
+  else
+    log_skip "bot account (no --bot-token provided)"
+  fi
 fi
 
 echo ""
@@ -646,8 +682,8 @@ if [ "$FORGE" = "gitlab" ]; then
 else
   # GitHub: use forge_branch_protect
   # Detect default branch
-  GH_INFO=$(forge_project_get 2>/dev/null || echo '{"default_branch":"main"}')
-  DEFAULT_BRANCH=$(echo "$GH_INFO" | jq -r '.default_branch // "main"' 2>/dev/null || echo "main")
+  GH_INFO=$(forge_project_get 2> /dev/null || echo '{"default_branch":"main"}')
+  DEFAULT_BRANCH=$(echo "$GH_INFO" | jq -r '.default_branch // "main"' 2> /dev/null || echo "main")
   run "forge_branch_protect '$DEFAULT_BRANCH' 30 40"
   log_pass "$DEFAULT_BRANCH protected (required PR reviews, no direct push)"
 fi
@@ -658,18 +694,82 @@ echo ""
 if [ "$FORGE" = "gitlab" ]; then
   echo "=== Bot Member ==="
 
-  if [ -n "$BOT_ID" ]; then
-    EXISTING_MEMBER=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/members/all?user_ids=$BOT_ID" 2> /dev/null | jq -r '[.[] | .access_level] | max // empty' || true)
-    if [ -n "$EXISTING_MEMBER" ]; then
-      if [ "$EXISTING_MEMBER" -ge 30 ]; then
-        log_skip "bot (ID: $BOT_ID) already member (access_level=$EXISTING_MEMBER)"
-      else
-        run "glab api --hostname $HOST -X PUT /projects/$PROJECT_ID/members/$BOT_ID -f access_level=30 >/dev/null"
-        log_pass "bot (ID: $BOT_ID) access level updated to Developer"
-      fi
+  # ── 5a. Create the bot as a project service account ──────────────────
+  # The install creates the bot as part of setup — it must NOT be a separate
+  # manual step. A project owner can provision a project service account via
+  # the API (no platform-admin needed, GitLab 16+). If the API is unavailable
+  # (feature flag off, 403/404), fall back to the manual instructions printed
+  # in the summary below.
+  BOT_IS_SERVICE_ACCOUNT=false
+  if [ -z "$BOT_ID" ]; then
+    # Idempotence: a bot already wired via BOUCLE_BOT_ID is reused, and a
+    # pre-existing project service account is reused too — re-running setup
+    # never creates a duplicate bot.
+    EXISTING_BOT_ID_VAR=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_BOT_ID" 2> /dev/null | jq -r '.value // empty' || true)
+    if [ -n "$EXISTING_BOT_ID_VAR" ] && [ "$EXISTING_BOT_ID_VAR" != "null" ]; then
+      BOT_ID="$EXISTING_BOT_ID_VAR"
+      log_skip "bot already wired (BOUCLE_BOT_ID=$BOT_ID) — reusing"
     else
-      run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/members -f user_id=$BOT_ID -f access_level=30 >/dev/null"
-      log_pass "bot (ID: $BOT_ID) added as Developer"
+      EXISTING_SA=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/service_accounts" 2> /dev/null || true)
+      SA_ID=$(echo "$EXISTING_SA" | jq -r '.[0].id // empty' 2> /dev/null || true)
+      if [ -n "$SA_ID" ] && [ "$SA_ID" != "null" ]; then
+        BOT_ID="$SA_ID"
+        BOT_USERNAME=$(echo "$EXISTING_SA" | jq -r '.[0].username // empty' 2> /dev/null || true)
+        BOT_IS_SERVICE_ACCOUNT=true
+        log_skip "existing project service account reused (ID: $BOT_ID, username: ${BOT_USERNAME:-?})"
+      else
+        SA_RESPONSE=$(run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/service_accounts" 2> /dev/null) || SA_RESPONSE=""
+        SA_NEW_ID=$(echo "$SA_RESPONSE" | jq -r '.id // empty' 2> /dev/null || true)
+        if [ -n "$SA_NEW_ID" ] && [ "$SA_NEW_ID" != "null" ]; then
+          BOT_ID="$SA_NEW_ID"
+          BOT_USERNAME=$(echo "$SA_RESPONSE" | jq -r '.username // empty' 2> /dev/null || true)
+          BOT_IS_SERVICE_ACCOUNT=true
+          log_pass "bot service account created (ID: $BOT_ID, username: ${BOT_USERNAME:-?})"
+        elif [ "$DRY_RUN" = "true" ]; then
+          log_skip "bot service account creation (dry-run)"
+        else
+          log_skip "could not create a bot service account via the API (feature flag off or endpoint 403/404) —"
+          log_skip "  create it manually under Project → Settings → Service accounts, then re-run:"
+          log_skip "  bin/setup --bot-id <id> --bot-username <username> --bot-token <pat>"
+        fi
+      fi
+    fi
+
+    # Best-effort: request an API token (scope: api) for the service account
+    # so BOUCLE_TOKEN is seeded too. Not fatal on failure — the PAT can be
+    # created manually in the UI.
+    if [ "$BOT_IS_SERVICE_ACCOUNT" = "true" ] && [ -z "$BOT_TOKEN" ]; then
+      PAT_RESPONSE=$(run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/service_accounts/$BOT_ID/personal_access_tokens -f name=boucle -f 'scopes[]=api'" 2> /dev/null) || PAT_RESPONSE=""
+      NEW_TOKEN=$(echo "$PAT_RESPONSE" | jq -r '.token // empty' 2> /dev/null || true)
+      if [ -n "$NEW_TOKEN" ] && [ "$NEW_TOKEN" != "null" ]; then
+        BOT_TOKEN="$NEW_TOKEN"
+        log_pass "service account PAT created (name: boucle, scope: api)"
+      elif [ "$DRY_RUN" = "true" ]; then
+        log_skip "service account PAT creation (dry-run)"
+      else
+        log_skip "could not create a PAT for the service account — create one manually under"
+        log_skip "  Project → Settings → Service accounts, then re-run:"
+        log_skip "  bin/setup --bot-id $BOT_ID --bot-token <pat>"
+      fi
+    fi
+  fi
+
+  if [ -n "$BOT_ID" ]; then
+    if [ "$BOT_IS_SERVICE_ACCOUNT" = "true" ]; then
+      log_skip "bot (ID: $BOT_ID) is a project service account — already a project member"
+    else
+      EXISTING_MEMBER=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/members/all?user_ids=$BOT_ID" 2> /dev/null | jq -r '[.[] | .access_level] | max // empty' || true)
+      if [ -n "$EXISTING_MEMBER" ]; then
+        if [ "$EXISTING_MEMBER" -ge 30 ]; then
+          log_skip "bot (ID: $BOT_ID) already member (access_level=$EXISTING_MEMBER)"
+        else
+          run "glab api --hostname $HOST -X PUT /projects/$PROJECT_ID/members/$BOT_ID -f access_level=30 >/dev/null"
+          log_pass "bot (ID: $BOT_ID) access level updated to Developer"
+        fi
+      else
+        run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/members -f user_id=$BOT_ID -f access_level=30 >/dev/null"
+        log_pass "bot (ID: $BOT_ID) added as Developer"
+      fi
     fi
   else
     log_skip "bot member (no --bot-id provided)"
@@ -696,6 +796,20 @@ if [ "$FORGE" = "gitlab" ]; then
   else
     run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_BOT_USERNAME -f value=$BOT_USERNAME -f masked=false -f protected=false >/dev/null"
     log_pass "BOUCLE_BOT_USERNAME CI variable set to $BOT_USERNAME"
+  fi
+
+  # BOUCLE_TOKEN — from --bot-token (section 1) or from the service-account
+  # PAT created above.
+  if [ -n "$BOT_TOKEN" ]; then
+    EXISTING_TOKEN_VAR=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_TOKEN" 2> /dev/null | jq -r '.key // empty' || true)
+    if [ -n "$EXISTING_TOKEN_VAR" ]; then
+      log_skip "BOUCLE_TOKEN already exists"
+    else
+      run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_TOKEN -f value='$BOT_TOKEN' -f masked=true -f protected=true >/dev/null"
+      log_pass "BOUCLE_TOKEN CI variable set (bot PAT)"
+    fi
+  else
+    log_skip "BOUCLE_TOKEN CI variable (no bot PAT available)"
   fi
 
   echo ""
@@ -803,11 +917,11 @@ if [ "$FORGE" = "github" ]; then
   echo "=== .boucle-version ==="
 
   # Check if .boucle-version already exists in the repo
-  FILE_CHECK=$(GH_TOKEN="$BOT_TOKEN" gh api "/repos/$PROJECT_ID/contents/.boucle-version" 2>/dev/null || true)
+  FILE_CHECK=$(GH_TOKEN="$BOT_TOKEN" gh api "/repos/$PROJECT_ID/contents/.boucle-version" 2> /dev/null || true)
   if echo "$FILE_CHECK" | jq -e '.content' > /dev/null 2>&1; then
     log_skip ".boucle-version already exists"
   else
-    BOUCLE_VERSION_CONTENT=$(echo -n '0.0.0' | base64 -w0 2>/dev/null || echo -n '0.0.0' | base64)
+    BOUCLE_VERSION_CONTENT=$(echo -n '0.0.0' | base64 -w0 2> /dev/null || echo -n '0.0.0' | base64)
     run "GH_TOKEN=\"$BOT_TOKEN\" gh api -X PUT /repos/$PROJECT_ID/contents/.boucle-version -f message='init' -f content=\"$BOUCLE_VERSION_CONTENT\" >/dev/null 2>&1"
     log_pass ".boucle-version created (0.0.0)"
   fi
@@ -848,15 +962,19 @@ if [ "$FORGE" = "gitlab" ]; then
   echo "  5. Create your first issue — the webhook will trigger triage."
   if [ -z "$BOT_ID" ]; then
     echo ""
-    echo "  NOTE: no --bot-id was provided, so the bot user was NOT added to the"
-    echo "  project and BOUCLE_BOT_ID was not seeded. boucle reassigns issues to"
-    echo "  the bot (assignee_ids[]) and merges MRs as it — without an account,"
-    echo "  issues stay assigned to the current user and the loop still runs."
-    echo "  To use a dedicated bot:"
+    echo "  NOTE: no --bot-id was provided and the service-account API could not"
+    echo "  create a bot (feature flag off, or the endpoint 403/404 on this"
+    echo "  GitLab). boucle reassigns issues to the bot (assignee_ids[]) and"
+    echo "  merges MRs as it — without an account, issues stay assigned to the"
+    echo "  current user and the loop still runs. To use a dedicated bot:"
     echo "    1. Create the bot via Project → Settings → Service accounts"
     echo "       (no platform-admin needed — a project owner can provision it)."
     echo "    2. Create a PAT for the bot (scope: api) and note its user ID."
     echo "    3. Re-run: bin/setup --bot-id <id> --bot-token <pat>"
+  fi
+  if [ "${BOT_IS_SERVICE_ACCOUNT:-false}" = "true" ]; then
+    echo "  Bot: project service account '${BOT_USERNAME:-?}' created and wired as Developer —"
+    echo "       boucle comments, reassigns issues, and merges MRs as this account."
   fi
 
   print_webhook_recommendations
@@ -883,6 +1001,9 @@ else
   echo ""
   echo "  NOTE: GitHub does not need a trigger token, webhook, or issue board —"
   echo "  the workflow itself acts as the receiver and GitHub labels serve as the board."
+  if [ -n "${GH_LOGIN:-}" ]; then
+    echo "  Bot: boucle acts as @$GH_LOGIN (resolved from the BOUCLE_TOKEN PAT)."
+  fi
 fi
 
 exit 0
