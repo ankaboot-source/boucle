@@ -98,7 +98,7 @@ setup() {
   assert_success
 }
 
-@test "doctor warns when BOUCLE_DEPLOY_MODE=external but BOUCLE_LIVE_URL is unset" {
+@test "doctor fails when BOUCLE_DEPLOY_MODE=external but BOUCLE_LIVE_URL is unset" {
   run bash -c '
     FAILURES=0
     pass() { echo "  ✓ $1"; }
