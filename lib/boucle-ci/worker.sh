@@ -286,36 +286,48 @@ EOF
   # ── Preview freshness marker ─────────────────────────────────────
   local head_sha marker_html marker_txt
   head_sha=$(git rev-parse HEAD)
-  marker_html="<!-- boucle:commit sha=${head_sha} -->"
-  marker_txt="boucle:commit sha=${head_sha}"
-  if [ -f "$BOUCLE_BUILD_OUTPUT/index.html" ]; then
-    sed "1i\\${marker_html}" "$BOUCLE_BUILD_OUTPUT/index.html" > "$BOUCLE_BUILD_OUTPUT/index.html.boucle" \
-      && mv "$BOUCLE_BUILD_OUTPUT/index.html.boucle" "$BOUCLE_BUILD_OUTPUT/index.html"
+  if boucle_worker_should_deploy; then
+    marker_html="<!-- boucle:commit sha=${head_sha} -->"
+    marker_txt="boucle:commit sha=${head_sha}"
+    if [ -f "$BOUCLE_BUILD_OUTPUT/index.html" ]; then
+      sed "1i\\${marker_html}" "$BOUCLE_BUILD_OUTPUT/index.html" > "$BOUCLE_BUILD_OUTPUT/index.html.boucle" \
+        && mv "$BOUCLE_BUILD_OUTPUT/index.html.boucle" "$BOUCLE_BUILD_OUTPUT/index.html"
+    fi
+    printf '%s\n' "$marker_txt" > "$BOUCLE_BUILD_OUTPUT/__boucle_commit__.txt"
+  else
+    echo "[boucle] SHA marker stamp skipped (no deploy in $(boucle_deploy_mode)/$(boucle_review_mode) mode)"
   fi
-  printf '%s\n' "$marker_txt" > "$BOUCLE_BUILD_OUTPUT/__boucle_commit__.txt"
 
   # ── Push branch ──────────────────────────────────────────────────
   git push --force origin "$BRANCH"
 
-  # ── Deploy ───────────────────────────────────────────────────────
+  # ── Deploy (gated by deploy/review mode) ─────────────────────────
   local deploy_log deploy_rc preview_url
-  deploy_log=$(mktemp)
-  (eval "$BOUCLE_DEPLOY_CMD") > "$deploy_log" 2>&1
-  deploy_rc=$?
-  preview_url=$(grep -oE "$BOUCLE_DEPLOY_URL_REGEX" "$deploy_log" | head -1)
-  if [ "$deploy_rc" -ne 0 ] && [ -n "$preview_url" ]; then
-    echo "WARN: deploy exited non-zero ($deploy_rc) but emitted a preview URL — proceeding" >&2
-  fi
-  if [ "$deploy_rc" -ne 0 ] && [ -z "$preview_url" ]; then
-    echo "FAIL: deploy exited $deploy_rc with no preview URL" >&2
-    cat "$deploy_log" >&2
+  preview_url=""
+
+  if boucle_worker_should_deploy; then
+    deploy_log=$(mktemp)
+    (eval "$BOUCLE_DEPLOY_CMD") > "$deploy_log" 2>&1
+    deploy_rc=$?
+    preview_url=$(grep -oE "$BOUCLE_DEPLOY_URL_REGEX" "$deploy_log" | head -1)
+    if [ "$deploy_rc" -ne 0 ] && [ -n "$preview_url" ]; then
+      echo "WARN: deploy exited non-zero ($deploy_rc) but emitted a preview URL — proceeding" >&2
+    fi
+    if [ "$deploy_rc" -ne 0 ] && [ -z "$preview_url" ]; then
+      echo "FAIL: deploy exited $deploy_rc with no preview URL" >&2
+      cat "$deploy_log" >&2
+      rm -f "$deploy_log"
+      exit 1
+    fi
     rm -f "$deploy_log"
-    exit 1
+  else
+    echo "[boucle] Deploy skipped (mode: $(boucle_deploy_mode), review: $(boucle_review_mode))"
   fi
-  rm -f "$deploy_log"
 
   # ── Preview URL deep-link ────────────────────────────────────────
-  preview_url=$(preview_url_for_changed_files "$preview_url")
+  if [ -n "$preview_url" ]; then
+    preview_url=$(preview_url_for_changed_files "$preview_url")
+  fi
 
   # ── MR title + description ───────────────────────────────────────
   ITERATION="${BOUCLE_ITERATION:-1}"
@@ -367,9 +379,13 @@ EOF
     mr_title="boucle: issue #$BOUCLE_ISSUE"
   fi
 
+  local preview_line=""
+  if [ -n "$preview_url" ]; then
+    preview_line="Preview: $preview_url"
+  fi
   local mr_description
-  mr_description=$(printf '## Issue #%s — iteration %s\n\nPreview: %s\n\n### What changed\n%s\n\n### Approach\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s_' \
-    "$BOUCLE_ISSUE" "$ITERATION" "$preview_url" "${commit_summary:-(no commits)}" "${approach:-(not recorded)}" "$BOUCLE_ISSUE" "$commit_count" "$ITERATION")
+  mr_description=$(printf '## Issue #%s — iteration %s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s_ | mode: deploy=%s review=%s' \
+    "$BOUCLE_ISSUE" "$ITERATION" "$preview_line" "${commit_summary:-(no commits)}" "${approach:-(not recorded)}" "$BOUCLE_ISSUE" "$commit_count" "$ITERATION" "$(boucle_deploy_mode)" "$(boucle_review_mode)")
 
   # ── MR create or update ──────────────────────────────────────────
   local mr_iid
@@ -382,52 +398,53 @@ EOF
   fi
 
   # ── Preview assertion (HTTP 200 + SHA marker match) ──────────────
-  if [ -z "$preview_url" ]; then
-    echo "FAIL: no preview URL" >&2
-    exit 1
-  fi
-  local preview_ok http_code attempt delay
-  preview_ok=false
-  attempt=0
-  delay=5
-  while [ "$attempt" -lt 6 ]; do
-    attempt=$((attempt + 1))
-    http_code=$(curl -sL -o /dev/null -w "%{http_code}" "$preview_url" 2> /dev/null || echo "000")
-    if [ "$http_code" = "200" ]; then
-      echo "Preview URL 200 OK (attempt $attempt/6)"
-      preview_ok=true
-      break
+  if [ -n "$preview_url" ]; then
+    local preview_ok http_code attempt delay
+    preview_ok=false
+    attempt=0
+    delay=5
+    while [ "$attempt" -lt 6 ]; do
+      attempt=$((attempt + 1))
+      http_code=$(curl -sL -o /dev/null -w "%{http_code}" "$preview_url" 2> /dev/null || echo "000")
+      if [ "$http_code" = "200" ]; then
+        echo "Preview URL 200 OK (attempt $attempt/6)"
+        preview_ok=true
+        break
+      fi
+      if [ "$attempt" -lt 6 ]; then
+        echo "Preview URL returned $http_code (attempt $attempt/6) — retrying in ${delay}s..." >&2
+        sleep "$delay"
+        delay=$((delay * 2))
+      fi
+    done
+    if [ "$preview_ok" != "true" ]; then
+      echo "FAIL: preview URL not 200 after $attempt attempts (last code: $http_code)" >&2
+      exit 1
     fi
-    if [ "$attempt" -lt 6 ]; then
-      echo "Preview URL returned $http_code (attempt $attempt/6) — retrying in ${delay}s..." >&2
-      sleep "$delay"
-      delay=$((delay * 2))
-    fi
-  done
-  if [ "$preview_ok" != "true" ]; then
-    echo "FAIL: preview URL not 200 after $attempt attempts (last code: $http_code)" >&2
-    exit 1
-  fi
 
-  local propagation_wait propagation_step elapsed deployed_sha
-  propagation_wait="${BOUCLE_PREVIEW_PROPAGATION_WAIT:-60}"
-  propagation_step=5
-  elapsed=0
-  deployed_sha=""
-  while [ "$elapsed" -lt "$propagation_wait" ]; do
-    deployed_sha=$(curl -s "${preview_url%/}/__boucle_commit__.txt" 2> /dev/null \
-      | grep -oE 'sha=[a-f0-9]{7,40}' | head -1 | sed 's/sha=//')
-    if [ "$deployed_sha" = "$head_sha" ]; then
-      echo "Preview fresh: deployed SHA ${deployed_sha:0:12} matches head ${head_sha:0:12} (after ${elapsed}s)"
-      break
+    local propagation_wait propagation_step elapsed deployed_sha
+    propagation_wait="${BOUCLE_PREVIEW_PROPAGATION_WAIT:-60}"
+    propagation_step=5
+    elapsed=0
+    deployed_sha=""
+    local marker_path="${BOUCLE_PREVIEW_MARKER_PATH:-__boucle_commit__.txt}"
+    while [ "$elapsed" -lt "$propagation_wait" ]; do
+      deployed_sha=$(curl -s "${preview_url%/}/${marker_path}" 2> /dev/null \
+        | grep -oE 'sha=[a-f0-9]{7,40}' | head -1 | sed 's/sha=//')
+      if [ "$deployed_sha" = "$head_sha" ]; then
+        echo "Preview fresh: deployed SHA ${deployed_sha:0:12} matches head ${head_sha:0:12} (after ${elapsed}s)"
+        break
+      fi
+      echo "Preview not fresh yet (got '${deployed_sha:-none}', want '${head_sha:0:12}') — retrying in ${propagation_step}s (${elapsed}/${propagation_wait}s)"
+      sleep "$propagation_step"
+      elapsed=$((elapsed + propagation_step))
+    done
+    if [ "$deployed_sha" != "$head_sha" ]; then
+      echo "FAIL: preview stale after ${propagation_wait}s — deployed SHA '${deployed_sha:-none}' != head '${head_sha:0:12}'" >&2
+      exit 1
     fi
-    echo "Preview not fresh yet (got '${deployed_sha:-none}', want '${head_sha:0:12}') — retrying in ${propagation_step}s (${elapsed}/${propagation_wait}s)"
-    sleep "$propagation_step"
-    elapsed=$((elapsed + propagation_step))
-  done
-  if [ "$deployed_sha" != "$head_sha" ]; then
-    echo "FAIL: preview stale after ${propagation_wait}s — deployed SHA '${deployed_sha:-none}' != head '${head_sha:0:12}'" >&2
-    exit 1
+  else
+    echo "[boucle] Preview assertion skipped (no preview URL in $(boucle_deploy_mode)/$(boucle_review_mode) mode)"
   fi
 
   # ── Set review label ─────────────────────────────────────────────
