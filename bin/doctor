@@ -72,13 +72,20 @@ if [ "$FORGE" = "gitlab" ]; then
   done
 
   # ── CI Variables ───────────────────────────────────────────────────────
-  for var in BOUCLE_TOKEN BOUCLE_ENABLED CLOUDFLARE_API_TOKEN BOUCLE_TRIGGER_TOKEN BOUCLE_SPEC_PROFILE; do
+  for var in BOUCLE_TOKEN BOUCLE_ENABLED BOUCLE_TRIGGER_TOKEN BOUCLE_SPEC_PROFILE; do
     if glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/$var" 2> /dev/null | jq -e '.key' > /dev/null 2>&1; then
       pass "CI variable $var exists"
     else
       fail "CI variable $var missing"
     fi
   done
+
+  # ── CLOUDFLARE_API_TOKEN (optional) ───────────────────────────────
+  if glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/CLOUDFLARE_API_TOKEN" 2> /dev/null | jq -e '.key' > /dev/null 2>&1; then
+    pass "CI variable CLOUDFLARE_API_TOKEN exists"
+  else
+    warn "CLOUDFLARE_API_TOKEN not set — CF Pages deploy will not be available"
+  fi
 
   # ── BOUCLE_LLM_API_KEY (masked) ──────────────────────────────────
   if glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_LLM_API_KEY" 2> /dev/null | jq -e '.key // empty' > /dev/null 2>&1; then
@@ -161,13 +168,18 @@ else
 
   # ── Repo Secrets ───────────────────────────────────────────────────────
   SECRETS=$(GH_TOKEN="$BOUCLE_TOKEN" gh secret list --repo "$BOUCLE_PROJECT_ID" 2> /dev/null | awk '{print $1}')
-  for var in BOUCLE_TOKEN CLOUDFLARE_API_TOKEN PI_AUTH BOUCLE_LLM_API_KEY; do
+  for var in BOUCLE_TOKEN PI_AUTH BOUCLE_LLM_API_KEY; do
     if echo "$SECRETS" | grep -qx "$var"; then
       pass "secret $var exists"
     else
       fail "secret $var missing"
     fi
   done
+  if echo "$SECRETS" | grep -qx "CLOUDFLARE_API_TOKEN"; then
+    pass "secret CLOUDFLARE_API_TOKEN exists"
+  else
+    warn "CLOUDFLARE_API_TOKEN not set — CF Pages deploy will not be available"
+  fi
 
   # ── Repo Variables ─────────────────────────────────────────────────────
   VARS=$(GH_TOKEN="$BOUCLE_TOKEN" gh variable list --repo "$BOUCLE_PROJECT_ID" 2> /dev/null | awk '{print $1}')
@@ -235,10 +247,31 @@ if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
       fail "CF Pages project '$BOUCLE_DEPLOY_PROJECT' not found"
     fi
   else
-    fail "BOUCLE_DEPLOY_PROJECT not set (required for CF Pages check)"
+    warn "CLOUDFLARE_API_TOKEN set but BOUCLE_DEPLOY_PROJECT not set — skipping CF Pages project check"
   fi
 else
-  fail "CLOUDFLARE_API_TOKEN not in env (run in CI, not locally)"
+  warn "CLOUDFLARE_API_TOKEN not set — CF Pages checks skipped (set CLOUDFLARE_API_TOKEN for Cloudflare deploy)"
+fi
+
+# ── Mode-specific checks ─────────────────────────────────────────────────
+DEPLOY_MODE="${BOUCLE_DEPLOY_MODE:-self}"
+if [ "$DEPLOY_MODE" = "external" ]; then
+  if [ -z "${BOUCLE_LIVE_URL:-}" ]; then
+    fail "BOUCLE_DEPLOY_MODE=external requires BOUCLE_LIVE_URL (consumer's own deploy target URL)"
+  else
+    pass "BOUCLE_LIVE_URL set for external deploy mode"
+  fi
+  if [ -z "${BOUCLE_PRODUCTION_URL:-}" ]; then
+    warn "BOUCLE_PRODUCTION_URL not set — e2e will use BOUCLE_LIVE_URL only"
+  fi
+elif [ "$DEPLOY_MODE" = "self" ]; then
+  if [ -z "${BOUCLE_DEPLOY_CMD:-}" ]; then
+    fail "BOUCLE_DEPLOY_MODE=self requires BOUCLE_DEPLOY_CMD"
+  else
+    pass "BOUCLE_DEPLOY_CMD set"
+  fi
+else
+  warn "Unknown BOUCLE_DEPLOY_MODE='$DEPLOY_MODE' — expected 'self' or 'external'"
 fi
 
 echo ""
