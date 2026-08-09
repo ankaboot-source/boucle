@@ -12,7 +12,7 @@
 #   - python3 (stdlib only)         — ui-ux-pro-max search.py (worker design skill)
 #   - curl, jq, git, ca-certificates
 #   - glab 1.50.0                   — GitLab CLI (API calls)
-#   - jcode v0.68.0                 — agent runtime (Rust binary, replaces opencode/pi)
+#   - jcode v0.73.0                 — agent runtime (Rust binary, replaces opencode/pi)
 #   - codebase-memory-mcp           — knowledge-graph MCP server
 #
 # NOTE: lib/boucle.sh is sourced from ${CI_PROJECT_DIR} at job runtime,
@@ -39,7 +39,7 @@ RUN curl -fsSL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/do
     && rm -rf /tmp/glab.tar.gz /tmp/bin
 
 # jcode — agent runtime (standalone Rust binary, no node dependency)
-ARG JCODE_VERSION=v0.68.0
+ARG JCODE_VERSION=v0.73.0
 RUN curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VERSION}/jcode-linux-x86_64.tar.gz" -o /tmp/jcode.tar.gz \
     && tar -xzf /tmp/jcode.tar.gz -C /tmp \
     && mv /tmp/jcode-linux-x86_64.bin /usr/local/bin/jcode \
