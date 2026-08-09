@@ -274,6 +274,95 @@ preview_url_for_changed_files() {
   echo "${base_url%/}${path}"
 }
 
+# ── Deploy / review mode helpers ─────────────────────────────────────────
+
+# boucle_deploy_mode
+#   Echo the current deploy mode ("self" or "external"). Default: "self".
+boucle_deploy_mode() {
+  echo "${BOUCLE_DEPLOY_MODE:-self}"
+}
+
+# boucle_review_mode
+#   Echo the current review mode ("preview" or "diff"). Default: "preview".
+boucle_review_mode() {
+  echo "${BOUCLE_REVIEW_MODE:-preview}"
+}
+
+# boucle_is_self_deploy
+#   Returns 0 (true) if BOUCLE_DEPLOY_MODE is "self", 1 (false) otherwise.
+boucle_is_self_deploy() {
+  [ "$(boucle_deploy_mode)" = "self" ]
+}
+
+# boucle_is_external_deploy
+#   Returns 0 (true) if BOUCLE_DEPLOY_MODE is "external", 1 (false) otherwise.
+boucle_is_external_deploy() {
+  [ "$(boucle_deploy_mode)" = "external" ]
+}
+
+# boucle_is_preview_review
+#   Returns 0 (true) if BOUCLE_REVIEW_MODE is "preview", 1 (false) otherwise.
+boucle_is_preview_review() {
+  [ "$(boucle_review_mode)" = "preview" ]
+}
+
+# boucle_is_diff_review
+#   Returns 0 (true) if BOUCLE_REVIEW_MODE is "diff", 1 (false) otherwise.
+boucle_is_diff_review() {
+  [ "$(boucle_review_mode)" = "diff" ]
+}
+
+# boucle_resolve_live_url [deploy_log]
+#   Resolve the production/live URL in priority order:
+#     1. BOUCLE_LIVE_URL (explicit override)
+#     2. BOUCLE_PRODUCTION_URL (fallback)
+#     3. Regex-extract from deploy_log (self mode only)
+#     4. Last-resort: https://${BOUCLE_DEPLOY_PROJECT}.pages.dev (self mode only)
+#   Echoes the resolved URL on stdout.
+boucle_resolve_live_url() {
+  local deploy_log="$1"
+  local url=""
+
+  # Priority 1: explicit override
+  if [ -n "${BOUCLE_LIVE_URL:-}" ]; then
+    echo "$BOUCLE_LIVE_URL"
+    return
+  fi
+
+  # Priority 2: production URL fallback
+  if [ -n "${BOUCLE_PRODUCTION_URL:-}" ]; then
+    echo "$BOUCLE_PRODUCTION_URL"
+    return
+  fi
+
+  # Priority 3-4: self mode only — extract from deploy log or fallback
+  if boucle_is_self_deploy; then
+    if [ -n "$deploy_log" ] && [ -f "$deploy_log" ]; then
+      url=$(grep -oE "$BOUCLE_DEPLOY_URL_REGEX" "$deploy_log" | head -1)
+    fi
+    if [ -z "$url" ] && [ -n "${BOUCLE_DEPLOY_PROJECT:-}" ]; then
+      url="https://${BOUCLE_DEPLOY_PROJECT}.pages.dev"
+    fi
+  fi
+
+  echo "$url"
+}
+
+# boucle_worker_should_deploy
+#   Returns 0 if the worker should run the preview deploy step,
+#   1 if it should skip it (external mode or diff review mode).
+boucle_worker_should_deploy() {
+  # Skip deploy in external mode (consumer's own CI handles it)
+  if boucle_is_external_deploy; then
+    return 1
+  fi
+  # Skip deploy in diff review mode (no preview needed)
+  if boucle_is_diff_review; then
+    return 1
+  fi
+  return 0
+}
+
 # ── Cross-role variable forwarding ──────────────────────────────────────
 
 # chain_to_role <issue_iid> <role> [var=value ...]
