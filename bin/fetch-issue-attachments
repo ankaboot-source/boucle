@@ -44,8 +44,8 @@ export BOUCLE_HOME
 export BOUCLE_FORGE="${BOUCLE_FORGE:-gitlab}"
 # shellcheck source=forge/common.sh
 . "$BOUCLE_HOME/bin/forge/common.sh"
-type forge_init &>/dev/null && {
-  type forge_issue_get &>/dev/null || forge_init
+type forge_init &> /dev/null && {
+  type forge_issue_get &> /dev/null || forge_init
 } || true
 export BOUCLE_FORGE_HOST="${BOUCLE_FORGE_HOST:-${GITLAB_HOST:-gitlab.example.com}}"
 export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:?CI_PROJECT_ID must be set}}"
