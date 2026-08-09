@@ -22,7 +22,7 @@
 # ── Helper: gh api with auth ──────────────────────────────────────────────
 
 _gh_api() {
-  GH_TOKEN="$BOUCLE_TOKEN" gh api "$@" 2>/dev/null
+  GH_TOKEN="$BOUCLE_TOKEN" gh api "$@" 2> /dev/null
 }
 
 _gh_api_silent() {
@@ -47,7 +47,10 @@ forge_issue_notes() {
   # Returns JSON array with normalized fields matching the contract.
   local iid="$1"
   local comments
-  comments=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/issues/$iid/comments") || { echo "[]"; return; }
+  comments=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/issues/$iid/comments") || {
+    echo "[]"
+    return
+  }
   # Normalize: GitHub .user.login → .author.username, .user.id → .author.id,
   # add .system=false (GitHub comments are never "system" — system events
   # are in the timeline, not comments)
@@ -57,12 +60,12 @@ forge_issue_notes() {
     author: { id: .user.id, username: .user.login },
     system: false,
     created_at: .created_at
-  }]' 2>/dev/null || echo "[]"
+  }]' 2> /dev/null || echo "[]"
 }
 
 forge_issue_labels_get() {
   local iid="$1"
-  _gh_api "/repos/$BOUCLE_PROJECT_ID/issues/$iid/labels" | jq -r '[.[].name] | join(",")' 2>/dev/null || true
+  _gh_api "/repos/$BOUCLE_PROJECT_ID/issues/$iid/labels" | jq -r '[.[].name] | join(",")' 2> /dev/null || true
 }
 
 forge_issue_labels_set() {
@@ -117,19 +120,167 @@ forge_issue_add_reaction() {
   # Map common emoji names to GitHub reaction content values
   local content
   case "$emoji" in
-    👍|thumbs_up|+1) content="+1" ;;
-    👎|thumbs_down|-1) content="-1" ;;
-    😄|laugh|smile) content="laugh" ;;
-    😕|confused) content="confused" ;;
-    ❤|heart|love) content="heart" ;;
-    🎉|hooray|party) content="hooray" ;;
-    🚀|rocket) content="rocket" ;;
-    👀|eyes) content="eyes" ;;
+    👍 | thumbs_up | +1) content="+1" ;;
+    👎 | thumbs_down | -1) content="-1" ;;
+    😄 | laugh | smile) content="laugh" ;;
+    😕 | confused) content="confused" ;;
+    ❤ | heart | love) content="heart" ;;
+    🎉 | hooray | party) content="hooray" ;;
+    🚀 | rocket) content="rocket" ;;
+    👀 | eyes) content="eyes" ;;
     *) content="$emoji" ;;
   esac
   _gh_api_silent -X POST "/repos/$BOUCLE_PROJECT_ID/issues/$iid/reactions" \
     -f content="$content" \
     -H "Accept: application/vnd.github.squirrel-girl-preview+json"
+}
+
+# ── Issue listing ─────────────────────────────────────────────────────────
+
+forge_issue_list_by_label() {
+  local label_csv="$1" state="${2:-open}"
+  # Map GitLab-style state to GitHub-style
+  case "$state" in
+    opened) state="open" ;;
+    closed) state="closed" ;;
+  esac
+  _gh_api "/repos/$BOUCLE_PROJECT_ID/issues?state=$state&labels=$label_csv&per_page=100" || echo "[]"
+}
+
+forge_issue_list_all() {
+  local state="${1:-open}"
+  case "$state" in
+    opened) state="open" ;;
+    closed) state="closed" ;;
+  esac
+  _gh_api "/repos/$BOUCLE_PROJECT_ID/issues?state=$state&per_page=100" || echo "[]"
+}
+
+forge_issue_count_by_label() {
+  local label_csv="$1" state="$2"
+  local data
+  data=$(forge_issue_list_by_label "$label_csv" "$state")
+  echo "$data" | jq 'length' 2> /dev/null || echo 0
+}
+
+# ── Issue update ──────────────────────────────────────────────────────────
+
+forge_issue_update() {
+  local iid="$1" key="$2" value="$3"
+  # GitHub uses "body" for description, "title" for title
+  _gh_api_silent -X PATCH "/repos/$BOUCLE_PROJECT_ID/issues/$iid" \
+    -f "$key=$value"
+}
+
+# ── Issue links ───────────────────────────────────────────────────────────
+
+forge_issue_links() {
+  # GitHub has no direct REST issue-links endpoint for cross-references.
+  # Sub-issue relationships are handled by forge_work_item_children.
+  echo "[]"
+}
+
+forge_issue_link_relates_to() {
+  # GitHub sub-issues use a different mechanism handled by
+  # forge_work_item_link_parent. No-op.
+  return 0
+}
+
+# ── Note operations ───────────────────────────────────────────────────────
+
+forge_issue_note_get() {
+  local iid="$1" note_id="$2"
+  # GitHub issue comments use /issues/comments/:id (note_id = comment id)
+  _gh_api "/repos/$BOUCLE_PROJECT_ID/issues/comments/$note_id" || true
+}
+
+forge_issue_note_update() {
+  local iid="$1" note_id="$2" new_body="$3"
+  _gh_api_silent -X PATCH "/repos/$BOUCLE_PROJECT_ID/issues/comments/$note_id" \
+    -f body="$new_body"
+}
+
+forge_mr_note_update() {
+  local mr_iid="$1" note_id="$2" new_body="$3"
+  # GitHub PR issue-style comments use the same endpoint as issue comments
+  _gh_api_silent -X PATCH "/repos/$BOUCLE_PROJECT_ID/issues/comments/$note_id" \
+    -f body="$new_body"
+}
+
+forge_note_delete() {
+  local kind="$1" object_iid="$2" note_id="$3"
+  # GitHub uses the same endpoint for all issue/PR comments
+  _gh_api_silent -X DELETE "/repos/$BOUCLE_PROJECT_ID/issues/comments/$note_id"
+}
+
+# ── MR lookup + approvals + assign + close ────────────────────────────────
+
+forge_mr_lookup_by_branch() {
+  local branch="$1" state="${2:-open}"
+  case "$state" in
+    opened) state="open" ;;
+    closed) state="closed" ;;
+  esac
+  local encoded
+  encoded=$(printf '%s' "$branch" | jq -sRr @uri)
+  # GitHub requires "owner:branch" format for the head filter
+  local owner="${BOUCLE_PROJECT_ID%%/*}"
+  _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?head=$owner:$encoded&state=$state&per_page=1" 2> /dev/null \
+    | jq -r '.[0].number // empty' 2> /dev/null || true
+}
+
+forge_mr_merge_status() {
+  local mr_iid="$1"
+  _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid" 2> /dev/null \
+    | jq -r '.["mergeable_state"] // "unknown"' 2> /dev/null || echo "unknown"
+}
+
+forge_mr_approvals() {
+  local mr_iid="$1"
+  local reviews
+  reviews=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid/reviews" 2> /dev/null) || {
+    echo "false"
+    return
+  }
+  echo "$reviews" | jq -r '[.[] | select(.state=="APPROVED")] | length > 0' 2> /dev/null || echo "false"
+}
+
+forge_mr_assign() {
+  local mr_iid="$1" user_login="$2"
+  [ -z "$user_login" ] && return 0
+  _gh_api_silent -X PATCH "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid" \
+    -f "assignees[]=$user_login"
+}
+
+forge_mr_close() {
+  local mr_iid="$1"
+  _gh_api_silent -X PATCH "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid" \
+    -f state=closed
+}
+
+# ── Note reactions ────────────────────────────────────────────────────────
+
+forge_note_reactions() {
+  local kind="$1" object_iid="$2" note_id="$3"
+  local resp
+  resp=$(_gh_api -X GET "/repos/$BOUCLE_PROJECT_ID/issues/comments/$note_id/reactions" \
+    -H "Accept: application/vnd.github.squirrel-girl-preview+json" 2> /dev/null) || {
+    echo "[]"
+    return
+  }
+  # Map GitHub .content → .name, .user.login → .user.username
+  echo "$resp" | jq -c '[.[] | {
+    name: .content,
+    user: { id: .user.id, username: .user.login }
+  }]' 2> /dev/null || echo "[]"
+}
+
+# ── Attachment upload ─────────────────────────────────────────────────────
+
+forge_attachment_upload() {
+  # GitHub has no issue-attachment upload API. Return empty — callers
+  # must handle gracefully (e.g. embed external URLs or skip).
+  return 0
 }
 
 # ── MR (PR) operations ────────────────────────────────────────────────────
@@ -173,13 +324,13 @@ forge_mr_merge() {
   for i in $(seq 1 60); do
     state=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid" | jq -r '.mergeable_state // "unknown"')
     case "$state" in
-      clean|unstable)
+      clean | unstable)
         # mergeable — squash merge
         _gh_api_silent -X PUT "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid/merge" \
           -f merge_method=squash
         return 0
         ;;
-      blocked|dirty|unknown)
+      blocked | dirty | unknown)
         # blocked: waiting on required reviews/checks
         # dirty: merge conflict
         if [ "$state" = "dirty" ]; then
@@ -223,10 +374,10 @@ forge_work_item_children() {
   # GitHub sub-issues API (if available) or timeline events fallback.
   # Try the sub-issues endpoint first (GitHub added sub-issues in 2025).
   local children
-  children=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/issues/$parent_iid/sub_issues" 2>/dev/null) || children=""
+  children=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/issues/$parent_iid/sub_issues" 2> /dev/null) || children=""
   if [ -n "$children" ] && [ "$children" != "[]" ]; then
     # Normalize: .number → .iid, .state → .state, .title → .title
-    echo "$children" | jq -c '[.[] | {iid: .number, state: .state, title: .title}]' 2>/dev/null || echo "[]"
+    echo "$children" | jq -c '[.[] | {iid: .number, state: .state, title: .title}]' 2> /dev/null || echo "[]"
     return
   fi
   # Fallback: parse body for "## Parent issue" marker (legacy boucle)
@@ -269,7 +420,7 @@ forge_attachment_download() {
   curl -sL -o "$dest" \
     -H "Authorization: Bearer $BOUCLE_TOKEN" \
     -H "Accept: application/octet-stream" \
-    "$url" 2>/dev/null || true
+    "$url" 2> /dev/null || true
 }
 
 # ── Pipeline / workflow triggering ───────────────────────────────────────
@@ -300,12 +451,15 @@ forge_pipeline_list_active() {
   local issue_iid="$1"
   # List in-progress workflow runs
   local runs
-  runs=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/actions/runs?status=in_progress&per_page=100") || { echo "[]"; return; }
+  runs=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/actions/runs?status=in_progress&per_page=100") || {
+    echo "[]"
+    return
+  }
   # Filter by BOUCLE_ISSUE input — need to fetch each run's details
   # (GitHub doesn't expose inputs in the list endpoint)
   local result="[]"
   local run_id
-  for run_id in $(echo "$runs" | jq -r '.workflow_runs[].id' 2>/dev/null); do
+  for run_id in $(echo "$runs" | jq -r '.workflow_runs[].id' 2> /dev/null); do
     local run_detail
     run_detail=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/actions/runs/$run_id") || continue
     local match
@@ -337,12 +491,12 @@ forge_parse_webhook() {
     actor: (.sender.login // .comment.user.login // empty),
     body: (.comment.body // .issue.body // .pull_request.body // empty),
     branch: (.pull_request.head.ref // .ref // empty)
-  }' 2>/dev/null || echo '{}'
+  }' 2> /dev/null || echo '{}'
 }
 
 forge_webhook_issue_iid() {
   local payload="$1"
-  echo "$payload" | jq -r '.issue.number // .pull_request.number // empty' 2>/dev/null || true
+  echo "$payload" | jq -r '.issue.number // .pull_request.number // empty' 2> /dev/null || true
 }
 
 # ── CI variables (repo secrets) ──────────────────────────────────────────
@@ -351,7 +505,7 @@ forge_ci_var_set() {
   local key="$1" value="$2" masked="${3:-true}" protected="${4:-false}"
   # GitHub secrets are always masked (write-only). Use gh CLI for simplicity
   # (handles libsodium encryption internally).
-  echo "$value" | GH_TOKEN="$BOUCLE_TOKEN" gh secret set "$key" --repo "$BOUCLE_PROJECT_ID" 2>/dev/null || true
+  echo "$value" | GH_TOKEN="$BOUCLE_TOKEN" gh secret set "$key" --repo "$BOUCLE_PROJECT_ID" 2> /dev/null || true
 }
 
 forge_ci_var_get() {
@@ -361,7 +515,7 @@ forge_ci_var_get() {
 }
 
 forge_ci_var_list() {
-  GH_TOKEN="$BOUCLE_TOKEN" gh secret list --repo "$BOUCLE_PROJECT_ID" 2>/dev/null | awk '{print $1}' || true
+  GH_TOKEN="$BOUCLE_TOKEN" gh secret list --repo "$BOUCLE_PROJECT_ID" 2> /dev/null | awk '{print $1}' || true
 }
 
 # ── Branch protection ────────────────────────────────────────────────────
@@ -387,7 +541,7 @@ forge_runner_check() {
   local runners
   runners=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/actions/runners") || return 1
   # Check if any runner has the given tag in its labels
-  echo "$runners" | jq -r '.runners[] | select(.status == "online") | .labels[].name' 2>/dev/null | grep -qx "$tag"
+  echo "$runners" | jq -r '.runners[] | select(.status == "online") | .labels[].name' 2> /dev/null | grep -qx "$tag"
 }
 
 # ── Labels ───────────────────────────────────────────────────────────────

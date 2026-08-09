@@ -250,7 +250,97 @@ forge_init() {
 #   but on GitHub the workflow IS the webhook receiver, so this may be
 #   a no-op or only used for non-workflow events.)
 
-# ── Backend sourcing ─────────────────────────────────────────────────────
+# ── Contract: issue listing ──────────────────────────────────────────────
+#
+# forge_issue_list_by_label <label_csv> [state]
+#   List issues filtered by label(s). Returns JSON array on stdout, [] on
+#   failure. state defaults to "opened" (GitLab) / "open" (GitHub).
+#   Accepts GitLab-style state values (opened/closed/all) and maps them
+#   for GitHub.
+#
+# forge_issue_list_all [state]
+#   List all issues, no label filter. Same return format.
+#
+# forge_issue_count_by_label <label_csv> <state>
+#   Count issues matching label(s) and state. Returns integer on stdout.
+#   Delegates to forge_issue_list_by_label + jq 'length'.
+
+# ── Contract: issue update ───────────────────────────────────────────────
+#
+# forge_issue_update <iid> <key> <value>
+#   Update a single issue field (e.g. description, title). Returns 0 on
+#   success. Callers pass the correct body key for the forge
+#   (GitLab: description/title; GitHub: body/title).
+
+# ── Contract: issue links (parent-child REST fallback) ───────────────────
+#
+# forge_issue_links <iid>
+#   List issue links (relates_to, blocks, etc.) as JSON array on stdout.
+#   Returns [] on failure. (GitLab: /issues/:iid/links; GitHub: no
+#   equivalent — returns [].)
+#
+# forge_issue_link_relates_to <child_iid> <parent_iid>
+#   Create a relates_to issue link. Returns 0 on success.
+#   (GitLab: POST /issues/:child/links; GitHub: no-op — sub-issues use
+#   forge_work_item_link_parent.)
+
+# ── Contract: note operations (read/update/delete) ───────────────────────
+#
+# forge_issue_note_get <iid> <note_id>
+#   Fetch a single issue note as JSON on stdout. Returns empty on failure.
+#   The JSON MUST contain: .id, .body, .author.id, .author.username,
+#   .system (boolean), .created_at.
+#
+# forge_issue_note_update <iid> <note_id> <new_body>
+#   Update an issue note body. Returns 0 on success.
+#
+# forge_mr_note_update <mr_iid> <note_id> <new_body>
+#   Update a MR/PR note body. Returns 0 on success.
+#
+# forge_note_delete <kind> <object_iid> <note_id>
+#   Delete a note. kind = "issue" or "mr". Best-effort, returns 0.
+#   (GitLab: DELETE /issues|merge_requests/:object/notes/:note_id;
+#   GitHub: DELETE /issues/comments/:note_id.)
+
+# ── Contract: MR lookup + approvals + assign + close ─────────────────────
+#
+# forge_mr_lookup_by_branch <source_branch> [state]
+#   Find MR/PR by source branch. Returns the MR/PR IID (number) on stdout,
+#   empty on failure. state defaults to "opened" (GitLab) / "open" (GitHub).
+#   Accepts GitLab-style state values and maps them for GitHub.
+#
+# forge_mr_merge_status <mr_iid>
+#   Get mergeable status string on stdout. Returns "unknown" on failure.
+#   (GitLab: detailed_merge_status; GitHub: mergeable_state.)
+#
+# forge_mr_approvals <mr_iid>
+#   Check if MR/PR has at least one approval. Returns "true" or "false"
+#   on stdout.
+#   (GitLab: /merge_requests/:iid/approvals → .approved;
+#   GitHub: /pulls/:iid/reviews → any .state=="APPROVED".)
+#
+# forge_mr_assign <mr_iid> <user_login>
+#   Assign MR/PR to a user. Best-effort, returns 0.
+#   (GitLab: uses curl with assignee_ids[]; GitHub: PATCH with assignees[].)
+#
+# forge_mr_close <mr_iid>
+#   Close MR/PR. Returns 0 on success.
+
+# ── Contract: note reactions (doctor spec-approval check) ────────────────
+#
+# forge_note_reactions <kind> <object_iid> <note_id>
+#   List emoji reactions on a note as JSON array on stdout. Returns [] on
+#   failure. Each reaction MUST contain: .name, .user.id, .user.username.
+#   kind = "issue" or "mr".
+#   (GitLab: award_emoji on note; GitHub: reactions on issue comment.)
+
+# ── Contract: attachment upload (triage visual preview) ──────────────────
+#
+# forge_attachment_upload <iid> <file_path> <filename>
+#   Upload a file to the issue. Returns the embeddable URL/path on stdout,
+#   empty on failure.
+#   (GitLab: POST /projects/:id/uploads; GitHub: no upload API — returns
+#   empty, callers must handle gracefully.)
 #
 # The backend file (e.g. bin/forge/gitlab.sh) MUST define every function
 # listed above. If a backend does not support a feature (e.g. GitHub has
