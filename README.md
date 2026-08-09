@@ -196,21 +196,10 @@ cost of one feature is the sum of all role invocations.
 
 The $/task figures are the **cost per Intelligence Index task** from
 [Artificial Analysis](https://artificialanalysis.ai) (v4.1.1, max-effort
-reasoning, retrieved 2026-08-09). Each model runs the same 9-evaluation
-benchmark suite; Artificial Analysis publishes the total cost and total
-output tokens, and derives $/task from them. The raw published data:
-
-| Model | Intel | Total II cost | Output tokens | In $/1M | Out $/1M |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| GLM-5.2 | 53 | $714.52 | 140M | $1.35 | $4.29 |
-| DeepSeek V4 Flash 0731 | 52 | $72.03 | 210M | $0.14 | $0.28 |
-| Claude Opus 5 | 63 | $3,836.05 | 100M | $5.00 | $25.00 |
-| Claude Sonnet 5 | 55 | $4,010.51 | 300M | $2.00 | $10.00 |
-
-So the cost ratios are grounded in published total-cost figures, not
-estimates: GLM-5.2 is 5.4× cheaper than Opus 5 on the same suite; DeepSeek
-V4 Flash 0731 is 55.7× cheaper than Sonnet 5. See
-[docs/cost-benchmark.md](docs/cost-benchmark.md) for the full derivation.
+reasoning, retrieved 2026-08-09) — each model runs the same 9-evaluation
+benchmark suite, and the cost is derived from the published total cost and
+token usage. See [docs/cost-benchmark.md](docs/cost-benchmark.md) for the
+raw published data and full derivation.
 
 Summing one pass through the loop (1 triage + 1 e2e + 3 worker + 3 reviewer):
 
