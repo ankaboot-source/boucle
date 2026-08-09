@@ -201,10 +201,44 @@ weighted by feature size — boucle ships a large feature for **9.9× less**
 than Claude Code. Full method, sensitivity, and break-even in
 [docs/cost-benchmark.md](docs/cost-benchmark.md).
 
-At this intelligence tier (52–63), what impacts the outcome most is not raw
-intelligence but **deterministic CI/CD gates** (spec approval, preview
-verification, SHA-anchored e2e) and **specialized agents enriched with
-skills** — not the model's confidence.
+### Determinism and skills beat raw intelligence
+
+The break-even analysis shows the intelligence gap would need to cause an
+implausibly high failure rate (29× above nominal) to justify Claude Code's
+cost premium. This reflects a broader pattern: at this intelligence tier,
+**how** you scaffold the agent matters more than **which** model you pick.
+
+- **Diminishing returns of raw intelligence** — from DeepSeek V4 Flash
+  ($0.03/task, intel 52) to Opus 5 ($2.34/task, intel 63), cost increases
+  78× while intelligence increases 21%. Each additional intelligence point
+  costs 54× more at the top than at the bottom
+  ([Artificial Analysis](https://artificialanalysis.ai), v4.1.1).
+- **Gates are model-agnostic** — Anthropic's own
+  ["Building Effective Agents"](https://www.anthropic.com/research/building-effective-agents)
+  (Dec 2024) recommends decomposing tasks into steps with "programmatic
+  checks (gates) on any intermediate steps to ensure that the process is
+  still on track," and notes that "code solutions are verifiable through
+  automated tests; agents can iterate on solutions using test results as
+  feedback." A spec approval, a preview verification, and a SHA-anchored e2e
+  gate catch a wrong output the same way regardless of which model produced
+  it.
+- **Specialized agents outperform generalists** — the same Anthropic article
+  argues that "workflows offer predictability and consistency for
+  well-defined tasks" over single powerful model calls, and that routing
+  tasks to "specialized prompts" outperforms a generalist. boucle's four
+  roles each carry a focused prompt and a curated skill library (UI/UX,
+  design, frontend engineering, codebase graph queries) — a specialized
+  agent with the right skill outperforms a generalist with higher raw
+  intelligence on the task it was built for.
+- **Coding benchmarks verify behavior, not confidence** —
+  [Terminal-Bench v2.1](https://artificialanalysis.ai/evaluations/terminalbench-v2-1)
+  and [SWE-bench Verified](https://www.swebench.com/) both evaluate agents
+  programmatically: each task ships with a verification suite the agent must
+  satisfy. The gate, not the model, decides what passes.
+
+The implication: investing in better gates and richer skills yields more
+quality per dollar than investing in a more intelligent model. The model
+decides what to *attempt*; the gates and skills decide what *ships*.
 
 ### Monthly capacity, multiplied
 
