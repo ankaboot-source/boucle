@@ -481,7 +481,7 @@ forge_trigger_role() {
   shift 2
   local -a args=(
     -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$BOUCLE_PROJECT_ID/trigger/pipeline"
-    -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=${BOUCLE_DEFAULT_BRANCH:-main}"
+    -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}"
     -F "variables[BOUCLE_ISSUE]=$issue_iid"
   )
   if [ -n "$role" ]; then
