@@ -34,7 +34,12 @@ forge_issue_note() {
 
 forge_issue_notes() {
   local iid="$1"
-  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues/$iid/notes" 2> /dev/null || echo "[]"
+  # --paginate: notes lists default to 20/page; boucle issues accumulate
+  # many bot comments (triage + validation + status), so pagination is
+  # mandatory to return ALL notes (the original inline calls used
+  # per_page=100 + --paginate).
+  glab api --hostname "$BOUCLE_FORGE_HOST" --paginate \
+    "/projects/$BOUCLE_PROJECT_ID/issues/$iid/notes?per_page=100" 2> /dev/null || echo "[]"
 }
 
 forge_issue_labels_get() {
@@ -239,7 +244,9 @@ forge_attachment_upload() {
   local resp
   resp=$(glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$BOUCLE_PROJECT_ID/uploads" \
     -F "file=@$file_path" 2> /dev/null) || return 0
-  echo "$resp" | jq -r '.["full_path"] // .url // empty' 2> /dev/null || true
+  # Prefer .url (relative /uploads/<hash>/<file>) — the same path GitLab's
+  # .markdown field wraps, so callers can embed it as ![alt](<url>).
+  echo "$resp" | jq -r '.url // .full_path // empty' 2> /dev/null || true
 }
 
 # ── MR operations ─────────────────────────────────────────────────────────
@@ -257,7 +264,9 @@ forge_mr_note() {
 
 forge_mr_notes() {
   local mr_iid="$1"
-  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/notes" 2> /dev/null || echo "[]"
+  # --paginate: see forge_issue_notes.
+  glab api --hostname "$BOUCLE_FORGE_HOST" --paginate \
+    "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/notes?per_page=100" 2> /dev/null || echo "[]"
 }
 
 forge_mr_create() {
@@ -338,15 +347,26 @@ forge_work_item_link_parent() {
   local child_iid="$1" parent_iid="$2"
   local parent_gid
   parent_gid=$(forge_work_item_global_id "$parent_iid")
-  if [ -n "$parent_gid" ]; then
-    # Try hierarchy API first
-    local http_code
-    http_code=$(glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$BOUCLE_PROJECT_ID/issues/$child_iid/links" \
-      -f target_issue_iid="$parent_iid" -f link_type=relates_to 2> /dev/null | jq -r '.http_status // empty' 2> /dev/null)
-    # Fall back to REST relates_to link
-    glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$BOUCLE_PROJECT_ID/issues/$child_iid/links" \
-      -f target_issue_iid="$parent_iid" -f link_type=relates_to > /dev/null 2>&1 || true
+  if [ -n "$parent_gid" ] && [ "$parent_gid" != "null" ]; then
+    # Hierarchy API first (creates the real "Éléments enfants" relationship
+    # visible in the UI). Requires the parent's GLOBAL work-item ID (not its
+    # project-scoped IID). The PATCH response carries the work item's .id on
+    # success — empty means the hierarchy API is unavailable (403, disabled
+    # work_item_rest_api flag on self-managed GitLab), so fall back below.
+    local patched
+    patched=$(glab api --hostname "$BOUCLE_FORGE_HOST" -X PATCH \
+      "/projects/$BOUCLE_PROJECT_ID/-/work_items/$child_iid" \
+      -H "Content-Type: application/json" \
+      -d "{\"features\":{\"hierarchy\":{\"parent_id\":$parent_gid}}}" 2> /dev/null \
+      | jq -r '.id // empty' 2> /dev/null || true)
+    [ -n "$patched" ] && return 0
   fi
+  # Fall back to the REST relates_to issue link (visible under "Linked items"
+  # on the parent). Best-effort — the `## Parent issue` body section remains
+  # the final navigation fallback.
+  echo "forge_work_item_link_parent: hierarchy API unavailable (or no global id for #$parent_iid) — falling back to relates_to issue link" >&2
+  glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$BOUCLE_PROJECT_ID/issues/$child_iid/links" \
+    -f target_issue_iid="$parent_iid" -f link_type=relates_to > /dev/null 2>&1 || true
 }
 
 # ── Attachments ───────────────────────────────────────────────────────────

@@ -12,8 +12,8 @@ boucle_ci_merger() {
     # Set merging label
     set_boucle_label "$BOUCLE_ISSUE" "boucle:merging" "boucle::status::bot"
 
-    # Find the MR for this issue
-    MR_IID=$(forge_mr_list_open | jq -r ".[] | select(.source_branch == \"boucle/$BOUCLE_ISSUE\") | .iid" | head -1)
+    # Find the MR for this issue (contract helper: lookup by source branch)
+    MR_IID=$(forge_mr_lookup_by_branch "boucle/$BOUCLE_ISSUE" "opened")
 
     if [ -z "$MR_IID" ]; then
         echo "FAIL: no open MR found for issue #$BOUCLE_ISSUE (branch boucle/$BOUCLE_ISSUE)" >&2
