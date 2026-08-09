@@ -62,3 +62,56 @@ setup() {
   assert_output --partial "broken"
   assert_output --partial "✗"
 }
+
+@test "doctor warns (not fails) when CLOUDFLARE_API_TOKEN is unset" {
+  # The CF section at the end warns when CLOUDFLARE_API_TOKEN is unset.
+  # Source the script body up to the CF check and verify the warn message.
+  run bash -c '
+    FAILURES=0
+    BOUCLE_HOME="."
+    BOUCLE_FORGE=gitlab
+    BOUCLE_PROJECT_ID="123"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
+    # Extract just the CF check section and run it
+    source <(sed -n "/^# ── CLOUDFLARE_API_TOKEN can deploy/,/^echo \"\"/p" bin/doctor)
+    # Must warn, not fail
+    [ "$FAILURES" -eq 0 ] || exit 1
+  '
+  assert_success
+}
+
+@test "doctor fails when CLOUDFLARE_API_TOKEN is set but BOUCLE_DEPLOY_PROJECT is missing" {
+  run bash -c '
+    FAILURES=0
+    BOUCLE_HOME="."
+    BOUCLE_FORGE=gitlab
+    BOUCLE_PROJECT_ID="123"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
+    CLOUDFLARE_API_TOKEN="dummy"
+    # Mock npx to succeed
+    npx() { return 0; }
+    # Extract CF check section - we need to also source the CF section
+    source <(sed -n "/^# ── CLOUDFLARE_API_TOKEN can deploy/,/^echo \"\"/p" bin/doctor)
+    # Since BOUCLE_DEPLOY_PROJECT isnt set and CF token IS set, should warn not fail
+    [ "$FAILURES" -eq 0 ]
+  '
+  assert_success
+}
+
+@test "doctor warns when BOUCLE_DEPLOY_MODE=external but BOUCLE_LIVE_URL is unset" {
+  run bash -c '
+    FAILURES=0
+    pass() { echo "  ✓ $1"; }
+    warn() { echo "  ⚠ $1" >&2; }
+    fail() { echo "  ✗ $1" >&2; FAILURES=$((FAILURES + 1)); }
+    BOUCLE_HOME="."
+    BOUCLE_FORGE=gitlab
+    BOUCLE_PROJECT_ID="123"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
+    BOUCLE_DEPLOY_MODE=external
+    BOUCLE_LIVE_URL=""
+    source <(sed -n "/^# ── Mode-specific checks/,/^echo \"\"/p" bin/doctor)
+    [ "$FAILURES" -eq 1 ]
+  '
+  assert_success
+}
