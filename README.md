@@ -11,18 +11,18 @@ never touch the engine itself.
 
 ## 📑 Table of contents
 
-- [✨ Why boucle?](#-why-boucle)
-- [🩹 What most loop tools get wrong](#-what-most-loop-tools-get-wrong)
-- [🚀 Quick start](#-quick-start)
-  - [Option 1 — copy/paste prompt](#option-1--copypaste-prompt-easiest)
-  - [Option 2 — command line](#option-2--command-line)
+- [✨ Why boucle?](#why-boucle)
+- [🩹 What most loop tools get wrong](#what-most-loop-tools-get-wrong)
+- [🚀 Quick start](#quick-start)
+  - [Option 1 — copy/paste prompt](#option-1-copypaste-prompt-easiest)
+  - [Option 2 — command line](#option-2-command-line)
   - [After install](#after-install)
-- [⚙️ How it works](#️-how-it-works)
-- [🛠️ Configuration](#️-configuration)
+- [⚙️ How it works](#how-it-works)
+- [🛠️ Configuration](#configuration)
   - [The bot user](#the-bot-user)
-- [🗺️ Roadmap](#️-roadmap)
-- [⚖️ License](#️-license)
-- [📚 Docs](#-docs)
+- [🗺️ Roadmap](#roadmap)
+- [⚖️ License](#license)
+- [📚 Docs](#docs)
 
 ## ✨ Why boucle?
 
