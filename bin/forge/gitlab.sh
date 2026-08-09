@@ -361,19 +361,51 @@ forge_mr_diff() {
 forge_mr_check_suites() {
   local mr_iid="$1" head_sha="$2"
   # GitLab: fetch pipelines for the MR
-  glab api --hostname "$BOUCLE_FORGE_HOST" \
-    "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/pipelines" 2> /dev/null \
-    | jq -c '[.[] | {name: (.ref // "pipeline"), status: .status, conclusion: (if .status == "success" then "success" elif .status == "failed" then "failure" else .status end)}]' 2> /dev/null \
-    || echo "[]"
+  local raw_data
+  raw_data=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
+    "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/pipelines" 2> /dev/null) || {
+    echo "[boucle] WARN: forge_mr_check_suites API call failed (glab api merge_requests/$mr_iid/pipelines)" >&2
+    echo "[]"
+    return
+  }
+  echo "$raw_data" \
+    | jq -c '[.[] | {
+        name: (.ref // "pipeline"),
+        status: (if .status == "pending" then "queued" elif .status == "running" then "in_progress" else .status end),
+        conclusion: (if .status == "success" then "success"
+                     elif .status == "failed" then "failure"
+                     elif .status == "canceled" then "cancelled"
+                     elif .status == "running" or .status == "pending" then null
+                     else .status end)
+      }]' 2> /dev/null || {
+    echo "[boucle] WARN: forge_mr_check_suites jq parse failed" >&2
+    echo "[]"
+  }
 }
 
 forge_commit_check_suites() {
   local sha="$1"
   # GitLab: fetch statuses for a commit
-  glab api --hostname "$BOUCLE_FORGE_HOST" \
-    "/projects/$BOUCLE_PROJECT_ID/repository/commits/$sha/statuses" 2> /dev/null \
-    | jq -c '[.[] | {name: (.name // .ref // "pipeline"), status: .status, conclusion: (if .status == "success" then "success" elif .status == "failed" then "failure" else .status end)}]' 2> /dev/null \
-    || echo "[]"
+  local raw_data
+  raw_data=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
+    "/projects/$BOUCLE_PROJECT_ID/repository/commits/$sha/statuses" 2> /dev/null) || {
+    echo "[boucle] WARN: forge_commit_check_suites API call failed (glab api commits/$sha/statuses)" >&2
+    echo "[]"
+    return
+  }
+  echo "$raw_data" \
+    | jq -c '[.[] | {
+        name: (.name // .ref // "pipeline"),
+        status: (if .status == "pending" then "queued" elif .status == "running" then "in_progress" else .status end),
+        conclusion: (if .status == "success" then "success"
+                     elif .status == "failed" then "failure"
+                     elif .status == "canceled" then "cancelled"
+                     elif .status == "running" or .status == "pending" then null
+                     else .status end)
+      }]' 2> /dev/null || {
+    echo "[boucle] WARN: forge_commit_check_suites jq parse failed" >&2
+    echo "[]"
+  }
 }
 
 # ── Hierarchy / parent-child ──────────────────────────────────────────────

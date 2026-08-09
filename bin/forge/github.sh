@@ -395,16 +395,34 @@ forge_mr_diff() {
 forge_mr_check_suites() {
   local mr_iid="$1" head_sha="$2"
   # Fetch check runs for the head commit of the PR
-  _gh_api "/repos/$BOUCLE_PROJECT_ID/commits/$head_sha/check-runs" 2> /dev/null \
+  local raw_data
+  raw_data=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/commits/$head_sha/check-runs" 2> /dev/null) || {
+    echo "[boucle] WARN: forge_mr_check_suites API call failed (gh api commits/$head_sha/check-runs)" >&2
+    echo "[]"
+    return
+  }
+  echo "$raw_data" \
     | jq -c '.check_runs // [] | map({name: .name, status: .status, conclusion: .conclusion})' 2> /dev/null \
-    || echo "[]"
+    || {
+      echo "[boucle] WARN: forge_mr_check_suites jq parse failed" >&2
+      echo "[]"
+    }
 }
 
 forge_commit_check_suites() {
   local sha="$1"
-  _gh_api "/repos/$BOUCLE_PROJECT_ID/commits/$sha/check-runs" 2> /dev/null \
+  local raw_data
+  raw_data=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/commits/$sha/check-runs" 2> /dev/null) || {
+    echo "[boucle] WARN: forge_commit_check_suites API call failed (gh api commits/$sha/check-runs)" >&2
+    echo "[]"
+    return
+  }
+  echo "$raw_data" \
     | jq -c '.check_runs // [] | map({name: .name, status: .status, conclusion: .conclusion})' 2> /dev/null \
-    || echo "[]"
+    || {
+      echo "[boucle] WARN: forge_commit_check_suites jq parse failed" >&2
+      echo "[]"
+    }
 }
 
 # ── Hierarchy / parent-child ──────────────────────────────────────────────

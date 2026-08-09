@@ -662,3 +662,201 @@ source_with_mock_forge() {
   assert_success
   assert_output ""
 }
+
+# ── Regression: check-suite vocabulary mapping and pending detection ────
+
+@test "gitlab forge_commit_check_suites maps pending→queued status" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=gitlab.example.com BOUCLE_PROJECT_ID=1
+    # Mock glab to return a pending GitLab status
+    glab() {
+      printf '"'"'[{"name":"test","status":"pending","ref":"main"}]'"'"'
+    }
+    # Source the forge file directly (not forge_init which needs common.sh)
+    source bin/forge/gitlab.sh
+    result=$(forge_commit_check_suites abc123)
+    echo "$result" | jq -e ".[0].status == \"queued\"" > /dev/null
+  '
+  assert_success
+}
+
+@test "gitlab forge_commit_check_suites maps running→in_progress status" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=gitlab.example.com BOUCLE_PROJECT_ID=1
+    glab() {
+      printf '"'"'[{"name":"test","status":"running","ref":"main"}]'"'"'
+    }
+    source bin/forge/gitlab.sh
+    result=$(forge_commit_check_suites abc123)
+    echo "$result" | jq -e ".[0].status == \"in_progress\"" > /dev/null
+  '
+  assert_success
+}
+
+@test "gitlab forge_commit_check_suites maps canceled→cancelled conclusion" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=gitlab.example.com BOUCLE_PROJECT_ID=1
+    glab() {
+      printf '"'"'[{"name":"test","status":"canceled","ref":"main"}]'"'"'
+    }
+    source bin/forge/gitlab.sh
+    result=$(forge_commit_check_suites abc123)
+    echo "$result" | jq -e ".[0].conclusion == \"cancelled\"" > /dev/null
+  '
+  assert_success
+}
+
+@test "gitlab forge_commit_check_suites maps success→success conclusion" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=gitlab.example.com BOUCLE_PROJECT_ID=1
+    glab() {
+      printf '"'"'[{"name":"test","status":"success","ref":"main"}]'"'"'
+    }
+    source bin/forge/gitlab.sh
+    result=$(forge_commit_check_suites abc123)
+    echo "$result" | jq -e ".[0].conclusion == \"success\"" > /dev/null
+  '
+  assert_success
+}
+
+@test "gitlab forge_commit_check_suites maps failed→failure conclusion" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=gitlab.example.com BOUCLE_PROJECT_ID=1
+    glab() {
+      printf '"'"'[{"name":"test","status":"failed","ref":"main"}]'"'"'
+    }
+    source bin/forge/gitlab.sh
+    result=$(forge_commit_check_suites abc123)
+    echo "$result" | jq -e ".[0].conclusion == \"failure\"" > /dev/null
+  '
+  assert_success
+}
+
+@test "pending-query is vocabulary-agnostic: treats running conclusion as pending" {
+  run bash -c '
+    # Mock data with GitHub-style and GitLab-style mixed
+    data='"'"'[{"name":"a","status":"completed","conclusion":"running"},{"name":"b","status":"completed","conclusion":"success"}]'"'"'
+    count=$(echo "$data" | jq -r '"'"'
+      def is_pending: . == "queued" or . == "in_progress" or . == "pending" or . == "running";
+      [.[] | select(.conclusion == null or (.conclusion | is_pending) or (.status | is_pending))]
+      | length
+    '"'"')
+    [ "$count" -eq 1 ]
+  '
+  assert_success
+}
+
+@test "pending-query is vocabulary-agnostic: treats pending status as pending" {
+  run bash -c '
+    data='"'"'[{"name":"a","status":"pending","conclusion":null},{"name":"b","status":"completed","conclusion":"success"}]'"'"'
+    count=$(echo "$data" | jq -r '"'"'
+      def is_pending: . == "queued" or . == "in_progress" or . == "pending" or . == "running";
+      [.[] | select(.conclusion == null or (.conclusion | is_pending) or (.status | is_pending))]
+      | length
+    '"'"')
+    [ "$count" -eq 1 ]
+  '
+  assert_success
+}
+
+@test "failure-detection query returns true on failure conclusion" {
+  run bash -c '
+    data='"'"'[{"name":"a","conclusion":"success"},{"name":"b","conclusion":"failure"},{"name":"c","conclusion":"cancelled"}]'"'"'
+    count=$(echo "$data" | jq -r '"'"'[.[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out" or .conclusion == "action_required")] | length'"'"')
+    [ "$count" -eq 2 ]
+  '
+  assert_success
+}
+
+@test "failure-detection query returns false on all success" {
+  run bash -c '
+    data='"'"'[{"name":"a","conclusion":"success"},{"name":"b","conclusion":"success"}]'"'"'
+    count=$(echo "$data" | jq -r '"'"'[.[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out" or .conclusion == "action_required")] | length'"'"')
+    [ "$count" -eq 0 ]
+  '
+  assert_success
+}
+
+@test "post-merge external timeout exits 1 when suites never conclude" {
+  # Write a helper script to avoid nested quoting
+  local helper_script
+  helper_script=$(mktemp)
+  cat > "$helper_script" << 'HELPER'
+#!/usr/bin/env bash
+BOUCLE_ISSUE=42
+BOUCLE_LIVE_URL="https://example.com"
+forge_commit_check_suites() {
+  echo '[{"name":"test","status":"in_progress","conclusion":null}]'
+}
+forge_issue_note() { :; }
+BOUCLE_FORGE_HOST=github.com
+BOUCLE_PROJECT_ID=1
+forge_issue_get() { :; }
+forge_issue_labels_get() { echo ""; }
+forge_issue_labels_set() { :; }
+export BOUCLE_DEPLOY_MODE=external
+export BOUCLE_EXTERNAL_DEPLOY_WAIT=20
+source lib/boucle.sh
+head_sha="abc123"
+wait_sec="${BOUCLE_EXTERNAL_DEPLOY_WAIT:-600}"
+wait_sec=$(echo "$wait_sec" | tr -cd '0-9')
+[ -z "$wait_sec" ] || [ "$wait_sec" -eq 0 ] 2>/dev/null && wait_sec=600
+max_attempts=$((wait_sec / 10))
+[ "$max_attempts" -lt 1 ] && max_attempts=1
+attempt=0
+all_done=true
+while [ "$attempt" -lt "$max_attempts" ]; do
+  attempt=$((attempt + 1))
+  check_data=$(forge_commit_check_suites "$head_sha")
+  pending_count=$(echo "$check_data" | jq -r '
+    def is_pending: . == "queued" or . == "in_progress" or . == "pending" or . == "running";
+    [.[] | select(.conclusion == null or (.conclusion | is_pending) or (.status | is_pending))]
+    | length' 2>/dev/null || echo 1)
+  if [ "$pending_count" -eq 0 ]; then
+    all_done=true
+    break
+  fi
+  if [ "$attempt" -ge "$max_attempts" ]; then
+    all_done=false
+    break
+  fi
+  sleep 1
+done
+if [ "$all_done" != "true" ]; then
+  echo "TIMEOUT_REACHED"
+  exit 1
+fi
+echo "SUCCESS"
+HELPER
+  chmod +x "$helper_script"
+  run "$helper_script"
+  rm -f "$helper_script"
+  assert_failure
+  assert_output --partial "TIMEOUT_REACHED"
+}
+
+@test "post-merge external failure detection exits 1 when suites fail" {
+  local helper_script
+  helper_script=$(mktemp)
+  cat > "$helper_script" << 'HELPER'
+#!/usr/bin/env bash
+BOUCLE_ISSUE=42
+BOUCLE_LIVE_URL="https://example.com"
+forge_commit_check_suites() {
+  echo '[{"name":"test","status":"completed","conclusion":"failure"}]'
+}
+forge_issue_note() { :; }
+check_data=$(forge_commit_check_suites "abc123")
+failed_count=$(echo "$check_data" | jq -r '[.[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out" or .conclusion == "action_required")] | length')
+if [ "$failed_count" -gt 0 ]; then
+  echo "FAILURE_DETECTED"
+  exit 1
+fi
+echo "SUCCESS"
+HELPER
+  chmod +x "$helper_script"
+  run "$helper_script"
+  rm -f "$helper_script"
+  assert_failure
+  assert_output --partial "FAILURE_DETECTED"
+}
