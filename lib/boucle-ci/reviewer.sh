@@ -76,7 +76,7 @@ boucle_ci_reviewer() {
   fi
 
   MR_DATA=$(forge_mr_get "$MR_IID")
-  PREVIEW_URL=$(echo "$MR_DATA" | jq -r '.description' | grep -oE 'https://[a-z0-9.-]+\.pages\.dev' | head -1)
+  PREVIEW_URL=$(echo "$MR_DATA" | jq -r '.description' | grep -oE "$BOUCLE_DEPLOY_URL_REGEX" | head -1)
   MR_URL=$(echo "$MR_DATA" | jq -r '.web_url // .html_url // empty')
 
   # ── Feedback channel: inject human MR comments into the reviewer ──
@@ -127,6 +127,42 @@ boucle_ci_reviewer() {
   "$BOUCLE_HOME"/bin/describe-images reviewer || echo "[boucle] WARN: image description failed — continuing without descriptions"
 
   export BOUCLE_PREVIEW_URL="$PREVIEW_URL"
+
+  # ── Diff review mode ─────────────────────────────────────────────
+  # When BOUCLE_REVIEW_MODE=diff (or no preview URL could be extracted),
+  # run code-review mode: review the PR diff, wait for check suites.
+  export BOUCLE_MR_DIFF=""
+  export BOUCLE_MR_CHECKS=""
+  if boucle_is_diff_review || [ -z "$PREVIEW_URL" ]; then
+    echo "[boucle] Diff review mode — gathering PR diff and check suites..."
+    # Fetch the MR diff
+    BOUCLE_MR_DIFF=$(forge_mr_diff "$MR_IID" | head -c 5000 || echo "")
+    # Wait for check suites on the PR head
+    local checks_wait checks_attempt checks_max check_data
+    checks_wait="${BOUCLE_REVIEW_CHECKS_WAIT:-900}"
+    checks_max=$((checks_wait / 10))
+    checks_attempt=0
+    check_data="[]"
+    while [ "$checks_attempt" -lt "$checks_max" ]; do
+      checks_attempt=$((checks_attempt + 1))
+      check_data=$(forge_mr_check_suites "$MR_IID" "$MR_HEAD")
+      local pending_count
+      pending_count=$(echo "$check_data" | jq -r '[.[] | select(.conclusion == null or .status == "queued" or .status == "in_progress")] | length' 2> /dev/null || echo 1)
+      if [ "$pending_count" -eq 0 ]; then
+        echo "All PR check suites concluded for MR !${MR_IID} (after ~$((checks_attempt * 10))s)"
+        break
+      fi
+      echo "PR check suites: $pending_count still pending (attempt $checks_attempt/$checks_max)"
+      sleep 10
+    done
+    BOUCLE_MR_CHECKS=$(echo "$check_data" | jq -c '.' 2> /dev/null || echo "[]")
+    # Warn on timeout but don't fail — the review can still proceed
+    if echo "$check_data" | jq -e '[.[] | select(.conclusion == null or .status == "queued" or .status == "in_progress")] | length > 0' > /dev/null 2>&1; then
+      echo "[boucle] WARN: PR check suites timed out after ${checks_wait}s — proceeding without full CI results"
+    fi
+    export BOUCLE_MR_DIFF BOUCLE_MR_CHECKS
+    echo "[boucle] Diff review mode ready: diff=${#BOUCLE_MR_DIFF}chars, checks=$(echo "$BOUCLE_MR_CHECKS" | jq 'length')"
+  fi
 
   # Fetch the issue body and export it so the reviewer agent can verify
   # that the MR content (texts, video URLs, citations) matches what the
