@@ -349,6 +349,33 @@ forge_mr_rebase() {
   return 0
 }
 
+# ── MR diff + check suites (review modes) ──────────────────────────────────
+
+forge_mr_diff() {
+  local mr_iid="$1"
+  glab api --hostname "$BOUCLE_FORGE_HOST" \
+    "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/diff" 2> /dev/null \
+    | jq -r '.[].diff // empty' 2> /dev/null || true
+}
+
+forge_mr_check_suites() {
+  local mr_iid="$1" head_sha="$2"
+  # GitLab: fetch pipelines for the MR
+  glab api --hostname "$BOUCLE_FORGE_HOST" \
+    "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/pipelines" 2> /dev/null \
+    | jq -c '[.[] | {name: (.ref // "pipeline"), status: .status, conclusion: (if .status == "success" then "success" elif .status == "failed" then "failure" else .status end)}]' 2> /dev/null \
+    || echo "[]"
+}
+
+forge_commit_check_suites() {
+  local sha="$1"
+  # GitLab: fetch statuses for a commit
+  glab api --hostname "$BOUCLE_FORGE_HOST" \
+    "/projects/$BOUCLE_PROJECT_ID/repository/commits/$sha/statuses" 2> /dev/null \
+    | jq -c '[.[] | {name: (.name // .ref // "pipeline"), status: .status, conclusion: (if .status == "success" then "success" elif .status == "failed" then "failure" else .status end)}]' 2> /dev/null \
+    || echo "[]"
+}
+
 # ── Hierarchy / parent-child ──────────────────────────────────────────────
 
 forge_work_item_global_id() {
@@ -454,6 +481,17 @@ forge_pipeline_list_active() {
     [ -n "$match" ] && result=$(echo "$result" | jq --argjson p "{\"id\":$pid,\"status\":\"running\"}" '. + [$p]')
   done
   echo "$result"
+}
+
+forge_pipeline_status_for_ref() {
+  local ref="$1" event="${2:-push}"
+  local pipelines
+  pipelines=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
+    "/projects/$BOUCLE_PROJECT_ID/pipelines?ref=$(printf '%s' "$ref" | jq -sRr @uri)&order_by=id&sort=desc&per_page=1" 2> /dev/null) || {
+    echo "unknown"
+    return
+  }
+  echo "$pipelines" | jq -r '.[0].status // "unknown"' 2> /dev/null || echo "unknown"
 }
 
 # ── User / bot resolution ─────────────────────────────────────────────────
