@@ -89,3 +89,13 @@ setup() {
   assert_success
   assert_output --partial ".jcode/skills"
 }
+
+@test "SYNC_PATHS includes lib (boucle-ci pipeline libraries)" {
+  # lib/boucle-ci.sh + lib/boucle-ci/ must propagate to consumers on update,
+  # otherwise bin/boucle-ci cannot source its stage functions and every
+  # pipeline job fails on the consumer (comment in bin/update promises
+  # "lib/ is always synced" — the variable list must honor it).
+  run bash -c 'source bin/update && echo "$SYNC_PATHS"'
+  assert_success
+  assert_output --partial "lib"
+}
