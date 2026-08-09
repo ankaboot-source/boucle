@@ -19,6 +19,27 @@
 (inferred from DeepSeek: $72.03 / $0.03 per task). Not displayed as a figure
 on the Artificial Analysis page; derived from the cost-per-task chart.
 
+## Per-role cost, end to end
+
+One feature flows through four roles: **triage** (analyze the issue, draft
+the spec) → **worker** (implement, up to 3 iterations) → **reviewer** (verify
+the preview, up to 3 iterations) → **e2e** (verify the live deployment). The
+cost of one feature is the sum of all role invocations.
+
+| Role | What it does | boucle | $/task | Claude Code | $/task |
+| --- | --- | --- | ---: | --- | ---: |
+| triage | analyze issue, draft spec | [GLM-5.2](https://z.ai/blog/glm-5.2) (intel 53) | $0.31 | Opus 5 (intel 63) | $2.34 |
+| worker (×3) | implement | [DeepSeek V4 Flash 0731](https://artificialanalysis.ai/models/deepseek-v4-flash) (intel 52) | $0.03 | Sonnet 5 (intel 55) | $1.72 |
+| reviewer (×3) | verify preview | DeepSeek V4 Flash 0731 (intel 52) | $0.03 | Sonnet 5 (intel 55) | $1.72 |
+| e2e | verify live deployment | GLM-5.2 (intel 53) | $0.31 | Opus 5 (intel 63) | $2.34 |
+
+Summing one pass through the loop (1 triage + 1 e2e + 3 worker + 3 reviewer):
+
+| | boucle | Claude Code |
+| --- | ---: | ---: |
+| **Cost per feature** | **$0.80** | **$15.00** |
+| Intelligence (triage / worker) | 53 / 52 | 63 / 55 |
+
 ### Published raw data (source of the $/task figures)
 
 Each model runs the same 9-evaluation Intelligence Index suite. Artificial
