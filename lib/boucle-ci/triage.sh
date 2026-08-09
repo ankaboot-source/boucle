@@ -28,370 +28,370 @@
 #     calls remain in this file.
 
 boucle_ci_triage() {
-    set +o pipefail
-    # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
-    # Guard: if dispatch skipped (bot note event, anti-loop), no .boucle-issue artifact
-    if [ ! -f .boucle-issue ]; then
-        # Recovery path: allow manual triage trigger via BOUCLE_ISSUE variable
-        if [ -n "${BOUCLE_ISSUE:-}" ]; then
-            echo "No .boucle-issue artifact, but BOUCLE_ISSUE=$BOUCLE_ISSUE set via trigger. Using it."
-            IID="$BOUCLE_ISSUE"
-        else
-            echo "No .boucle-issue artifact (dispatch skipped) and no BOUCLE_ISSUE variable. Nothing to triage."
-            exit 0
-        fi
+  set +o pipefail
+  # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
+  # Guard: if dispatch skipped (bot note event, anti-loop), no .boucle-issue artifact
+  if [ ! -f .boucle-issue ]; then
+    # Recovery path: allow manual triage trigger via BOUCLE_ISSUE variable
+    if [ -n "${BOUCLE_ISSUE:-}" ]; then
+      echo "No .boucle-issue artifact, but BOUCLE_ISSUE=$BOUCLE_ISSUE set via trigger. Using it."
+      IID="$BOUCLE_ISSUE"
     else
-        IID=$(cat .boucle-issue)
+      echo "No .boucle-issue artifact (dispatch skipped) and no BOUCLE_ISSUE variable. Nothing to triage."
+      exit 0
     fi
-    export BOUCLE_ISSUE="$IID"
+  else
+    IID=$(cat .boucle-issue)
+  fi
+  export BOUCLE_ISSUE="$IID"
 
-    # Label helper: preserve non-boucle labels when writing a boucle label.
-    # The jq filter uses startswith("boucle:") which catches BOTH the detail
-    # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
-    # starts with "boucle:"), so we strip all boucle-managed labels when
-    # writing a new pair. Caller passes detail as $2 and gross as $3.
-    # Resolve the human reporter to notify on NEEDS-INFO. For a sub-issue
-    # created by the bot via NEEDS-SPLIT, the issue's own author is up-bot
-    # (useless to assign). The human who must answer is the PARENT issue's
-    # author. Parse the "## Parent issue\n#N" link from the sub-issue body
-    # (same format maybe_close_parent uses) and fetch the parent's author.
-    # For a top-level issue, use its own author.
-    # NOTE: use printf '%s' (not echo) to feed JSON to jq — echo in some
-    # shells (zsh) interprets backslash escapes and corrupts JSON whose
-    # description contains literal control characters.
-    # Fetch the global work-item ID for an issue (needed as parent_id for
-    # the child-items hierarchy API). Issues and work items share the same
-    # IID space since 16.0, so /work_items/:iid works for issues too.
-    # Returns empty string on failure (loop must not break).
-    # NOTE: the forge CLI may exit 0 on HTTP 403 (e.g. when the work_item_rest_api
-    # feature flag is disabled) and print the error JSON to stdout, so we
-    # validate the response shape rather than rely on the exit code.
-    # List child work items of a parent. Returns JSON array (empty array on
-    # failure). Each child has .iid, .state ("opened"|"closed"), .title.
-    # NOTE: the forge CLI may exit 0 on HTTP 403 (e.g. when the work_item_rest_api
-    # feature flag is disabled) and print the error JSON to stdout. A 403
-    # error object like {"message":"403 Forbidden ..."} is a JSON OBJECT,
-    # not an array — jq 'length' on an object returns its key count (1),
-    # which would falsely trip the idempotency guard. We therefore validate
-    # that the response is a JSON ARRAY and return [] otherwise.
-    # Download attachments uploaded to the issue (capped per BOUCLE_IMAGE_*_BYTES).
-    # Makes them available to the triage agent via BOUCLE_ISSUE_ATTACHMENTS.
-    $BOUCLE_HOME/bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
+  # Label helper: preserve non-boucle labels when writing a boucle label.
+  # The jq filter uses startswith("boucle:") which catches BOTH the detail
+  # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
+  # starts with "boucle:"), so we strip all boucle-managed labels when
+  # writing a new pair. Caller passes detail as $2 and gross as $3.
+  # Resolve the human reporter to notify on NEEDS-INFO. For a sub-issue
+  # created by the bot via NEEDS-SPLIT, the issue's own author is up-bot
+  # (useless to assign). The human who must answer is the PARENT issue's
+  # author. Parse the "## Parent issue\n#N" link from the sub-issue body
+  # (same format maybe_close_parent uses) and fetch the parent's author.
+  # For a top-level issue, use its own author.
+  # NOTE: use printf '%s' (not echo) to feed JSON to jq — echo in some
+  # shells (zsh) interprets backslash escapes and corrupts JSON whose
+  # description contains literal control characters.
+  # Fetch the global work-item ID for an issue (needed as parent_id for
+  # the child-items hierarchy API). Issues and work items share the same
+  # IID space since 16.0, so /work_items/:iid works for issues too.
+  # Returns empty string on failure (loop must not break).
+  # NOTE: the forge CLI may exit 0 on HTTP 403 (e.g. when the work_item_rest_api
+  # feature flag is disabled) and print the error JSON to stdout, so we
+  # validate the response shape rather than rely on the exit code.
+  # List child work items of a parent. Returns JSON array (empty array on
+  # failure). Each child has .iid, .state ("opened"|"closed"), .title.
+  # NOTE: the forge CLI may exit 0 on HTTP 403 (e.g. when the work_item_rest_api
+  # feature flag is disabled) and print the error JSON to stdout. A 403
+  # error object like {"message":"403 Forbidden ..."} is a JSON OBJECT,
+  # not an array — jq 'length' on an object returns its key count (1),
+  # which would falsely trip the idempotency guard. We therefore validate
+  # that the response is a JSON ARRAY and return [] otherwise.
+  # Download attachments uploaded to the issue (capped per BOUCLE_IMAGE_*_BYTES).
+  # Makes them available to the triage agent via BOUCLE_ISSUE_ATTACHMENTS.
+  $BOUCLE_HOME/bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
 
-    # Detect image attachments and route to a vision-capable model if needed.
-    # Forge controls: BOUCLE_VISION_ROUTING, BOUCLE_VISION_MODEL, BOUCLE_VISION_ROLES.
-    eval "$($BOUCLE_HOME/bin/detect-vision-need triage)"
+  # Detect image attachments and route to a vision-capable model if needed.
+  # Forge controls: BOUCLE_VISION_ROUTING, BOUCLE_VISION_MODEL, BOUCLE_VISION_ROLES.
+  eval "$($BOUCLE_HOME/bin/detect-vision-need triage)"
 
-    # Fetch the issue body and export it so the triage agent does not
-    # waste steps calling forge issue view (minimax-m3
-    # burned 4+ steps on failed fetches before posting its comment).
-    export BOUCLE_ISSUE_BODY
-    BOUCLE_ISSUE_BODY=$(forge_issue_get "$IID" | jq -r '.description // empty' 2>/dev/null || echo "")
-    if [ -z "$BOUCLE_ISSUE_BODY" ]; then
-        echo "[boucle] WARN: could not fetch issue #$IID body — agent will fall back to forge issue view."
-    fi
+  # Fetch the issue body and export it so the triage agent does not
+  # waste steps calling forge issue view (minimax-m3
+  # burned 4+ steps on failed fetches before posting its comment).
+  export BOUCLE_ISSUE_BODY
+  BOUCLE_ISSUE_BODY=$(forge_issue_get "$IID" | jq -r '.description // empty' 2> /dev/null || echo "")
+  if [ -z "$BOUCLE_ISSUE_BODY" ]; then
+    echo "[boucle] WARN: could not fetch issue #$IID body — agent will fall back to forge issue view."
+  fi
 
-    # Fetch the issue notes (comments) and export them so the triage
-    # agent can see prior triage Questions AND the author's answers.
-    # Without this, every re-triage re-asks questions the author already
-    # answered (issue #27: 6 repeated triage notes on a consumer repo).
-    # The notes API returns newest-first; we reverse to oldest-first
-    # and format each note as "[<author>] <body>". We keep ALL notes
-    # (including prior triage comments) so the agent can see what it
-    # already asked and avoid re-asking. System/internal notes are
-    # excluded (type != null). The current run's about-to-be-posted
-    # note does not exist yet at fetch time, so it is naturally absent.
-    export BOUCLE_ISSUE_NOTES
-    # NOTE: forge_issue_notes paginates in the GitLab backend (--paginate,
-    # per_page=100) so all notes are returned, matching the original inline
-    # call. The GitHub backend paginates via _gh_api (gh api --paginate).
-    BOUCLE_ISSUE_NOTES=$(forge_issue_notes "$IID" |
-        jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | reverse | .[]' 2>/dev/null || echo "")
-    if [ -z "$BOUCLE_ISSUE_NOTES" ]; then
-        echo "[boucle] INFO: no prior notes for issue #$IID (first triage run)."
-    fi
+  # Fetch the issue notes (comments) and export them so the triage
+  # agent can see prior triage Questions AND the author's answers.
+  # Without this, every re-triage re-asks questions the author already
+  # answered (issue #27: 6 repeated triage notes on a consumer repo).
+  # The notes API returns newest-first; we reverse to oldest-first
+  # and format each note as "[<author>] <body>". We keep ALL notes
+  # (including prior triage comments) so the agent can see what it
+  # already asked and avoid re-asking. System/internal notes are
+  # excluded (type != null). The current run's about-to-be-posted
+  # note does not exist yet at fetch time, so it is naturally absent.
+  export BOUCLE_ISSUE_NOTES
+  # NOTE: forge_issue_notes paginates in the GitLab backend (--paginate,
+  # per_page=100) so all notes are returned, matching the original inline
+  # call. The GitHub backend paginates via _gh_api (gh api --paginate).
+  BOUCLE_ISSUE_NOTES=$(forge_issue_notes "$IID" \
+    | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | reverse | .[]' 2> /dev/null || echo "")
+  if [ -z "$BOUCLE_ISSUE_NOTES" ]; then
+    echo "[boucle] INFO: no prior notes for issue #$IID (first triage run)."
+  fi
 
-    # Run the agent. Use `|| rc=$?` to suppress set -e so the script
-    # continues to comment parsing even if the agent exits non-zero
-    # (step limit, crash, etc.).
-    # Record the newest triage note ID BEFORE running the agent, so we can
-    # distinguish a NEW triage comment (posted by this run) from OLD ones.
-    # Without this, a run where the agent doesn't post a new comment would
-    # re-parse the OLD triage comment and re-apply its disposition, causing
-    # a label bounce with no new question asked.
-    PRE_RUN_TRIAGE_ID=$(forge_issue_notes "$IID" |
-        jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## TL;DR")) | select(.body | test("## Disposition"))] | first | .id // 0')
-    rc=0
-    $BOUCLE_HOME/bin/jc triage || rc=$?
-    if [ "$rc" -ne 0 ]; then
-        echo "WARN: $BOUCLE_HOME/bin/jc triage exited $rc — checking if a triage comment was posted anyway."
-    fi
+  # Run the agent. Use `|| rc=$?` to suppress set -e so the script
+  # continues to comment parsing even if the agent exits non-zero
+  # (step limit, crash, etc.).
+  # Record the newest triage note ID BEFORE running the agent, so we can
+  # distinguish a NEW triage comment (posted by this run) from OLD ones.
+  # Without this, a run where the agent doesn't post a new comment would
+  # re-parse the OLD triage comment and re-apply its disposition, causing
+  # a label bounce with no new question asked.
+  PRE_RUN_TRIAGE_ID=$(forge_issue_notes "$IID" \
+    | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## TL;DR")) | select(.body | test("## Disposition"))] | first | .id // 0')
+  rc=0
+  $BOUCLE_HOME/bin/jc triage || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "WARN: $BOUCLE_HOME/bin/jc triage exited $rc — checking if a triage comment was posted anyway."
+  fi
 
-    # Parse the triage comment for Disposition and Size
-    # Notes API returns notes newest-first, so `first` = newest.
-    # Only consider triage comments NEWER than the one present before this
-    # run (PRE_RUN_TRIAGE_ID). If the agent didn't post a new comment, this
-    # returns empty, which we handle below by leaving the issue at
-    # boucle:triage instead of re-applying the OLD disposition.
-    COMMENT=$(forge_issue_notes "$IID" |
-        jq -r --argjson pre "$PRE_RUN_TRIAGE_ID" \
-            '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## TL;DR")) | select(.body | test("## Disposition")) | select(.id > $pre)] | first | .body // ""')
+  # Parse the triage comment for Disposition and Size
+  # Notes API returns notes newest-first, so `first` = newest.
+  # Only consider triage comments NEWER than the one present before this
+  # run (PRE_RUN_TRIAGE_ID). If the agent didn't post a new comment, this
+  # returns empty, which we handle below by leaving the issue at
+  # boucle:triage instead of re-applying the OLD disposition.
+  COMMENT=$(forge_issue_notes "$IID" \
+    | jq -r --argjson pre "$PRE_RUN_TRIAGE_ID" \
+      '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## TL;DR")) | select(.body | test("## Disposition")) | select(.id > $pre)] | first | .body // ""')
 
-    # Parse Disposition and Size from their SECTIONS only, not the whole body.
-    # Scoping prevents false matches: e.g. "already" in an acceptance criterion
-    # contains "ready" and would match a whole-body grep for READY.
-    DISPOSITION=$(echo "$COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
-    SIZE=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
+  # Parse Disposition and Size from their SECTIONS only, not the whole body.
+  # Scoping prevents false matches: e.g. "already" in an acceptance criterion
+  # contains "ready" and would match a whole-body grep for READY.
+  DISPOSITION=$(echo "$COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
+  SIZE=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
 
-    # ── Log-scraping fallback (step-limit recovery) ──────────────────
-    # If the agent drafted a triage comment but ran out of steps before
-    # posting it (DISPOSITION empty), scrape the drafted comment from the
-    # agent's stdout log and post it ourselves. The agent's post-early
-    # prompt rule should prevent this, but this catches the residual case.
-    if [ -z "$DISPOSITION" ]; then
-        AGENT_LOG="$BOUCLE_WORKSPACE/.boucle-state/$IID/agent-output.log"
-        if [ -f "$AGENT_LOG" ]; then
-            # Extract the drafted triage comment: from the boucle:triage marker
-            # to the end of the fenced block. The agent prints the full comment
-            # (often inside a ``` fence) in its stdout when it can't call the forge CLI.
-            # Marker patterns are anchored to start-of-line (AGENTS.md lesson
-            # #47): a marker quoted in prose must not start the scrape.
-            DRAFTED_COMMENT=$(awk '
+  # ── Log-scraping fallback (step-limit recovery) ──────────────────
+  # If the agent drafted a triage comment but ran out of steps before
+  # posting it (DISPOSITION empty), scrape the drafted comment from the
+  # agent's stdout log and post it ourselves. The agent's post-early
+  # prompt rule should prevent this, but this catches the residual case.
+  if [ -z "$DISPOSITION" ]; then
+    AGENT_LOG="$BOUCLE_WORKSPACE/.boucle-state/$IID/agent-output.log"
+    if [ -f "$AGENT_LOG" ]; then
+      # Extract the drafted triage comment: from the boucle:triage marker
+      # to the end of the fenced block. The agent prints the full comment
+      # (often inside a ``` fence) in its stdout when it can't call the forge CLI.
+      # Marker patterns are anchored to start-of-line (AGENTS.md lesson
+      # #47): a marker quoted in prose must not start the scrape.
+      DRAFTED_COMMENT=$(awk '
                 /^<!-- boucle:triage v=1 -->/ { found=1 }
                 found { print; if (/^## Disposition/) { disp=1 } }
                 disp && /^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$/ { exit }
-            ' "$AGENT_LOG" 2>/dev/null || echo "")
-            # If no boucle:triage found, try the boucle:draft marker (first-pass
-            # draft posted early per the post-early rule). Promote it to a
-            # triage comment by replacing the draft marker with the triage marker.
-            if [ -z "$DRAFTED_COMMENT" ]; then
-                DRAFTED_COMMENT=$(awk '
+            ' "$AGENT_LOG" 2> /dev/null || echo "")
+      # If no boucle:triage found, try the boucle:draft marker (first-pass
+      # draft posted early per the post-early rule). Promote it to a
+      # triage comment by replacing the draft marker with the triage marker.
+      if [ -z "$DRAFTED_COMMENT" ]; then
+        DRAFTED_COMMENT=$(awk '
                     /^<!-- boucle:draft role=triage -->/ { found=1 }
                     found { print; if (/^## Disposition/) { disp=1 } }
                     disp && /^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$/ { exit }
-                ' "$AGENT_LOG" 2>/dev/null || echo "")
-                if [ -n "$DRAFTED_COMMENT" ]; then
-                    echo "[boucle] WARN: no boucle:triage in log — promoting boucle:draft to triage (step-limit fallback)."
-                    DRAFTED_COMMENT=$(printf '%s' "$DRAFTED_COMMENT" | sed 's|<!-- boucle:draft role=triage -->|<!-- boucle:triage v=1 -->|')
-                fi
-            fi
-            if [ -n "$DRAFTED_COMMENT" ] && echo "$DRAFTED_COMMENT" | grep -qiE '^## Disposition'; then
-                echo "[boucle] Recovering drafted triage comment from agent log (step-limit fallback)."
-                # Strip leading/trailing ``` fences if the agent wrapped the comment.
-                DRAFTED_COMMENT=$(echo "$DRAFTED_COMMENT" | sed '/^```$/d')
-                forge_issue_note "$IID" "$DRAFTED_COMMENT"
-                # Re-fetch and re-parse the now-posted comment.
-                # Same PRE_RUN_TRIAGE_ID filter: only consider comments newer than
-                # the pre-run one (the just-posted fallback comment qualifies).
-                COMMENT=$(forge_issue_notes "$IID" |
-                    jq -r --argjson pre "$PRE_RUN_TRIAGE_ID" \
-                        '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## TL;DR")) | select(.body | test("## Disposition")) | select(.id > $pre)] | first | .body // ""')
-                DISPOSITION=$(echo "$COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
-                SIZE=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
-                if [ -n "$DISPOSITION" ]; then
-                    echo "[boucle] Step-limit fallback succeeded: recovered disposition=$DISPOSITION size=${SIZE:-?}."
-                else
-                    echo "[boucle] Step-limit fallback failed: drafted comment had no parsable Disposition."
-                fi
-            fi
+                ' "$AGENT_LOG" 2> /dev/null || echo "")
+        if [ -n "$DRAFTED_COMMENT" ]; then
+          echo "[boucle] WARN: no boucle:triage in log — promoting boucle:draft to triage (step-limit fallback)."
+          DRAFTED_COMMENT=$(printf '%s' "$DRAFTED_COMMENT" | sed 's|<!-- boucle:draft role=triage -->|<!-- boucle:triage v=1 -->|')
         fi
-    fi
-
-    # If no NEW triage comment was posted by this run (agent crashed, hit
-    # step limit, or decided no new triage was needed), leave the issue at
-    # boucle:triage and exit without changing labels. Re-applying the OLD
-    # disposition would bounce the label (e.g. triage→needs-info) with no
-    # new question asked — the exact "retour à une review humaine alors
-    # qu'aucune question n'est posée" symptom.
-    if [ -z "$DISPOSITION" ]; then
-        # ── Circuit breaker (silent-failure escalation) ─────────────────
-        # bin/jc exits 3 when the agent produced NO posted comment AND NO
-        # drafted comment (silent failure — e.g. hit OUTPUT_TOKEN_MAX
-        # mid-comment before reaching the forge tool call). If we leave the
-        # issue at boucle:triage, the doctor re-triggers it every 10 min
-        # and the agent fails identically every time → infinite loop
-        # (issue #27 on a consumer repo). Escalate to human instead
-        # so a human can investigate. The issue keeps its boucle:triage
-        # label for traceability but moves to boucle::status::human.
-        if [ "$rc" -eq 3 ]; then
-            echo "[boucle] Silent triage failure (bin/jc exit 3) — escalating issue #$IID to human to break doctor re-trigger loop."
-            set_boucle_label "$IID" "boucle:human" "boucle::status::human"
-            forge_issue_note "$IID" ":rotating_light: Triage a échoué en silence (l'agent n'a produit aucun commentaire). Passage en revue humaine pour casser la boucle de re-déclenchement. Voir les logs du job $BOUCLE_JOB_URL."
-            exit 1
-        fi
-        echo "[boucle] No new triage comment posted by this run — leaving issue #$IID at boucle:triage, no label change."
-        exit 0
-    fi
-
-    # Collapse duplicate triage comments (agent may post a v2; CI replaces the first).
-    # NOTE: bin/collapse-duplicate-notes is fully forge-agnostic (uses the
-    # forge_* contract: forge_issue_notes / forge_issue_note_update /
-    # forge_note_delete) since the GitHub-support port.
-    $BOUCLE_HOME/bin/collapse-duplicate-notes triage "$BOUCLE_PROJECT_ID" "$IID" "$PRE_RUN_TRIAGE_ID" "$BOUCLE_FORGE_HOST"
-    # Route based on disposition
-    case "$DISPOSITION" in
-    READY)
-        if [ "$SIZE" = "L" ]; then
-            set_boucle_label "$IID" "boucle:human,size:l" "boucle::status::human"
+      fi
+      if [ -n "$DRAFTED_COMMENT" ] && echo "$DRAFTED_COMMENT" | grep -qiE '^## Disposition'; then
+        echo "[boucle] Recovering drafted triage comment from agent log (step-limit fallback)."
+        # Strip leading/trailing ``` fences if the agent wrapped the comment.
+        DRAFTED_COMMENT=$(echo "$DRAFTED_COMMENT" | sed '/^```$/d')
+        forge_issue_note "$IID" "$DRAFTED_COMMENT"
+        # Re-fetch and re-parse the now-posted comment.
+        # Same PRE_RUN_TRIAGE_ID filter: only consider comments newer than
+        # the pre-run one (the just-posted fallback comment qualifies).
+        COMMENT=$(forge_issue_notes "$IID" \
+          | jq -r --argjson pre "$PRE_RUN_TRIAGE_ID" \
+            '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## TL;DR")) | select(.body | test("## Disposition")) | select(.id > $pre)] | first | .body // ""')
+        DISPOSITION=$(echo "$COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
+        SIZE=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
+        if [ -n "$DISPOSITION" ]; then
+          echo "[boucle] Step-limit fallback succeeded: recovered disposition=$DISPOSITION size=${SIZE:-?}."
         else
-            # Spec-validation gate (configurable via BOUCLE_SPEC_PROFILE).
-            # Default "product" gates M, skips S. "off" never gates (legacy).
-            # "strict" gates all sizes. An unknown profile falls back to "product".
-            SPEC_PROFILE="${BOUCLE_SPEC_PROFILE:-product}"
-            SHOULD_GATE=false
-            case "$SPEC_PROFILE" in
-            off) SHOULD_GATE=false ;;
-            strict) SHOULD_GATE=true ;;
-            product) [ "$SIZE" = "M" ] && SHOULD_GATE=true ;;
-            *)
-                echo "WARN: unknown BOUCLE_SPEC_PROFILE '$SPEC_PROFILE' — treating as product"
-                [ "$SIZE" = "M" ] && SHOULD_GATE=true
-                ;;
-            esac
-            # Gate-skip transparency: when the spec gate is auto-validated
-            # (DND window or boucle:autonomous label), record WHY on the issue
-            # so the human understands why no gate was respected. Each skip
-            # path applies a flag label (visible on the board) AND posts an
-            # explanatory comment. See AGENTS.md lesson "Gate-skip
-            # transparency" + AGENTS.md (lesson 47).
-            # Two paths flip SHOULD_GATE=false:
-            #   1. boucle:autonomous label on the issue (per-issue opt-in,
-            #      applied at creation — takes precedence, intentional).
-            #   2. DND window active (time-based, global).
-            GATE_SKIP_LABELS=""
-            AUTONOMOUS=$(forge_issue_get "$IID" 2>/dev/null |
-                jq -r '(.labels // []) | map(select(. == "boucle:autonomous")) | length' 2>/dev/null || echo 0)
-            if [ "$SHOULD_GATE" = "true" ] && [ "${AUTONOMOUS:-0}" -gt 0 ] 2>/dev/null; then
-                echo "[boucle] 🤖 Issue flagged autonomous — auto-validating spec gate for #$IID"
-                SHOULD_GATE=false
-                GATE_SKIP_LABELS="boucle:autonomous"
-                AUTONOMOUS_NOTE=$(printf "🤖 **Spec gate auto-validée — issue flaguée autonome**\n\nLa validation humaine du spec a été automatiquement validée car cette issue porte le label \`boucle:autonomous\`. La boucle continue donc jusqu'à la MR sans contact humain.\n\nLe label \`boucle:autonomous\` reste visible sur l'issue (tableau de bord) jusqu'à la prochaine transition d'état.\n\nVous pourrez valider la MR quand elle sera prête. Pour ne plus auto-valider le spec sur cette issue, retirez le label \`boucle:autonomous\`.")
-                forge_issue_note "$IID" "$AUTONOMOUS_NOTE"
-            fi
-            if [ "$SHOULD_GATE" = "true" ] && "$BOUCLE_HOME/bin/dnd" 2>/dev/null; then
-                DND_START="${BOUCLE_DND_START:-22:00}"
-                DND_END="${BOUCLE_DND_END:-07:00}"
-                DND_TZ="${BOUCLE_DND_TZ:-UTC}"
-                echo "[boucle] 🌙 DND active — auto-validating spec gate for #$IID"
-                SHOULD_GATE=false
-                GATE_SKIP_LABELS="${GATE_SKIP_LABELS:+$GATE_SKIP_LABELS,}boucle:dnd"
-                DND_NOTE=$(printf "🌙 **Spec gate auto-validée — mode Do-Not-Disturb actif**\n\nLa validation humaine du spec a été automatiquement validée car la fenêtre DND est active (%s–%s %s). La boucle continue donc jusqu'à la MR sans contact humain.\n\nLe label \`boucle:dnd\` a été appliqué à l'issue (visible sur le tableau de bord) pour signaler cette auto-validation ; il sera retiré à la prochaine transition d'état.\n\nVous pourrez valider la MR quand elle sera prête. Pour désactiver le DND : mettez \`BOUCLE_DND_ENABLED=false\` dans les variables CI du projet." "$DND_START" "$DND_END" "$DND_TZ")
-                forge_issue_note "$IID" "$DND_NOTE"
-            fi
-            if [ "$SHOULD_GATE" = "true" ]; then
-                # Pause for author to validate the spec (acceptance criteria) before
-                # the worker runs. Assign to the reporter (handles sub-issues via
-                # the parent's author — resolve_reporter_id defined above) and post
-                # a comment with clear next-action instructions. Do NOT trigger worker.
-                set_boucle_label "$IID" "boucle:spec-review" "boucle::status::human"
-                AUTHOR_ID=$(resolve_reporter_id "$IID")
-                if [ -n "$AUTHOR_ID" ] && [ "$AUTHOR_ID" != "null" ]; then
-                    forge_issue_assign "$IID" "$AUTHOR_ID"
-                fi
-                # Append validation instructions to the triage comment itself so
-                # the human has ONE message to read/approve (instead of a separate
-                # note). Falls back to a standalone POST if the triage note cannot
-                # be resolved or the PUT fails — approval detection tolerates both
-                # shapes (doctor polls "React with" across all notes).
-                SPEC_MSG=$(printf '## Validation\n\nReview the **TL;DR** above. If it matches what you want:\n- React with 👍 ✅ ☑️ ✔️ 🆗 or 👌 on this comment to approve, OR\n- Reply to this issue with any comment.\nIf not, reply with corrections.')
-                TRIAGE_NOTE_ID=$(forge_issue_notes "$IID" 2>/dev/null |
-                    jq -r '[.[] | select(.body | contains("<!-- boucle:triage") and contains("## TL;DR") and contains("## Disposition"))]
-                            | sort_by(.created_at) | last | .id' 2>/dev/null || echo "")
-                SPEC_MSG_APPENDED=false
-                if [ -n "$TRIAGE_NOTE_ID" ]; then
-                    EXISTING_BODY=$(forge_issue_note_get "$IID" "$TRIAGE_NOTE_ID" 2>/dev/null |
-                        jq -r '.body // empty' 2>/dev/null)
-                    # Idempotency guard: skip if the validation section is already
-                    # present (re-runs of triage on the same issue).
-                    if [ -n "$EXISTING_BODY" ] && ! echo "$EXISTING_BODY" | grep -q "## Validation"; then
-                        UPDATED_BODY=$(printf '%s\n\n%s' "$EXISTING_BODY" "$SPEC_MSG")
-                        if forge_issue_note_update "$IID" "$TRIAGE_NOTE_ID" "$UPDATED_BODY"; then
-                            SPEC_MSG_APPENDED=true
-                        fi
-                    elif [ -n "$EXISTING_BODY" ]; then
-                        SPEC_MSG_APPENDED=true
-                    fi
-                fi
-                if [ "$SPEC_MSG_APPENDED" != "true" ]; then
-                    forge_issue_note "$IID" "$SPEC_MSG"
-                fi
-            else
-                # Include gate-skip flag labels (boucle:autonomous / boucle:dnd)
-                # so the board shows WHY the gate was skipped. Consumed on the
-                # next state transition (set_boucle_label strips boucle:* labels).
-                set_boucle_label "$IID" "boucle:todo,size:$(echo $SIZE | tr '[:upper:]' '[:lower:]')${GATE_SKIP_LABELS:+,$GATE_SKIP_LABELS}" "boucle::status::bot"
-                # Dependency gate FIRST: a blocked issue is not "ready",
-                # so it should not count against the capacity cap.
-                if ! check_dependencies_and_gate "$IID"; then
-                    : # blocked — note already posted, label already set
-                else
-                    # Concurrency cap: defer worker trigger if too many issues are already working.
-                    MAX_PARALLEL="${BOUCLE_MAX_PARALLEL_ISSUES:-0}"
-                    WORKING_COUNT=0
-                    if [ "$MAX_PARALLEL" -gt 0 ] 2>/dev/null; then
-                        WORKING_COUNT=$(forge_issue_count_by_label "boucle:working" "opened" 2>/dev/null || echo 0)
-                        if [ "$WORKING_COUNT" -ge "$MAX_PARALLEL" ]; then
-                            echo "[boucle] Max parallel issues ($MAX_PARALLEL) reached — $WORKING_COUNT already working. Deferring #$IID (stays at boucle:todo, doctor will re-trigger when a slot frees)."
-                            forge_issue_note "$IID" "⏳ Worker deferred — $WORKING_COUNT issues already in progress (cap: $MAX_PARALLEL). Will start automatically when a slot frees up."
-                            # Do NOT chain to worker — leave at boucle:todo. Doctor recovers it.
-                        else
-                            # Chain to worker
-                            chain_to_role "$IID" "worker"
-                        fi
-                    else
-                        # Chain to worker (cap disabled)
-                        chain_to_role "$IID" "worker"
-                    fi
-                fi
-            fi
+          echo "[boucle] Step-limit fallback failed: drafted comment had no parsable Disposition."
         fi
+      fi
+    fi
+  fi
 
-        # ── Aperçu visuel (systematic for UI/UX issues) ────────────────
-        # Fires for ALL READY dispositions (Size S/M/L, gated or not).
-        # The triage agent writes RENDER_REQUEST + preview.html for
-        # UI/UX issues (mandatory per triage.md). Non-UI/UX issues have
-        # no RENDER_REQUEST → block is a no-op (zero Chromium cost).
-        # Failure is isolated: fallback note, never blocks the loop.
-        # Idempotent: RENDER_REQUEST deleted after successful embed.
-        PREVIEW_HTML="$BOUCLE_WORKSPACE/.boucle/$IID/preview.html"
-        RENDER_REQUEST_FILE="$BOUCLE_WORKSPACE/.boucle/$IID/RENDER_REQUEST"
+  # If no NEW triage comment was posted by this run (agent crashed, hit
+  # step limit, or decided no new triage was needed), leave the issue at
+  # boucle:triage and exit without changing labels. Re-applying the OLD
+  # disposition would bounce the label (e.g. triage→needs-info) with no
+  # new question asked — the exact "retour à une review humaine alors
+  # qu'aucune question n'est posée" symptom.
+  if [ -z "$DISPOSITION" ]; then
+    # ── Circuit breaker (silent-failure escalation) ─────────────────
+    # bin/jc exits 3 when the agent produced NO posted comment AND NO
+    # drafted comment (silent failure — e.g. hit OUTPUT_TOKEN_MAX
+    # mid-comment before reaching the forge tool call). If we leave the
+    # issue at boucle:triage, the doctor re-triggers it every 10 min
+    # and the agent fails identically every time → infinite loop
+    # (issue #27 on a consumer repo). Escalate to human instead
+    # so a human can investigate. The issue keeps its boucle:triage
+    # label for traceability but moves to boucle::status::human.
+    if [ "$rc" -eq 3 ]; then
+      echo "[boucle] Silent triage failure (bin/jc exit 3) — escalating issue #$IID to human to break doctor re-trigger loop."
+      set_boucle_label "$IID" "boucle:human" "boucle::status::human"
+      forge_issue_note "$IID" ":rotating_light: Triage a échoué en silence (l'agent n'a produit aucun commentaire). Passage en revue humaine pour casser la boucle de re-déclenchement. Voir les logs du job $BOUCLE_JOB_URL."
+      exit 1
+    fi
+    echo "[boucle] No new triage comment posted by this run — leaving issue #$IID at boucle:triage, no label change."
+    exit 0
+  fi
 
-        if [ "${BOUCLE_PREVIEW_DISABLE:-false}" != "true" ] && [ -s "$RENDER_REQUEST_FILE" ] && [ -s "$PREVIEW_HTML" ]; then
-            echo "[boucle] RENDER_REQUEST found — attempting visual preview"
-
-            # 1. Resolve the triage comment note_id (separate fetch so we
-            #    don't disturb the existing comment parse).
-            TRIAGE_NOTE_ID=$(forge_issue_notes "$IID" 2>/dev/null |
-                jq -r '[.[] | select(.body | contains("<!-- boucle:triage") and contains("## TL;DR") and contains("## Disposition"))]
-                        | sort_by(.created_at) | last | .id' 2>/dev/null || echo "")
-
-            if [ -z "$TRIAGE_NOTE_ID" ]; then
-                echo "[boucle] WARN: triage comment not found — cannot embed preview"
+  # Collapse duplicate triage comments (agent may post a v2; CI replaces the first).
+  # NOTE: bin/collapse-duplicate-notes is fully forge-agnostic (uses the
+  # forge_* contract: forge_issue_notes / forge_issue_note_update /
+  # forge_note_delete) since the GitHub-support port.
+  $BOUCLE_HOME/bin/collapse-duplicate-notes triage "$BOUCLE_PROJECT_ID" "$IID" "$PRE_RUN_TRIAGE_ID" "$BOUCLE_FORGE_HOST"
+  # Route based on disposition
+  case "$DISPOSITION" in
+    READY)
+      if [ "$SIZE" = "L" ]; then
+        set_boucle_label "$IID" "boucle:human,size:l" "boucle::status::human"
+      else
+        # Spec-validation gate (configurable via BOUCLE_SPEC_PROFILE).
+        # Default "product" gates M, skips S. "off" never gates (legacy).
+        # "strict" gates all sizes. An unknown profile falls back to "product".
+        SPEC_PROFILE="${BOUCLE_SPEC_PROFILE:-product}"
+        SHOULD_GATE=false
+        case "$SPEC_PROFILE" in
+          off) SHOULD_GATE=false ;;
+          strict) SHOULD_GATE=true ;;
+          product) [ "$SIZE" = "M" ] && SHOULD_GATE=true ;;
+          *)
+            echo "WARN: unknown BOUCLE_SPEC_PROFILE '$SPEC_PROFILE' — treating as product"
+            [ "$SIZE" = "M" ] && SHOULD_GATE=true
+            ;;
+        esac
+        # Gate-skip transparency: when the spec gate is auto-validated
+        # (DND window or boucle:autonomous label), record WHY on the issue
+        # so the human understands why no gate was respected. Each skip
+        # path applies a flag label (visible on the board) AND posts an
+        # explanatory comment. See AGENTS.md lesson "Gate-skip
+        # transparency" + AGENTS.md (lesson 47).
+        # Two paths flip SHOULD_GATE=false:
+        #   1. boucle:autonomous label on the issue (per-issue opt-in,
+        #      applied at creation — takes precedence, intentional).
+        #   2. DND window active (time-based, global).
+        GATE_SKIP_LABELS=""
+        AUTONOMOUS=$(forge_issue_get "$IID" 2> /dev/null \
+          | jq -r '(.labels // []) | map(select(. == "boucle:autonomous")) | length' 2> /dev/null || echo 0)
+        if [ "$SHOULD_GATE" = "true" ] && [ "${AUTONOMOUS:-0}" -gt 0 ] 2> /dev/null; then
+          echo "[boucle] 🤖 Issue flagged autonomous — auto-validating spec gate for #$IID"
+          SHOULD_GATE=false
+          GATE_SKIP_LABELS="boucle:autonomous"
+          AUTONOMOUS_NOTE=$(printf "🤖 **Spec gate auto-validée — issue flaguée autonome**\n\nLa validation humaine du spec a été automatiquement validée car cette issue porte le label \`boucle:autonomous\`. La boucle continue donc jusqu'à la MR sans contact humain.\n\nLe label \`boucle:autonomous\` reste visible sur l'issue (tableau de bord) jusqu'à la prochaine transition d'état.\n\nVous pourrez valider la MR quand elle sera prête. Pour ne plus auto-valider le spec sur cette issue, retirez le label \`boucle:autonomous\`.")
+          forge_issue_note "$IID" "$AUTONOMOUS_NOTE"
+        fi
+        if [ "$SHOULD_GATE" = "true" ] && "$BOUCLE_HOME/bin/dnd" 2> /dev/null; then
+          DND_START="${BOUCLE_DND_START:-22:00}"
+          DND_END="${BOUCLE_DND_END:-07:00}"
+          DND_TZ="${BOUCLE_DND_TZ:-UTC}"
+          echo "[boucle] 🌙 DND active — auto-validating spec gate for #$IID"
+          SHOULD_GATE=false
+          GATE_SKIP_LABELS="${GATE_SKIP_LABELS:+$GATE_SKIP_LABELS,}boucle:dnd"
+          DND_NOTE=$(printf "🌙 **Spec gate auto-validée — mode Do-Not-Disturb actif**\n\nLa validation humaine du spec a été automatiquement validée car la fenêtre DND est active (%s–%s %s). La boucle continue donc jusqu'à la MR sans contact humain.\n\nLe label \`boucle:dnd\` a été appliqué à l'issue (visible sur le tableau de bord) pour signaler cette auto-validation ; il sera retiré à la prochaine transition d'état.\n\nVous pourrez valider la MR quand elle sera prête. Pour désactiver le DND : mettez \`BOUCLE_DND_ENABLED=false\` dans les variables CI du projet." "$DND_START" "$DND_END" "$DND_TZ")
+          forge_issue_note "$IID" "$DND_NOTE"
+        fi
+        if [ "$SHOULD_GATE" = "true" ]; then
+          # Pause for author to validate the spec (acceptance criteria) before
+          # the worker runs. Assign to the reporter (handles sub-issues via
+          # the parent's author — resolve_reporter_id defined above) and post
+          # a comment with clear next-action instructions. Do NOT trigger worker.
+          set_boucle_label "$IID" "boucle:spec-review" "boucle::status::human"
+          AUTHOR_ID=$(resolve_reporter_id "$IID")
+          if [ -n "$AUTHOR_ID" ] && [ "$AUTHOR_ID" != "null" ]; then
+            forge_issue_assign "$IID" "$AUTHOR_ID"
+          fi
+          # Append validation instructions to the triage comment itself so
+          # the human has ONE message to read/approve (instead of a separate
+          # note). Falls back to a standalone POST if the triage note cannot
+          # be resolved or the PUT fails — approval detection tolerates both
+          # shapes (doctor polls "React with" across all notes).
+          SPEC_MSG=$(printf '## Validation\n\nReview the **TL;DR** above. If it matches what you want:\n- React with 👍 ✅ ☑️ ✔️ 🆗 or 👌 on this comment to approve, OR\n- Reply to this issue with any comment.\nIf not, reply with corrections.')
+          TRIAGE_NOTE_ID=$(forge_issue_notes "$IID" 2> /dev/null \
+            | jq -r '[.[] | select(.body | contains("<!-- boucle:triage") and contains("## TL;DR") and contains("## Disposition"))]
+                            | sort_by(.created_at) | last | .id' 2> /dev/null || echo "")
+          SPEC_MSG_APPENDED=false
+          if [ -n "$TRIAGE_NOTE_ID" ]; then
+            EXISTING_BODY=$(forge_issue_note_get "$IID" "$TRIAGE_NOTE_ID" 2> /dev/null \
+              | jq -r '.body // empty' 2> /dev/null)
+            # Idempotency guard: skip if the validation section is already
+            # present (re-runs of triage on the same issue).
+            if [ -n "$EXISTING_BODY" ] && ! echo "$EXISTING_BODY" | grep -q "## Validation"; then
+              UPDATED_BODY=$(printf '%s\n\n%s' "$EXISTING_BODY" "$SPEC_MSG")
+              if forge_issue_note_update "$IID" "$TRIAGE_NOTE_ID" "$UPDATED_BODY"; then
+                SPEC_MSG_APPENDED=true
+              fi
+            elif [ -n "$EXISTING_BODY" ]; then
+              SPEC_MSG_APPENDED=true
+            fi
+          fi
+          if [ "$SPEC_MSG_APPENDED" != "true" ]; then
+            forge_issue_note "$IID" "$SPEC_MSG"
+          fi
+        else
+          # Include gate-skip flag labels (boucle:autonomous / boucle:dnd)
+          # so the board shows WHY the gate was skipped. Consumed on the
+          # next state transition (set_boucle_label strips boucle:* labels).
+          set_boucle_label "$IID" "boucle:todo,size:$(echo $SIZE | tr '[:upper:]' '[:lower:]')${GATE_SKIP_LABELS:+,$GATE_SKIP_LABELS}" "boucle::status::bot"
+          # Dependency gate FIRST: a blocked issue is not "ready",
+          # so it should not count against the capacity cap.
+          if ! check_dependencies_and_gate "$IID"; then
+            : # blocked — note already posted, label already set
+          else
+            # Concurrency cap: defer worker trigger if too many issues are already working.
+            MAX_PARALLEL="${BOUCLE_MAX_PARALLEL_ISSUES:-0}"
+            WORKING_COUNT=0
+            if [ "$MAX_PARALLEL" -gt 0 ] 2> /dev/null; then
+              WORKING_COUNT=$(forge_issue_count_by_label "boucle:working" "opened" 2> /dev/null || echo 0)
+              if [ "$WORKING_COUNT" -ge "$MAX_PARALLEL" ]; then
+                echo "[boucle] Max parallel issues ($MAX_PARALLEL) reached — $WORKING_COUNT already working. Deferring #$IID (stays at boucle:todo, doctor will re-trigger when a slot frees)."
+                forge_issue_note "$IID" "⏳ Worker deferred — $WORKING_COUNT issues already in progress (cap: $MAX_PARALLEL). Will start automatically when a slot frees up."
+                # Do NOT chain to worker — leave at boucle:todo. Doctor recovers it.
+              else
+                # Chain to worker
+                chain_to_role "$IID" "worker"
+              fi
             else
-                # 2. Install Chromium + puppeteer-core (only now, in /tmp).
-                if npm install --prefix /tmp puppeteer-core @sparticuz/chromium >/dev/null 2>&1; then
-                    # 3. Render preview.html → preview.png (1280x800, fullPage).
-                    #    NODE_PATH=/tmp/node_modules so the script (bin/) resolves
-                    #    the modules installed in /tmp.
-                    PREVIEW_PNG="$BOUCLE_WORKSPACE/.boucle/$IID/preview.png"
-                    if NODE_PATH=/tmp/node_modules node "$BOUCLE_WORKSPACE/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2>/dev/null; then
-                        # 4. Upload the PNG via the forge contract. The backend
-                        #    returns the embeddable path (GitLab: /uploads/...;
-                        #    GitHub: no upload API → empty, handled below).
-                        IMG_PATH=$(forge_attachment_upload "$IID" "$PREVIEW_PNG" "preview.png" 2>/dev/null || true)
-                        IMG_URL=""
-                        [ -n "$IMG_PATH" ] && IMG_URL="![Aperçu](${IMG_PATH})"
+              # Chain to worker (cap disabled)
+              chain_to_role "$IID" "worker"
+            fi
+          fi
+        fi
+      fi
 
-                        if [ -n "$IMG_URL" ]; then
-                            # 5. Fetch the existing comment, insert Aperçu right after
-                            #    the TL;DR section (first thing the human sees), PUT.
-                            #    Guard: if EXISTING_BODY is empty (fetch failed), do NOT
-                            #    PUT — otherwise we overwrite the entire triage comment
-                            #    (losing the boucle:triage marker + criteria + disposition).
-                            EXISTING_BODY=$(forge_issue_note_get "$IID" "$TRIAGE_NOTE_ID" 2>/dev/null |
-                                jq -r '.body // empty' 2>/dev/null)
-                            if [ -n "$EXISTING_BODY" ]; then
-                                NEW_BODY=$(printf '%s\n' "$EXISTING_BODY" | awk -v img="$IMG_URL" '
+      # ── Aperçu visuel (systematic for UI/UX issues) ────────────────
+      # Fires for ALL READY dispositions (Size S/M/L, gated or not).
+      # The triage agent writes RENDER_REQUEST + preview.html for
+      # UI/UX issues (mandatory per triage.md). Non-UI/UX issues have
+      # no RENDER_REQUEST → block is a no-op (zero Chromium cost).
+      # Failure is isolated: fallback note, never blocks the loop.
+      # Idempotent: RENDER_REQUEST deleted after successful embed.
+      PREVIEW_HTML="$BOUCLE_WORKSPACE/.boucle/$IID/preview.html"
+      RENDER_REQUEST_FILE="$BOUCLE_WORKSPACE/.boucle/$IID/RENDER_REQUEST"
+
+      if [ "${BOUCLE_PREVIEW_DISABLE:-false}" != "true" ] && [ -s "$RENDER_REQUEST_FILE" ] && [ -s "$PREVIEW_HTML" ]; then
+        echo "[boucle] RENDER_REQUEST found — attempting visual preview"
+
+        # 1. Resolve the triage comment note_id (separate fetch so we
+        #    don't disturb the existing comment parse).
+        TRIAGE_NOTE_ID=$(forge_issue_notes "$IID" 2> /dev/null \
+          | jq -r '[.[] | select(.body | contains("<!-- boucle:triage") and contains("## TL;DR") and contains("## Disposition"))]
+                        | sort_by(.created_at) | last | .id' 2> /dev/null || echo "")
+
+        if [ -z "$TRIAGE_NOTE_ID" ]; then
+          echo "[boucle] WARN: triage comment not found — cannot embed preview"
+        else
+          # 2. Install Chromium + puppeteer-core (only now, in /tmp).
+          if npm install --prefix /tmp puppeteer-core @sparticuz/chromium > /dev/null 2>&1; then
+            # 3. Render preview.html → preview.png (1280x800, fullPage).
+            #    NODE_PATH=/tmp/node_modules so the script (bin/) resolves
+            #    the modules installed in /tmp.
+            PREVIEW_PNG="$BOUCLE_WORKSPACE/.boucle/$IID/preview.png"
+            if NODE_PATH=/tmp/node_modules node "$BOUCLE_WORKSPACE/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2> /dev/null; then
+              # 4. Upload the PNG via the forge contract. The backend
+              #    returns the embeddable path (GitLab: /uploads/...;
+              #    GitHub: no upload API → empty, handled below).
+              IMG_PATH=$(forge_attachment_upload "$IID" "$PREVIEW_PNG" "preview.png" 2> /dev/null || true)
+              IMG_URL=""
+              [ -n "$IMG_PATH" ] && IMG_URL="![Aperçu](${IMG_PATH})"
+
+              if [ -n "$IMG_URL" ]; then
+                # 5. Fetch the existing comment, insert Aperçu right after
+                #    the TL;DR section (first thing the human sees), PUT.
+                #    Guard: if EXISTING_BODY is empty (fetch failed), do NOT
+                #    PUT — otherwise we overwrite the entire triage comment
+                #    (losing the boucle:triage marker + criteria + disposition).
+                EXISTING_BODY=$(forge_issue_note_get "$IID" "$TRIAGE_NOTE_ID" 2> /dev/null \
+                  | jq -r '.body // empty' 2> /dev/null)
+                if [ -n "$EXISTING_BODY" ]; then
+                  NEW_BODY=$(printf '%s\n' "$EXISTING_BODY" | awk -v img="$IMG_URL" '
                                         /^## TL;DR/ { in_tldr=1; print; next }
                                         in_tldr && /^## / && !inserted {
                                             print "## Aperçu"; print img; print ""; inserted=1; in_tldr=0
@@ -399,102 +399,102 @@ boucle_ci_triage() {
                                         { print }
                                         END { if (!inserted) { print ""; print "## Aperçu"; print img } }
                                     ')
-                                if forge_issue_note_update "$IID" "$TRIAGE_NOTE_ID" "$NEW_BODY"; then
-                                    # 6. Idempotence: delete RENDER_REQUEST (no re-render on retry).
-                                    rm -f "$RENDER_REQUEST_FILE"
-                                    echo "[boucle] Visual preview embedded in triage comment #$TRIAGE_NOTE_ID"
-                                else
-                                    echo "[boucle] WARN: PUT notes failed — RENDER_REQUEST kept for retry"
-                                fi
-                            else
-                                echo "[boucle] WARN: existing comment body empty — posting fallback note"
-                                forge_issue_note "$IID" "Aperçu indisponible (échec lecture commentaire) — validez sur le TL;DR."
-                            fi
-                        else
-                            echo "[boucle] WARN: PNG upload failed — posting fallback note"
-                            forge_issue_note "$IID" "Aperçu indisponible (échec upload) — validez sur le TL;DR."
-                        fi
-                    else
-                        echo "[boucle] WARN: Chromium render failed — posting fallback note"
-                        forge_issue_note "$IID" "Aperçu indisponible (échec rendu) — validez sur le TL;DR."
-                    fi
+                  if forge_issue_note_update "$IID" "$TRIAGE_NOTE_ID" "$NEW_BODY"; then
+                    # 6. Idempotence: delete RENDER_REQUEST (no re-render on retry).
+                    rm -f "$RENDER_REQUEST_FILE"
+                    echo "[boucle] Visual preview embedded in triage comment #$TRIAGE_NOTE_ID"
+                  else
+                    echo "[boucle] WARN: PUT notes failed — RENDER_REQUEST kept for retry"
+                  fi
                 else
-                    echo "[boucle] WARN: Chromium install failed — posting fallback note"
-                    forge_issue_note "$IID" "Aperçu indisponible (Chromium indisponible) — validez sur le TL;DR."
-                    # Chain to worker (cap disabled)
-                    chain_to_role "$IID" "worker"
+                  echo "[boucle] WARN: existing comment body empty — posting fallback note"
+                  forge_issue_note "$IID" "Aperçu indisponible (échec lecture commentaire) — validez sur le TL;DR."
                 fi
+              else
+                echo "[boucle] WARN: PNG upload failed — posting fallback note"
+                forge_issue_note "$IID" "Aperçu indisponible (échec upload) — validez sur le TL;DR."
+              fi
+            else
+              echo "[boucle] WARN: Chromium render failed — posting fallback note"
+              forge_issue_note "$IID" "Aperçu indisponible (échec rendu) — validez sur le TL;DR."
             fi
+          else
+            echo "[boucle] WARN: Chromium install failed — posting fallback note"
+            forge_issue_note "$IID" "Aperçu indisponible (Chromium indisponible) — validez sur le TL;DR."
+            # Chain to worker (cap disabled)
+            chain_to_role "$IID" "worker"
+          fi
         fi
-        ;;
+      fi
+      ;;
     NEEDS-INFO)
-        set_boucle_label "$IID" "boucle:needs-info" "boucle::status::human"
-        # Assign the issue to its reporter (author) so they're notified
-        # and know to answer the blocking questions. For a sub-issue
-        # created by the bot via NEEDS-SPLIT, the author is up-bot — so
-        # resolve the PARENT issue's author instead (the human who filed
-        # the original request). The loop pauses here until the reporter
-        # replies, which re-triggers triage.
-        AUTHOR_ID=$(resolve_reporter_id "$IID")
-        if [ -n "$AUTHOR_ID" ] && [ "$AUTHOR_ID" != "null" ]; then
-            forge_issue_assign "$IID" "$AUTHOR_ID"
-        fi
-        ;;
+      set_boucle_label "$IID" "boucle:needs-info" "boucle::status::human"
+      # Assign the issue to its reporter (author) so they're notified
+      # and know to answer the blocking questions. For a sub-issue
+      # created by the bot via NEEDS-SPLIT, the author is up-bot — so
+      # resolve the PARENT issue's author instead (the human who filed
+      # the original request). The loop pauses here until the reporter
+      # replies, which re-triggers triage.
+      AUTHOR_ID=$(resolve_reporter_id "$IID")
+      if [ -n "$AUTHOR_ID" ] && [ "$AUTHOR_ID" != "null" ]; then
+        forge_issue_assign "$IID" "$AUTHOR_ID"
+      fi
+      ;;
     NEEDS-SPLIT)
-        # Idempotency guard: if the parent already has children via the
-        # hierarchy API, the split was already done — skip to
-        # avoid duplicate sub-issues. Fall back to the legacy split-parent
-        # marker comment for data produced by older boucle versions.
-        CHILDREN_COUNT=$(get_work_item_children "$IID" | jq 'length' 2>/dev/null || echo 0)
-        if [ "${CHILDREN_COUNT:-0}" -gt 0 ]; then
-            echo "Parent #$IID already has $CHILDREN_COUNT child work item(s) — skipping split (idempotency guard)"
-            exit 0
-        fi
-        # Legacy fallback: check for the old split-parent marker comment
-        EXISTING_SPLIT=$(forge_issue_notes "$IID" |
-            jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | length' 2>/dev/null || echo 0)
-        if [ "${EXISTING_SPLIT:-0}" -gt 0 ]; then
-            echo "Parent #$IID already has a legacy boucle:split-parent marker — skipping split (idempotency guard)"
-            exit 0
-        fi
-        # Parse sub-issues from the triage comment. Format:
-        #   ## Sub-issues
-        #   <!-- boucle:sub-issue v=1 -->
-        #   ### Sub-issue 1: <title>
-        #   <body...>
-        #   Size: S | M
-        #   ### Sub-issue 2: ...
-        SUBISSUES_SECTION=$(echo "$COMMENT" | sed -n '/^## Sub-issues/,/^## /p' | sed -e '${/^## /d}')
-        # If the selected comment has no Sub-issues section, the agent may have
-        # posted a truncated duplicate. Search ALL triage comments (newest-first)
-        # for one that has a parseable Sub-issues section.
-        if [ -z "$SUBISSUES_SECTION" ] || ! echo "$SUBISSUES_SECTION" | grep -qE '^### Sub-issue [0-9]+[[:space:]]*:'; then
-            echo "Selected triage comment has no Sub-issues section — searching all triage comments..."
-            SUBISSUES_SECTION=$(forge_issue_notes "$IID" |
-                jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("### Sub-issue [0-9]+[[:space:]]*:"))] | first | .body' |
-                sed -n '/^## Sub-issues/,/^## /p' | sed -e '${/^## /d}')
-        fi
-        # Skip if still no parseable sub-issues after searching all comments
-        if [ -z "$SUBISSUES_SECTION" ] || ! echo "$SUBISSUES_SECTION" | grep -qE '^### Sub-issue [0-9]+[[:space:]]*:'; then
-            echo "NEEDS-SPLIT but no parseable sub-issues — falling back to boucle:human"
-            set_boucle_label "$IID" "boucle:human" "boucle::status::human"
-            forge_issue_note "$IID" "Triage requested NEEDS-SPLIT but no parseable sub-issues were found in the triage comment. Please split this issue manually."
-            exit 0
-        fi
+      # Idempotency guard: if the parent already has children via the
+      # hierarchy API, the split was already done — skip to
+      # avoid duplicate sub-issues. Fall back to the legacy split-parent
+      # marker comment for data produced by older boucle versions.
+      CHILDREN_COUNT=$(get_work_item_children "$IID" | jq 'length' 2> /dev/null || echo 0)
+      if [ "${CHILDREN_COUNT:-0}" -gt 0 ]; then
+        echo "Parent #$IID already has $CHILDREN_COUNT child work item(s) — skipping split (idempotency guard)"
+        exit 0
+      fi
+      # Legacy fallback: check for the old split-parent marker comment
+      EXISTING_SPLIT=$(forge_issue_notes "$IID" \
+        | jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | length' 2> /dev/null || echo 0)
+      if [ "${EXISTING_SPLIT:-0}" -gt 0 ]; then
+        echo "Parent #$IID already has a legacy boucle:split-parent marker — skipping split (idempotency guard)"
+        exit 0
+      fi
+      # Parse sub-issues from the triage comment. Format:
+      #   ## Sub-issues
+      #   <!-- boucle:sub-issue v=1 -->
+      #   ### Sub-issue 1: <title>
+      #   <body...>
+      #   Size: S | M
+      #   ### Sub-issue 2: ...
+      SUBISSUES_SECTION=$(echo "$COMMENT" | sed -n '/^## Sub-issues/,/^## /p' | sed -e '${/^## /d}')
+      # If the selected comment has no Sub-issues section, the agent may have
+      # posted a truncated duplicate. Search ALL triage comments (newest-first)
+      # for one that has a parseable Sub-issues section.
+      if [ -z "$SUBISSUES_SECTION" ] || ! echo "$SUBISSUES_SECTION" | grep -qE '^### Sub-issue [0-9]+[[:space:]]*:'; then
+        echo "Selected triage comment has no Sub-issues section — searching all triage comments..."
+        SUBISSUES_SECTION=$(forge_issue_notes "$IID" \
+          | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("### Sub-issue [0-9]+[[:space:]]*:"))] | first | .body' \
+          | sed -n '/^## Sub-issues/,/^## /p' | sed -e '${/^## /d}')
+      fi
+      # Skip if still no parseable sub-issues after searching all comments
+      if [ -z "$SUBISSUES_SECTION" ] || ! echo "$SUBISSUES_SECTION" | grep -qE '^### Sub-issue [0-9]+[[:space:]]*:'; then
+        echo "NEEDS-SPLIT but no parseable sub-issues — falling back to boucle:human"
+        set_boucle_label "$IID" "boucle:human" "boucle::status::human"
+        forge_issue_note "$IID" "Triage requested NEEDS-SPLIT but no parseable sub-issues were found in the triage comment. Please split this issue manually."
+        exit 0
+      fi
 
-        # Extract parent context (title + URL) for the sub-issue body
-        PARENT_DATA=$(forge_issue_get "$IID")
-        PARENT_TITLE=$(echo "$PARENT_DATA" | jq -r '.title')
-        PARENT_URL=$(echo "$PARENT_DATA" | jq -r '.web_url')
-        PARENT_IID="$IID"
+      # Extract parent context (title + URL) for the sub-issue body
+      PARENT_DATA=$(forge_issue_get "$IID")
+      PARENT_TITLE=$(echo "$PARENT_DATA" | jq -r '.title')
+      PARENT_URL=$(echo "$PARENT_DATA" | jq -r '.web_url')
+      PARENT_IID="$IID"
 
-        CREATED_IIDS=""
-        # awk splits the section into records, one per sub-issue.
-        # First line of each record is "TITLE:<title>"; following lines are body;
-        # last non-empty line should be "Size: X".
-        SUBISSUE_COUNT=0
-        PARSE_FAILURES=0
-        echo "$SUBISSUES_SECTION" | awk '
+      CREATED_IIDS=""
+      # awk splits the section into records, one per sub-issue.
+      # First line of each record is "TITLE:<title>"; following lines are body;
+      # last non-empty line should be "Size: X".
+      SUBISSUE_COUNT=0
+      PARSE_FAILURES=0
+      echo "$SUBISSUES_SECTION" | awk '
                 BEGIN { rec = 0 }
                 /^<!-- boucle:sub-issue/ { next }
                 /^### Sub-issue [0-9]+[[:space:]]*:/ {
@@ -518,211 +518,211 @@ boucle_ci_triage() {
                 }
                 { print }
                 END { if (rec > 0) print "---END---" }
-            ' >/tmp/subissues.parsed
+            ' > /tmp/subissues.parsed
 
-        while IFS= read -r line; do
-            if [ "$line" = "---END---" ]; then
-                # Finalize the current sub-issue
-                if [ -n "$CUR_TITLE" ]; then
-                    # Strip the Size: line from the body
-                    CUR_BODY_NO_SIZE=$(echo "$CUR_BODY" | sed '/^Size:[[:space:]]*[SML]/d')
-                    CUR_BODY_NO_SIZE=$(echo "$CUR_BODY_NO_SIZE" | sed '/^Depends on:[[:space:]]*#/d')
-                    # Default size to M if not present
-                    CUR_SIZE="${CUR_SIZE_RAW:-M}"
-                    # Validate: if "- [ ]" appears mid-line (not at start), newlines
-                    # were stripped — the agent posted a single-line body that won't
-                    # render as markdown. Skip creation so we fall back to human
-                    # instead of shipping an unrenderable sub-issue.
-                    if echo "$CUR_BODY_NO_SIZE" | grep -qE '[^[:space:]]- \[ \]'; then
-                        echo "WARN: sub-issue '$CUR_TITLE' has checkbox markers not at line start (newlines stripped) — skipping creation"
-                        PARSE_FAILURES=$((PARSE_FAILURES + 1))
-                    else
-                        # Build the sub-issue body with parent reference (single-line to keep YAML literal block happy)
-                        SUB_BODY=$(printf 'Split from #%s (%s).\n\n%s\n\n## Parent issue\n#%s — %s' "$PARENT_IID" "$PARENT_TITLE" "$CUR_BODY_NO_SIZE" "$PARENT_IID" "$PARENT_URL")
-                        SUB_SIZE_LOWER=$(echo "$CUR_SIZE" | tr '[:upper:]' '[:lower:]')
-                        # Validate: only S or M
-                        if [ "$CUR_SIZE" != "S" ] && [ "$CUR_SIZE" != "M" ]; then
-                            echo "WARN: sub-issue '$CUR_TITLE' has size '$CUR_SIZE' (not S/M) — defaulting to M"
-                            CUR_SIZE="M"
-                            SUB_SIZE_LOWER="m"
-                        fi
-                        echo "Creating sub-issue: $CUR_TITLE (Size: $CUR_SIZE)"
-                        # TODO: forge_issue_create returns only the IID (not the
-                        # full API JSON the original parsed); the failure message
-                        # below loses the API response body.
-                        NEW_IID=$(forge_issue_create "$CUR_TITLE" "$SUB_BODY" "boucle:triage,boucle::status::bot,size:$SUB_SIZE_LOWER")
-                        if [ -n "$NEW_IID" ] && [ "$NEW_IID" != "null" ]; then
-                            CREATED_IIDS="${CREATED_IIDS:+$CREATED_IIDS,}$NEW_IID"
-                            SUBISSUE_COUNT=$((SUBISSUE_COUNT + 1))
-                            echo "  → created #$NEW_IID"
-                            # Assign the sub-issue to the bot (it's on the bot side from
-                            # creation). Best-effort: skip silently if BOUCLE_BOT_ID unset.
-                            # NOTE: the original hard-failed (exit 1) when the curl
-                            # failed with BOUCLE_BOT_ID set; forge_issue_assign is
-                            # best-effort per the contract, so that abort is dropped.
-                            if [ -n "${BOUCLE_BOT_ID:-}" ]; then
-                                forge_issue_assign "$NEW_IID" "$BOUCLE_BOT_ID"
-                            fi
-                            # Set the parent via the forge contract. The backend
-                            # tries the work-items hierarchy API first (real
-                            # "Éléments enfants" relationship — needs the parent's
-                            # GLOBAL work-item ID, not the project-scoped IID);
-                            # if unavailable (work_item_rest_api feature flag
-                            # disabled on self-managed GitLab), it falls back to
-                            # a REST relates_to issue link (visible under
-                            # "Linked items" on the parent). Final fallback: the
-                            # ## Parent issue body text provides navigation.
-                            forge_work_item_link_parent "$NEW_IID" "$PARENT_IID"
-                            # Trigger triage directly via trigger API (bot-created issues would
-                            # hit the anti-loop guard in dispatch because ACTOR=up-bot).
-                            chain_to_role "$NEW_IID" ""
-                        else
-                            echo "  → FAIL to create sub-issue: ${NEW_IID:-empty response from forge_issue_create}" >&2
-                            PARSE_FAILURES=$((PARSE_FAILURES + 1))
-                        fi
-                    fi
-                fi
-                # Reset for next record
-                CUR_TITLE=""
-                CUR_BODY=""
-                CUR_SIZE_RAW=""
-                CUR_DEPS=""
-            elif [[ "$line" == TITLE:* ]]; then
-                CUR_TITLE="${line#TITLE:}"
-                CUR_BODY=""
-                CUR_SIZE_RAW=""
-                CUR_DEPS=""
-            elif [[ "$line" == DEPS:* ]]; then
-                CUR_DEPS="${line#DEPS:}"
+      while IFS= read -r line; do
+        if [ "$line" = "---END---" ]; then
+          # Finalize the current sub-issue
+          if [ -n "$CUR_TITLE" ]; then
+            # Strip the Size: line from the body
+            CUR_BODY_NO_SIZE=$(echo "$CUR_BODY" | sed '/^Size:[[:space:]]*[SML]/d')
+            CUR_BODY_NO_SIZE=$(echo "$CUR_BODY_NO_SIZE" | sed '/^Depends on:[[:space:]]*#/d')
+            # Default size to M if not present
+            CUR_SIZE="${CUR_SIZE_RAW:-M}"
+            # Validate: if "- [ ]" appears mid-line (not at start), newlines
+            # were stripped — the agent posted a single-line body that won't
+            # render as markdown. Skip creation so we fall back to human
+            # instead of shipping an unrenderable sub-issue.
+            if echo "$CUR_BODY_NO_SIZE" | grep -qE '[^[:space:]]- \[ \]'; then
+              echo "WARN: sub-issue '$CUR_TITLE' has checkbox markers not at line start (newlines stripped) — skipping creation"
+              PARSE_FAILURES=$((PARSE_FAILURES + 1))
             else
-                # Append line to body. Direct assignment (not command
-                # substitution) preserves the trailing newline: $(...) strips
-                # trailing newlines, which would collapse the whole body to a
-                # single line and make the mid-line checkbox guard false-positive
-                # on "Acceptance criteria:- [ ] ..." (colon is non-space before
-                # "- [ ]"). $'\n' keeps the newline literal.
-                CUR_BODY="${CUR_BODY}${line}"$'\n'
-                # Capture Size: line
-                if [[ "$line" =~ ^Size:[[:space:]]*([SML]) ]]; then
-                    CUR_SIZE_RAW="${BASH_REMATCH[1]}"
+              # Build the sub-issue body with parent reference (single-line to keep YAML literal block happy)
+              SUB_BODY=$(printf 'Split from #%s (%s).\n\n%s\n\n## Parent issue\n#%s — %s' "$PARENT_IID" "$PARENT_TITLE" "$CUR_BODY_NO_SIZE" "$PARENT_IID" "$PARENT_URL")
+              SUB_SIZE_LOWER=$(echo "$CUR_SIZE" | tr '[:upper:]' '[:lower:]')
+              # Validate: only S or M
+              if [ "$CUR_SIZE" != "S" ] && [ "$CUR_SIZE" != "M" ]; then
+                echo "WARN: sub-issue '$CUR_TITLE' has size '$CUR_SIZE' (not S/M) — defaulting to M"
+                CUR_SIZE="M"
+                SUB_SIZE_LOWER="m"
+              fi
+              echo "Creating sub-issue: $CUR_TITLE (Size: $CUR_SIZE)"
+              # TODO: forge_issue_create returns only the IID (not the
+              # full API JSON the original parsed); the failure message
+              # below loses the API response body.
+              NEW_IID=$(forge_issue_create "$CUR_TITLE" "$SUB_BODY" "boucle:triage,boucle::status::bot,size:$SUB_SIZE_LOWER")
+              if [ -n "$NEW_IID" ] && [ "$NEW_IID" != "null" ]; then
+                CREATED_IIDS="${CREATED_IIDS:+$CREATED_IIDS,}$NEW_IID"
+                SUBISSUE_COUNT=$((SUBISSUE_COUNT + 1))
+                echo "  → created #$NEW_IID"
+                # Assign the sub-issue to the bot (it's on the bot side from
+                # creation). Best-effort: skip silently if BOUCLE_BOT_ID unset.
+                # NOTE: the original hard-failed (exit 1) when the curl
+                # failed with BOUCLE_BOT_ID set; forge_issue_assign is
+                # best-effort per the contract, so that abort is dropped.
+                if [ -n "${BOUCLE_BOT_ID:-}" ]; then
+                  forge_issue_assign "$NEW_IID" "$BOUCLE_BOT_ID"
                 fi
+                # Set the parent via the forge contract. The backend
+                # tries the work-items hierarchy API first (real
+                # "Éléments enfants" relationship — needs the parent's
+                # GLOBAL work-item ID, not the project-scoped IID);
+                # if unavailable (work_item_rest_api feature flag
+                # disabled on self-managed GitLab), it falls back to
+                # a REST relates_to issue link (visible under
+                # "Linked items" on the parent). Final fallback: the
+                # ## Parent issue body text provides navigation.
+                forge_work_item_link_parent "$NEW_IID" "$PARENT_IID"
+                # Trigger triage directly via trigger API (bot-created issues would
+                # hit the anti-loop guard in dispatch because ACTOR=up-bot).
+                chain_to_role "$NEW_IID" ""
+              else
+                echo "  → FAIL to create sub-issue: ${NEW_IID:-empty response from forge_issue_create}" >&2
+                PARSE_FAILURES=$((PARSE_FAILURES + 1))
+              fi
             fi
-        done </tmp/subissues.parsed
-
-        # ── Resolve dependencies (index → IID) and update sub-issue bodies ──
-        # CUR_DEPS holds 1-based sibling indices (e.g. "2"). Map them to
-        # real IIDs via the creation order. Then append a "## Depends on"
-        # section + the boucle:depends-on marker to each dependent sub-issue.
-        # Cycle detection: build the dep graph and reject cycles → human.
-        #
-        # CREATED_IIDS is a comma-separated list in creation order, so
-        # index N → the N-th IID in that list.
-        if [ -n "$CREATED_IIDS" ] && [ "$SUBISSUE_COUNT" -gt 0 ]; then
-            # Source the depends-on lib for detect_cycle + resolve_dep_indices.
-            source "$BOUCLE_HOME/bin/lib/depends-on.sh"
-
-            # Re-parse to get per-sub-issue deps (we lost CUR_DEPS across the
-            # loop boundary, so re-derive from /tmp/subissues.parsed).
-            declare -a DEPS_BY_INDEX=()
-            CUR_IDX=0
-            while IFS= read -r line; do
-                if [ "$line" = "---END---" ]; then
-                    CUR_IDX=$((CUR_IDX + 1))
-                elif [[ "$line" == DEPS:* ]]; then
-                    DEPS_BY_INDEX[$CUR_IDX]="${line#DEPS:}"
-                fi
-            done </tmp/subissues.parsed
-
-            # Build graph string for detect_cycle: "0:1;1:0" where nodes are
-            # 0-based array indices and deps are 0-based space-separated.
-            # Include ALL nodes (even those with no deps) so detect_cycle
-            # has the correct node count.
-            GRAPH_STR=""
-            for ((gi = 0; gi < SUBISSUE_COUNT; gi++)); do
-                raw="${DEPS_BY_INDEX[$gi]:-}"
-                resolved=""
-                for d in $(echo "$raw" | tr ',' ' '); do
-                    if [[ "$d" =~ ^[0-9]+$ ]] && [ "$d" -ge 1 ] && [ "$d" -le "$SUBISSUE_COUNT" ]; then
-                        resolved="$resolved $((d - 1))"
-                    else
-                        echo "WARN: sub-issue $((gi + 1)) depends on #$d which is out of range (1..$SUBISSUE_COUNT) — dropping that dep"
-                    fi
-                done
-                GRAPH_STR="${GRAPH_STR:+$GRAPH_STR;}$gi:${resolved# }"
-            done
-
-            if detect_cycle "$GRAPH_STR"; then
-                echo "FAIL: dependency cycle detected involving sub-issues ($CREATED_IIDS)"
-                set_boucle_label "$IID" "boucle:human" "boucle::status::human"
-                forge_issue_note "$IID" "⚠️ Triage declared a dependency cycle between sub-issues ($CREATED_IIDS). The sub-issues were created but their dependencies could not be resolved. Please fix the dependencies manually."
-                # Still mark split so dispatch doesn't re-triage the parent.
-                set_boucle_label "$IID" "boucle:split" "boucle::status::bot"
-                exit 0
-            fi
-
-            # Second pass: update each dependent sub-issue's description.
-            # DEPS_BY_INDEX is 0-based (CUR_IDX starts at 0), so i is the
-            # 0-based sub-issue index. The dep indices stored are 1-based
-            # sibling indices (from the triage comment), which resolve_dep_indices
-            # maps to real IIDs.
-            for i in "${!DEPS_BY_INDEX[@]}"; do
-                raw="${DEPS_BY_INDEX[$i]:-}"
-                [ -z "$raw" ] && continue
-                # Resolve indices to IIDs using the lib function.
-                resolved_iids=$(resolve_dep_indices "$raw" "$CREATED_IIDS")
-                [ -z "$resolved_iids" ] && continue
-                cur_iid=$(echo "$CREATED_IIDS" | cut -d',' -f$((i + 1)))
-                [ -z "$cur_iid" ] && continue
-                # Fetch current description, append the Depends on section.
-                cur_desc=$(forge_issue_get "$cur_iid" 2>/dev/null | jq -r '.description // empty' 2>/dev/null || echo "")
-                if [ -z "$cur_desc" ]; then
-                    echo "WARN: can't fetch description of #$cur_iid to append deps — skipping"
-                    continue
-                fi
-                # Human-readable #N list + machine marker.
-                human_list=$(echo "$resolved_iids" | sed 's/,/, #/g; s/^/#/')
-                new_desc=$(printf '%s\n\n## Depends on\n%s\n<!-- boucle:depends-on iids=%s -->' "$cur_desc" "$human_list" "$resolved_iids")
-                forge_issue_update "$cur_iid" "description" "$new_desc" ||
-                    echo "WARN: failed to update #$cur_iid description with deps"
-                echo "  → #$cur_iid depends on $resolved_iids"
-            done
-        fi
-
-        if [ "$SUBISSUE_COUNT" -eq 0 ]; then
-            echo "NEEDS-SPLIT but zero sub-issues created — falling back to boucle:human"
-            set_boucle_label "$IID" "boucle:human" "boucle::status::human"
-            forge_issue_note "$IID" "Triage requested NEEDS-SPLIT but no sub-issues could be created from the triage comment. Please split this issue manually."
+          fi
+          # Reset for next record
+          CUR_TITLE=""
+          CUR_BODY=""
+          CUR_SIZE_RAW=""
+          CUR_DEPS=""
+        elif [[ "$line" == TITLE:* ]]; then
+          CUR_TITLE="${line#TITLE:}"
+          CUR_BODY=""
+          CUR_SIZE_RAW=""
+          CUR_DEPS=""
+        elif [[ "$line" == DEPS:* ]]; then
+          CUR_DEPS="${line#DEPS:}"
         else
-            # Mark the parent boucle:split FIRST so dispatch and doctor stop
-            # re-triaging it even if the comment POST below fails. The parent
-            # stays open and is closed by maybe_close_parent() (e2e) or the
-            # doctor's split-parent cascade when all sub-issues close.
-            set_boucle_label "$IID" "boucle:split" "boucle::status::bot"
-            # Post ONE merged comment: human-readable sub-issue list + the
-            # machine-readable split-parent marker. Merging makes the two
-            # atomic (single POST) — a job failure cannot leave a human
-            # comment without its marker, which caused duplicate "Split into"
-            # comments and duplicate sub-issues on retry. The marker is parsed
-            # by maybe_close_parent's legacy fallback path when the hierarchy
-            # API is unavailable (feature flag disabled on self-managed GitLab).
-            SPLIT_MSG=$(printf 'Split into: #%s.\n\nParent stays open until all sub-issues close. The loop closes this parent automatically when the last sub-issue completes.\n\n<!-- boucle:split-parent iids=%s -->' "$(echo "$CREATED_IIDS" | sed 's/,/, #/g')" "$CREATED_IIDS")
-            forge_issue_note "$IID" "$SPLIT_MSG"
-            echo "Split parent #$IID into $SUBISSUE_COUNT sub-issue(s): $CREATED_IIDS (parent marked boucle:split)"
-            if [ "$PARSE_FAILURES" -gt 0 ]; then
-                echo "WARN: $PARSE_FAILURES sub-issue(s) failed to create"
-            fi
+          # Append line to body. Direct assignment (not command
+          # substitution) preserves the trailing newline: $(...) strips
+          # trailing newlines, which would collapse the whole body to a
+          # single line and make the mid-line checkbox guard false-positive
+          # on "Acceptance criteria:- [ ] ..." (colon is non-space before
+          # "- [ ]"). $'\n' keeps the newline literal.
+          CUR_BODY="${CUR_BODY}${line}"$'\n'
+          # Capture Size: line
+          if [[ "$line" =~ ^Size:[[:space:]]*([SML]) ]]; then
+            CUR_SIZE_RAW="${BASH_REMATCH[1]}"
+          fi
         fi
-        rm -f /tmp/subissues.parsed
-        ;;
-    *)
-        echo "Unparsable disposition: $DISPOSITION → routing to human"
-        set_boucle_label "$IID" "boucle:human" "boucle::status::human"
-        ;;
-    esac
+      done < /tmp/subissues.parsed
 
-    # Assert: triage comment exists and disposition parsable
-    if [ -z "$DISPOSITION" ]; then
-        echo "FAIL: disposition not parsable" >&2
-        exit 1
-    fi
+      # ── Resolve dependencies (index → IID) and update sub-issue bodies ──
+      # CUR_DEPS holds 1-based sibling indices (e.g. "2"). Map them to
+      # real IIDs via the creation order. Then append a "## Depends on"
+      # section + the boucle:depends-on marker to each dependent sub-issue.
+      # Cycle detection: build the dep graph and reject cycles → human.
+      #
+      # CREATED_IIDS is a comma-separated list in creation order, so
+      # index N → the N-th IID in that list.
+      if [ -n "$CREATED_IIDS" ] && [ "$SUBISSUE_COUNT" -gt 0 ]; then
+        # Source the depends-on lib for detect_cycle + resolve_dep_indices.
+        source "$BOUCLE_HOME/bin/lib/depends-on.sh"
+
+        # Re-parse to get per-sub-issue deps (we lost CUR_DEPS across the
+        # loop boundary, so re-derive from /tmp/subissues.parsed).
+        declare -a DEPS_BY_INDEX=()
+        CUR_IDX=0
+        while IFS= read -r line; do
+          if [ "$line" = "---END---" ]; then
+            CUR_IDX=$((CUR_IDX + 1))
+          elif [[ "$line" == DEPS:* ]]; then
+            DEPS_BY_INDEX[$CUR_IDX]="${line#DEPS:}"
+          fi
+        done < /tmp/subissues.parsed
+
+        # Build graph string for detect_cycle: "0:1;1:0" where nodes are
+        # 0-based array indices and deps are 0-based space-separated.
+        # Include ALL nodes (even those with no deps) so detect_cycle
+        # has the correct node count.
+        GRAPH_STR=""
+        for ((gi = 0; gi < SUBISSUE_COUNT; gi++)); do
+          raw="${DEPS_BY_INDEX[$gi]:-}"
+          resolved=""
+          for d in $(echo "$raw" | tr ',' ' '); do
+            if [[ "$d" =~ ^[0-9]+$ ]] && [ "$d" -ge 1 ] && [ "$d" -le "$SUBISSUE_COUNT" ]; then
+              resolved="$resolved $((d - 1))"
+            else
+              echo "WARN: sub-issue $((gi + 1)) depends on #$d which is out of range (1..$SUBISSUE_COUNT) — dropping that dep"
+            fi
+          done
+          GRAPH_STR="${GRAPH_STR:+$GRAPH_STR;}$gi:${resolved# }"
+        done
+
+        if detect_cycle "$GRAPH_STR"; then
+          echo "FAIL: dependency cycle detected involving sub-issues ($CREATED_IIDS)"
+          set_boucle_label "$IID" "boucle:human" "boucle::status::human"
+          forge_issue_note "$IID" "⚠️ Triage declared a dependency cycle between sub-issues ($CREATED_IIDS). The sub-issues were created but their dependencies could not be resolved. Please fix the dependencies manually."
+          # Still mark split so dispatch doesn't re-triage the parent.
+          set_boucle_label "$IID" "boucle:split" "boucle::status::bot"
+          exit 0
+        fi
+
+        # Second pass: update each dependent sub-issue's description.
+        # DEPS_BY_INDEX is 0-based (CUR_IDX starts at 0), so i is the
+        # 0-based sub-issue index. The dep indices stored are 1-based
+        # sibling indices (from the triage comment), which resolve_dep_indices
+        # maps to real IIDs.
+        for i in "${!DEPS_BY_INDEX[@]}"; do
+          raw="${DEPS_BY_INDEX[$i]:-}"
+          [ -z "$raw" ] && continue
+          # Resolve indices to IIDs using the lib function.
+          resolved_iids=$(resolve_dep_indices "$raw" "$CREATED_IIDS")
+          [ -z "$resolved_iids" ] && continue
+          cur_iid=$(echo "$CREATED_IIDS" | cut -d',' -f$((i + 1)))
+          [ -z "$cur_iid" ] && continue
+          # Fetch current description, append the Depends on section.
+          cur_desc=$(forge_issue_get "$cur_iid" 2> /dev/null | jq -r '.description // empty' 2> /dev/null || echo "")
+          if [ -z "$cur_desc" ]; then
+            echo "WARN: can't fetch description of #$cur_iid to append deps — skipping"
+            continue
+          fi
+          # Human-readable #N list + machine marker.
+          human_list=$(echo "$resolved_iids" | sed 's/,/, #/g; s/^/#/')
+          new_desc=$(printf '%s\n\n## Depends on\n%s\n<!-- boucle:depends-on iids=%s -->' "$cur_desc" "$human_list" "$resolved_iids")
+          forge_issue_update "$cur_iid" "description" "$new_desc" \
+            || echo "WARN: failed to update #$cur_iid description with deps"
+          echo "  → #$cur_iid depends on $resolved_iids"
+        done
+      fi
+
+      if [ "$SUBISSUE_COUNT" -eq 0 ]; then
+        echo "NEEDS-SPLIT but zero sub-issues created — falling back to boucle:human"
+        set_boucle_label "$IID" "boucle:human" "boucle::status::human"
+        forge_issue_note "$IID" "Triage requested NEEDS-SPLIT but no sub-issues could be created from the triage comment. Please split this issue manually."
+      else
+        # Mark the parent boucle:split FIRST so dispatch and doctor stop
+        # re-triaging it even if the comment POST below fails. The parent
+        # stays open and is closed by maybe_close_parent() (e2e) or the
+        # doctor's split-parent cascade when all sub-issues close.
+        set_boucle_label "$IID" "boucle:split" "boucle::status::bot"
+        # Post ONE merged comment: human-readable sub-issue list + the
+        # machine-readable split-parent marker. Merging makes the two
+        # atomic (single POST) — a job failure cannot leave a human
+        # comment without its marker, which caused duplicate "Split into"
+        # comments and duplicate sub-issues on retry. The marker is parsed
+        # by maybe_close_parent's legacy fallback path when the hierarchy
+        # API is unavailable (feature flag disabled on self-managed GitLab).
+        SPLIT_MSG=$(printf 'Split into: #%s.\n\nParent stays open until all sub-issues close. The loop closes this parent automatically when the last sub-issue completes.\n\n<!-- boucle:split-parent iids=%s -->' "$(echo "$CREATED_IIDS" | sed 's/,/, #/g')" "$CREATED_IIDS")
+        forge_issue_note "$IID" "$SPLIT_MSG"
+        echo "Split parent #$IID into $SUBISSUE_COUNT sub-issue(s): $CREATED_IIDS (parent marked boucle:split)"
+        if [ "$PARSE_FAILURES" -gt 0 ]; then
+          echo "WARN: $PARSE_FAILURES sub-issue(s) failed to create"
+        fi
+      fi
+      rm -f /tmp/subissues.parsed
+      ;;
+    *)
+      echo "Unparsable disposition: $DISPOSITION → routing to human"
+      set_boucle_label "$IID" "boucle:human" "boucle::status::human"
+      ;;
+  esac
+
+  # Assert: triage comment exists and disposition parsable
+  if [ -z "$DISPOSITION" ]; then
+    echo "FAIL: disposition not parsable" >&2
+    exit 1
+  fi
 }

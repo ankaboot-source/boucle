@@ -24,7 +24,7 @@ fi
 # Map stage name to function name.
 FUNC="boucle_ci_${STAGE//-/_}"
 
-if ! declare -F "$FUNC" >/dev/null 2>&1; then
+if ! declare -F "$FUNC" > /dev/null 2>&1; then
   echo "Unknown stage: $STAGE (function $FUNC not found)" >&2
   exit 1
 fi
