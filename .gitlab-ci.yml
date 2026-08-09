@@ -319,8 +319,12 @@ check:
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
     # Run on pushes and MRs to $CI_DEFAULT_BRANCH.
+    # NOTE: the explicit $CI_PIPELINE_SOURCE == "merge_request_event" reference
+    # is REQUIRED — GitLab only creates merge-request pipelines when the config
+    # references it; a bare $CI_MERGE_REQUEST_TARGET_BRANCH_NAME rule never
+    # triggers an MR pipeline (observed on framagit, 2026-08).
     - if: $CI_COMMIT_BRANCH == "$CI_DEFAULT_BRANCH"
-    - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "$CI_DEFAULT_BRANCH"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "$CI_DEFAULT_BRANCH"
   before_script:
     - apt-get update -qq && apt-get install -y -qq curl git make xz-utils jq python3
     # Initialize bats test helper submodules
