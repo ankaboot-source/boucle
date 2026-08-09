@@ -2,6 +2,7 @@
 description: Triage agent — analyzes issues, drafts acceptance criteria, classifies size
 mode: primary
 model: ollama-cloud/glm-5.2
+reasoning_effort: off
 temperature: 0.5
 steps: 300
 ---
