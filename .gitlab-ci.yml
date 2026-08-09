@@ -3122,14 +3122,14 @@ merger:
       # avoidance mechanism: because merges are serialized, each rebase is
       # against a $CI_DEFAULT_BRANCH that already includes all previously-merged MRs.
       git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
-      if ! git rebase origin/$CI_DEFAULT_BRANCH; then
+      if ! REBASE_OUTPUT=$(git rebase origin/$CI_DEFAULT_BRANCH 2>&1); then
+        # S4: never re-trigger the worker blindly on a rebase conflict — a
+        # fresh run reproduces the same semantic conflict. Classify, post a
+        # structured note with manual options, and hand the issue to the
+        # human immediately (boucle_escalate_merge_conflict in lib/boucle.sh).
         echo "FAIL: rebase onto origin/$CI_DEFAULT_BRANCH conflicted — even after serial merge." >&2
         git rebase --abort 2>/dev/null || true
-        echo "Re-triggering worker (iteration 1) — the worker will preserve its commits and re-base onto fresh $CI_DEFAULT_BRANCH." >&2
-        set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-        glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-          -f body="🔄 Merger could not rebase MR !${MR_IID} onto $CI_DEFAULT_BRANCH (conflict). Re-running the worker on fresh $CI_DEFAULT_BRANCH to regenerate the MR." > /dev/null
-        chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=1
+        boucle_escalate_merge_conflict "$BOUCLE_ISSUE" "$MR_IID" "$CI_DEFAULT_BRANCH" "$REBASE_OUTPUT"
         exit 1
       fi
 
