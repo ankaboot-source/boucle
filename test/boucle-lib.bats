@@ -860,3 +860,28 @@ HELPER
   assert_failure
   assert_output --partial "FAILURE_DETECTED"
 }
+
+@test ".gitlab-ci.yml: forge backend sourced BEFORE lib/boucle.sh (before_script bootstrap)" {
+  # Regression (consumer framagit, 2026-08): the before_script sourced
+  # lib/boucle.sh without bin/forge/*, so set_boucle_label failed with
+  # "forge_issue_labels_get: command not found" on every inline job
+  # (merger/doctor). Each `source "…lib/boucle.sh"` must be preceded by
+  # the forge prelude (common.sh + forge_init).
+  line=""
+  frozen=0
+  while IFS= read -r l; do
+    case "$l" in
+      *'source "$BOUCLE_HOME/lib/boucle.sh"')
+        [ "$frozen" -ge 2 ] || {
+          echo "lib/boucle.sh sourced without forge prelude:$LINE" >&2
+          return 1
+        }
+        frozen=0
+        ;;
+      *'source "$BOUCLE_HOME/bin/forge/common.sh"'*) frozen=1 ;;
+      *forge_init*) frozen=2 ;;
+      *) [ "$frozen" -ge 1 ] && frozen=$((frozen + 0)) ;;
+    esac
+    LINE=${LINE:-}
+  done <<< "$(cat .gitlab-ci.yml | grep -n 'source \$BOUCLE_HOME/lib/boucle.sh\|source \$BOUCLE_HOME/bin/forge/common.sh\|forge_init')"
+}
