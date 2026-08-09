@@ -214,6 +214,13 @@ forge_reaction_canonical() {
 #   Returns JSON array on stdout, each with: .id, .status, .variables
 #   (or enough to match BOUCLE_ISSUE=<iid>).
 #   Used by the doctor to check if a pipeline is already running.
+#
+# forge_pipeline_status_for_ref <ref> [event]
+#   Get the status of the latest pipeline/workflow run for a ref.
+#   Returns "success", "failed", "canceled", "running", "pending", or
+#   "unknown" on stdout. Used by post-merge to wait for deploy.
+#   (GitLab: /projects/:id/pipelines?ref=:ref&order_by=id&sort=desc;
+#   GitHub: /repos/:owner/:repo/actions/runs?branch=:ref&per_page=1.)
 
 # ── Contract: user / bot resolution ──────────────────────────────────────
 #
@@ -366,6 +373,28 @@ forge_reaction_canonical() {
 #
 # forge_mr_close <mr_iid>
 #   Close MR/PR. Returns 0 on success.
+
+# ── Contract: MR diff + check suites (review modes) ──────────────────────
+#
+# forge_mr_diff <mr_iid>
+#   Fetch the diff of a MR/PR as plain text on stdout. Returns empty on
+#   failure. Used by the reviewer in diff mode (BOUCLE_REVIEW_MODE=diff).
+#   (GitLab: glab mr diff <iid>; GitHub: gh pr diff <iid>.)
+#
+# forge_mr_check_suites <mr_iid> <head_sha>
+#   Fetch check/CI suite status for a MR/PR head commit as JSON on stdout.
+#   Returns [] on failure. Each entry MUST contain: .name, .status, .conclusion.
+#   Used by the reviewer in diff mode to wait for the repo's own CI.
+#   (GitLab: /projects/:id/merge_requests/:iid/pipelines; GitHub:
+#   /repos/:owner/:repo/commits/:sha/check-runs.)
+#
+# forge_commit_check_suites <sha>
+#   Fetch check/CI suite status for a specific commit SHA as JSON on stdout.
+#   Returns [] on failure. Each entry MUST contain: .name, .status, .conclusion.
+#   Used by post-merge in external mode to wait for the consumer's own CI
+#   after merge.
+#   (GitLab: /projects/:id/repository/commits/:sha/statuses; GitHub:
+#   /repos/:owner/:repo/commits/:sha/check-runs.)
 
 # ── Contract: note reactions (doctor spec-approval check) ────────────────
 #

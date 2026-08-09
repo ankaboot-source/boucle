@@ -384,6 +384,29 @@ forge_mr_rebase() {
   return 0
 }
 
+# ── MR diff + check suites (review modes) ──────────────────────────────────
+
+forge_mr_diff() {
+  local mr_iid="$1"
+  GH_TOKEN="$BOUCLE_TOKEN" gh pr diff "$mr_iid" \
+    --repo "$BOUCLE_PROJECT_ID" 2> /dev/null || true
+}
+
+forge_mr_check_suites() {
+  local mr_iid="$1" head_sha="$2"
+  # Fetch check runs for the head commit of the PR
+  _gh_api "/repos/$BOUCLE_PROJECT_ID/commits/$head_sha/check-runs" 2> /dev/null \
+    | jq -c '.check_runs // [] | map({name: .name, status: .status, conclusion: .conclusion})' 2> /dev/null \
+    || echo "[]"
+}
+
+forge_commit_check_suites() {
+  local sha="$1"
+  _gh_api "/repos/$BOUCLE_PROJECT_ID/commits/$sha/check-runs" 2> /dev/null \
+    | jq -c '.check_runs // [] | map({name: .name, status: .status, conclusion: .conclusion})' 2> /dev/null \
+    || echo "[]"
+}
+
 # ── Hierarchy / parent-child ──────────────────────────────────────────────
 
 forge_work_item_global_id() {
@@ -490,6 +513,17 @@ forge_pipeline_list_active() {
     [ -n "$match" ] && result=$(echo "$result" | jq --argjson p "{\"id\":$run_id,\"status\":\"in_progress\"}" '. + [$p]')
   done
   echo "$result"
+}
+
+forge_pipeline_status_for_ref() {
+  local ref="$1" event="${2:-push}"
+  # Get the latest workflow run for the given branch/ref
+  local runs
+  runs=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/actions/runs?branch=$ref&per_page=1&event=$event" 2> /dev/null) || {
+    echo "unknown"
+    return
+  }
+  echo "$runs" | jq -r '.workflow_runs[0].conclusion // .workflow_runs[0].status // "unknown"' 2> /dev/null || echo "unknown"
 }
 
 # ── User / bot resolution ─────────────────────────────────────────────────
