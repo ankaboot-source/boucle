@@ -174,83 +174,74 @@ spec and approve the MR.
 
 ## 💰 Cost
 
-boucle runs on a **subscription plan**, not per-token billing — you pay a
-fixed monthly fee for a usage allowance, and the loop runs within it. The
-plan is the base; the question is how many issues per month boucle can
-sustain on it.
+boucle runs on any OpenAI-compatible API — per-token (OpenRouter, the
+provider's own API) or subscription plan (Ollama, Claude Code). The
+per-feature cost below serves two purposes: it tells you the **direct cost**
+of shipping one feature, and — on a subscription plan — it tells you the
+**capacity**: how many features the plan sustains per month. As a bonus, the
+gated, asynchronous loop gives you a calmer workflow driven by the human's
+agenda, not the agent's.
 
-### Per-role cost (Artificial Analysis, max-effort reasoning)
+### Cost per feature, end to end
 
-One issue flows through four roles, end to end: **triage** (analyze the
-issue, draft the spec) → **worker** (implement, up to 3 iterations) →
-**reviewer** (verify the preview, up to 3 iterations) → **e2e** (verify the
-live deployment). The cost of one issue is the sum of all role invocations.
+One feature flows through four roles: **triage** (analyze the issue, draft
+the spec) → **worker** (implement, up to 3 iterations) → **reviewer** (verify
+the preview, up to 3 iterations) → **e2e** (verify the live deployment). The
+cost of one feature is the sum of all role invocations.
 
-| Role | What it does | boucle model | $/task | Claude Code model | $/task |
+| Role | What it does | boucle | $/task | Claude Code | $/task |
 | --- | --- | --- | ---: | --- | ---: |
 | triage | analyze issue, draft spec | [GLM-5.2](https://z.ai/blog/glm-5.2) (intel 53) | $0.31 | Opus 5 (intel 63) | $2.34 |
-| worker | implement (×3 iterations) | [DeepSeek V4 Flash 0731](https://artificialanalysis.ai/models/deepseek-v4-flash) (intel 52) | $0.03 | Sonnet 5 (intel 55) | $1.72 |
-| reviewer | verify preview (×3 iterations) | DeepSeek V4 Flash 0731 (intel 52) | $0.03 | Sonnet 5 (intel 55) | $1.72 |
+| worker (×3) | implement | [DeepSeek V4 Flash 0731](https://artificialanalysis.ai/models/deepseek-v4-flash) (intel 52) | $0.03 | Sonnet 5 (intel 55) | $1.72 |
+| reviewer (×3) | verify preview | DeepSeek V4 Flash 0731 (intel 52) | $0.03 | Sonnet 5 (intel 55) | $1.72 |
 | e2e | verify live deployment | GLM-5.2 (intel 53) | $0.31 | Opus 5 (intel 63) | $2.34 |
 
-The worker and reviewer run the most (3 iterations each), so their cost
-dominates the per-issue total. boucle puts the cheapest model (DeepSeek,
-$0.03) on the heaviest roles — where it reaches 95% of Sonnet 5's
-intelligence at 57× less cost. The triage role is strategic (it produces
-the spec that guides everything), so boucle keeps a stronger reasoner
-(GLM-5.2) there — 84% of Opus 5's intelligence at 7.5× less cost.
+Summing one pass through the loop (1 triage + 1 e2e + 3 worker + 3 reviewer):
 
-### From plans to capacity
-
-boucle runs on a **subscription plan**, not per-token billing. The plan gives
-you a monthly usage allowance; the per-issue cost tells you how much of that
-allowance one issue consumes. So the plan is the base, and the question is:
-how many issues per month can boucle sustain on it?
-
-**Ollama Max — $100/mo** (continuous agents, 10 concurrent models). At
-boucle's per-issue cost, the plan sustains:
-
-| Config | $/issue | Issues/month on Max ($100) |
+| | boucle | Claude Code |
 | --- | ---: | ---: |
-| full DeepSeek | $0.24 | ~416 |
-| **default (GLM-5.2 + DeepSeek)** | $0.80 | ~125 |
-| Kimi K3 triage + DeepSeek | $1.22 | ~82 |
+| **Cost per feature** | **$0.80** | **$15.00** |
+| Intelligence (triage / worker) | 53 / 52 | 63 / 55 |
 
-**Claude Code Max 20× — $200/mo** (20× Pro usage). At the equivalent
-per-issue cost ($15.00 for Opus 5 + Sonnet 5), the plan sustains **~13
-issues/month** — for **2× the price**.
+boucle ships one feature for **18.8× less** than Claude Code. The worker and
+reviewer run the most iterations, so boucle puts the cheapest model
+(DeepSeek, $0.03) on the heaviest roles — where it reaches 95% of Sonnet 5's
+intelligence at 57× less cost. The triage role is strategic (it produces the
+spec that guides everything), so boucle keeps a stronger reasoner there — 84%
+of Opus 5's intelligence at 7.5× less cost. The full per-role breakdown and
+alternative configs (full-DeepSeek at $0.24, Kimi K3 triage at $1.22) are in
+[docs/cost-benchmark.md](docs/cost-benchmark.md).
 
-So for half the monthly fee, boucle on Ollama Max processes **6–32× more
-issues** than Claude Code Max 20×, depending on the config. The capacity
-gap comes from the per-task cost gap (7–57×), not the plan price gap (2×).
+### Monthly capacity, multiplied
 
-### Configurations
+The plan is the base; the per-feature cost determines how many features it
+sustains. boucle also runs issues **in parallel** (up to
+`BOUCLE_MAX_PARALLEL_ISSUES`, default 5), so the monthly capacity is the plan
+allowance divided by the per-feature cost — not serialized.
 
-All configs are gated by a human spec approval and a live-preview
-verification — the model decides what to *attempt*, the gates decide what
-*ships*. The model choice on the **triage** role (issue analysis + spec) is
-the main quality lever:
+| Plan | Price | Config | $/feature | Features/month |
+| --- | ---: | --- | ---: | ---: |
+| Ollama Max | $100 | **default (GLM-5.2 + DeepSeek)** | $0.80 | **~125** |
+| Ollama Max | $100 | full DeepSeek | $0.24 | ~416 |
+| Ollama Max | $100 | Kimi K3 triage + DeepSeek | $1.22 | ~82 |
+| Claude Code Max 20× | $200 | Opus 5 + Sonnet 5 | $15.00 | ~13 |
 
-| Config | Triage intel | $/issue | vs Claude Code |
-| --- | ---: | ---: | ---: |
-| full DeepSeek | 52 | $0.24 | 62.5× cheaper |
-| **default (GLM-5.2 + DeepSeek)** | 53 | $0.80 | 18.8× cheaper |
-| Kimi K3 triage + DeepSeek | 60 | $1.22 | 12.3× cheaper |
-| Claude Code (Opus 5 + Sonnet 5) | 63 | $15.00 | — |
+For **half the monthly fee**, boucle on Ollama Max ships **6–32× more
+features** than Claude Code Max 20×. The capacity gap comes from the
+per-feature cost gap (18.8×), not the plan price gap (2×) — and parallelism
+multiplies it further.
 
-The default duo is the shipped compromise. Full-DeepSeek is the cost floor
-at the price of a weaker triage (−1 pt vs GLM-5.2). Swapping in Kimi K3 on
-triage closes most of the gap vs Opus 5 (from −10 to −3 pts) for +$0.42/issue
-— a quality upgrade at marginal cost, still 12.3× cheaper than Claude Code.
-See [docs/cost-benchmark.md](docs/cost-benchmark.md) for the full per-role
-breakdown.
+### Less toxicity, on your schedule
 
-> Note: new Ollama Max subscriptions are temporarily paused (capacity
-> expansion); Pro ($20/mo, 3 concurrent) remains open and sustains
-> ~25–100 issues/month depending on the config. Pro users can buy extra
-> usage balance to go beyond the plan's included limits. See
-> [Ollama pricing](https://ollama.com/pricing) and
-> [Claude pricing](https://claude.com/pricing) for the live numbers.
+A chat-based coding agent demands your attention *now* — it asks, you answer,
+it waits, you context-switch. boucle inverts that. The loop runs
+asynchronously on CI; the human intervenes at **clear, named gates** (spec
+approval, MR review), not in a live chat. The **Do-Not-Disturb** mode
+(`BOUCLE_DND_*`) auto-validates the spec gate during your off-hours so the
+loop never blocks on you overnight. You approve the spec over your morning
+coffee; by the time you're back from lunch, the worker has implemented, the
+reviewer has verified the preview, and the MR is waiting. The agent works on
+the agent's clock; you work on yours.
 
 ## 🛠️ Configuration
 
