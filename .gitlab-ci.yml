@@ -205,6 +205,10 @@ default:
       # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
       source "$BOUCLE_HOME/bin/forge/common.sh"
       forge_init
+      # chain_to_role/forge_trigger_role rely on BOUCLE_DEFAULT_BRANCH — never
+      # set by GitLab; resolve from the native CI_DEFAULT_BRANCH (fallback
+      # master) so triggers target the real default branch, not "main".
+      export BOUCLE_DEFAULT_BRANCH="${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}"
       source "$BOUCLE_HOME/lib/boucle.sh"
 
       # ── jcode coding agent (standalone Rust binary) ──────────────
@@ -453,6 +457,10 @@ dispatch:
       # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
       source "$BOUCLE_HOME/bin/forge/common.sh"
       forge_init
+      # chain_to_role/forge_trigger_role rely on BOUCLE_DEFAULT_BRANCH — never
+      # set by GitLab; resolve from the native CI_DEFAULT_BRANCH (fallback
+      # master) so triggers target the real default branch, not "main".
+      export BOUCLE_DEFAULT_BRANCH="${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}"
       source "$BOUCLE_HOME/lib/boucle.sh"
   script:
     - |
@@ -3041,6 +3049,10 @@ merger:
       # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
       source "$BOUCLE_HOME/bin/forge/common.sh"
       forge_init
+      # chain_to_role/forge_trigger_role rely on BOUCLE_DEFAULT_BRANCH — never
+      # set by GitLab; resolve from the native CI_DEFAULT_BRANCH (fallback
+      # master) so triggers target the real default branch, not "main".
+      export BOUCLE_DEFAULT_BRANCH="${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}"
       source "$BOUCLE_HOME/lib/boucle.sh"
   script:
     - |
@@ -3286,6 +3298,10 @@ post-merge:
       # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
       source "$BOUCLE_HOME/bin/forge/common.sh"
       forge_init
+      # chain_to_role/forge_trigger_role rely on BOUCLE_DEFAULT_BRANCH — never
+      # set by GitLab; resolve from the native CI_DEFAULT_BRANCH (fallback
+      # master) so triggers target the real default branch, not "main".
+      export BOUCLE_DEFAULT_BRANCH="${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}"
       source "$BOUCLE_HOME/lib/boucle.sh"
   script:
     - |
@@ -3400,6 +3416,10 @@ catchup:
       # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
       source "$BOUCLE_HOME/bin/forge/common.sh"
       forge_init
+      # chain_to_role/forge_trigger_role rely on BOUCLE_DEFAULT_BRANCH — never
+      # set by GitLab; resolve from the native CI_DEFAULT_BRANCH (fallback
+      # master) so triggers target the real default branch, not "main".
+      export BOUCLE_DEFAULT_BRANCH="${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}"
       source "$BOUCLE_HOME/lib/boucle.sh"
   script:
     - |
