@@ -7,9 +7,9 @@
 ## 1. Identity
 
 Boucle is a **loop engineering** tool for **Product Builders**. It turns a
-forge issue (GitLab, soon GitHub) into a deployed product, without
+forge issue (GitLab or GitHub) into a deployed product, without
 continuous human intervention — the human stays in the loop at decision
-points (spec validation, MR approval).
+points (spec validation, MR/PR approval).
 
 Boucle **lowers the barrier to entry** for building websites and applications,
 while integrating with **developer CI/CD practices**. Unlike SaaS platforms
@@ -53,8 +53,8 @@ section.
 
 | Layer | Technology |
 | --- | --- |
-| Forge | GitLab (MVP), GitHub (planned) |
-| CI/CD | GitLab CI (8 stages) |
+| Forge | GitLab, GitHub |
+| CI/CD | GitLab CI (8 stages) / GitHub Actions (8 stages) — shared shell library `lib/boucle-ci/` |
 | AI agents | jcode (4 agents: triage, worker, reviewer, e2e) |
 | Models | glm-5.2 (triage, e2e), deepseek-v4-flash:0731 (worker, reviewer) — open-weight preference |
 | Knowledge graph | codebase-memory-mcp |
@@ -64,9 +64,11 @@ section.
 | Vendored skills | `.jcode/skills/` — content borrowed from the maintainer's skill library, synced from upstream. Only one component ships executable code: `ui-ux-pro-max` (Python stdlib-only, engine of the worker's design skill). No boucle-authored Python. |
 | Visual charter | `.jcode/DESIGN-template.md` — per-site design system file (product context → tokens → motion → components → content/iconography/visual foundations), derivative of superdesign-skill DESIGN.md (MIT) and named after that concept. Consumer sites keep their own `VISUAL-CHARTER.md`; the worker reads it before any UI work and it overrides generic design recommendations. `bin/check-design-charter` validates the charter structure (sections, tokens, no placeholders) before UI work. |
 
-Boucle is designed to be **forge-agnostic and deploy-agnostic**. Current
-limitations (GitLab only, Cloudflare only) are due to the MVP, not
-definitive choices.
+Boucle is designed to be **forge-agnostic and deploy-agnostic**. The forge
+abstraction layer (`bin/forge/${BOUCLE_FORGE}.sh`) and the shared CI shell
+library (`lib/boucle-ci/`) let the same loop run on GitLab CI or GitHub
+Actions. Deployment is Cloudflare Pages for the MVP, with other targets
+planned.
 
 ## 5. Philosophy
 
