@@ -413,3 +413,252 @@ source_with_mock_forge() {
   '
   assert_success
 }
+
+# ── New deploy/review mode helpers ────────────────────────────────────
+
+@test "defines boucle_deploy_mode function" {
+  run grep -E '^boucle_deploy_mode\(\)' lib/boucle.sh
+  assert_success
+}
+
+@test "defines boucle_review_mode function" {
+  run grep -E '^boucle_review_mode\(\)' lib/boucle.sh
+  assert_success
+}
+
+@test "defines boucle_is_self_deploy function" {
+  run grep -E '^boucle_is_self_deploy\(\)' lib/boucle.sh
+  assert_success
+}
+
+@test "defines boucle_is_external_deploy function" {
+  run grep -E '^boucle_is_external_deploy\(\)' lib/boucle.sh
+  assert_success
+}
+
+@test "defines boucle_is_preview_review function" {
+  run grep -E '^boucle_is_preview_review\(\)' lib/boucle.sh
+  assert_success
+}
+
+@test "defines boucle_is_diff_review function" {
+  run grep -E '^boucle_is_diff_review\(\)' lib/boucle.sh
+  assert_success
+}
+
+@test "defines boucle_resolve_live_url function" {
+  run grep -E '^boucle_resolve_live_url\(\)' lib/boucle.sh
+  assert_success
+}
+
+@test "defines boucle_worker_should_deploy function" {
+  run grep -E '^boucle_worker_should_deploy\(\)' lib/boucle.sh
+  assert_success
+}
+
+@test "boucle_deploy_mode defaults to self" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_DEPLOY_MODE=""
+    source lib/boucle.sh
+    boucle_deploy_mode
+  '
+  assert_success
+  assert_output "self"
+}
+
+@test "boucle_deploy_mode returns external when set" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_DEPLOY_MODE=external
+    source lib/boucle.sh
+    boucle_deploy_mode
+  '
+  assert_success
+  assert_output "external"
+}
+
+@test "boucle_review_mode defaults to preview" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_REVIEW_MODE=""
+    source lib/boucle.sh
+    boucle_review_mode
+  '
+  assert_success
+  assert_output "preview"
+}
+
+@test "boucle_review_mode returns diff when set" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_REVIEW_MODE=diff
+    source lib/boucle.sh
+    boucle_review_mode
+  '
+  assert_success
+  assert_output "diff"
+}
+
+@test "boucle_is_self_deploy returns 0 for default self mode" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_DEPLOY_MODE=""
+    source lib/boucle.sh
+    boucle_is_self_deploy && echo "OK" || echo "FAIL"
+  '
+  assert_success
+  assert_output "OK"
+}
+
+@test "boucle_is_external_deploy returns 0 for external mode" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_DEPLOY_MODE=external
+    source lib/boucle.sh
+    boucle_is_external_deploy && echo "OK" || echo "FAIL"
+  '
+  assert_success
+  assert_output "OK"
+}
+
+@test "boucle_is_diff_review returns 0 for diff mode" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_REVIEW_MODE=diff
+    source lib/boucle.sh
+    boucle_is_diff_review && echo "OK" || echo "FAIL"
+  '
+  assert_success
+  assert_output "OK"
+}
+
+@test "boucle_worker_should_deploy returns 0 in default self+preview mode" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_DEPLOY_MODE=""
+    BOUCLE_REVIEW_MODE=""
+    source lib/boucle.sh
+    boucle_worker_should_deploy && echo "OK" || echo "FAIL"
+  '
+  assert_success
+  assert_output "OK"
+}
+
+@test "boucle_worker_should_deploy returns 1 in external mode" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_DEPLOY_MODE=external
+    BOUCLE_REVIEW_MODE=preview
+    source lib/boucle.sh
+    boucle_worker_should_deploy && echo "OK" || echo "FAIL"
+  '
+  assert_success
+  assert_output "FAIL"
+}
+
+@test "boucle_worker_should_deploy returns 1 in diff review mode" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_DEPLOY_MODE=self
+    BOUCLE_REVIEW_MODE=diff
+    source lib/boucle.sh
+    boucle_worker_should_deploy && echo "OK" || echo "FAIL"
+  '
+  assert_success
+  assert_output "FAIL"
+}
+
+@test "boucle_resolve_live_url returns BOUCLE_LIVE_URL when set" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_LIVE_URL="https://example.com"
+    BOUCLE_PRODUCTION_URL=""
+    BOUCLE_DEPLOY_PROJECT=""
+    source lib/boucle.sh
+    boucle_resolve_live_url ""
+  '
+  assert_success
+  assert_output "https://example.com"
+}
+
+@test "boucle_resolve_live_url falls back to BOUCLE_PRODUCTION_URL" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_LIVE_URL=""
+    BOUCLE_PRODUCTION_URL="https://prod.example.com"
+    source lib/boucle.sh
+    boucle_resolve_live_url ""
+  '
+  assert_success
+  assert_output "https://prod.example.com"
+}
+
+@test "boucle_resolve_live_url returns pages.dev fallback in self mode" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_DEPLOY_MODE=self
+    BOUCLE_LIVE_URL=""
+    BOUCLE_PRODUCTION_URL=""
+    BOUCLE_DEPLOY_PROJECT="my-site"
+    source lib/boucle.sh
+    boucle_resolve_live_url ""
+  '
+  assert_success
+  assert_output "https://my-site.pages.dev"
+}
+
+@test "boucle_resolve_live_url returns empty in external mode without BOUCLE_LIVE_URL" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_DEPLOY_MODE=external
+    BOUCLE_LIVE_URL=""
+    BOUCLE_PRODUCTION_URL=""
+    source lib/boucle.sh
+    boucle_resolve_live_url ""
+  '
+  assert_success
+  assert_output ""
+}
