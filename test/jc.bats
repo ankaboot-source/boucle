@@ -519,6 +519,121 @@ EOF
   rm -rf "$(dirname "$(dirname "$AGENT_DIR")")"
 }
 
+# ── Reasoning effort (frontmatter → JCODE_OPENAI_REASONING_EFFORT) ─────
+# bin/jc reads reasoning_effort from the agent file frontmatter and exports
+# it as JCODE_OPENAI_REASONING_EFFORT for jcode v0.73.0+ (sent verbatim as
+# reasoning_effort in the OpenAI request body). The value lives in the agent
+# file — worker.md/reviewer.md ship deepseek-v4-flash:0731 with max.
+
+@test "reasoning effort: frontmatter value extracted" {
+  AGENT_DIR=$(mktemp -d)/.jcode/agents
+  mkdir -p "$AGENT_DIR"
+  cat > "$AGENT_DIR/worker.md" <<'EOF'
+---
+model: ollama-cloud/deepseek-v4-flash:0731
+reasoning_effort: max
+---
+worker agent body
+EOF
+  TMPF=$(mktemp)
+  awk '
+    /^AGENT_FILE=""/ { p = 1 }
+    p { print }
+    p && /^# ── Provider fallback config/ { exit }
+  ' bin/jc > "$TMPF"
+  # shellcheck disable=SC1090
+  run bash -c "
+    CI_PROJECT_DIR='$(dirname "$(dirname "$AGENT_DIR")")'
+    AGENT='worker'
+    ROLE='worker'
+    source '$TMPF'
+    echo \"REASONING_EFFORT=\$REASONING_EFFORT\"
+  "
+  assert_success
+  assert_output --partial "REASONING_EFFORT=max"
+  rm -f "$TMPF"
+  rm -rf "$(dirname "$(dirname "$AGENT_DIR")")"
+}
+
+@test "reasoning effort: absent frontmatter key leaves empty (jcode default)" {
+  AGENT_DIR=$(mktemp -d)/.jcode/agents
+  mkdir -p "$AGENT_DIR"
+  cat > "$AGENT_DIR/triage.md" <<'EOF'
+---
+model: ollama-cloud/glm-5.2
+temperature: 0.5
+---
+triage agent body
+EOF
+  TMPF=$(mktemp)
+  awk '
+    /^AGENT_FILE=""/ { p = 1 }
+    p { print }
+    p && /^# ── Provider fallback config/ { exit }
+  ' bin/jc > "$TMPF"
+  # shellcheck disable=SC1090
+  run bash -c "
+    CI_PROJECT_DIR='$(dirname "$(dirname "$AGENT_DIR")")'
+    AGENT='triage'
+    ROLE='triage'
+    source '$TMPF'
+    echo \"REASONING_EFFORT=[\$REASONING_EFFORT]\"
+  "
+  assert_success
+  assert_output --partial "REASONING_EFFORT=[]"
+  rm -f "$TMPF"
+  rm -rf "$(dirname "$(dirname "$AGENT_DIR")")"
+}
+
+@test "reasoning effort: exported as JCODE_OPENAI_REASONING_EFFORT" {
+  AGENT_DIR=$(mktemp -d)/.jcode/agents
+  mkdir -p "$AGENT_DIR"
+  cat > "$AGENT_DIR/worker.md" <<'EOF'
+---
+model: ollama-cloud/deepseek-v4-flash:0731
+reasoning_effort: max
+---
+worker agent body
+EOF
+  TMPF=$(mktemp)
+  # Slice through the export block (ends before Do-Not-Disturb).
+  awk '
+    /^AGENT_FILE=""/ { p = 1 }
+    p { print }
+    p && /^# ── Do-Not-Disturb/ { exit }
+  ' bin/jc > "$TMPF"
+  JCODE_HOME=$(mktemp -d)
+  # shellcheck disable=SC1090
+  run bash -c "
+    CI_PROJECT_DIR='$(dirname "$(dirname "$AGENT_DIR")")'
+    AGENT='worker'
+    ROLE='worker'
+    PROVIDER_PROFILE='test-profile'
+    export BOUCLE_LLM_BASE_URL='https://llm.test/v1'
+    export BOUCLE_LLM_API_KEY='dummy'
+    export JCODE_HOME='$JCODE_HOME'
+    source '$TMPF'
+    echo \"JCODE_OPENAI_REASONING_EFFORT=\$JCODE_OPENAI_REASONING_EFFORT\"
+  "
+  assert_success
+  assert_output --partial "JCODE_OPENAI_REASONING_EFFORT=max"
+  rm -f "$TMPF"
+  rm -rf "$JCODE_HOME"
+  rm -rf "$(dirname "$(dirname "$AGENT_DIR")")"
+}
+
+@test "reasoning effort: shipped agents carrying deepseek-flash declare max" {
+  # The contract: every agent file running deepseek-v4-flash:0731 must
+  # declare reasoning_effort: max (nothing else forces it).
+  for agent in worker reviewer; do
+    model_line=$(awk '/^model:/{sub(/^model:[[:space:]]*/,""); print; exit}' ".jcode/agents/$agent.md")
+    echo "model_line=$model_line" >&2
+    [[ "$model_line" == *"deepseek"* ]] || continue
+    effort_line=$(awk '/^reasoning_effort:/{sub(/^reasoning_effort:[[:space:]]*/,""); print; exit}' ".jcode/agents/$agent.md")
+    [[ "$effort_line" == "max" ]]
+  done
+}
+
 # ── run_with_retry (transient-failure handling) ───────────────────────
 # Tests the retry math: max_retries + 1 total attempts, exponential backoff
 # up to 60s cap, ±50% jitter. We can't sleep the test for 60s, so we
