@@ -41,6 +41,18 @@ extract_func_body() {
   ' bin/jc > "$2"
 }
 
+# build_prompt calls trim_notes, so both must be extracted together or the
+# sourced snippet hits "command not found" and silently drops the notes.
+# Usage: extract_prompt_funcs <outfile>
+extract_prompt_funcs() {
+  local tmp
+  tmp=$(mktemp)
+  extract_func_body trim_notes "$1"
+  extract_func build_prompt "$tmp"
+  cat "$tmp" >> "$1"
+  rm -f "$tmp"
+}
+
 # ── Syntax ────────────────────────────────────────────────────────────
 
 @test "bin/jc parses without syntax error" {
@@ -159,7 +171,7 @@ extract_func_body() {
 
 @test "build_prompt: triage role mentions boucle:triage marker" {
   TMPF=$(mktemp)
-  extract_func build_prompt "$TMPF"
+  extract_prompt_funcs "$TMPF"
   run bash -c "ISSUE=42; source '$TMPF'; build_prompt triage"
   assert_success
   assert_output --partial "issue #42"
@@ -169,7 +181,7 @@ extract_func_body() {
 
 @test "build_prompt: worker role mentions [skip ci] commit" {
   TMPF=$(mktemp)
-  extract_func build_prompt "$TMPF"
+  extract_prompt_funcs "$TMPF"
   run bash -c "ISSUE=99; source '$TMPF'; build_prompt worker"
   assert_success
   assert_output --partial "issue #99"
@@ -179,7 +191,7 @@ extract_func_body() {
 
 @test "build_prompt: reviewer role references BOUCLE_PREVIEW_URL" {
   TMPF=$(mktemp)
-  extract_func build_prompt "$TMPF"
+  extract_prompt_funcs "$TMPF"
   run bash -c "ISSUE=7; source '$TMPF'; build_prompt reviewer"
   assert_success
   assert_output --partial "issue #7"
@@ -190,7 +202,7 @@ extract_func_body() {
 
 @test "build_prompt: e2e role references BOUCLE_LIVE_URL" {
   TMPF=$(mktemp)
-  extract_func build_prompt "$TMPF"
+  extract_prompt_funcs "$TMPF"
   run bash -c "ISSUE=3; source '$TMPF'; build_prompt e2e"
   assert_success
   assert_output --partial "issue #3"
@@ -201,7 +213,7 @@ extract_func_body() {
 
 @test "build_prompt: appends attachment paths when BOUCLE_ISSUE_ATTACHMENTS is set" {
   TMPF=$(mktemp)
-  extract_func build_prompt "$TMPF"
+  extract_prompt_funcs "$TMPF"
   run bash -c "ISSUE=5; BOUCLE_ISSUE_ATTACHMENTS='/tmp/a.png /tmp/b.jpg'; source '$TMPF'; build_prompt triage"
   assert_success
   assert_output --partial "/tmp/a.png"
@@ -212,7 +224,7 @@ extract_func_body() {
 
 @test "build_prompt: no attachment footer when BOUCLE_ISSUE_ATTACHMENTS is empty" {
   TMPF=$(mktemp)
-  extract_func build_prompt "$TMPF"
+  extract_prompt_funcs "$TMPF"
   run bash -c "ISSUE=5; unset BOUCLE_ISSUE_ATTACHMENTS; source '$TMPF'; build_prompt triage"
   assert_success
   refute_output --partial "Issue attachments"
@@ -227,7 +239,7 @@ extract_func_body() {
 
 @test "build_prompt: triage includes prior notes when BOUCLE_ISSUE_NOTES is set" {
   TMPF=$(mktemp)
-  extract_func build_prompt "$TMPF"
+  extract_prompt_funcs "$TMPF"
   run bash -c "ISSUE=27; BOUCLE_ISSUE_BODY='Amend the README'; BOUCLE_ISSUE_NOTES='[human] The Bold Font .ttf is attached
 [up-bot] Where is the README?
 [human] README.md is at repo root'; source '$TMPF'; build_prompt triage"
@@ -240,10 +252,109 @@ extract_func_body() {
 
 @test "build_prompt: no prior-notes section when BOUCLE_ISSUE_NOTES is empty" {
   TMPF=$(mktemp)
-  extract_func build_prompt "$TMPF"
+  extract_prompt_funcs "$TMPF"
   run bash -c "ISSUE=27; BOUCLE_ISSUE_BODY='Amend the README'; unset BOUCLE_ISSUE_NOTES; source '$TMPF'; build_prompt triage"
   assert_success
   refute_output --partial "Prior discussion"
+  rm -f "$TMPF"
+}
+
+# ── trim_notes (token-cost control) ───────────────────────────────────
+# Injected note threads are re-billed as input on every iteration: the
+# agents themselves write the bulkiest entries (triage analyses, reviewer
+# verdicts). trim_notes caps each note, never dropping one — dropping the
+# oldest would discard the early preservation instructions the worker
+# relies on (lib/boucle-ci/worker.sh).
+
+@test "trim_notes: short notes pass through unchanged" {
+  TMPF=$(mktemp)
+  extract_func_body trim_notes "$TMPF"
+  run bash -c "source '$TMPF'; trim_notes t '[human] short note'"
+  assert_success
+  assert_output --partial "[human] short note"
+  refute_output --partial "elided by boucle"
+}
+
+@test "trim_notes: a note longer than the cap is truncated with an elision marker" {
+  TMPF=$(mktemp)
+  extract_func_body trim_notes "$TMPF"
+  BIG=$(printf 'x%.0s' $(seq 1 3000))
+  run bash -c "source '$TMPF'; BOUCLE_MAX_NOTE_CHARS=100 trim_notes t '[bot] $BIG'" 2> /dev/null
+  assert_success
+  assert_output --partial "elided by boucle"
+  # Output must be far smaller than the 3000-char input.
+  [ "${#output}" -lt 400 ]
+  rm -f "$TMPF"
+}
+
+@test "trim_notes: EVERY note survives — the oldest is never dropped" {
+  TMPF=$(mktemp)
+  extract_func_body trim_notes "$TMPF"
+  BIG=$(printf 'y%.0s' $(seq 1 2000))
+  # Oldest note carries a preservation instruction; later notes are bulky.
+  run bash -c "source '$TMPF'; BOUCLE_MAX_NOTE_CHARS=50 trim_notes t '[human] KEEP-THIS-URL https://example.org/video
+[bot] $BIG
+[bot] $BIG'" 2> /dev/null
+  assert_success
+  assert_output --partial "KEEP-THIS-URL"
+  rm -f "$TMPF"
+}
+
+@test "trim_notes: multi-line note bodies stay attached to their author line" {
+  TMPF=$(mktemp)
+  extract_func_body trim_notes "$TMPF"
+  run bash -c "source '$TMPF'; BOUCLE_MAX_NOTE_CHARS=5000 trim_notes t '[human] line one
+line two continues the same note
+[bot] second note'" 2> /dev/null
+  assert_success
+  assert_output --partial "line two continues the same note"
+  assert_output --partial "[bot] second note"
+  rm -f "$TMPF"
+}
+
+@test "trim_notes: BOUCLE_MAX_NOTE_CHARS=0 disables trimming (escape hatch)" {
+  TMPF=$(mktemp)
+  extract_func_body trim_notes "$TMPF"
+  BIG=$(printf 'z%.0s' $(seq 1 3000))
+  run bash -c "source '$TMPF'; BOUCLE_MAX_NOTE_CHARS=0 trim_notes t '[bot] $BIG'" 2> /dev/null
+  assert_success
+  refute_output --partial "elided by boucle"
+  [ "${#output}" -gt 2900 ]
+  rm -f "$TMPF"
+}
+
+@test "trim_notes: empty input produces empty output" {
+  TMPF=$(mktemp)
+  extract_func_body trim_notes "$TMPF"
+  run bash -c "source '$TMPF'; trim_notes t ''" 2> /dev/null
+  assert_success
+  assert_output ""
+  rm -f "$TMPF"
+}
+
+@test "trim_notes: reports before/after sizes on stderr for CI measurement" {
+  TMPF=$(mktemp)
+  extract_func_body trim_notes "$TMPF"
+  BIG=$(printf 'w%.0s' $(seq 1 3000))
+  run bash -c "source '$TMPF'; BOUCLE_MAX_NOTE_CHARS=100 trim_notes issue_notes '[bot] $BIG' > /dev/null"
+  assert_success
+  assert_output --partial "[boucle:prompt]"
+  assert_output --partial "issue_notes"
+  assert_output --partial "chars_before="
+  assert_output --partial "chars_after="
+  rm -f "$TMPF"
+}
+
+@test "build_prompt: worker trims bulky prior notes but keeps the earliest instruction" {
+  TMPF=$(mktemp)
+  extract_prompt_funcs "$TMPF"
+  BIG=$(printf 'q%.0s' $(seq 1 4000))
+  run bash -c "ISSUE=42; BOUCLE_MAX_NOTE_CHARS=80; BOUCLE_ISSUE_BODY='Build the page'; BOUCLE_ISSUE_NOTES='[human] Use the EXACT video URL https://example.org/v
+[bot] $BIG'; source '$TMPF'; build_prompt worker" 2> /dev/null
+  assert_success
+  assert_output --partial "Use the EXACT video URL"
+  assert_output --partial "elided by boucle"
+  refute_output --partial "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
   rm -f "$TMPF"
 }
 
