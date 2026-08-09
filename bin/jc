@@ -39,7 +39,10 @@ DRY_RUN="${BOUCLE_DRY_RUN:-false}"
 # JCODE_RUN_AUTO_POKE=0 prevents the auto-poke loop from extending the run.
 
 # ── Map boucle roles to project-local agents (.jcode/agents/*.md) ──
-# jcode has no --variant flag. Reasoning effort is not controllable per-call.
+# jcode has no --variant flag. Reasoning effort IS controllable since jcode
+# v0.73.0 via JCODE_OPENAI_REASONING_EFFORT / config openai_reasoning_effort
+# (values none|minimal|low|medium|high|xhigh|max — deepseek ladder includes
+# max). Wired from the agent frontmatter below (see REASONING_EFFORT parse).
 # Temperature is set via JCODE_OPENAI_EXTRA_BODY env (parsed from agent YAML frontmatter).
 AGENT=""
 MODEL=""
@@ -170,6 +173,13 @@ fi
 # Extract temperature (optional — empty means use provider default)
 TEMPERATURE=$(awk '/^temperature:/{sub(/^temperature:[[:space:]]*/,""); print; exit}' "$AGENT_FILE")
 
+# Extract reasoning effort (optional — empty means jcode's own default, "low").
+# Frontmatter key:
+#   reasoning_effort: max   # none|minimal|low|medium|high|xhigh|max
+# The value lives in the agent file: worker.md/reviewer.md ship model
+# deepseek-v4-flash:0731 with `reasoning_effort: max`. No model sniffing here.
+REASONING_EFFORT=$(awk '/^reasoning_effort:/{sub(/^reasoning_effort:[[:space:]]*/,""); print; exit}' "$AGENT_FILE")
+
 # ── Provider fallback config ───────────────────────────────────────────
 # When the primary provider is down (empty log / no agent activity = the
 # exit-4 condition, AGENTS.md lesson #29), retry with a fallback provider
@@ -249,6 +259,13 @@ export JCODE_NO_EMOJI="${JCODE_NO_EMOJI:-1}"
 # Set temperature via JCODE_OPENAI_EXTRA_BODY if the agent file specifies one.
 if [ -n "$TEMPERATURE" ]; then
   export JCODE_OPENAI_EXTRA_BODY="{\"temperature\":${TEMPERATURE}}"
+fi
+
+# Set reasoning effort via JCODE_OPENAI_REASONING_EFFORT (jcode v0.73.0+).
+# Sent verbatim as reasoning_effort in the OpenAI request body; "max" is part
+# of jcode's deepseek ladder (none|low|medium|high|max).
+if [ -n "$REASONING_EFFORT" ]; then
+  export JCODE_OPENAI_REASONING_EFFORT="$REASONING_EFFORT"
 fi
 
 # ── Do-Not-Disturb ─────────────────────────────────────────────────────
