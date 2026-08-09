@@ -9,6 +9,21 @@ and boucle handles the rest — analysis, implementation, review, merge,
 deploy, verification. You stay in the forge you already use every day; you
 never touch the engine itself.
 
+## 📑 Table of contents
+
+- [✨ Why boucle?](#-why-boucle)
+- [🩹 What most loop tools get wrong](#-what-most-loop-tools-get-wrong)
+- [🚀 Quick start](#-quick-start)
+  - [Option 1 — copy/paste prompt](#option-1--copypaste-prompt-easiest)
+  - [Option 2 — command line](#option-2--command-line)
+  - [The bot user](#the-bot-user)
+  - [After install](#after-install)
+- [⚙️ How it works](#️-how-it-works)
+- [🛠️ Configuration](#️-configuration)
+- [🗺️ Roadmap](#️-roadmap)
+- [⚖️ License](#️-license)
+- [📚 Docs](#-docs)
+
 ## ✨ Why boucle?
 
 **End to end, from idea to shipped.** A ticket becomes a feature deployed to
@@ -59,22 +74,6 @@ seven-run POC of a representative loop tool:
 - **No budget control.** Token spend with no cap or visibility. → boucle
   ships step and iteration caps per role, and a concurrency cap on parallel
   issues.
-
-### 🏗️ Origins
-
-Boucle was not designed in a vacuum — it was extracted from a real
-benchmark: an Astro static site on GitLab, deployed to Cloudflare Pages,
-maintained by an indie Product Builder.
-
-Keeping that site running — while agents burned the night away on their own
-machines — is what produced the requirement list above. Before boucle, the
-maintainer ran a **seven-run POC of a representative loop tool** (*looper*):
-it covered only 57% of the autonomous flow (≥80% required), needed 3–5
-manual interventions per loop (≤1 tolerated), and its diff-scoped review
-gate shipped broken code to production (a 404 page and a migration that
-throws at runtime). The irritants above are drawn from that benchmark —
-boucle is the second iteration, designed so these failure modes are
-structurally impossible, not just discouraged.
 
 ## 🚀 Quick start
 
@@ -226,7 +225,7 @@ deploy overrides — is documented in [LOOP.md](LOOP.md).
 
 ## 🗺️ Roadmap
 
-- [ ] **GitHub support** — run boucle on GitHub issues and Actions
+- [x] **GitHub support** — run boucle on GitHub issues and Actions
 - [ ] **servo rendering** — migrate preview rendering from Puppeteer to
       [servo](https://github.com/servo/servo) (Rust-native, no Chromium)
 
