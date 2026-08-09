@@ -721,7 +721,7 @@ else
     if [ "$DRY_RUN" = "true" ]; then
       echo "  [dry-run] set BOUCLE_FALLBACK_BASE_URL (secret, masked) — value omitted"
     else
-      echo "$BOUCLE_FALLBACK_BASE_URL" | GH_TOKEN="$BOT_TOKEN" gh secret set BOUCLE_FALLBACK_BASE_URL --repo "$PROJECT_ID" 2>/dev/null
+      echo "$BOUCLE_FALLBACK_BASE_URL" | GH_TOKEN="$BOT_TOKEN" gh secret set BOUCLE_FALLBACK_BASE_URL --repo "$PROJECT_ID" 2> /dev/null
     fi
     log_pass "BOUCLE_FALLBACK_BASE_URL set (secrets, masked)"
   else
@@ -733,7 +733,7 @@ else
     if [ "$DRY_RUN" = "true" ]; then
       echo "  [dry-run] set BOUCLE_FALLBACK_API_KEY (secret, masked) — value omitted"
     else
-      echo "$BOUCLE_FALLBACK_API_KEY" | GH_TOKEN="$BOT_TOKEN" gh secret set BOUCLE_FALLBACK_API_KEY --repo "$PROJECT_ID" 2>/dev/null
+      echo "$BOUCLE_FALLBACK_API_KEY" | GH_TOKEN="$BOT_TOKEN" gh secret set BOUCLE_FALLBACK_API_KEY --repo "$PROJECT_ID" 2> /dev/null
     fi
     log_pass "BOUCLE_FALLBACK_API_KEY set (secrets, masked)"
   else
