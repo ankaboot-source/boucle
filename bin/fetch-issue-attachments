@@ -27,7 +27,28 @@ MAX_BYTES="${BOUCLE_IMAGE_MAX_BYTES:-10485760}"
 TOTAL_MAX_BYTES="${BOUCLE_IMAGE_TOTAL_MAX_BYTES:-52428800}"
 
 HOST="${BOUCLE_FORGE_HOST:-gitlab.example.com}"
-PROJECT_ID="${CI_PROJECT_ID:?CI_PROJECT_ID must be set}"
+
+# ── Forge backend bootstrap ─────────────────────────────────────────
+# This script runs standalone in the CI job (not via bin/boucle-ci), so
+# it must source the forge abstraction itself. BOUCLE_FORGE defaults to
+# gitlab when the script is called outside CI (local dev, tests).
+BOUCLE_HOME="${BOUCLE_HOME:-}"
+if [ -z "$BOUCLE_HOME" ]; then
+  if [ -d "${CI_PROJECT_DIR:-}/.boucle/bin" ]; then
+    BOUCLE_HOME="$CI_PROJECT_DIR/.boucle"
+  else
+    BOUCLE_HOME="$(cd "$(dirname "$0")/.." && pwd)"
+  fi
+fi
+export BOUCLE_HOME
+export BOUCLE_FORGE="${BOUCLE_FORGE:-gitlab}"
+# shellcheck source=forge/common.sh
+. "$BOUCLE_HOME/bin/forge/common.sh"
+type forge_init &>/dev/null && {
+  type forge_issue_get &>/dev/null || forge_init
+} || true
+export BOUCLE_FORGE_HOST="${BOUCLE_FORGE_HOST:-${GITLAB_HOST:-gitlab.example.com}}"
+export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:?CI_PROJECT_ID must be set}}"
 
 mkdir -p "$ATT_DIR"
 # Clean slate per run (re-download fresh each time)
@@ -38,9 +59,9 @@ ALL_TEXT=$(mktemp)
 trap 'rm -f "$ALL_TEXT"' EXIT
 
 {
-  glab api --hostname "$HOST" "/projects/$PROJECT_ID/issues/$ISSUE" 2> /dev/null \
+  forge_issue_get "$ISSUE" 2> /dev/null \
     | jq -r '.description // empty' 2> /dev/null || true
-  glab api --hostname "$HOST" "/projects/$PROJECT_ID/issues/$ISSUE/notes" 2> /dev/null \
+  forge_issue_notes "$ISSUE" 2> /dev/null \
     | jq -r '.[].body // empty' 2> /dev/null || true
 } > "$ALL_TEXT"
 
@@ -55,27 +76,33 @@ trap 'rm -f "$ALL_TEXT"' EXIT
 if [ "${BOUCLE_PARENT_ATTACHMENTS_DISABLE:-false}" != "true" ]; then
   # Parse the parent IID from the current issue's description only (notes are
   # not templated, so they cannot carry the "## Parent issue" section).
-  PARENT_IID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/issues/$ISSUE" 2> /dev/null \
+  # `|| true`: grep exits 1 when the description contains no "#N" (non-sub-issue
+  # with a plain description) — under set -euo pipefail that would abort the
+  # whole fetch. The sibling pipelines above all carry `|| true`; this one must
+  # too, or non-sub-issue attachments silently never download (CI masks the
+  # abort with its `|| echo WARN` guard).
+  PARENT_IID=$(forge_issue_get "$ISSUE" 2> /dev/null \
     | jq -r '.description // empty' 2> /dev/null \
     | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' \
-    | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+    | grep -oE '#[0-9]+' | head -1 | tr -d '#') || true
   if [ -n "${PARENT_IID:-}" ] && [ "$PARENT_IID" != "$ISSUE" ]; then
     echo "[fetch-issue-attachments] Found parent issue #$PARENT_IID — inheriting its attachments"
     {
-      glab api --hostname "$HOST" "/projects/$PROJECT_ID/issues/$PARENT_IID" 2> /dev/null \
+      forge_issue_get "$PARENT_IID" 2> /dev/null \
         | jq -r '.description // empty' 2> /dev/null || true
-      glab api --hostname "$HOST" "/projects/$PROJECT_ID/issues/$PARENT_IID/notes" 2> /dev/null \
+      forge_issue_notes "$PARENT_IID" 2> /dev/null \
         | jq -r '.[].body // empty' 2> /dev/null || true
     } >> "$ALL_TEXT"
   fi
 fi
 
-# Extract all GitLab upload paths (any extension — images, PDFs, archives, etc.).
-# GitLab markdown references uploads as ![alt](/uploads/<hash>/<filename.ext>)
-# or as regular links [label](/uploads/...). We only download forge-hosted
-# uploads (not arbitrary internet URLs) for safety.
+# Extract all forge-hosted upload paths (any extension — images, PDFs,
+# archives, etc.). Delegated to the forge contract so the pattern matches
+# the active backend (GitLab /uploads/<hash>/<filename.ext>, GitHub
+# user-attachments URLs). We only download forge-hosted uploads (not
+# arbitrary internet URLs) for safety.
 mapfile -t UPLOAD_PATHS < <(
-  grep -oiE "/uploads/[^[:space:]\"')]+" "$ALL_TEXT" \
+  forge_attachments_extract "$(cat "$ALL_TEXT")" \
     | sort -u || true
 )
 
@@ -112,17 +139,15 @@ for path in "${UPLOAD_PATHS[@]}"; do
   remaining=$((TOTAL_MAX_BYTES - total_size))
   per_file_cap=$((MAX_BYTES < remaining ? MAX_BYTES : remaining))
 
-  # Download via the GitLab API (not the raw /uploads/ URL).
-  # The raw URL (https://$HOST/uploads/...) returns a login page for private
+  # Download via the forge contract (forge_attachment_download uses the
+  # API, not the raw /uploads/ URL — the raw URL
+  # (https://$HOST/uploads/...) returns a login page for private
   # projects — the /uploads/ endpoint uses cookie-based session auth, not the
   # PRIVATE-TOKEN header. The API endpoint
   #   GET /projects/:id/uploads/:secret/:filename
   # with `Accept: application/octet-stream` returns the binary blob correctly.
-  # See boucle lesson #31.
-  if glab api --hostname "$HOST" --method GET \
-    "/projects/$PROJECT_ID${path}" \
-    -H "Accept: application/octet-stream" \
-    > "$outpath" 2> /dev/null; then
+  # See boucle lesson #31).
+  if forge_attachment_download "$path" "$outpath"; then
     actual_size=$(wc -c < "$outpath")
     if [ "$actual_size" -eq 0 ]; then
       rm -f "$outpath"
