@@ -885,3 +885,15 @@ HELPER
     LINE=${LINE:-}
   done <<< "$(cat .gitlab-ci.yml | grep -n 'source \$BOUCLE_HOME/lib/boucle.sh\|source \$BOUCLE_HOME/bin/forge/common.sh\|forge_init')"
 }
+
+@test "forge_trigger_role falls back to CI_DEFAULT_BRANCH (never bare 'main')" {
+  # Regression (consumer framagit, 2026-08): forge_trigger_role POSTed the
+  # role-trigger pipeline with ref=${BOUCLE_DEFAULT_BRANCH:-main}; the var is
+  # never set by GitLab CI, so consumers with master as default branch
+  # triggered against a non-existent "main" ref — the curl error was swallowed
+  # by `|| true` and the re-trigger silently died. The fallback MUST resolve
+  # CI_DEFAULT_BRANCH (GitLab native) before degrading to master.
+  run bash -c 'source bin/forge/gitlab.sh && grep -n "CI_DEFAULT_BRANCH" <(declare -f forge_trigger_role) || grep -n "CI_DEFAULT_BRANCH" bin/forge/gitlab.sh'
+  assert_success
+  assert_output --partial "CI_DEFAULT_BRANCH"
+}
