@@ -206,7 +206,7 @@ default:
       # named jcode-linux-x86_64.bin at its root.
       if ! command -v jcode &>/dev/null; then
         echo "Installing jcode coding agent (standalone binary)..."
-        JCODE_VER="${JCODE_VERSION:-v0.68.0}"
+        JCODE_VER="${JCODE_VERSION:-v0.73.0}"
         mkdir -p "$HOME/.local/bin"
         curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x86_64.tar.gz" -o /tmp/jcode.tar.gz
         tar xzf /tmp/jcode.tar.gz -C /tmp
