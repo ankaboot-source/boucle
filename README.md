@@ -17,6 +17,7 @@ never touch the engine itself.
   - [Option 2 — command line](#option-2-command-line)
   - [After install](#after-install)
 - [⚙️ How it works](#️-how-it-works)
+- [💰 Cost](#cost)
 - [🛠️ Configuration](#️-configuration)
   - [The bot user](#the-bot-user)
 - [🗺️ Roadmap](#️-roadmap)
@@ -170,6 +171,54 @@ issue closed
 Four specialized agents — **triage**, **worker**, **reviewer**, **e2e** —
 orchestrate the whole flow. Humans only do what only humans can: validate the
 spec and approve the MR.
+
+## 💰 Cost
+
+boucle runs on a **subscription plan**, not per-token billing — you pay a
+fixed monthly fee for a usage allowance, and the loop runs within it. The
+default duo ([GLM-5.2](https://z.ai/blog/glm-5.2) for triage/review,
+[DeepSeek V4 Flash 0731](https://artificialanalysis.ai/models/deepseek-v4-flash)
+for the worker) is tuned for the cheapest plan that sustains an autonomous
+loop, while the equivalent Claude Code duo (Opus 5 + Sonnet 5) needs the
+top plan for the same workload.
+
+### Per-task cost (Artificial Analysis, max-effort reasoning)
+
+| Model | Intelligence | Cost per task | Role in boucle |
+| --- | --- | --- | --- |
+| [GLM-5.2](https://z.ai/blog/glm-5.2) | 53 | $0.31 | triage, e2e |
+| [DeepSeek V4 Flash 0731](https://artificialanalysis.ai/models/deepseek-v4-flash) | 52 | $0.03 | worker, reviewer |
+| Claude Opus 5 | 63 | $2.34 | (equivalent: triage, e2e) |
+| Claude Sonnet 5 | 55 | $1.72 | (equivalent: worker, reviewer) |
+
+The boucle duo scores near-equal on intelligence (52–53 vs 55–63) at **7–57×
+less cost per task**. The intelligence gap is real but narrow; the cost gap is
+not.
+
+### Monthly plan comparison
+
+| | boucle (Ollama) | Claude Code |
+| --- | --- | --- |
+| Cheapest usable plan | **Pro — $20/mo** | Pro — $20/mo (usage too low for an autonomous loop) |
+| Recommended plan | **Max — $100/mo** (continuous agents, 10 concurrent) | **Max 20× — $200/mo** (20× Pro usage) |
+| Capacity model | session limits reset every 5h, weekly every 7d; compute-weighted | usage limits, 5× or 20× Pro |
+| Concurrency | Pro: 3 models · Max: 10 models | (not published) |
+| Models included | GLM-5.2, DeepSeek V4 Flash 0731, + 40k community | Opus 5, Sonnet 5, Haiku |
+| Data retention | zero data retention, no training on prompts | Anthropic's standard policy |
+
+**Bottom line:** an autonomous loop that runs unattended needs the top tier on
+either side. boucle on Ollama Max ($100/mo) gives you continuous-agent
+capacity with 10 concurrent models; Claude Code Max 20× ($200/mo) costs
+**2× more** for a duo whose per-task cost is **7–57× higher** — and whose
+intelligence edge (63 vs 53) does not change the outcome of a loop that
+validates behavior on a live preview rather than trusting the model's
+confidence.
+
+> Note: new Ollama Max subscriptions are temporarily paused (capacity
+> expansion); Pro remains open and Pro users can buy extra usage balance to
+> go beyond the plan's included limits. See
+> [Ollama pricing](https://ollama.com/pricing) and
+> [Claude pricing](https://claude.com/pricing) for the live numbers.
 
 ## 🛠️ Configuration
 
