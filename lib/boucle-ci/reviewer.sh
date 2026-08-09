@@ -140,14 +140,22 @@ boucle_ci_reviewer() {
     # Wait for check suites on the PR head
     local checks_wait checks_attempt checks_max check_data
     checks_wait="${BOUCLE_REVIEW_CHECKS_WAIT:-900}"
+    checks_wait=$(echo "$checks_wait" | tr -cd '0-9')
+    [ -z "$checks_wait" ] || [ "$checks_wait" -eq 0 ] 2> /dev/null && checks_wait=900
     checks_max=$((checks_wait / 10))
+    [ "$checks_max" -lt 1 ] && checks_max=1
     checks_attempt=0
     check_data="[]"
     while [ "$checks_attempt" -lt "$checks_max" ]; do
       checks_attempt=$((checks_attempt + 1))
       check_data=$(forge_mr_check_suites "$MR_IID" "$MR_HEAD")
+      # Vocabulary-agnostic pending detection: treat as pending when
+      # .conclusion is null OR .status/pending in {queued,in_progress,pending,running}
       local pending_count
-      pending_count=$(echo "$check_data" | jq -r '[.[] | select(.conclusion == null or .status == "queued" or .status == "in_progress")] | length' 2> /dev/null || echo 1)
+      pending_count=$(echo "$check_data" | jq -r '
+        def is_pending: . == "queued" or . == "in_progress" or . == "pending" or . == "running";
+        [.[] | select(.conclusion == null or (.conclusion | is_pending) or (.status | is_pending))]
+        | length' 2> /dev/null || echo 1)
       if [ "$pending_count" -eq 0 ]; then
         echo "All PR check suites concluded for MR !${MR_IID} (after ~$((checks_attempt * 10))s)"
         break
@@ -156,9 +164,16 @@ boucle_ci_reviewer() {
       sleep 10
     done
     BOUCLE_MR_CHECKS=$(echo "$check_data" | jq -c '.' 2> /dev/null || echo "[]")
-    # Warn on timeout but don't fail — the review can still proceed
-    if echo "$check_data" | jq -e '[.[] | select(.conclusion == null or .status == "queued" or .status == "in_progress")] | length > 0' > /dev/null 2>&1; then
-      echo "[boucle] WARN: PR check suites timed out after ${checks_wait}s — proceeding without full CI results"
+    # Warn on timeout but don't fail — the review can still proceed.
+    # Report failed-conclusions count alongside the timeout warning.
+    local failed_count
+    failed_count=$(echo "$check_data" | jq -r '[.[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out" or .conclusion == "action_required")] | length' 2> /dev/null || echo 0)
+    if echo "$check_data" | jq -e '
+      def is_pending: . == "queued" or . == "in_progress" or . == "pending" or . == "running";
+      [.[] | select(.conclusion == null or (.conclusion | is_pending) or (.status | is_pending))] | length > 0' > /dev/null 2>&1; then
+      echo "[boucle] WARN: PR check suites timed out after ${checks_wait}s (${failed_count} failed) — proceeding without full CI results"
+    elif [ "$failed_count" -gt 0 ]; then
+      echo "[boucle] INFO: ${failed_count} PR check suite(s) had failure conclusions — reviewer will judge"
     fi
     export BOUCLE_MR_DIFF BOUCLE_MR_CHECKS
     echo "[boucle] Diff review mode ready: diff=${#BOUCLE_MR_DIFF}chars, checks=$(echo "$BOUCLE_MR_CHECKS" | jq 'length')"

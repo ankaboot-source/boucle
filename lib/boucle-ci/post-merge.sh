@@ -30,15 +30,23 @@ boucle_ci_post_merge() {
     local head_sha wait_sec attempt max_attempts
     head_sha=$(git rev-parse HEAD)
     wait_sec="${BOUCLE_EXTERNAL_DEPLOY_WAIT:-600}"
+    wait_sec=$(echo "$wait_sec" | tr -cd '0-9')
+    [ -z "$wait_sec" ] || [ "$wait_sec" -eq 0 ] 2> /dev/null && wait_sec=600
     max_attempts=$((wait_sec / 10))
+    [ "$max_attempts" -lt 1 ] && max_attempts=1
     attempt=0
     local all_done=true
     while [ "$attempt" -lt "$max_attempts" ]; do
       attempt=$((attempt + 1))
       local check_data all_concluded pending_count
       check_data=$(forge_commit_check_suites "$head_sha")
-      all_concluded=$(echo "$check_data" | jq -r '[.[] | select(.conclusion == null or .status == "queued" or .status == "in_progress")] | length' 2> /dev/null || echo 1)
-      if [ "$all_concluded" -eq 0 ]; then
+      # Vocabulary-agnostic pending detection: treat as pending when
+      # .conclusion is null OR .status/pending in {queued,in_progress,pending,running}
+      pending_count=$(echo "$check_data" | jq -r '
+        def is_pending: . == "queued" or . == "in_progress" or . == "pending" or . == "running";
+        [.[] | select(.conclusion == null or (.conclusion | is_pending) or (.status | is_pending))]
+        | length' 2> /dev/null || echo 1)
+      if [ "$pending_count" -eq 0 ]; then
         echo "All check suites concluded for commit ${head_sha:0:12} (after ~$((attempt * 10))s)"
         all_done=true
         break
@@ -47,7 +55,7 @@ boucle_ci_post_merge() {
         all_done=false
         break
       fi
-      echo "Waiting for check suites on ${head_sha:0:12} — $all_concluded still pending (attempt $attempt/$max_attempts)"
+      echo "Waiting for check suites on ${head_sha:0:12} — $pending_count still pending (attempt $attempt/$max_attempts)"
       sleep 10
     done
 
@@ -55,6 +63,16 @@ boucle_ci_post_merge() {
       echo "FAIL: external deploy wait timed out after ${wait_sec}s — check suites on ${head_sha:0:12} did not conclude" >&2
       forge_issue_note "$BOUCLE_ISSUE" \
         "⚠️ External deploy wait timed out after ${wait_sec}s. The consumer's own CI/CD did not complete for commit ${head_sha:0:12}. Check the repo's CI/CD status manually.\n\nBOUCLE_LIVE_URL=$live_url"
+      exit 1
+    fi
+
+    # Check for any suite that concluded with failure/cancelled/timed_out/action_required
+    local failed_count
+    failed_count=$(echo "$check_data" | jq -r '[.[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out" or .conclusion == "action_required")] | length' 2> /dev/null || echo 0)
+    if [ "$failed_count" -gt 0 ]; then
+      echo "FAIL: $failed_count check suite(s) failed for commit ${head_sha:0:12}" >&2
+      forge_issue_note "$BOUCLE_ISSUE" \
+        "⚠️ External deploy CI failed: $failed_count check suite(s) concluded with failure for commit ${head_sha:0:12}. The consumer's own CI/CD reported errors.\n\nBOUCLE_LIVE_URL=$live_url"
       exit 1
     fi
 
