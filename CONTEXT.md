@@ -23,8 +23,7 @@ happens asynchronously, driven by labels and comments.
 Boucle was extracted from a real benchmark: the maintenance of a static
 Astro website (GitLab-hosted, deployed to Cloudflare Pages). The failure
 modes observed there — and in the *looper* POC that preceded boucle —
-shaped the design. See the [README](README.md) "Why boucle?" → Origins
-section.
+shaped the design.
 
 ## 2. Features
 
@@ -132,7 +131,9 @@ Contributions to boucle must align with this line.
 
 ## 8. Known limitations (MVP)
 
-- **GitLab only**: GitHub is planned but not yet implemented.
+- **GitLab + GitHub**: both forges are supported. GitLab remains the
+  reference implementation; GitHub (GitHub Actions, `BOUCLE_FORGE=github`)
+  is functional but less battle-tested.
 - **Cloudflare Pages only**: other deployment targets are planned.
 - **codebase-memory-mcp hang in CI**: the MCP handshake can exceed the
   30-second runner window. `bin/jc` disables MCP servers in CI via
