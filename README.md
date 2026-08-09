@@ -78,9 +78,9 @@ seven-run POC of a representative loop tool:
 ## 🚀 Quick start
 
 **Prerequisites:** a GitLab repository with Cloudflare Pages configured as the
-deployment target, and a bot GitLab account with a Personal Access Token. The
-bot is a separate account that boucle acts through — see
-[The bot user](#the-bot-user) for how to create it.
+deployment target. `bin/setup` creates the bot (a project service account) as
+part of the install — see [The bot user](#the-bot-user) if you prefer to wire
+in an existing account instead.
 
 Pick whichever path fits you.
 
@@ -123,30 +123,42 @@ git submodule add https://github.com/ankaboot-source/boucle .boucle
 `bin/setup` configures GitLab (CI variables, labels, board, branch
 protection, webhook), writes a thin `.gitlab-ci.yml` shim, and appends
 `.boucle/` to your `.gitignore`. Your existing pipeline is never overwritten.
-Project and host are read from the `origin` remote automatically — the only
-values you may need to pass explicitly are the bot and Cloudflare tokens
-(`--bot-token`, `--cf-token`), which otherwise come from the `BOUCLE_*`
-environment variables.
+Project and host are read from the `origin` remote automatically. The bot is
+created for you (pass `--bot-id` / `--bot-token` to use an existing account
+instead); the only token you may still need to pass explicitly is the
+Cloudflare one (`--cf-token`), which otherwise comes from the `BOUCLE_CF_TOKEN`
+environment variable.
 
 ### The bot user
 
-boucle acts through a dedicated GitLab **bot account** — it comments on
-issues, reassigns them, and merges approved MRs. `bin/setup` wires an
-existing account into your project, but **it does not create it**: creating a
-platform user requires GitLab platform-admin rights, which most project
-owners do not have.
+boucle acts through a dedicated **bot account** — it comments on issues,
+reassigns them, and merges approved MRs. **`bin/setup` creates it for you as
+part of the install**: it is not a separate manual step.
 
-Instead, create the bot from your project's **Service accounts** page
-(GitLab → Project → Settings → Service accounts, e.g. on framagit:
+- **GitLab** — setup provisions a **project service account** via the API
+  (a project owner can do this without platform-admin rights, GitLab 16+)
+  and requests a Personal Access Token (scope: `api`) for it. It then seeds
+  the `BOUCLE_BOT_ID` / `BOUCLE_BOT_USERNAME` / `BOUCLE_TOKEN` CI/CD
+  variables, and the loop reassigns issues to it automatically. Re-running
+  setup reuses the existing account — it never creates a duplicate.
+- **GitHub** — GitHub has no project service accounts: the bot is the account
+  that owns the `--bot-token` PAT. setup resolves which account the PAT
+  belongs to, seeds `BOUCLE_BOT_USERNAME` with that login (the loop detects
+  the bot's own comments by it), and tells you if that account is not yet a
+  collaborator of the repository so you can add it.
+
+If the GitLab service-account API is unavailable on your instance (feature
+flag off, or the endpoint 403s), setup falls back to the manual flow: create
+the bot from your project's **Service accounts** page (GitLab → Project →
+Settings → Service accounts, e.g. on framagit:
 `https://<your-gitlab-host>/<group>/<project>/-/settings/service_accounts`).
-That page lets a project owner provision a bot without platform admin.
-Then:
+That page lets a project owner provision a bot without platform admin. Then:
 
 1. Create a Personal Access Token for the bot account (scope: `api`) — this
    is the `--bot-token` value.
 2. Get its numeric user ID — this is the `--bot-id` value.
-3. Pass both to `bin/setup` (`--bot-id <id> --bot-token <pat>`), or set the
-   `BOUCLE_BOT_ID` / `BOUCLE_BOT_TOKEN` environment variables.
+3. Re-run `bin/setup --bot-id <id> --bot-token <pat>` (or set the
+   `BOUCLE_BOT_ID` / `BOUCLE_BOT_TOKEN` environment variables).
 
 `bin/setup` then adds the bot to the project as a Developer, seeds the
 `BOUCLE_BOT_ID` / `BOUCLE_BOT_USERNAME` / `BOUCLE_TOKEN` CI/CD variables, and
