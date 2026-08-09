@@ -238,6 +238,24 @@ run() {
   fi
 }
 
+# detect_iana_tz — detect the IANA timezone name from the environment
+# Resolution order: $TZ (if it contains a /), /etc/timezone, readlink /etc/localtime, UTC
+detect_iana_tz() {
+  local tz=""
+  if [ -n "${TZ:-}" ] && [[ "$TZ" == */* ]]; then
+    tz="$TZ"
+  elif [ -f /etc/timezone ] && [ -s /etc/timezone ]; then
+    tz="$(cat /etc/timezone | tr -d '[:space:]')"
+  else
+    local link
+    link="$(readlink -f /etc/localtime 2> /dev/null || true)"
+    if [ -n "$link" ] && [[ "$link" == *zoneinfo/* ]] && ! echo "$link" | grep -q 'localtime$'; then
+      tz="${link#*zoneinfo/}"
+    fi
+  fi
+  echo "${tz:-UTC}"
+}
+
 # configure_webhook <hook_id> <url> — GitLab only
 configure_webhook() {
   local hook_id="$1"
@@ -402,6 +420,59 @@ if [ "$FORGE" = "gitlab" ]; then
     log_pass "BOUCLE_DND_ENABLED set (true — good default)"
   fi
 
+  # BOUCLE_DND_TZ
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_DND_TZ" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
+  if [ -n "$EXISTING" ]; then
+    log_skip "BOUCLE_DND_TZ already exists"
+  else
+    DND_TZ_VALUE="${BOUCLE_DND_TZ:-$(detect_iana_tz)}"
+    if [ "$NON_INTERACTIVE" = "false" ]; then
+      read -r -p "BOUCLE_DND_TZ (IANA timezone, e.g. Europe/Paris) [$DND_TZ_VALUE]: " DND_TZ_INPUT || true
+      [ -n "$DND_TZ_INPUT" ] && DND_TZ_VALUE="$DND_TZ_INPUT"
+    fi
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_DND_TZ -f value=$DND_TZ_VALUE -f masked=false -f protected=false >/dev/null"
+    log_pass "BOUCLE_DND_TZ set ($DND_TZ_VALUE)"
+  fi
+
+  # BOUCLE_DND_START
+  if [ -n "${BOUCLE_DND_START:-}" ]; then
+    EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_DND_START" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
+    if [ -n "$EXISTING" ]; then
+      log_skip "BOUCLE_DND_START already exists"
+    else
+      run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_DND_START -f value=$BOUCLE_DND_START -f masked=false -f protected=false >/dev/null"
+      log_pass "BOUCLE_DND_START set ($BOUCLE_DND_START)"
+    fi
+  else
+    log_skip "BOUCLE_DND_START (not provided — default 22:00 applies)"
+  fi
+
+  # BOUCLE_DND_END
+  if [ -n "${BOUCLE_DND_END:-}" ]; then
+    EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_DND_END" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
+    if [ -n "$EXISTING" ]; then
+      log_skip "BOUCLE_DND_END already exists"
+    else
+      run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_DND_END -f value=$BOUCLE_DND_END -f masked=false -f protected=false >/dev/null"
+      log_pass "BOUCLE_DND_END set ($BOUCLE_DND_END)"
+    fi
+  else
+    log_skip "BOUCLE_DND_END (not provided — default 07:00 applies)"
+  fi
+
+  # BOUCLE_DND_EXCLUDE_DAYS
+  if [ -n "${BOUCLE_DND_EXCLUDE_DAYS:-}" ]; then
+    EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_DND_EXCLUDE_DAYS" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
+    if [ -n "$EXISTING" ]; then
+      log_skip "BOUCLE_DND_EXCLUDE_DAYS already exists"
+    else
+      run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_DND_EXCLUDE_DAYS -f value=$BOUCLE_DND_EXCLUDE_DAYS -f masked=false -f protected=false >/dev/null"
+      log_pass "BOUCLE_DND_EXCLUDE_DAYS set ($BOUCLE_DND_EXCLUDE_DAYS)"
+    fi
+  else
+    log_skip "BOUCLE_DND_EXCLUDE_DAYS (not provided — no excluded days)"
+  fi
+
   # BOUCLE_UPDATE_MODE
   EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_UPDATE_MODE" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
   if [ -n "$EXISTING" ]; then
@@ -441,6 +512,77 @@ if [ "$FORGE" = "gitlab" ]; then
     LLM_BASE_URL="${BOUCLE_LLM_BASE_URL:-https://ollama.com/v1}"
     run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables --field key=BOUCLE_LLM_BASE_URL --field value=$LLM_BASE_URL >/dev/null"
     log_pass "BOUCLE_LLM_BASE_URL set (${BOUCLE_LLM_BASE_URL:-default: https://ollama.com/v1})"
+  fi
+
+  # BOUCLE_FALLBACK_PROVIDER
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_FALLBACK_PROVIDER" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
+  if [ -n "$EXISTING" ]; then
+    log_skip "BOUCLE_FALLBACK_PROVIDER already exists"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_FALLBACK_PROVIDER -f value='${BOUCLE_FALLBACK_PROVIDER:-}' -f masked=false -f protected=false >/dev/null"
+    log_pass "BOUCLE_FALLBACK_PROVIDER set (${BOUCLE_FALLBACK_PROVIDER:-empty — fallback disabled by default; set a provider + BOUCLE_FALLBACK_API_KEY to enable})"
+  fi
+
+  # BOUCLE_FALLBACK_MODEL_TRIAGE
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_FALLBACK_MODEL_TRIAGE" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
+  if [ -n "$EXISTING" ]; then
+    log_skip "BOUCLE_FALLBACK_MODEL_TRIAGE already exists"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_FALLBACK_MODEL_TRIAGE -f value=${BOUCLE_FALLBACK_MODEL_TRIAGE:-glm-5.2} -f masked=false -f protected=false >/dev/null"
+    log_pass "BOUCLE_FALLBACK_MODEL_TRIAGE set (${BOUCLE_FALLBACK_MODEL_TRIAGE:-glm-5.2})"
+  fi
+
+  # BOUCLE_FALLBACK_MODEL_WORKER
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_FALLBACK_MODEL_WORKER" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
+  if [ -n "$EXISTING" ]; then
+    log_skip "BOUCLE_FALLBACK_MODEL_WORKER already exists"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_FALLBACK_MODEL_WORKER -f value=${BOUCLE_FALLBACK_MODEL_WORKER:-deepseek-v4-flash} -f masked=false -f protected=false >/dev/null"
+    log_pass "BOUCLE_FALLBACK_MODEL_WORKER set (${BOUCLE_FALLBACK_MODEL_WORKER:-deepseek-v4-flash})"
+  fi
+
+  # BOUCLE_FALLBACK_MODEL_REVIEWER
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_FALLBACK_MODEL_REVIEWER" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
+  if [ -n "$EXISTING" ]; then
+    log_skip "BOUCLE_FALLBACK_MODEL_REVIEWER already exists"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_FALLBACK_MODEL_REVIEWER -f value=${BOUCLE_FALLBACK_MODEL_REVIEWER:-glm-5.2} -f masked=false -f protected=false >/dev/null"
+    log_pass "BOUCLE_FALLBACK_MODEL_REVIEWER set (${BOUCLE_FALLBACK_MODEL_REVIEWER:-glm-5.2})"
+  fi
+
+  # BOUCLE_FALLBACK_MODEL_E2E
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_FALLBACK_MODEL_E2E" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
+  if [ -n "$EXISTING" ]; then
+    log_skip "BOUCLE_FALLBACK_MODEL_E2E already exists"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_FALLBACK_MODEL_E2E -f value=${BOUCLE_FALLBACK_MODEL_E2E:-deepseek-v4-flash} -f masked=false -f protected=false >/dev/null"
+    log_pass "BOUCLE_FALLBACK_MODEL_E2E set (${BOUCLE_FALLBACK_MODEL_E2E:-deepseek-v4-flash})"
+  fi
+
+  # BOUCLE_FALLBACK_BASE_URL (masked — only when env var is set)
+  if [ -n "${BOUCLE_FALLBACK_BASE_URL:-}" ]; then
+    EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_FALLBACK_BASE_URL" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
+    if [ -n "$EXISTING" ]; then
+      log_skip "BOUCLE_FALLBACK_BASE_URL already exists"
+    else
+      run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_FALLBACK_BASE_URL -f value=$BOUCLE_FALLBACK_BASE_URL -f masked=true -f protected=false >/dev/null"
+      log_pass "BOUCLE_FALLBACK_BASE_URL set (masked)"
+    fi
+  else
+    log_skip "BOUCLE_FALLBACK_BASE_URL (not provided — fallback provider URL must be set manually when fallback is enabled)"
+  fi
+
+  # BOUCLE_FALLBACK_API_KEY (masked — only when env var is set)
+  if [ -n "${BOUCLE_FALLBACK_API_KEY:-}" ]; then
+    EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_FALLBACK_API_KEY" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
+    if [ -n "$EXISTING" ]; then
+      log_skip "BOUCLE_FALLBACK_API_KEY already exists"
+    else
+      run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_FALLBACK_API_KEY -f value='$BOUCLE_FALLBACK_API_KEY' -f masked=true -f protected=false >/dev/null"
+      log_pass "BOUCLE_FALLBACK_API_KEY set (masked)"
+    fi
+  else
+    log_skip "BOUCLE_FALLBACK_API_KEY (not provided — must be set manually when fallback is enabled)"
   fi
 else
   # ── GitHub: repo secrets via gh secret set ──────────────────────────
@@ -516,6 +658,87 @@ else
   LLM_BASE_URL="${BOUCLE_LLM_BASE_URL:-https://ollama.com/v1}"
   run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_LLM_BASE_URL --repo \"$PROJECT_ID\" --body \"$LLM_BASE_URL\" 2>/dev/null"
   log_pass "BOUCLE_LLM_BASE_URL set to ${BOUCLE_LLM_BASE_URL:-default: https://ollama.com/v1} (vars)"
+
+  # ── GitHub: DND variables ────────────────────────────────────────────
+
+  # BOUCLE_DND_ENABLED
+  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_DND_ENABLED --repo \"$PROJECT_ID\" --body true 2>/dev/null"
+  log_pass "BOUCLE_DND_ENABLED set to true (vars)"
+
+  # BOUCLE_DND_TZ
+  DND_TZ_VALUE="${BOUCLE_DND_TZ:-$(detect_iana_tz)}"
+  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_DND_TZ --repo \"$PROJECT_ID\" --body \"$DND_TZ_VALUE\" 2>/dev/null"
+  log_pass "BOUCLE_DND_TZ set to $DND_TZ_VALUE (vars)"
+
+  # BOUCLE_DND_START (only when provided via env)
+  if [ -n "${BOUCLE_DND_START:-}" ]; then
+    run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_DND_START --repo \"$PROJECT_ID\" --body \"$BOUCLE_DND_START\" 2>/dev/null"
+    log_pass "BOUCLE_DND_START set to $BOUCLE_DND_START (vars)"
+  else
+    log_skip "BOUCLE_DND_START (not provided — default 22:00 applies)"
+  fi
+
+  # BOUCLE_DND_END (only when provided via env)
+  if [ -n "${BOUCLE_DND_END:-}" ]; then
+    run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_DND_END --repo \"$PROJECT_ID\" --body \"$BOUCLE_DND_END\" 2>/dev/null"
+    log_pass "BOUCLE_DND_END set to $BOUCLE_DND_END (vars)"
+  else
+    log_skip "BOUCLE_DND_END (not provided — default 07:00 applies)"
+  fi
+
+  # BOUCLE_DND_EXCLUDE_DAYS (only when provided via env)
+  if [ -n "${BOUCLE_DND_EXCLUDE_DAYS:-}" ]; then
+    run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_DND_EXCLUDE_DAYS --repo \"$PROJECT_ID\" --body \"$BOUCLE_DND_EXCLUDE_DAYS\" 2>/dev/null"
+    log_pass "BOUCLE_DND_EXCLUDE_DAYS set to $BOUCLE_DND_EXCLUDE_DAYS (vars)"
+  else
+    log_skip "BOUCLE_DND_EXCLUDE_DAYS (not provided — no excluded days)"
+  fi
+
+  # ── GitHub: fallback provider variables ───────────────────────────────
+
+  # BOUCLE_FALLBACK_PROVIDER
+  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FALLBACK_PROVIDER --repo \"$PROJECT_ID\" --body \"${BOUCLE_FALLBACK_PROVIDER:-}\" 2>/dev/null"
+  log_pass "BOUCLE_FALLBACK_PROVIDER set to '${BOUCLE_FALLBACK_PROVIDER:-}' (vars) — ${BOUCLE_FALLBACK_PROVIDER:-fallback disabled by default; set a provider + BOUCLE_FALLBACK_API_KEY to enable}"
+
+  # BOUCLE_FALLBACK_MODEL_TRIAGE
+  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FALLBACK_MODEL_TRIAGE --repo \"$PROJECT_ID\" --body \"${BOUCLE_FALLBACK_MODEL_TRIAGE:-glm-5.2}\" 2>/dev/null"
+  log_pass "BOUCLE_FALLBACK_MODEL_TRIAGE set to ${BOUCLE_FALLBACK_MODEL_TRIAGE:-glm-5.2} (vars)"
+
+  # BOUCLE_FALLBACK_MODEL_WORKER
+  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FALLBACK_MODEL_WORKER --repo \"$PROJECT_ID\" --body \"${BOUCLE_FALLBACK_MODEL_WORKER:-deepseek-v4-flash}\" 2>/dev/null"
+  log_pass "BOUCLE_FALLBACK_MODEL_WORKER set to ${BOUCLE_FALLBACK_MODEL_WORKER:-deepseek-v4-flash} (vars)"
+
+  # BOUCLE_FALLBACK_MODEL_REVIEWER
+  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FALLBACK_MODEL_REVIEWER --repo \"$PROJECT_ID\" --body \"${BOUCLE_FALLBACK_MODEL_REVIEWER:-glm-5.2}\" 2>/dev/null"
+  log_pass "BOUCLE_FALLBACK_MODEL_REVIEWER set to ${BOUCLE_FALLBACK_MODEL_REVIEWER:-glm-5.2} (vars)"
+
+  # BOUCLE_FALLBACK_MODEL_E2E
+  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FALLBACK_MODEL_E2E --repo \"$PROJECT_ID\" --body \"${BOUCLE_FALLBACK_MODEL_E2E:-deepseek-v4-flash}\" 2>/dev/null"
+  log_pass "BOUCLE_FALLBACK_MODEL_E2E set to ${BOUCLE_FALLBACK_MODEL_E2E:-deepseek-v4-flash} (vars)"
+
+  # BOUCLE_FALLBACK_BASE_URL (masked secret — only when provided via env)
+  if [ -n "${BOUCLE_FALLBACK_BASE_URL:-}" ]; then
+    if [ "$DRY_RUN" = "true" ]; then
+      echo "  [dry-run] set BOUCLE_FALLBACK_BASE_URL (secret, masked) — value omitted"
+    else
+      echo "$BOUCLE_FALLBACK_BASE_URL" | GH_TOKEN="$BOT_TOKEN" gh secret set BOUCLE_FALLBACK_BASE_URL --repo "$PROJECT_ID" 2>/dev/null
+    fi
+    log_pass "BOUCLE_FALLBACK_BASE_URL set (secrets, masked)"
+  else
+    log_skip "BOUCLE_FALLBACK_BASE_URL (not provided — must be set manually when fallback is enabled)"
+  fi
+
+  # BOUCLE_FALLBACK_API_KEY (masked secret — only when provided via env)
+  if [ -n "${BOUCLE_FALLBACK_API_KEY:-}" ]; then
+    if [ "$DRY_RUN" = "true" ]; then
+      echo "  [dry-run] set BOUCLE_FALLBACK_API_KEY (secret, masked) — value omitted"
+    else
+      echo "$BOUCLE_FALLBACK_API_KEY" | GH_TOKEN="$BOT_TOKEN" gh secret set BOUCLE_FALLBACK_API_KEY --repo "$PROJECT_ID" 2>/dev/null
+    fi
+    log_pass "BOUCLE_FALLBACK_API_KEY set (secrets, masked)"
+  else
+    log_skip "BOUCLE_FALLBACK_API_KEY (not provided — must be set manually when fallback is enabled)"
+  fi
 
   # ── GitHub: bot account (PAT identity) ───────────────────────────────
   # GitHub has no project service accounts: the --bot-token PAT *is* the
