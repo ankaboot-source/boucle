@@ -89,7 +89,21 @@ forge_issue_create() {
 
 forge_issue_reactions() {
   local iid="$1"
-  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues/$iid/award_emoji" 2> /dev/null || echo "[]"
+  local resp
+  resp=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues/$iid/award_emoji" 2> /dev/null) || {
+    echo "[]"
+    return
+  }
+  # Keep only the canonical reaction set (same on every forge, see
+  # forge_reaction_canonical) — GitLab also stores non-approval emoji
+  # that MUST NOT be reported.
+  echo "$resp" | jq -r '.[] | [.name, (.user.id // 0), (.user.username // "")] | @tsv' 2> /dev/null \
+    | while IFS=$'\t' read -r name uid uname; do
+      canon=$(forge_reaction_canonical "$name")
+      [ -n "$canon" ] || continue
+      jq -nc --arg name "$canon" --arg id "$uid" --arg uname "$uname" \
+        '{name: $name, user: {id: ($id | tonumber), username: $uname}}' 2> /dev/null
+    done | jq -s '.' 2> /dev/null || echo "[]"
 }
 
 forge_issue_add_reaction() {
@@ -223,7 +237,7 @@ forge_mr_close() {
 
 forge_note_reactions() {
   local kind="$1" object_iid="$2" note_id="$3"
-  local endpoint
+  local endpoint resp
   case "$kind" in
     issue) endpoint="issues" ;;
     mr | merge_request) endpoint="merge_requests" ;;
@@ -232,8 +246,20 @@ forge_note_reactions() {
       return
       ;;
   esac
-  glab api --hostname "$BOUCLE_FORGE_HOST" \
-    "/projects/$BOUCLE_PROJECT_ID/$endpoint/$object_iid/notes/$note_id/award_emoji" 2> /dev/null || echo "[]"
+  resp=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
+    "/projects/$BOUCLE_PROJECT_ID/$endpoint/$object_iid/notes/$note_id/award_emoji" 2> /dev/null) || {
+    echo "[]"
+    return
+  }
+  # Keep only the canonical reaction set (same on every forge, see
+  # forge_reaction_canonical).
+  echo "$resp" | jq -r '.[] | [.name, (.user.id // 0), (.user.username // "")] | @tsv' 2> /dev/null \
+    | while IFS=$'\t' read -r name uid uname; do
+      canon=$(forge_reaction_canonical "$name")
+      [ -n "$canon" ] || continue
+      jq -nc --arg name "$canon" --arg id "$uid" --arg uname "$uname" \
+        '{name: $name, user: {id: ($id | tonumber), username: $uname}}' 2> /dev/null
+    done | jq -s '.' 2> /dev/null || echo "[]"
 }
 
 # ── Attachment upload ─────────────────────────────────────────────────────
