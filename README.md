@@ -43,12 +43,7 @@ review and merge the PR/MR — everything happens where you already work.
 loop-engineering framework you assemble. One command installs it;
 `bin/setup` verifies every prerequisite; then it just runs.
 
-**Built on fast, modern tools — batteries included.** jcode, a standalone
-**Rust** binary (fast startup, zero runtime dependencies), a **codebase
-knowledge graph** that gives agents real structural understanding of your
-repository instead of blind grep, and a curated **skill library** —
-including UI/UX, design, and frontend engineering — so the agents ship
-polished results, not just functional code.
+**Built on fast, modern tools — batteries included.** [jcode](https://github.com/1jehuang/jcode), a standalone **Rust** binary (fast startup, zero runtime dependencies), a [codebase knowledge graph](https://github.com/DeusData/codebase-memory-mcp) that gives agents real structural understanding of your repository instead of blind grep, and a curated [skill library](.jcode/skills/) — including UI/UX, design, and frontend engineering — so the agents ship polished results, not just functional code.
 
 **Not a SaaS. No server.** The whole loop runs on your forge's CI
 pipelines. Your code, your data, your tokens stay yours.
