@@ -491,6 +491,59 @@ if [ -f "$MR_ATTACHMENTS_ENV" ]; then
 fi
 BOUCLE_MR_ATTACHMENTS="${BOUCLE_MR_ATTACHMENTS:-}"
 
+# ── 3c. Trim injected note threads (token-cost control) ──────────────
+# The CI stages export the FULL note thread (BOUCLE_ISSUE_NOTES,
+# BOUCLE_REVIEWER_FEEDBACK) with no cap, and build_prompt injects it on
+# every run. The agents are themselves the main writers of those threads
+# (triage posts a structured analysis, the reviewer posts criterion-by-
+# criterion verdicts, CI posts status notes), so iteration N's *output*
+# becomes iteration N+1's *input* — and is re-billed on every later run.
+#
+# Truncation is PER NOTE, never per thread: every note survives, only its
+# tail is elided. Dropping whole notes (even "the oldest") would break the
+# documented invariant that early preservation instructions must stand
+# alongside later amendments (lib/boucle-ci/worker.sh) — that invariant is
+# what stops the worker from re-introducing placeholder content.
+#
+# Notes arrive as "[<author>] <body>" entries whose bodies may span lines;
+# a new note is detected by the "[<author>] " prefix at start of line.
+# BOUCLE_MAX_NOTE_CHARS=0 disables trimming entirely (escape hatch).
+trim_notes() {
+  local label="$1" text="$2"
+  local max="${BOUCLE_MAX_NOTE_CHARS:-1500}"
+  if [ -z "$text" ]; then
+    return 0
+  fi
+  # Non-numeric or <= 0 → pass through untouched.
+  case "$max" in
+    '' | *[!0-9]*) max=0 ;;
+  esac
+  if [ "$max" -le 0 ]; then
+    printf '%s' "$text"
+    return 0
+  fi
+  local out
+  out=$(printf '%s\n' "$text" | awk -v max="$max" '
+    function flush(   n) {
+      if (buf == "") return
+      n = length(buf)
+      if (n > max) {
+        printf "%s\n[... %d chars elided by boucle (BOUCLE_MAX_NOTE_CHARS=%d) ...]\n", substr(buf, 1, max), n - max, max
+      } else {
+        printf "%s\n", buf
+      }
+      buf = ""
+    }
+    /^\[[^]]+\] / { flush(); buf = $0; next }
+    { buf = (buf == "" ? $0 : buf "\n" $0) }
+    END { flush() }
+  ')
+  # Report on stderr (stdout is the prompt payload). Mirrors the existing
+  # [boucle:metrics] channel so the before/after is measurable in CI logs.
+  echo "[boucle:prompt] $label chars_before=${#text} chars_after=${#out} max_note_chars=$max" >&2
+  printf '%s' "$out"
+}
+
 # ── 4. Build the agent prompt (issue-specific context only) ──────────
 # Role instructions live in .jcode/agents/<role>.md (system prompt,
 # loaded via .jcode/prompt-overlay.md).
@@ -509,7 +562,10 @@ build_prompt() {
       # the agent sees previous triage Questions AND the author's answers.
       # Without this, every re-triage re-asks questions the author already
       # answered (issue #27: 6 repeated triage notes on a consumer repo).
-      local notes="${BOUCLE_ISSUE_NOTES:-}"
+      # Trimmed per note (see trim_notes): prior triage analyses are the
+      # bulkiest entries in this thread and are re-billed on every re-triage.
+      local notes
+      notes="$(trim_notes issue_notes "${BOUCLE_ISSUE_NOTES:-}")"
       if [ -n "$body" ]; then
         prompt="Analyze issue #${ISSUE}.
 
@@ -540,12 +596,15 @@ Post your analysis as a comment with the boucle:triage marker. Use: bin/forge-no
       # Inject the full issue notes (fetched by CI as BOUCLE_ISSUE_NOTES) so
       # the worker sees the FULL discussion history — including early
       # preservation instructions that the latest amendments must NOT
-      # override.
-      local notes="${BOUCLE_ISSUE_NOTES:-}"
+      # override. trim_notes keeps EVERY note (only tails are elided), so
+      # those early instructions still reach the worker.
+      local notes
+      notes="$(trim_notes issue_notes "${BOUCLE_ISSUE_NOTES:-}")"
       # Inject reviewer verdicts + human MR comments (fetched by CI as
       # BOUCLE_REVIEWER_FEEDBACK) so re-runs after a reviewer FAIL or a human
       # MR comment actually address the feedback. Empty on the first run.
-      local feedback="${BOUCLE_REVIEWER_FEEDBACK:-}"
+      local feedback
+      feedback="$(trim_notes reviewer_feedback "${BOUCLE_REVIEWER_FEEDBACK:-}")"
       prompt="Implement issue #${ISSUE}. Read state.md first. Commit your changes with [skip ci].
 
 Preserve instructed content: the issue body below contains the EXACT content the human instructed (URLs, citations, texts, images). You MUST use them verbatim. DO NOT generate placeholders, DO NOT rewrite the instructed texts, DO NOT substitute URLs. If a field is missing from the issue, fetch the issue body via \`bin/forge-note issue ${ISSUE}\` or the forge CLI rather than inventing. Recent amendments (in the feedback section below) AMEND the spec — they do NOT replace earlier preservation instructions. Conciliate them.
@@ -594,8 +653,10 @@ ${BOUCLE_SIBLINGS}
       local body="${BOUCLE_ISSUE_BODY:-}"
       # Inject the same MR discussion the worker received (fetched by CI as
       # BOUCLE_REVIEWER_FEEDBACK). Human comments MUST take precedence over
-      # state.md.
-      local feedback="${BOUCLE_REVIEWER_FEEDBACK:-}"
+      # state.md. Trimmed per note: this thread carries the reviewer's own
+      # prior verdicts, the single bulkiest re-billed block in the loop.
+      local feedback
+      feedback="$(trim_notes reviewer_feedback "${BOUCLE_REVIEWER_FEEDBACK:-}")"
       prompt="Review the MR for issue #${ISSUE}. Test the deployed preview at \$BOUCLE_PREVIEW_URL. Post your verdict with the boucle:verdict marker.
 
 Verify content fidelity: the issue body below is the original spec. Check that the MR preserves the instructed content (URLs, citations, texts) verbatim — no placeholders, no rewrites, no substitutions. A MR that degrades instructed content is a FAIL even if it satisfies the latest amendments.
