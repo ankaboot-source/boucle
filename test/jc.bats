@@ -657,6 +657,7 @@ EOF
     CI_PROJECT_DIR='$(dirname "$(dirname "$AGENT_DIR")")'
     AGENT='worker'
     ROLE='worker'
+    BOUCLE_WORKSPACE='$(dirname "$(dirname "$AGENT_DIR")")'
     source '$TMPF'
     echo \"REASONING_EFFORT=\$REASONING_EFFORT\"
   "
@@ -687,6 +688,7 @@ EOF
     CI_PROJECT_DIR='$(dirname "$(dirname "$AGENT_DIR")")'
     AGENT='triage'
     ROLE='triage'
+    BOUCLE_WORKSPACE='$(dirname "$(dirname "$AGENT_DIR")")'
     source '$TMPF'
     echo \"REASONING_EFFORT=[\$REASONING_EFFORT]\"
   "
@@ -720,6 +722,7 @@ EOF
     AGENT='worker'
     ROLE='worker'
     PROVIDER_PROFILE='test-profile'
+    BOUCLE_WORKSPACE='$(dirname "$(dirname "$AGENT_DIR")")'
     export BOUCLE_LLM_BASE_URL='https://llm.test/v1'
     export BOUCLE_LLM_API_KEY='dummy'
     export JCODE_HOME='$JCODE_HOME'
@@ -733,15 +736,19 @@ EOF
   rm -rf "$(dirname "$(dirname "$AGENT_DIR")")"
 }
 
-@test "reasoning effort: shipped agents carrying deepseek-flash declare max" {
-  # The contract: every agent file running deepseek-v4-flash:0731 must
-  # declare reasoning_effort: max (nothing else forces it).
-  for agent in worker reviewer; do
+@test "reasoning effort: shipped agents declare max (deepseek) or off (others)" {
+  # The contract: every shipped agent file declares reasoning_effort —
+  # deepseek models → max; other models → off (jcode's own default would
+  # otherwise be "low", which sends effort=low to glm agents).
+  for agent in triage worker reviewer e2e; do
     model_line=$(awk '/^model:/{sub(/^model:[[:space:]]*/,""); print; exit}' ".jcode/agents/$agent.md")
-    echo "model_line=$model_line" >&2
-    [[ "$model_line" == *"deepseek"* ]] || continue
+    [[ -n "$model_line" ]]
     effort_line=$(awk '/^reasoning_effort:/{sub(/^reasoning_effort:[[:space:]]*/,""); print; exit}' ".jcode/agents/$agent.md")
-    [[ "$effort_line" == "max" ]]
+    if [[ "$model_line" == *"deepseek"* ]]; then
+      [[ "$effort_line" == "max" ]]
+    else
+      [[ "$effort_line" == "off" ]]
+    fi
   done
 }
 
