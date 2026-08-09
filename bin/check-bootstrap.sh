@@ -32,17 +32,31 @@ if ! command -v shfmt > /dev/null 2>&1; then
 fi
 
 if ! command -v bats > /dev/null 2>&1; then
-  git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats
-  /tmp/bats/install.sh "$PREFIX"
+  # Tarball install — no git required (the check job runs on ANY runner via
+  # tags: [], and shared docker runners may lack git in the job PATH).
+  curl -sSL "https://github.com/bats-core/bats-core/archive/refs/tags/v1.14.0.tar.gz" | tar -xz -C /tmp
+  /tmp/bats-core-1.14.0/install.sh "$PREFIX"
 fi
 
-# Tools that cannot be user-installed — fail with an actionable message.
-for t in curl git make tar xz; do
-  command -v "$t" > /dev/null 2>&1 || {
-    echo "check-bootstrap: missing system tool '$t' — install it (or provide a runner that has it), then re-run." >&2
-    exit 1
-  }
-done
+# System prerequisites that cannot be user-installed. Try sudo (shared docker
+# runners are often root-capable); otherwise fail with an actionable message.
+ensure_tool() {
+  local t="$1" pkg="$2"
+  if command -v "$t" > /dev/null 2>&1; then
+    return 0
+  fi
+  if command -v sudo > /dev/null 2>&1 && sudo -n true 2> /dev/null; then
+    sudo apt-get update -qq > /dev/null 2>&1 || true
+    sudo apt-get install -y -qq "$pkg" > /dev/null 2>&1 && return 0
+  fi
+  echo "check-bootstrap: missing system tool '$t' — no sudo to install it. Provide a runner that has '$t' (or install it on this runner), then re-run." >&2
+  exit 1
+}
+ensure_tool curl curl
+ensure_tool git git
+ensure_tool make make
+ensure_tool tar tar
+ensure_tool xz xz-utils
 
 shellcheck --version > /dev/null
 shfmt --version > /dev/null

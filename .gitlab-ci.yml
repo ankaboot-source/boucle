@@ -331,8 +331,9 @@ check:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   before_script:
     - export PATH="$HOME/.local/bin:$PATH"
-    # Initialize bats test helper submodules
-    - git submodule update --init --recursive
+    # No git submodule update here: GitLab's get_sources already initialized
+    # the test submodules, and tags: [] jobs can land on runners without git
+    # in the job PATH (the bootstrap installs/verifies git itself).
     # Toolchain (shellcheck/shfmt/bats, pinned) — root-safe bootstrap:
     # falls back to $HOME/.local/bin when /usr/local/bin is not writable
     # (shared shell executors, e.g. framagit's non-root runner). Fails with

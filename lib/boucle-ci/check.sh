@@ -8,8 +8,11 @@
 boucle_ci_check() {
   set +o pipefail
 
-  # Initialize bats test helper submodules
-  git submodule update --init --recursive
+  # Initialize bats test helper submodules (guarded: jobs may run on
+  # runners without git; GitLab's get_sources initializes them anyway).
+  if command -v git > /dev/null 2>&1; then
+    git submodule update --init --recursive
+  fi
 
   # Install the toolchain (shellcheck/shfmt/bats, pinned) via the shared
   # root-safe bootstrap — falls back to $HOME/.local/bin when /usr/local/bin
