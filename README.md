@@ -237,9 +237,9 @@ deploy overrides — is documented in [LOOP.md](LOOP.md).
 
 ## 🗺️ Roadmap
 
-- [x] **GitHub support** — run boucle on GitHub issues and Actions
 - [ ] **servo rendering** — migrate preview rendering from Puppeteer to
       [servo](https://github.com/servo/servo) (Rust-native, no Chromium)
+- [ ] **cost estimate** — per-issue token-cost estimate and tracking
 
 ## ⚖️ License
 
