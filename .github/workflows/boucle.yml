@@ -47,6 +47,24 @@ on:
       BOUCLE_PREVIEW_URL:
         description: "Preview URL for reviewer"
         required: false
+      BOUCLE_PRODUCTION_URL:
+        description: "Production URL for e2e"
+        required: false
+      BOUCLE_DEPLOY_MODE:
+        description: "Deploy mode (self|external)"
+        required: false
+      BOUCLE_REVIEW_MODE:
+        description: "Review mode (preview|diff)"
+        required: false
+      BOUCLE_EXTERNAL_DEPLOY_WAIT:
+        description: "Seconds to wait for external deploy CI"
+        required: false
+      BOUCLE_REVIEW_CHECKS_WAIT:
+        description: "Seconds to wait for PR check suites in diff mode"
+        required: false
+      BOUCLE_PREVIEW_MARKER_PATH:
+        description: "Path for SHA marker probe file"
+        required: false
 
 # ── Environment ────────────────────────────────────────────────────────────────
 env:
@@ -78,6 +96,12 @@ env:
   BOUCLE_VISION_ROUTING: ${{ vars.BOUCLE_VISION_ROUTING || 'enabled' }}
   BOUCLE_VISION_MODEL: ${{ vars.BOUCLE_VISION_MODEL || 'minimax-m3' }}
   BOUCLE_VISION_ROLES: ${{ vars.BOUCLE_VISION_ROLES || 'triage,worker,reviewer' }}
+  BOUCLE_DEPLOY_MODE: ${{ vars.BOUCLE_DEPLOY_MODE || 'self' }}
+  BOUCLE_REVIEW_MODE: ${{ vars.BOUCLE_REVIEW_MODE || 'preview' }}
+  BOUCLE_EXTERNAL_DEPLOY_WAIT: ${{ vars.BOUCLE_EXTERNAL_DEPLOY_WAIT || '600' }}
+  BOUCLE_REVIEW_CHECKS_WAIT: ${{ vars.BOUCLE_REVIEW_CHECKS_WAIT || '900' }}
+  BOUCLE_PREVIEW_MARKER_PATH: ${{ vars.BOUCLE_PREVIEW_MARKER_PATH || '__boucle_commit__.txt' }}
+  BOUCLE_DEPLOY_URL_REGEX: ${{ vars.BOUCLE_DEPLOY_URL_REGEX || 'https://[a-z0-9.-]+\\.pages\\.dev' }}
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   PI_AUTH: ${{ secrets.PI_AUTH }}
 

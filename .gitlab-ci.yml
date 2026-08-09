@@ -96,6 +96,16 @@ variables:
   BOUCLE_VISION_ROUTING: "enabled"
   BOUCLE_VISION_MODEL: "minimax-m3"
   BOUCLE_VISION_ROLES: "triage,worker,reviewer"
+  # Deploy mode: "self" (boucle runs BOUCLE_DEPLOY_CMD) or "external" (consumer's own CI deploys)
+  BOUCLE_DEPLOY_MODE: "self"
+  # Review mode: "preview" (review tests against deployed preview) or "diff" (review PR diff + check suites)
+  BOUCLE_REVIEW_MODE: "preview"
+  # External deploy: max seconds to wait for consumer's own CI run on merged commit
+  BOUCLE_EXTERNAL_DEPLOY_WAIT: "600"
+  # Diff review: max seconds to wait for PR check suites before proceeding
+  BOUCLE_REVIEW_CHECKS_WAIT: "900"
+  # SHA marker probe path (relative to preview/live URL root)
+  BOUCLE_PREVIEW_MARKER_PATH: "__boucle_commit__.txt"
   # Check out the engine submodule in consumer repos (.boucle/). No-op when
   # the repo has no submodule (dogfood).
   GIT_SUBMODULE_STRATEGY: recursive
