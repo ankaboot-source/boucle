@@ -16,7 +16,7 @@ never touch the engine itself.
   - [Option 1 — copy/paste prompt](#option-1-copypaste-prompt-easiest)
   - [Option 2 — command line](#option-2-command-line)
   - [After install](#after-install)
-- [⚙️ How it works](#️-how-it-works)
+- [⚙️ How it works and why it's calmer](#️-how-it-works-and-why-its-calmer)
 - [💰 Cost](#cost)
 - [🛠️ Configuration](#️-configuration)
   - [The bot user](#the-bot-user)
@@ -34,23 +34,15 @@ live preview** with screenshots — not prose.
 
 **Fast and cheap — BYOK.** Lightweight, purpose-built agents run on your
 forge's existing CI, with your own LLM credentials. No Mac Mini, no VPS, no
-always-on laptop. The default duo — [GLM-5.2](https://z.ai/blog/glm-5.2) for
-triage and review, [DeepSeek V4 Flash 0731](https://artificialanalysis.ai/models/deepseek-v4-flash)
-for the worker — pairs a strong reasoner with a fast coder that scores near-equal
-on intelligence at a fraction of the cost.
+always-on laptop. boucle ships a feature for **9.9× less** than Claude Code
+— see [Cost](#cost) for the per-role breakdown and capacity analysis.
 
-**No new interface.** No web app, no TUI. Your forge (GitLab or GitHub)
-stays the interface: create an issue, label it, approve the spec, then
+**No new interface, no server.** No web app, no TUI, no SaaS. The whole loop
+runs on your forge's (GitLab or GitHub) CI pipelines — your code, your data,
+your tokens stay yours. Create an issue, label it, approve the spec, then
 review and merge the PR/MR — everything happens where you already work.
 
-**Ready to use, not a framework.** boucle ships as a working product, not a
-loop-engineering framework you assemble. One command installs it;
-`bin/setup` verifies every prerequisite; then it just runs.
-
 **Built on fast, modern tools — batteries included.** [jcode](https://github.com/1jehuang/jcode), a standalone **Rust** binary (fast startup, zero runtime dependencies), a [codebase knowledge graph](https://github.com/DeusData/codebase-memory-mcp) that gives agents real structural understanding of your repository instead of blind grep, and a curated [skill library](.jcode/skills/) — including UI/UX, design, and frontend engineering — so the agents ship polished results, not just functional code.
-
-**Not a SaaS. No server.** The whole loop runs on your forge's CI
-pipelines. Your code, your data, your tokens stay yours.
 
 **By a product builder, for product builders.** Built by an indie Product
 Builder who got tired of babysitting agents overnight.
@@ -144,7 +136,7 @@ From there, the pipeline takes over. You only answer the human prompts:
 spec validation and MR approval. The `doctor` job (a scheduled
 self-healing sweep) runs automatically — there is nothing to run by hand.
 
-## ⚙️ How it works
+## ⚙️ How it works and why it's calmer
 
 ```
 issue in GitLab
@@ -170,7 +162,15 @@ issue closed
 
 Four specialized agents — **triage**, **worker**, **reviewer**, **e2e** —
 orchestrate the whole flow. Humans only do what only humans can: validate the
-spec and approve the MR.
+spec and approve the MR. A chat-based coding agent demands your attention
+*now* — it asks, you answer, it waits, you context-switch. boucle inverts
+that. The loop runs asynchronously on CI; the human intervenes at **clear,
+named gates** (spec approval, MR review), not in a live chat. The
+**Do-Not-Disturb** mode (`BOUCLE_DND_*`) auto-validates the spec gate during
+your off-hours so the loop never blocks on you overnight. You approve the
+spec over your morning coffee; by the time you're back from lunch, the worker
+has implemented, the reviewer has verified the preview, and the MR is
+waiting. The agent works on the agent's clock; you work on yours.
 
 ## 💰 Cost
 
@@ -207,38 +207,24 @@ The break-even analysis shows the intelligence gap would need to cause an
 implausibly high failure rate (29× above nominal) to justify Claude Code's
 cost premium. This reflects a broader pattern: at this intelligence tier,
 **how** you scaffold the agent matters more than **which** model you pick.
-
-- **Diminishing returns of raw intelligence** — from DeepSeek V4 Flash
-  ($0.03/task, intel 52) to Opus 5 ($2.34/task, intel 63), cost increases
-  78× while intelligence increases 21%. Each additional intelligence point
-  costs 54× more at the top than at the bottom
-  ([Artificial Analysis](https://artificialanalysis.ai), v4.1.1).
-- **Gates are model-agnostic** — Anthropic's own
-  ["Building Effective Agents"](https://www.anthropic.com/research/building-effective-agents)
-  (Dec 2024) recommends decomposing tasks into steps with "programmatic
-  checks (gates) on any intermediate steps to ensure that the process is
-  still on track," and notes that "code solutions are verifiable through
-  automated tests; agents can iterate on solutions using test results as
-  feedback." A spec approval, a preview verification, and a SHA-anchored e2e
-  gate catch a wrong output the same way regardless of which model produced
-  it.
-- **Specialized agents outperform generalists** — the same Anthropic article
-  argues that "workflows offer predictability and consistency for
-  well-defined tasks" over single powerful model calls, and that routing
-  tasks to "specialized prompts" outperforms a generalist. boucle's four
-  roles each carry a focused prompt and a curated skill library (UI/UX,
-  design, frontend engineering, codebase graph queries) — a specialized
-  agent with the right skill outperforms a generalist with higher raw
-  intelligence on the task it was built for.
-- **Coding benchmarks verify behavior, not confidence** —
-  [Terminal-Bench v2.1](https://artificialanalysis.ai/evaluations/terminalbench-v2-1)
-  and [SWE-bench Verified](https://www.swebench.com/) both evaluate agents
-  programmatically: each task ships with a verification suite the agent must
-  satisfy. The gate, not the model, decides what passes.
-
-The implication: investing in better gates and richer skills yields more
-quality per dollar than investing in a more intelligent model. The model
-decides what to *attempt*; the gates and skills decide what *ships*.
+Raw intelligence has diminishing returns — from DeepSeek V4 Flash ($0.03/task)
+to Opus 5 ($2.34/task), cost increases 78× while intelligence increases 21%
+([Artificial Analysis](https://artificialanalysis.ai), v4.1.1). What closes
+the gap instead is structure: Anthropic's own
+["Building Effective Agents"](https://www.anthropic.com/research/building-effective-agents)
+(Dec 2024) recommends decomposing tasks into steps with "programmatic checks
+(gates) on any intermediate steps" and notes that "code solutions are
+verifiable through automated tests; agents can iterate on solutions using
+test results as feedback." Coding benchmarks like
+[Terminal-Bench v2.1](https://artificialanalysis.ai/evaluations/terminalbench-v2-1)
+and [SWE-bench Verified](https://www.swebench.com/) confirm this — each task
+ships with a verification suite the agent must satisfy, so the gate, not the
+model, decides what passes. boucle's four specialized roles each carry a
+focused prompt and a curated skill library (UI/UX, design, frontend
+engineering, codebase graph queries) — a specialized agent with the right
+skill outperforms a generalist with higher raw intelligence on the task it
+was built for. The model decides what to *attempt*; the gates and skills
+decide what *ships*.
 
 ### Monthly capacity, multiplied
 
@@ -258,18 +244,6 @@ For **half the monthly fee**, boucle on Ollama Max ships **6–32× more
 features** than Claude Code Max 20×. The capacity gap comes from the
 per-feature cost gap (18.8×), not the plan price gap (2×) — and parallelism
 multiplies it further.
-
-### Less toxicity, on your schedule
-
-A chat-based coding agent demands your attention *now* — it asks, you answer,
-it waits, you context-switch. boucle inverts that. The loop runs
-asynchronously on CI; the human intervenes at **clear, named gates** (spec
-approval, MR review), not in a live chat. The **Do-Not-Disturb** mode
-(`BOUCLE_DND_*`) auto-validates the spec gate during your off-hours so the
-loop never blocks on you overnight. You approve the spec over your morning
-coffee; by the time you're back from lunch, the worker has implemented, the
-reviewer has verified the preview, and the MR is waiting. The agent works on
-the agent's clock; you work on yours.
 
 ## 🛠️ Configuration
 
