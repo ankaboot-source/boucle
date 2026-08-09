@@ -174,13 +174,11 @@ spec and approve the MR.
 
 ## 💰 Cost
 
-boucle runs on any OpenAI-compatible API — per-token (OpenRouter, the
-provider's own API) or subscription plan (Ollama, Claude Code). The
-per-feature cost below serves two purposes: it tells you the **direct cost**
-of shipping one feature, and — on a subscription plan — it tells you the
-**capacity**: how many features the plan sustains per month. As a bonus, the
-gated, asynchronous loop gives you a calmer workflow driven by the human's
-agenda, not the agent's.
+The per-feature cost below serves two purposes: it tells you the **direct
+cost** of shipping one feature, and — on a fixed-budget plan — it tells you
+the **capacity**: how many features that budget sustains per month. As a
+bonus, the gated, asynchronous loop gives you a calmer workflow driven by
+the human's agenda, not the agent's.
 
 ### Cost per feature, end to end
 
