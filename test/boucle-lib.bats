@@ -897,3 +897,24 @@ HELPER
   assert_success
   assert_output --partial "CI_DEFAULT_BRANCH"
 }
+
+# ── S4: merge-conflict escalation ─────────────────────────────────────
+
+@test "boucle_parse_merge_conflicts classifies modify/delete and content" {
+  run bash -c 'source lib/boucle.sh; out=$(printf "CONFLICT (modify/delete): src/components/MobilisationBlock.astro deleted in a19ed86 and modified in HEAD.\nCONFLICT (content): Merge conflict in src/pages/index.astro\nOK line"); boucle_parse_merge_conflicts "$out"'
+  assert_success
+  assert_output --partial "- src/components/MobilisationBlock.astro (modify/delete)"
+  assert_output --partial "- src/pages/index.astro (content (modify/modify))"
+}
+
+@test "boucle_parse_merge_conflicts returns empty on clean output" {
+  run bash -c 'source lib/boucle.sh; boucle_parse_merge_conflicts "nothing to rebase"'
+  assert_success
+  assert_output ""
+}
+
+@test "merger detects S4 escalation helper exists (no blind worker retry)" {
+  run bash -c 'source lib/boucle.sh; declare -F boucle_escalate_merge_conflict >/dev/null && declare -F boucle_parse_merge_conflicts >/dev/null && echo OK'
+  assert_success
+  assert_output "OK"
+}
