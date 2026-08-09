@@ -25,10 +25,22 @@ shift 2
 MESSAGE=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --message) MESSAGE="${2:?--message requires a value}"; shift 2 ;;
-    --message-file) MESSAGE=$(cat "${2:?--message-file requires a path}"); shift 2 ;;
-    --message-stdin) MESSAGE=$(cat); shift ;;
-    *) echo "Unknown argument: $1" >&2; exit 1 ;;
+    --message)
+      MESSAGE="${2:?--message requires a value}"
+      shift 2
+      ;;
+    --message-file)
+      MESSAGE=$(cat "${2:?--message-file requires a path}")
+      shift 2
+      ;;
+    --message-stdin)
+      MESSAGE=$(cat)
+      shift
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 1
+      ;;
   esac
 done
 
