@@ -180,34 +180,25 @@ the **capacity**: how many features that budget sustains per month. As a
 bonus, the gated, asynchronous loop gives you a calmer workflow driven by
 the human's agenda, not the agent's.
 
-### Cost per feature, end to end
+### Cost per feature
 
 One feature flows through four roles: **triage** (analyze the issue, draft
 the spec) → **worker** (implement, up to 3 iterations) → **reviewer** (verify
 the preview, up to 3 iterations) → **e2e** (verify the live deployment). The
 cost of one feature is the sum of all role invocations.
 
-| Role | What it does | boucle | $/task | Claude Code | $/task |
-| --- | --- | --- | ---: | --- | ---: |
-| triage | analyze issue, draft spec | [GLM-5.2](https://z.ai/blog/glm-5.2) (intel 53) | $0.31 | Opus 5 (intel 63) | $2.34 |
-| worker (×3) | implement | [DeepSeek V4 Flash 0731](https://artificialanalysis.ai/models/deepseek-v4-flash) (intel 52) | $0.03 | Sonnet 5 (intel 55) | $1.72 |
-| reviewer (×3) | verify preview | DeepSeek V4 Flash 0731 (intel 52) | $0.03 | Sonnet 5 (intel 55) | $1.72 |
-| e2e | verify live deployment | GLM-5.2 (intel 53) | $0.31 | Opus 5 (intel 63) | $2.34 |
+| | boucle | Claude Code |
+| --- | ---: | ---: |
+| **Cost per feature** | **$0.80** | **$15.00** |
+| Intelligence (triage / worker) | 53 / 52 | 63 / 55 |
+| **Cost per large feature** (intelligence-adjusted¹) | **$1.51** | **$15.00** |
 
 The $/task figures are the **cost per Intelligence Index task** from
 [Artificial Analysis](https://artificialanalysis.ai) (v4.1.1, max-effort
 reasoning, retrieved 2026-08-09) — each model runs the same 9-evaluation
 benchmark suite, and the cost is derived from the published total cost and
 token usage. See [docs/cost-benchmark.md](docs/cost-benchmark.md) for the
-raw published data and full derivation.
-
-Summing one pass through the loop (1 triage + 1 e2e + 3 worker + 3 reviewer):
-
-| | boucle | Claude Code |
-| --- | ---: | ---: |
-| **Cost per feature** | **$0.80** | **$15.00** |
-| Intelligence (triage / worker) | 53 / 52 | 63 / 55 |
-| **Cost per large feature** (intelligence-adjusted¹) | **$1.51** | **$15.00** |
+raw published data, per-role breakdown, and full derivation.
 
 ¹ Nominal scenario, Large feature (refactor, multi-page). Three failure modes
 (feature KO, extra iterations, post-ship bugs) are modeled separately, each
