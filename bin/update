@@ -18,9 +18,9 @@ VERSION_FILE=".boucle-version"
 # bin/forge/ is always synced (it's under bin/). lib/ is always synced
 # (lib/boucle-ci.sh + lib/boucle-ci/ live under lib/).
 if [ "${BOUCLE_FORGE:-gitlab}" = "github" ]; then
-  SYNC_PATHS="bin .pi .github/workflows/boucle.yml .jcode/agents .jcode/skills .jcode/UPSTREAM-FIX-WORKFLOW.md"
+  SYNC_PATHS="bin lib .pi .github/workflows/boucle.yml .jcode/agents .jcode/skills .jcode/UPSTREAM-FIX-WORKFLOW.md"
 else
-  SYNC_PATHS="bin .pi .gitlab-ci.yml .jcode/agents .jcode/skills .jcode/UPSTREAM-FIX-WORKFLOW.md"
+  SYNC_PATHS="bin lib .pi .gitlab-ci.yml .jcode/agents .jcode/skills .jcode/UPSTREAM-FIX-WORKFLOW.md"
 fi
 
 # ── Pure functions (testable, no network) ──────────────────────────────
