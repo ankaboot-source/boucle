@@ -207,15 +207,20 @@ Summing one pass through the loop (1 triage + 1 e2e + 3 worker + 3 reviewer):
 | --- | ---: | ---: |
 | **Cost per feature** | **$0.80** | **$15.00** |
 | Intelligence (triage / worker) | 53 / 52 | 63 / 55 |
+| **Cost per large feature** (intelligence-adjusted¹) | **$1.51** | **$15.00** |
 
-boucle ships one feature for **18.8× less** than Claude Code. The worker and
-reviewer run the most iterations, so boucle puts the cheapest model
-(DeepSeek, $0.03) on the heaviest roles — where it reaches 95% of Sonnet 5's
-intelligence at 57× less cost. The triage role is strategic (it produces the
-spec that guides everything), so boucle keeps a stronger reasoner there — 84%
-of Opus 5's intelligence at 7.5× less cost. The full per-role breakdown and
-alternative configs (full-DeepSeek at $0.24, Kimi K3 triage at $1.22) are in
-[docs/cost-benchmark.md](docs/cost-benchmark.md).
+¹ Nominal scenario, Large feature (refactor, multi-page). Three failure modes
+(feature KO, extra iterations, post-ship bugs) are modeled separately, each
+mapped to the role whose intelligence gap drives it, and weighted by feature
+size. Even at this pessimistic adjusted cost, boucle ships a large feature
+for **9.9× less** than Claude Code. See [docs/cost-benchmark.md](docs/cost-benchmark.md)
+for the full method, sensitivity analysis, and break-even.
+
+At this intelligence tier (52–63), what impacts the outcome most is not raw
+intelligence but **deterministic CI/CD gates** (spec approval, preview
+verification, SHA-anchored e2e) and **specialized agents enriched with
+skills** — not the model's confidence. The full per-role breakdown and
+alternative configs are in [docs/cost-benchmark.md](docs/cost-benchmark.md).
 
 ### Monthly capacity, multiplied
 
