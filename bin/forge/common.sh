@@ -57,6 +57,43 @@ forge_init() {
   source "$backend"
 }
 
+# ── Contract: reaction name normalization ────────────────────────────────
+#
+# forge_reaction_canonical <name>
+#   Normalize a forge-specific reaction name to the canonical cross-forge
+#   name. Echoes the canonical name on stdout, or NOTHING (empty) for names
+#   outside the canonical set — callers MUST treat empty as "not a valid
+#   reaction" and drop it. This is the SINGLE source of truth for which
+#   reactions are valid: the spec-approval gate only counts "thumbsup".
+#
+#   Canonical set (the SAME on every forge):
+#     thumbsup      (GitHub "+1",  GitLab "thumbsup")
+#     thumbs_down   (GitHub "-1",  GitLab "thumbs_down")
+#     smile         (GitHub "laugh", GitLab "smile")
+#     confused      (GitHub "confused", GitLab "confused")
+#     heart         (GitHub "heart", GitLab "heart")
+#     tada          (GitHub "hooray", GitLab "tada")
+#     rocket        (GitHub "rocket", GitLab "rocket")
+#     eyes          (GitHub "eyes",  GitLab "eyes")
+#   Emoji aliases (👍 👎 😄 😕 ❤ 🎉 🚀 👀) and the legacy names
+#   (+1, -1, thumbs_up, laugh, love, hooray, party) are accepted for
+#   forge_issue_add_reaction convenience; they map to the same canonical
+#   names. Anything else (e.g. the old GitLab alpha approval codes) maps
+#   to empty and is NOT a valid spec approval.
+forge_reaction_canonical() {
+  local name="$1"
+  case "$name" in
+    thumbsup | thumbs_up | "+1" | "👍") echo "thumbsup" ;;
+    thumbs_down | "-1" | "👎") echo "thumbs_down" ;;
+    smile | laugh | "😄") echo "smile" ;;
+    confused | "😕") echo "confused" ;;
+    heart | love | "❤") echo "heart" ;;
+    tada | hooray | party | "🎉") echo "tada" ;;
+    rocket | "🚀") echo "rocket" ;;
+    eyes | "👀") echo "eyes" ;;
+  esac
+}
+
 # ── Contract: issue operations ───────────────────────────────────────────
 #
 # forge_issue_get <iid>
@@ -91,11 +128,15 @@ forge_init() {
 # forge_issue_reactions <iid>
 #   Fetch emoji reactions on an issue as JSON array on stdout.
 #   Each reaction MUST contain: .name, .user.id, .user.username.
+#   Only the canonical reaction set (see forge_reaction_canonical) is
+#   returned — forge-specific names are normalized, out-of-set reactions
+#   are dropped.
 #   (GitLab: issue-level awards; GitHub: issue reactions API.)
 #
 # forge_issue_add_reaction <iid> <emoji_name>
 #   Add an emoji reaction to an issue. Returns 0 on success.
-#   (Used by spec-approval gate.)
+#   Accepts canonical names, legacy names and emoji aliases (mapped by
+#   forge_reaction_canonical). (Used by spec-approval gate.)
 
 # ── Contract: MR / PR operations ─────────────────────────────────────────
 #
@@ -331,6 +372,9 @@ forge_init() {
 # forge_note_reactions <kind> <object_iid> <note_id>
 #   List emoji reactions on a note as JSON array on stdout. Returns [] on
 #   failure. Each reaction MUST contain: .name, .user.id, .user.username.
+#   Only the canonical reaction set (see forge_reaction_canonical) is
+#   returned — forge-specific names are normalized, out-of-set reactions
+#   are dropped.
 #   kind = "issue" or "mr".
 #   (GitLab: award_emoji on note; GitHub: reactions on issue comment.)
 

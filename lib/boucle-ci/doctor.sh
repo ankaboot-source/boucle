@@ -19,9 +19,11 @@ boucle_ci_doctor() {
   # we handle).
   set +o pipefail
   RECOVERED=0
-  # Emoji reactions that count as spec approval (GitLab internal alpha codes).
+  # Emoji reactions that count as spec approval — canonical set only.
+  # The forge backends normalize via forge_reaction_canonical, so only
+  # "thumbsup" can appear here.
   # Must mirror the dispatch job's constant — each CI job runs its own shell.
-  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup|white_check_mark|ballot_box_with_check|heavy_check_mark|ok|ok_hand"
+  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup"
 
   # ── Local helpers ──────────────────────────────────────────────────────
   # set_boucle_label / chain_to_role / close_issue / get_work_item_children
