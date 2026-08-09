@@ -138,38 +138,35 @@ self-healing sweep) runs automatically — there is nothing to run by hand.
 
 ## ⚙️ How it works
 
-```
-issue in GitLab
-      │  (create it, or assign one to the boucle bot)
-      ▼
-   triage          analyses the issue, posts a spec, asks for your approval
-      │  (you validate the spec)
-      ▼
-   worker          implements on a branch and deploys a preview
-      │
-      ▼
-   reviewer        adversarial review against the preview
-      │
-      ▼
-   merge + deploy  (you approve the MR, then it merges)
-      │
-      ▼
-   e2e             verifies the production URL
-      │
-      ▼
-issue closed
+```mermaid
+flowchart TD
+    H1["👤 Create an issue"] --> T["🤖 Triage<br/>Analyses, drafts spec"]
+    T --> H2["👤 Approve the spec?<br/>👍 or 💬 comment"]
+    H2 -->|👍| W["🤖 Worker<br/>Implements, deploys preview"]
+    H2 -->|💬 comment| T
+    W --> R["🤖 Reviewer<br/>Adversarial review<br/>✅ pass or ❌ fail"]
+    R -->|✅ pass| H3["👤 Approve the MR?<br/>👍 or 💬 comment"]
+    R -->|❌ fail| W
+    H3 -->|👍| M["⚙️ Merge + Deploy"]
+    H3 -->|💬 comment| W
+    M --> E["🤖 E2E<br/>Verifies production<br/>✅ pass or ❌ fail"]
+    E -->|✅ pass| D["✅ Feature validated end-to-end"]
+    E -->|❌ fail| W
 ```
 
 Four specialized agents — **triage**, **worker**, **reviewer**, **e2e** —
 orchestrate the whole flow. Humans only do what only humans can: validate the
-spec and approve the MR. A chat-based coding agent demands your attention
-*now* — it asks, you answer, it waits, you context-switch. boucle inverts
-that. The loop runs asynchronously on CI; the human intervenes at **clear,
-named gates** (spec approval, MR review), not in a live chat. The
-**Do-Not-Disturb** mode (`BOUCLE_DND_*`) auto-validates the spec gate during
-your off-hours so the loop never blocks on you overnight. You approve the
-spec over your morning coffee; by the time you're back from lunch, the worker
-has implemented, the reviewer has verified the preview, and the MR is
+spec and approve the MR.
+
+A chat-based coding agent demands your attention *now* — it asks, you answer,
+it waits, you context-switch. boucle inverts that. The loop runs
+asynchronously on CI; the human intervenes at **clear, named gates** (spec
+approval, MR review), not in a live chat.
+
+The **Do-Not-Disturb** mode (`BOUCLE_DND_*`) auto-validates the spec gate
+during your off-hours so the loop never blocks on you overnight. You approve
+the spec over your morning coffee; by the time you're back from lunch, the
+worker has implemented, the reviewer has verified the preview, and the MR is
 waiting. The agent works on the agent's clock; you work on yours.
 
 ### Determinism and skills beat raw intelligence
@@ -178,24 +175,31 @@ The break-even analysis in [Cost](#cost) shows the intelligence gap would
 need to cause an implausibly high failure rate (29× above nominal) to justify
 Claude Code's cost premium. This reflects a broader pattern: at this
 intelligence tier, **how** you scaffold the agent matters more than **which**
-model you pick. Raw intelligence has diminishing returns — from DeepSeek V4
-Flash ($0.03/task) to Opus 5 ($2.34/task), cost increases 78× while
-intelligence increases 21% ([Artificial Analysis](https://artificialanalysis.ai),
-v4.1.1). What closes the gap instead is structure: Anthropic's own
+model you pick.
+
+Raw intelligence has diminishing returns — from DeepSeek V4 Flash ($0.03/task)
+to Opus 5 ($2.34/task), cost increases 78× while intelligence increases 21%
+([Artificial Analysis](https://artificialanalysis.ai), v4.1.1). What closes
+the gap instead is structure: Anthropic's own
 ["Building Effective Agents"](https://www.anthropic.com/research/building-effective-agents)
 (Dec 2024) recommends decomposing tasks into steps with "programmatic checks
 (gates) on any intermediate steps" and notes that "code solutions are
 verifiable through automated tests; agents can iterate on solutions using
-test results as feedback." Coding benchmarks like
+test results as feedback."
+
+Coding benchmarks like
 [Terminal-Bench v2.1](https://artificialanalysis.ai/evaluations/terminalbench-v2-1)
 and [SWE-bench Verified](https://www.swebench.com/) confirm this — each task
 ships with a verification suite the agent must satisfy, so the gate, not the
-model, decides what passes. boucle's four specialized roles each carry a
-focused prompt and a curated skill library (UI/UX, design, frontend
-engineering, codebase graph queries) — a specialized agent with the right
-skill outperforms a generalist with higher raw intelligence on the task it
-was built for. The model decides what to *attempt*; the gates and skills
-decide what *ships*.
+model, decides what passes.
+
+boucle's four specialized roles each carry a focused prompt and a curated
+skill library (UI/UX, design, frontend engineering, codebase graph queries) —
+a specialized agent with the right skill outperforms a generalist with higher
+raw intelligence on the task it was built for.
+
+**The model decides what to *attempt*; the gates and skills decide what
+*ships*.**
 
 ## 💰 Cost
 
