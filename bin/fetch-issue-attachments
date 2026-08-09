@@ -13,6 +13,7 @@
 #         .boucle/$ISSUE/attachments/MANIFEST.md (human-readable log).
 set -euo pipefail
 
+: "${BOUCLE_TOKEN:?BOUCLE_TOKEN must be set}"
 ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
 CI_PROJECT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
 # .boucle/$ISSUE is gitignored per-issue state (kept inside the engine dir so
