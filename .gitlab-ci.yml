@@ -202,11 +202,10 @@ default:
       # these were copy-pasted into each job's script block (8 copies of
       # set_boucle_label, 3 of resolve_reporter_id, etc.) with subtle
       # drift between variants. Now sourced once here.
-            # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
+      # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
       source "$BOUCLE_HOME/bin/forge/common.sh"
       forge_init
-
-source "$BOUCLE_HOME/lib/boucle.sh"
+      source "$BOUCLE_HOME/lib/boucle.sh"
 
       # ── jcode coding agent (standalone Rust binary) ──────────────
       # jcode replaces both opencode and pi. It is a Rust binary shipped as
@@ -451,11 +450,10 @@ dispatch:
       export JCODE_HOME="$CI_PROJECT_DIR/.boucle-state/.jcode"
 
       # ── Shared boucle helpers (set_boucle_label, chain_to_role, ...) ──
-            # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
+      # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
       source "$BOUCLE_HOME/bin/forge/common.sh"
       forge_init
-
-source "$BOUCLE_HOME/lib/boucle.sh"
+      source "$BOUCLE_HOME/lib/boucle.sh"
   script:
     - |
       # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
@@ -3040,11 +3038,10 @@ merger:
       export JCODE_HOME="$CI_PROJECT_DIR/.boucle-state/.jcode"
 
       # ── Shared boucle helpers (set_boucle_label, chain_to_role, ...) ──
-            # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
+      # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
       source "$BOUCLE_HOME/bin/forge/common.sh"
       forge_init
-
-source "$BOUCLE_HOME/lib/boucle.sh"
+      source "$BOUCLE_HOME/lib/boucle.sh"
   script:
     - |
       # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
@@ -3286,11 +3283,10 @@ post-merge:
       export JCODE_HOME="$CI_PROJECT_DIR/.boucle-state/.jcode"
 
       # ── Shared boucle helpers (set_boucle_label, chain_to_role, ...) ──
-            # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
+      # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
       source "$BOUCLE_HOME/bin/forge/common.sh"
       forge_init
-
-source "$BOUCLE_HOME/lib/boucle.sh"
+      source "$BOUCLE_HOME/lib/boucle.sh"
   script:
     - |
       set +o pipefail
@@ -3401,11 +3397,10 @@ catchup:
       export JCODE_HOME="$CI_PROJECT_DIR/.boucle-state/.jcode"
 
       # ── Shared boucle helpers (set_boucle_label, chain_to_role, ...) ──
-            # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
+      # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
       source "$BOUCLE_HOME/bin/forge/common.sh"
       forge_init
-
-source "$BOUCLE_HOME/lib/boucle.sh"
+      source "$BOUCLE_HOME/lib/boucle.sh"
   script:
     - |
       # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
