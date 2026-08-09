@@ -33,7 +33,10 @@ live preview** with screenshots — not prose.
 
 **Fast and cheap — BYOK.** Lightweight, purpose-built agents run on your
 forge's existing CI, with your own LLM credentials. No Mac Mini, no VPS, no
-always-on laptop.
+always-on laptop. The default duo — [GLM-5.2](https://z.ai/blog/glm-5.2) for
+triage and review, [DeepSeek V4 Flash 0731](https://artificialanalysis.ai/models/deepseek-v4-flash)
+for the worker — pairs a strong reasoner with a fast coder that scores near-equal
+on intelligence at a fraction of the cost.
 
 **No new interface.** No web app, no TUI. Your forge (GitLab or GitHub)
 stays the interface: create an issue, label it, approve the spec, then
