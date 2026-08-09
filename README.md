@@ -77,10 +77,15 @@ seven-run POC of a representative loop tool:
 
 ## 🚀 Quick start
 
-**Prerequisites:** a GitLab repository with Cloudflare Pages configured as the
-deployment target. `bin/setup` creates the bot (a project service account) as
-part of the install — see [The bot user](#the-bot-user) if you prefer to wire
-in an existing account instead.
+**Prerequisites:** a Git repository hosted on **GitLab or GitHub**, with a
+deployment target. The default target is Cloudflare Pages, but boucle is
+deploy-agnostic: set `BOUCLE_DEPLOY_MODE=external` when your own CI/CD ships
+the app (no deploy command needed, e2e still runs after merge), or bring any
+hosting reachable by `BOUCLE_DEPLOY_CMD`/`BOUCLE_LIVE_URL` — see the
+[Configuration](#configuration) table and [LOOP.md](LOOP.md). `bin/setup`
+creates the bot (a project service account on GitLab, the PAT owner on
+GitHub) as part of the install — see [The bot user](#the-bot-user) if you
+prefer to wire in an existing account instead.
 
 Pick whichever path fits you.
 
@@ -88,11 +93,11 @@ Pick whichever path fits you.
 
 No terminal needed. Ask your coding agent (Claude Code, Cursor, …) to install
 boucle by pasting this prompt. **Nothing to replace**: the agent detects your
-GitLab host and project from the git remote, and it works even if you are not
-already inside the target repository.
+GitLab/GitHub host and project from the git remote, and it works even if you are
+not already inside the target repository.
 
 ```text
-Install boucle on this GitLab repository. Execute these steps and report
+Install boucle on this GitLab/GitHub repository. Execute these steps and report
 back what you did:
 
 1. If you are not already inside the target repository — the one whose
@@ -120,14 +125,15 @@ git submodule add https://github.com/ankaboot-source/boucle .boucle
 .boucle/bin/setup --non-interactive
 ```
 
-`bin/setup` configures GitLab (CI variables, labels, board, branch
-protection, webhook), writes a thin `.gitlab-ci.yml` shim, and appends
+`bin/setup` configures the forge (GitLab CI/CD variables or GitHub Actions
+variables/secrets, labels, branch protection, webhook), writes a thin
+`.gitlab-ci.yml` or `.github/workflows/boucle.yml` shim, and appends
 `.boucle/` to your `.gitignore`. Your existing pipeline is never overwritten.
-Project and host are read from the `origin` remote automatically. The bot is
+Project, host and forge are read from the `origin` remote automatically. The bot is
 created for you (pass `--bot-id` / `--bot-token` to use an existing account
 instead); the only token you may still need to pass explicitly is the
 Cloudflare one (`--cf-token`), which otherwise comes from the `BOUCLE_CF_TOKEN`
-environment variable.
+environment variable — and only if your deploy target is Cloudflare.
 
 ### After install
 
@@ -175,10 +181,10 @@ spec and approve the MR.
 
 ## 🛠️ Configuration
 
-Boucle reads its configuration from GitLab CI/CD variables. The only one you
-**must** set to get started is `BOUCLE_LLM_API_KEY` (see
-[After install](#after-install)). The basics below all have sane defaults —
-override them only when you need to:
+Boucle reads its configuration from CI/CD variables (GitLab) or Actions
+variables/secrets (GitHub). The only one you **must** set to get started is
+`BOUCLE_LLM_API_KEY` (see [After install](#after-install)). The basics below
+all have sane defaults — override them only when you need to:
 
 | Variable | Default | What it controls |
 | --- | --- | --- |
@@ -192,10 +198,18 @@ override them only when you need to:
 | `BOUCLE_UPDATE_MODE` | `release` | How boucle updates itself (release = pinned engine version). |
 | `BOUCLE_MAX_PARALLEL_ISSUES` | `5` | Max issues worked on in parallel (`0` = unlimited). |
 | `BOUCLE_MAX_ITERATIONS` | `3` | Max worker re-runs per issue before escalation. |
+| `BOUCLE_DEPLOY_MODE` | `self` | Deploy handling: `self` runs `BOUCLE_DEPLOY_CMD` (default); `external` delegates deploys to the consumer's own CI/CD — boucle waits for it, then e2e-tests `BOUCLE_LIVE_URL`. |
+| `BOUCLE_REVIEW_MODE` | `preview` | Reviewer gate: `preview` tests the deployed preview (default); `diff` reviews the PR diff + the repo's own check suites — choose it when no per-PR preview infra exists. |
+| `BOUCLE_LIVE_URL` | *(unset)* | Canonical e2e target URL — **required** in `external` mode; optional override in `self` mode. |
 
-Variables are edited in GitLab under **Settings → CI/CD → Variables** — see
-the [GitLab documentation on CI/CD variables](https://docs.gitlab.com/ci/variables/)
-for how to add, mask, or protect them.
+Deploy targets: Cloudflare Pages (default), GitHub Pages, GitLab Pages, or the
+consumer's own pipeline (`external` mode). Per-provider
+`BOUCLE_DEPLOY_CMD`/`BOUCLE_DEPLOY_URL_REGEX` recipes live in [LOOP.md](LOOP.md).
+
+Variables are edited in GitLab under **Settings → CI/CD → Variables** (see the
+[GitLab documentation on CI/CD variables](https://docs.gitlab.com/ci/variables/))
+or in GitHub under **Settings → Secrets and variables → Actions** — see
+[using variables in GitHub Actions](https://docs.github.com/en/actions/learn-github-actions/variables).
 
 Every other option — models per agent, vision routing, provider fallback,
 deploy overrides — is documented in [LOOP.md](LOOP.md).
@@ -240,6 +254,12 @@ the loop reassigns issues to it automatically.
 - [ ] **servo rendering** — migrate preview rendering from Puppeteer to
       [servo](https://github.com/servo/servo) (Rust-native, no Chromium)
 - [ ] **cost estimate** — per-issue token-cost estimate and tracking
+- [ ] **GitHub/GitLab Pages deploy recipes** — first-class
+      `BOUCLE_DEPLOY_PROVIDER=github-pages|gitlab-pages` publisher and
+      `bin/setup`/`bin/doctor` support (issue [#29](https://github.com/ankaboot-source/boucle/issues/29), W1.7)
+- [ ] **Pilot consumers** — install and run the loop on the first
+      non-Cloudflare, GitHub-hosted consumer repos (issue
+      [#29](https://github.com/ankaboot-source/boucle/issues/29), W4/W5)
 
 ## ⚖️ License
 
