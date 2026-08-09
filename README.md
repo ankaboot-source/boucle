@@ -16,7 +16,7 @@ never touch the engine itself.
   - [Option 1 — copy/paste prompt](#option-1-copypaste-prompt-easiest)
   - [Option 2 — command line](#option-2-command-line)
   - [After install](#after-install)
-- [⚙️ How it works and why it's calmer](#️-how-it-works-and-why-its-calmer)
+- [⚙️ How it works](#️-how-it-works)
 - [💰 Cost](#cost)
 - [🛠️ Configuration](#️-configuration)
   - [The bot user](#the-bot-user)
@@ -136,7 +136,7 @@ From there, the pipeline takes over. You only answer the human prompts:
 spec validation and MR approval. The `doctor` job (a scheduled
 self-healing sweep) runs automatically — there is nothing to run by hand.
 
-## ⚙️ How it works and why it's calmer
+## ⚙️ How it works
 
 ```mermaid
 flowchart TD
