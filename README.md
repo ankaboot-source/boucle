@@ -211,16 +211,24 @@ either side. boucle on Ollama Max ($100/mo) gives you continuous-agent
 capacity with 10 concurrent models; Claude Code Max 20× ($200/mo) costs
 **2× more** for a duo whose per-task cost is **7–57× higher**.
 
-The quality gap is real but asymmetric. On the **worker** role, DeepSeek V4
-Flash 0731 reaches 95% of Sonnet 5's intelligence (52 vs 55) at 57× less
-cost — near-equal quality, overwhelming cost advantage. On the **triage**
-role, GLM-5.2 sits at 84% of Opus 5's intelligence (53 vs 63) at 7.5× less
-cost — a genuine 10-point gap. boucle compensates by routing the triage
-model's output through a human spec gate before the worker acts, and by
-verifying the worker's output on a live preview rather than trusting the
-model's confidence. The net effect: you trade a measurable slice of
-frontier reasoning for a 2× monthly saving and a 7–57× per-task saving —
-and the loop's gates, not the model, decide what ships.
+The quality gap is real but asymmetric, and the model choice on the **triage**
+role (issue analysis + spec) is the main lever. Three configurations, all
+gated by a human spec approval and a live-preview verification so the model
+decides what to *attempt* and the gates decide what *ships*:
+
+| Config | Triage intel | $/issue | vs Claude Code |
+| --- | ---: | ---: | ---: |
+| full DeepSeek | 52 | $0.24 | 62.5× cheaper |
+| **default (GLM-5.2 + DeepSeek)** | 53 | $0.80 | 18.8× cheaper |
+| Kimi K3 triage + DeepSeek | 60 | $1.22 | 12.3× cheaper |
+| Claude Code (Opus 5 + Sonnet 5) | 63 | $15.00 | — |
+
+The default duo is the shipped compromise. Full-DeepSeek is the cost floor
+($0.24/issue) at the price of a weaker triage. Swapping in Kimi K3 on triage
+closes most of the gap vs Opus 5 (from −10 to −3 pts) for +$0.42/issue — a
+quality upgrade at marginal cost, still 12.3× cheaper than Claude Code. See
+[docs/cost-benchmark.md](docs/cost-benchmark.md) for the full per-role
+breakdown.
 
 > Note: new Ollama Max subscriptions are temporarily paused (capacity
 > expansion); Pro remains open and Pro users can buy extra usage balance to
