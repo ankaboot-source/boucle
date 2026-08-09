@@ -107,8 +107,8 @@ TOML
     # $BOUCLE_FALLBACK_PROVIDER`) resolves. The key stays referenced via
     # api_key_env — never written to disk in plaintext.
     if [ -n "${BOUCLE_FALLBACK_PROVIDER:-}" ] \
-       && [ -n "${BOUCLE_FALLBACK_BASE_URL:-}" ] \
-       && [ -n "${BOUCLE_FALLBACK_API_KEY:-}" ]; then
+      && [ -n "${BOUCLE_FALLBACK_BASE_URL:-}" ] \
+      && [ -n "${BOUCLE_FALLBACK_API_KEY:-}" ]; then
       cat >> "$config_file" << TOML
 
 [providers.$BOUCLE_FALLBACK_PROVIDER]
@@ -142,10 +142,10 @@ TOML
 # triage, BOUCLE_MODEL_WORKER=deepseek-v4-flash for a faster worker).
 # The agent file default is the "good default" — override only when needed.
 AGENT_FILE=""
-  for candidate in \
-    "$BOUCLE_WORKSPACE/.jcode/agents/${AGENT}.md" \
-    "$(pwd)/.jcode/agents/${AGENT}.md" \
-    "$(dirname "$0")/../.jcode/agents/${AGENT}.md"; do
+for candidate in \
+  "$BOUCLE_WORKSPACE/.jcode/agents/${AGENT}.md" \
+  "$(pwd)/.jcode/agents/${AGENT}.md" \
+  "$(dirname "$0")/../.jcode/agents/${AGENT}.md"; do
   if [ -f "$candidate" ]; then
     AGENT_FILE="$candidate"
     break
@@ -222,7 +222,7 @@ fi
 # CI_PROJECT_DIR on GitLab, GITHUB_WORKSPACE on GitHub). Fall back to
 # CI_PROJECT_DIR (GitLab predefined) then pwd for local dev.
 BOUCLE_WORKSPACE="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-$(pwd)}}"
-CI_PROJECT_DIR="$BOUCLE_WORKSPACE"  # backward-compat alias for existing refs
+CI_PROJECT_DIR="$BOUCLE_WORKSPACE" # backward-compat alias for existing refs
 STATE_DIR="$BOUCLE_WORKSPACE/.boucle/$ISSUE"
 STATE_FILE="$STATE_DIR/state.md"
 ITERATIONS_FILE="$STATE_DIR/iterations.md"

@@ -26,14 +26,14 @@ boucle_ci_worker() {
   save_state_cache() {
     if [ -d ".boucle/$BOUCLE_ISSUE" ]; then
       mkdir -p "$ISSUE_STATE_CACHE"
-      cp -a ".boucle/$BOUCLE_ISSUE/." "$ISSUE_STATE_CACHE/" 2>/dev/null || true
+      cp -a ".boucle/$BOUCLE_ISSUE/." "$ISSUE_STATE_CACHE/" 2> /dev/null || true
     fi
   }
   trap save_state_cache EXIT
 
   # ── Closed-issue guard ───────────────────────────────────────────
   local worker_issue_state
-  worker_issue_state=$(forge_issue_get "$BOUCLE_ISSUE" | jq -r '.state // "unknown"' 2>/dev/null || echo "unknown")
+  worker_issue_state=$(forge_issue_get "$BOUCLE_ISSUE" | jq -r '.state // "unknown"' 2> /dev/null || echo "unknown")
   if [ "$worker_issue_state" = "closed" ]; then
     echo "boucle: issue #$BOUCLE_ISSUE is closed — worker cannot run on a closed issue (no-op)"
     exit 0
@@ -49,11 +49,11 @@ boucle_ci_worker() {
   BRANCH="boucle/$BOUCLE_ISSUE"
   if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
     git checkout "$BRANCH"
-    if git log --oneline "origin/$BOUCLE_DEFAULT_BRANCH..$BRANCH" 2>/dev/null | grep -q .; then
+    if git log --oneline "origin/$BOUCLE_DEFAULT_BRANCH..$BRANCH" 2> /dev/null | grep -q .; then
       echo "[boucle] Branch has prior worker commits — rebasing onto origin/$BOUCLE_DEFAULT_BRANCH to preserve work."
       if ! git rebase "origin/$BOUCLE_DEFAULT_BRANCH"; then
         echo "[boucle] Rebase conflicted — resetting to origin/$BOUCLE_DEFAULT_BRANCH (prior work lost)."
-        git rebase --abort 2>/dev/null || true
+        git rebase --abort 2> /dev/null || true
         git reset --hard "origin/$BOUCLE_DEFAULT_BRANCH"
       fi
     else
@@ -67,7 +67,7 @@ boucle_ci_worker() {
   if [ -d "$ISSUE_STATE_CACHE" ]; then
     echo "[boucle] Restoring .boucle/$BOUCLE_ISSUE/ from $ISSUE_STATE_CACHE"
     mkdir -p ".boucle/$BOUCLE_ISSUE"
-    cp -a "$ISSUE_STATE_CACHE/." ".boucle/$BOUCLE_ISSUE/" 2>/dev/null || true
+    cp -a "$ISSUE_STATE_CACHE/." ".boucle/$BOUCLE_ISSUE/" 2> /dev/null || true
   fi
 
   # ── Configure git credentials for push ───────────────────────────
@@ -115,10 +115,10 @@ EOF
   export BOUCLE_REVIEWER_FEEDBACK
   BOUCLE_REVIEWER_FEEDBACK=""
   local mr_for_feedback
-  mr_for_feedback=$(forge_mr_lookup_by_branch "boucle/$BOUCLE_ISSUE" "opened" 2>/dev/null || echo "")
+  mr_for_feedback=$(forge_mr_lookup_by_branch "boucle/$BOUCLE_ISSUE" "opened" 2> /dev/null || echo "")
   if [ -n "$mr_for_feedback" ]; then
     BOUCLE_REVIEWER_FEEDBACK=$(forge_mr_notes "$mr_for_feedback" \
-      | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | .[]' 2>/dev/null || echo "")
+      | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | .[]' 2> /dev/null || echo "")
   fi
 
   # ── Download attachments ─────────────────────────────────────────
@@ -131,14 +131,14 @@ EOF
 
   # ── Export issue body + notes for the agent prompt ───────────────
   export BOUCLE_ISSUE_BODY
-  BOUCLE_ISSUE_BODY=$(forge_issue_get "$BOUCLE_ISSUE" | jq -r '.description // empty' 2>/dev/null || echo "")
+  BOUCLE_ISSUE_BODY=$(forge_issue_get "$BOUCLE_ISSUE" | jq -r '.description // empty' 2> /dev/null || echo "")
   if [ -z "$BOUCLE_ISSUE_BODY" ]; then
     echo "[boucle] WARN: could not fetch issue #$BOUCLE_ISSUE body — worker will fall back to forge CLI."
   fi
 
   export BOUCLE_ISSUE_NOTES
   BOUCLE_ISSUE_NOTES=$(forge_issue_notes "$BOUCLE_ISSUE" \
-    | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | reverse | .[]' 2>/dev/null || echo "")
+    | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | reverse | .[]' 2> /dev/null || echo "")
   if [ -z "$BOUCLE_ISSUE_NOTES" ]; then
     echo "[boucle] INFO: no prior notes for issue #$BOUCLE_ISSUE (first worker run)."
   fi
@@ -148,11 +148,11 @@ EOF
   BOUCLE_SIBLINGS=""
   local sib_parent_iid
   sib_parent_iid=$(forge_issue_get "$BOUCLE_ISSUE" \
-    | jq -r '.description // empty' 2>/dev/null \
+    | jq -r '.description // empty' 2> /dev/null \
     | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
   if [ -n "$sib_parent_iid" ] && [ "$sib_parent_iid" != "$BOUCLE_ISSUE" ]; then
     local sib_children
-    sib_children=$(forge_work_item_children "$sib_parent_iid" 2>/dev/null || echo "[]")
+    sib_children=$(forge_work_item_children "$sib_parent_iid" 2> /dev/null || echo "[]")
     if [ "$sib_children" = "[]" ]; then
       # Fallback: split-parent marker
       sib_children=$(forge_issue_notes "$sib_parent_iid" \
@@ -171,7 +171,7 @@ EOF
           title: .title,
           state: .state,
           mr_url: (.web_url // "")
-        })' 2>/dev/null || echo "[]")
+        })' 2> /dev/null || echo "[]")
   fi
 
   # ── Run the agent ────────────────────────────────────────────────
@@ -187,7 +187,7 @@ EOF
     agent_log_file="$BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE/agent-output.log"
     log_snippet="(log file not found or empty)"
     if [ -f "$agent_log_file" ]; then
-      log_snippet=$(tail -c 2000 "$agent_log_file" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' || echo "(log read failed)")
+      log_snippet=$(tail -c 2000 "$agent_log_file" 2> /dev/null | sed 's/\x1b\[[0-9;]*m//g' || echo "(log read failed)")
     fi
     diagnostic_body=$(printf '%s\n' \
       "## ⚠️ Worker — échec du modèle (API indisponible ou crédits épuisés)" \
@@ -221,7 +221,7 @@ EOF
   fi
 
   # Ensure wrangler cache isn't committed
-  if ! grep -q '.wrangler/' .gitignore 2>/dev/null; then
+  if ! grep -q '.wrangler/' .gitignore 2> /dev/null; then
     echo '.wrangler/' >> .gitignore
     git add .gitignore
     git commit -m "chore: ignore .wrangler/ cache [skip ci]" --no-verify
@@ -229,22 +229,22 @@ EOF
 
   # ── Empty-MR guard ───────────────────────────────────────────────
   local diff_files
-  diff_files=$(git diff --name-only "origin/$BOUCLE_DEFAULT_BRANCH..HEAD" 2>/dev/null | grep -v '^\.gitignore$' || true)
+  diff_files=$(git diff --name-only "origin/$BOUCLE_DEFAULT_BRANCH..HEAD" 2> /dev/null | grep -v '^\.gitignore$' || true)
   if [ -z "$diff_files" ]; then
     ITERATION="${BOUCLE_ITERATION:-1}"
     local max_iter="${BOUCLE_MAX_ITERATIONS:-3}"
     # Update MR title only (not description — lesson #24)
     local existing_mr_iid
-    existing_mr_iid=$(forge_mr_lookup_by_branch "$BRANCH" "opened" 2>/dev/null || echo "")
+    existing_mr_iid=$(forge_mr_lookup_by_branch "$BRANCH" "opened" 2> /dev/null || echo "")
     if [ -n "$existing_mr_iid" ]; then
       local nochg_title="feat: worker iteration $ITERATION — no code changes yet (#$BOUCLE_ISSUE)"
       forge_mr_update "$existing_mr_iid" "$nochg_title" ""
     fi
     if [ "$ITERATION" -lt "$max_iter" ]; then
-      echo "WARN: worker produced no changes — re-triggering (iteration $((ITERATION+1))/$max_iter)." >&2
+      echo "WARN: worker produced no changes — re-triggering (iteration $((ITERATION + 1))/$max_iter)." >&2
       set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-      forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker produced no code changes on iteration $ITERATION (agent likely exhausted its step budget). Re-running (iteration $((ITERATION+1))/$max_iter)."
-      chain_to_role "$BOUCLE_ISSUE" "worker" "BOUCLE_ITERATION=$((ITERATION+1))"
+      forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker produced no code changes on iteration $ITERATION (agent likely exhausted its step budget). Re-running (iteration $((ITERATION + 1))/$max_iter)."
+      chain_to_role "$BOUCLE_ISSUE" "worker" "BOUCLE_ITERATION=$((ITERATION + 1))"
     else
       echo "Escalating to human — worker produced no changes after $max_iter attempts." >&2
       set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
@@ -257,21 +257,21 @@ EOF
   git fetch origin "$BOUCLE_DEFAULT_BRANCH"
   if ! git rebase "origin/$BOUCLE_DEFAULT_BRANCH"; then
     echo "FAIL: rebase onto origin/$BOUCLE_DEFAULT_BRANCH conflicted." >&2
-    git rebase --abort 2>/dev/null || true
+    git rebase --abort 2> /dev/null || true
     ITERATION="${BOUCLE_ITERATION:-1}"
     local max_iter="${BOUCLE_MAX_ITERATIONS:-3}"
     if [ "$ITERATION" -lt "$max_iter" ]; then
       # Closed-issue guard
       local rebase_issue_state
-      rebase_issue_state=$(forge_issue_get "$BOUCLE_ISSUE" | jq -r '.state // "unknown"' 2>/dev/null || echo "unknown")
+      rebase_issue_state=$(forge_issue_get "$BOUCLE_ISSUE" | jq -r '.state // "unknown"' 2> /dev/null || echo "unknown")
       if [ "$rebase_issue_state" = "closed" ]; then
         echo "boucle: issue #$BOUCLE_ISSUE is closed — not re-triggering worker after rebase conflict"
         exit 1
       fi
-      echo "Re-triggering worker (iteration $((ITERATION+1))/$max_iter)." >&2
+      echo "Re-triggering worker (iteration $((ITERATION + 1))/$max_iter)." >&2
       set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-      forge_issue_note "$BOUCLE_ISSUE" "🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh $BOUCLE_DEFAULT_BRANCH (iteration $((ITERATION+1))/$max_iter)."
-      chain_to_role "$BOUCLE_ISSUE" "worker" "BOUCLE_ITERATION=$((ITERATION+1))"
+      forge_issue_note "$BOUCLE_ISSUE" "🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh $BOUCLE_DEFAULT_BRANCH (iteration $((ITERATION + 1))/$max_iter)."
+      chain_to_role "$BOUCLE_ISSUE" "worker" "BOUCLE_ITERATION=$((ITERATION + 1))"
     else
       echo "Escalating to human — iteration cap ($max_iter) reached after repeated rebase conflicts." >&2
       set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
@@ -320,8 +320,8 @@ EOF
   # ── MR title + description ───────────────────────────────────────
   ITERATION="${BOUCLE_ITERATION:-1}"
   local commit_count commit_summary approach
-  commit_count=$(git log "origin/$BOUCLE_DEFAULT_BRANCH..$BRANCH" --oneline 2>/dev/null | wc -l | tr -d ' ')
-  commit_summary=$(git log "origin/$BOUCLE_DEFAULT_BRANCH..$BRANCH" --format='- %s' 2>/dev/null | head -10)
+  commit_count=$(git log "origin/$BOUCLE_DEFAULT_BRANCH..$BRANCH" --oneline 2> /dev/null | wc -l | tr -d ' ')
+  commit_summary=$(git log "origin/$BOUCLE_DEFAULT_BRANCH..$BRANCH" --format='- %s' 2> /dev/null | head -10)
   approach=""
   if [ -f ".boucle-state/$BOUCLE_ISSUE/state.md" ]; then
     approach=$(sed -n '/^## Approach/,/^## /p' ".boucle-state/$BOUCLE_ISSUE/state.md" | head -n -1 | tail -n +2 | head -20)
@@ -332,7 +332,7 @@ EOF
 
   # Infer MR type from issue labels
   local issue_title issue_labels issue_data mr_type
-  issue_data=$(forge_issue_get "$BOUCLE_ISSUE" 2>/dev/null || true)
+  issue_data=$(forge_issue_get "$BOUCLE_ISSUE" 2> /dev/null || true)
   if [ -n "$issue_data" ]; then
     issue_title=$(echo "$issue_data" | jq -r '.title // empty')
     issue_labels=$(echo "$issue_data" | jq -r '.labels | map(. | ascii_downcase) | join(",") // empty')
@@ -373,7 +373,7 @@ EOF
 
   # ── MR create or update ──────────────────────────────────────────
   local mr_iid
-  mr_iid=$(forge_mr_lookup_by_branch "$BRANCH" "opened" 2>/dev/null || echo "")
+  mr_iid=$(forge_mr_lookup_by_branch "$BRANCH" "opened" 2> /dev/null || echo "")
   if [ -z "$mr_iid" ]; then
     mr_iid=$(forge_mr_create "$BRANCH" "$BOUCLE_DEFAULT_BRANCH" "$mr_title" "$mr_description")
   else
@@ -392,7 +392,7 @@ EOF
   delay=5
   while [ "$attempt" -lt 6 ]; do
     attempt=$((attempt + 1))
-    http_code=$(curl -sL -o /dev/null -w "%{http_code}" "$preview_url" 2>/dev/null || echo "000")
+    http_code=$(curl -sL -o /dev/null -w "%{http_code}" "$preview_url" 2> /dev/null || echo "000")
     if [ "$http_code" = "200" ]; then
       echo "Preview URL 200 OK (attempt $attempt/6)"
       preview_ok=true
@@ -415,7 +415,7 @@ EOF
   elapsed=0
   deployed_sha=""
   while [ "$elapsed" -lt "$propagation_wait" ]; do
-    deployed_sha=$(curl -s "${preview_url%/}/__boucle_commit__.txt" 2>/dev/null \
+    deployed_sha=$(curl -s "${preview_url%/}/__boucle_commit__.txt" 2> /dev/null \
       | grep -oE 'sha=[a-f0-9]{7,40}' | head -1 | sed 's/sha=//')
     if [ "$deployed_sha" = "$head_sha" ]; then
       echo "Preview fresh: deployed SHA ${deployed_sha:0:12} matches head ${head_sha:0:12} (after ${elapsed}s)"
