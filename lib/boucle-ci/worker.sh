@@ -437,28 +437,8 @@ EOF
   chain_to_role "$BOUCLE_ISSUE" "reviewer" "BOUCLE_ITERATION=$ITERATION"
 }
 
-# ── Helper: lookup MR/PR by source branch ──────────────────────────
-# forge_mr_get takes an mr_iid, but the worker needs to find a MR by
-# its source branch name. This helper queries the forge API directly.
-# Returns the MR IID on stdout, empty on failure.
-# Usage: forge_mr_lookup_by_branch <source_branch> <state>
-forge_mr_lookup_by_branch() {
-  local branch="$1" state="${2:-opened}"
-  local forge="${BOUCLE_FORGE:-gitlab}"
-  case "$forge" in
-    gitlab)
-      glab api --hostname "$BOUCLE_FORGE_HOST" \
-        "/projects/$BOUCLE_PROJECT_ID/merge_requests?source_branch=$(printf '%s' "$branch" | sed 's|/|%2F|g')&state=$state" 2>/dev/null \
-        | jq -r '.[0].iid // empty' 2>/dev/null || true
-      ;;
-    github)
-      # GitHub: list PRs filtered by head branch
-      GH_TOKEN="$BOUCLE_TOKEN" gh api \
-        "/repos/$BOUCLE_PROJECT_ID/pulls?state=${state:+open}&head=$(printf '%s' "$branch" | sed 's|/|%2F|g')" 2>/dev/null \
-        | jq -r '.[0].number // empty' 2>/dev/null || true
-      ;;
-    *)
-      echo "" >&2
-      ;;
-  esac
-}
+# forge_mr_lookup_by_branch <source_branch> [state] is provided by the
+# forge backend (bin/forge/gitlab.sh / bin/forge/github.sh), loaded via
+# forge_init() in lib/boucle-ci.sh before this stage runs. The local
+# duplicate was removed — the contract version is authoritative (commit
+# 2bea653). Returns the MR IID on stdout, empty on failure.

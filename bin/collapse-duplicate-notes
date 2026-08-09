@@ -42,20 +42,45 @@ if [[ -z "$TYPE" || -z "$PROJECT_ID" || -z "$NOTE_IID" ]]; then
   exit 0
 fi
 
+# ── Forge backend bootstrap ─────────────────────────────────────────
+# This script runs standalone in the CI job (not via bin/boucle-ci), so
+# it must source the forge abstraction itself. BOUCLE_FORGE defaults to
+# gitlab when the script is called outside CI (local dev, tests).
+BOUCLE_HOME="${BOUCLE_HOME:-}"
+if [ -z "$BOUCLE_HOME" ]; then
+  if [ -d "${CI_PROJECT_DIR:-}/.boucle/bin" ]; then
+    BOUCLE_HOME="$CI_PROJECT_DIR/.boucle"
+  else
+    BOUCLE_HOME="$(cd "$(dirname "$0")/.." && pwd)"
+  fi
+fi
+export BOUCLE_HOME
+export BOUCLE_FORGE="${BOUCLE_FORGE:-gitlab}"
+# shellcheck source=forge/common.sh
+. "$BOUCLE_HOME/bin/forge/common.sh"
+type forge_init &>/dev/null && {
+  type forge_issue_get &>/dev/null || forge_init
+} || true
+export BOUCLE_FORGE_HOST="$HOST"
+export BOUCLE_PROJECT_ID="$PROJECT_ID"
+
 case "$TYPE" in
   triage)
+    KIND="issue"
     ENDPOINT="projects/${PROJECT_ID}/issues/${NOTE_IID}/notes"
     # boucle:triage marker + ## TL;DR (final only) + ## Disposition section
     FILTER='.[] | select(.body | test("<!-- boucle:triage")) | select(.body | test("(?m)^## TL;DR")) | select(.body | test("(?m)^## Disposition"))'
     DRAFT_FILTER='.[] | select(.body | test("<!-- boucle:draft role=triage"))'
     ;;
   reviewer)
+    KIND="mr"
     ENDPOINT="projects/${PROJECT_ID}/merge_requests/${NOTE_IID}/notes"
     FILTER='.[] | select(.body | test("<!-- boucle:verdict")) | select(.body | test("role=reviewer"))'
     DRAFT_FILTER='.[] | select(.body | test("<!-- boucle:draft role=reviewer"))'
     [[ -n "$SHA" ]] && FILTER="${FILTER} | select(.body | test(\"${SHA}\"))"
     ;;
   e2e)
+    KIND="issue"
     ENDPOINT="projects/${PROJECT_ID}/issues/${NOTE_IID}/notes"
     FILTER='.[] | select(.body | test("<!-- boucle:verdict")) | select(.body | test("role=e2e"))'
     DRAFT_FILTER='.[] | select(.body | test("<!-- boucle:draft role=e2e"))'
@@ -67,8 +92,13 @@ case "$TYPE" in
     ;;
 esac
 
-# Fetch all notes. Tolerate failure (empty result → nothing to collapse).
-NOTES_JSON="$(glab api "$ENDPOINT" --paginate 2> /dev/null || true)"
+# Fetch all notes via the forge contract. Tolerate failure (empty result →
+# nothing to collapse).
+if [ "$KIND" = "mr" ]; then
+  NOTES_JSON="$(forge_mr_notes "$NOTE_IID" 2> /dev/null || true)"
+else
+  NOTES_JSON="$(forge_issue_notes "$NOTE_IID" 2> /dev/null || true)"
+fi
 if [[ -z "$NOTES_JSON" ]]; then
   log "collapse-duplicate-notes: no notes fetched for $ENDPOINT"
   exit 0
@@ -106,15 +136,20 @@ if [[ "$FINAL_COUNT" -ge 2 ]]; then
   # PUT newest body onto first (oldest) note id.
   if [[ -n "$FIRST_ID" && -n "$NEWEST_BODY" ]]; then
     log "collapse-duplicate-notes: PUT $ENDPOINT/$FIRST_ID (newest body onto oldest id)"
-    printf '%s' "$NEWEST_BODY" | glab api -X PUT "$ENDPOINT/$FIRST_ID" -F "body=@-" 2> /dev/null \
-      || log "collapse-duplicate-notes: PUT failed for note $FIRST_ID (continuing)"
+    if [ "$KIND" = "mr" ]; then
+      forge_mr_note_update "$NOTE_IID" "$FIRST_ID" "$NEWEST_BODY" 2> /dev/null \
+        || log "collapse-duplicate-notes: PUT failed for note $FIRST_ID (continuing)"
+    else
+      forge_issue_note_update "$NOTE_IID" "$FIRST_ID" "$NEWEST_BODY" 2> /dev/null \
+        || log "collapse-duplicate-notes: PUT failed for note $FIRST_ID (continuing)"
+    fi
   fi
 
   # DELETE every other matching final note id (all except the first/oldest).
   printf '%s\n' "$FINAL_IDS" | tail -n +2 | while IFS= read -r DEL_ID; do
     [[ -z "$DEL_ID" ]] && continue
     log "collapse-duplicate-notes: DELETE $ENDPOINT/$DEL_ID (duplicate final)"
-    glab api -X DELETE "$ENDPOINT/$DEL_ID" 2> /dev/null \
+    forge_note_delete "$KIND" "$NOTE_IID" "$DEL_ID" 2> /dev/null \
       || log "collapse-duplicate-notes: DELETE failed for note $DEL_ID (continuing)"
   done
 else
@@ -131,7 +166,7 @@ if [[ -n "$DRAFT_IDS" ]]; then
   printf '%s\n' "$DRAFT_IDS" | while IFS= read -r DEL_ID; do
     [[ -z "$DEL_ID" ]] && continue
     log "collapse-duplicate-notes: DELETE $ENDPOINT/$DEL_ID (superseded draft)"
-    glab api -X DELETE "$ENDPOINT/$DEL_ID" 2> /dev/null \
+    forge_note_delete "$KIND" "$NOTE_IID" "$DEL_ID" 2> /dev/null \
       || log "collapse-duplicate-notes: DELETE failed for note $DEL_ID (continuing)"
   done
 fi
