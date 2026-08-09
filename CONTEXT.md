@@ -57,7 +57,7 @@ shaped the design.
 | AI agents | jcode (4 agents: triage, worker, reviewer, e2e) |
 | Models | glm-5.2 (triage, e2e), deepseek-v4-flash:0731 (worker, reviewer) — open-weight preference |
 | Knowledge graph | codebase-memory-mcp |
-| Deployment | Cloudflare Pages (wrangler) — MVP, other targets planned |
+| Deployment | Pluggable: Cloudflare Pages (default), GitHub Pages, GitLab Pages, external (consumer's own CI) |
 | Tests | bats (shell), shellcheck, shfmt |
 | Hooks | pre-commit |
 | Vendored skills | `.jcode/skills/` — content borrowed from the maintainer's skill library, synced from upstream. Only one component ships executable code: `ui-ux-pro-max` (Python stdlib-only, engine of the worker's design skill). No boucle-authored Python. |
