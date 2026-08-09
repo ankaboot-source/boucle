@@ -77,33 +77,52 @@ GitLab Pages unique-domain mode uses random 6-char IDs — use `BOUCLE_LIVE_URL`
 
 ## CI/CD variables
 
-Full list of boucle CI/CD variables (set as repo secrets/variables). Defaults shown; override per-consumer.
+Complete reference of all boucle CI/CD variables (set as repo secrets/variables). Defaults shown; override per-consumer. `bin/setup` seeds defaults where possible (e.g. `BOUCLE_DND_TZ` from the installing machine's timezone, fallback model variables).
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `BOUCLE_FORGE` | `gitlab` | Active forge (`gitlab` or `github`) |
-| `BOUCLE_DEPLOY_MODE` | `self` | Deploy mode (`self` or `external`) |
-| `BOUCLE_REVIEW_MODE` | `preview` | Review mode (`preview` or `diff`) |
-| `BOUCLE_DEPLOY_CMD` | `npx wrangler pages deploy ...` | Deploy command (self mode) |
-| `BOUCLE_DEPLOY_URL_REGEX` | `https://[a-z0-9.-]+\.pages\.dev` | Regex to extract URL from deploy output |
-| `BOUCLE_DEPLOY_PROJECT` | `""` | Cloudflare Pages project name (self mode) |
-| `BOUCLE_LIVE_URL` | `""` | Production/live URL (overrides regex/pages.dev fallback; **required** in external mode) |
-| `BOUCLE_PRODUCTION_URL` | `""` | Production URL fallback for e2e |
-| `BOUCLE_PREVIEW_MARKER_PATH` | `__boucle_commit__.txt` | SHA marker probe path (relative to URL root) |
-| `BOUCLE_PREVIEW_PROPAGATION_WAIT` | `60` | Seconds to wait for preview CDN propagation |
-| `BOUCLE_EXTERNAL_DEPLOY_WAIT` | `600` | Max seconds to wait for consumer's own CI on merged commit |
-| `BOUCLE_REVIEW_CHECKS_WAIT` | `900` | Max seconds to wait for PR check suites in diff mode |
-| `BOUCLE_BUILD_CMD` | `npm ci && npm run build` | Build command |
-| `BOUCLE_BUILD_OUTPUT` | `public` | Build output directory |
-| `BOUCLE_MAX_PARALLEL_ISSUES` | `5` | Max concurrent boucle:working issues (0 = unlimited) |
-| `BOUCLE_MAX_ITERATIONS` | `3` | Max worker re-runs per issue |
-| `BOUCLE_STALENESS_THRESHOLD` | `2400` | Seconds before a stuck issue is re-triggered (must exceed max job timeout) |
-| `BOUCLE_SPEC_PROFILE` | `product` | Spec validation profile |
-| `BOUCLE_LLM_BASE_URL` | — | LLM API endpoint |
-| `BOUCLE_LLM_API_KEY` | — | LLM API key (masked secret) |
-| `BOUCLE_VISION_ROUTING` | `enabled` | Vision model routing (`enabled` or `disabled`) |
-| `BOUCLE_VISION_MODEL` | `minimax-m3` | Vision model for image-enabled roles |
-| `BOUCLE_VISION_ROLES` | `triage,worker,reviewer` | Roles eligible for vision model routing |
+| `BOUCLE_ENABLED` | `true` | Master switch: `true` or `false` (pause boucle). |
+| `BOUCLE_FORGE` | `gitlab` | Active forge: `gitlab` or `github`. |
+| `BOUCLE_SPEC_PROFILE` | `product` | Spec validation profile: `product` (default, gates Size M only), `strict` (gates all sizes), `off` (never); unknown → `product`. |
+| `BOUCLE_DND_ENABLED` | `true` | Do-Not-Disturb master switch: `true` or `false`. |
+| `BOUCLE_DND_START` / `BOUCLE_DND_END` | `22:00` / `07:00` | Quiet-hours window: HH:MM 24h start/end. |
+| `BOUCLE_DND_TZ` | `UTC` | Quiet-hours timezone (IANA name, e.g. `Europe/Paris`); seeded by `bin/setup` from the machine's timezone. |
+| `BOUCLE_DND_EXCLUDE_DAYS` | *(empty)* | Comma-separated weekday names never in DND (e.g. `Fri,Sat`). |
+| `BOUCLE_DEPLOY_MODE` | `self` | Deploy mode: `self` (boucle runs `BOUCLE_DEPLOY_CMD`) or `external` (consumer's own CI/CD deploys). |
+| `BOUCLE_REVIEW_MODE` | `preview` | Review mode: `preview` (tests deployed preview) or `diff` (reviews PR diff + check suites). |
+| `BOUCLE_DEPLOY_CMD` | `npx wrangler pages deploy ...` | Deploy command (self mode). |
+| `BOUCLE_DEPLOY_URL_REGEX` | `https://[a-z0-9.-]+\.pages\.dev` | Regex to extract URL from deploy output. |
+| `BOUCLE_DEPLOY_PROJECT` | `""` | Cloudflare Pages project name (self mode). |
+| `BOUCLE_LIVE_URL` | `""` | Production/live URL (overrides regex/pages.dev fallback; **required** in external mode). |
+| `BOUCLE_PRODUCTION_URL` | `""` | Production URL fallback for e2e. |
+| `BOUCLE_PREVIEW_MARKER_PATH` | `__boucle_commit__.txt` | SHA marker probe path (relative to URL root). |
+| `BOUCLE_PREVIEW_PROPAGATION_WAIT` | `60` | Seconds to wait for preview CDN propagation. |
+| `BOUCLE_PREVIEW_DISABLE` | `false` | Skip Chromium visual preview in triage: `true` or `false`. |
+| `BOUCLE_EXTERNAL_DEPLOY_WAIT` | `600` | Max seconds to wait for consumer's own CI on merged commit. |
+| `BOUCLE_REVIEW_CHECKS_WAIT` | `900` | Max seconds to wait for PR check suites in diff mode. |
+| `BOUCLE_BUILD_CMD` | `npm ci && npm run build` | Build command. |
+| `BOUCLE_BUILD_OUTPUT` | `public` | Build output directory. |
+| `BOUCLE_RUNNER_TAG` | `boucle` | Runner tag for agent jobs (GitLab; `bin/setup --runner-tag`). |
+| `BOUCLE_RUNS_ON` | `ubuntu-latest` | Runs-on expression (GitHub; forge-agnostic — maps to tags on GitLab). |
+| `BOUCLE_MAX_PARALLEL_ISSUES` | `5` | Max concurrent boucle:working issues (`0` = unlimited). |
+| `BOUCLE_MAX_ITERATIONS` | `3` | Max worker re-runs per issue before escalation. |
+| `BOUCLE_STALENESS_THRESHOLD` | `2400` | Seconds before a stuck issue is re-triggered (must exceed max job timeout, 30 min). |
+| `BOUCLE_UPDATE_MODE` | `release` | Update mode: `release` (pinned engine release) or `dev` (tracking branch). |
+| `BOUCLE_LLM_BASE_URL` | — | LLM API endpoint (any OpenAI-compatible). |
+| `BOUCLE_LLM_API_KEY` | — | LLM API key (masked secret). |
+| `BOUCLE_VISION_ROUTING` | `enabled` | Vision model routing: `enabled` or `disabled`. |
+| `BOUCLE_VISION_MODEL` | `minimax-m3` | Vision model for image-enabled roles. |
+| `BOUCLE_VISION_ROLES` | `triage,worker,reviewer` | Roles eligible for vision model routing (comma-separated). |
+| `BOUCLE_FALLBACK_PROVIDER` | *(empty)* | Fallback provider profile name; empty = disabled. Requires `BOUCLE_FALLBACK_BASE_URL` + `BOUCLE_FALLBACK_API_KEY` (masked). Retries on exit-4 (provider down / quota exhausted) before escalating. |
+| `BOUCLE_FALLBACK_BASE_URL` | *(empty)* | Fallback provider endpoint (OpenAI-compatible). |
+| `BOUCLE_FALLBACK_API_KEY` | *(empty)* | Fallback provider key (masked secret). |
+| `BOUCLE_FALLBACK_MODEL_TRIAGE` | `glm-5.2` | Per-role fallback model overrides. |
+| `BOUCLE_FALLBACK_MODEL_WORKER` | `deepseek-v4-flash` | |
+| `BOUCLE_FALLBACK_MODEL_REVIEWER` | `glm-5.2` | |
+| `BOUCLE_FALLBACK_MODEL_E2E` | `deepseek-v4-flash` | |
+| `BOUCLE_PROVIDER_PROFILE` | `boucle` | jcode provider profile name. |
+| `BOUCLE_IMAGE_MAX_BYTES` | `10485760` | Max bytes per attachment (10 MiB). |
+| `BOUCLE_IMAGE_TOTAL_MAX_BYTES` | `52428800` | Max total bytes per issue (50 MiB). |
 
 ### Bot token (GitHub)
 

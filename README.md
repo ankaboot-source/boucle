@@ -250,31 +250,33 @@ all have sane defaults — override them only when you need to:
 
 | Variable | Default | What it controls |
 | --- | --- | --- |
-| `BOUCLE_ENABLED` | `true` | Master switch. Set to `false` to pause boucle without touching the pipeline. |
+| `BOUCLE_ENABLED` | `true` | Master switch: `true` (default) or `false` to pause boucle. |
 | `BOUCLE_LLM_API_KEY` | *(unset)* | LLM provider key. Set as a **masked** variable. |
 | `BOUCLE_LLM_BASE_URL` | `https://ollama.com/v1` | LLM provider endpoint (any OpenAI-compatible API). |
-| `BOUCLE_RUNNER_TAG` | `boucle` | Runner tag that executes agent jobs. Override if your runner uses a different tag. |
-| `BOUCLE_SPEC_PROFILE` | `product` | Spec gate strictness: which issues require your spec approval. |
-| `BOUCLE_DND_ENABLED` | `true` | Auto-validates the spec gate during quiet hours (Do-Not-Disturb). |
-| `BOUCLE_DND_START` / `BOUCLE_DND_END` / `BOUCLE_DND_TZ` | `22:00` / `07:00` / `UTC` | Quiet-hours window for the spec gate. |
-| `BOUCLE_UPDATE_MODE` | `release` | How boucle updates itself (release = pinned engine version). |
-| `BOUCLE_MAX_PARALLEL_ISSUES` | `5` | Max issues worked on in parallel (`0` = unlimited). |
-| `BOUCLE_MAX_ITERATIONS` | `3` | Max worker re-runs per issue before escalation. |
-| `BOUCLE_DEPLOY_MODE` | `self` | Deploy handling: `self` runs `BOUCLE_DEPLOY_CMD` (default); `external` delegates deploys to the consumer's own CI/CD — boucle waits for it, then e2e-tests `BOUCLE_LIVE_URL`. |
-| `BOUCLE_REVIEW_MODE` | `preview` | Reviewer gate: `preview` tests the deployed preview (default); `diff` reviews the PR diff + the repo's own check suites — choose it when no per-PR preview infra exists. |
+| `BOUCLE_SPEC_PROFILE` | `product` | Spec gate strictness: `product` (default — gates Size M only), `strict` (gates all sizes), `off` (never gates); unknown → `product`. |
+| `BOUCLE_DND_ENABLED` | `true` | Do-Not-Disturb master switch: `true` (default) or `false`. |
+| `BOUCLE_DND_START` / `BOUCLE_DND_END` / `BOUCLE_DND_TZ` | `22:00` / `07:00` / `UTC` | Quiet-hours window: HH:MM 24h start/end + IANA timezone (e.g. `Europe/Paris`). |
+| `BOUCLE_DEPLOY_MODE` | `self` | Deploy handling: `self` (default — boucle runs `BOUCLE_DEPLOY_CMD`) or `external` (consumer's own CI/CD deploys; `BOUCLE_LIVE_URL` required). |
+| `BOUCLE_REVIEW_MODE` | `preview` | Reviewer gate: `preview` (default — tests deployed preview) or `diff` (reviews PR diff + check suites). |
 | `BOUCLE_LIVE_URL` | *(unset)* | Canonical e2e target URL — **required** in `external` mode; optional override in `self` mode. |
 
 Deploy targets: Cloudflare Pages (default), GitHub Pages, GitLab Pages, or the
 consumer's own pipeline (`external` mode). Per-provider
 `BOUCLE_DEPLOY_CMD`/`BOUCLE_DEPLOY_URL_REGEX` recipes live in [LOOP.md](LOOP.md).
+During install, `bin/setup` seeds the DND timezone (`BOUCLE_DND_TZ`) from the
+machine's timezone, plus the fallback model variables (`BOUCLE_FALLBACK_*`) —
+all overridable after install in the variables UI.
 
 Variables are edited in GitLab under **Settings → CI/CD → Variables** (see the
 [GitLab documentation on CI/CD variables](https://docs.gitlab.com/ci/variables/))
 or in GitHub under **Settings → Secrets and variables → Actions** — see
 [using variables in GitHub Actions](https://docs.github.com/en/actions/learn-github-actions/variables).
 
-Every other option — models per agent, vision routing, provider fallback,
-deploy overrides — is documented in [LOOP.md](LOOP.md).
+Every other option — `BOUCLE_RUNNER_TAG`/`BOUCLE_RUNS_ON`, `BOUCLE_UPDATE_MODE`
+(`release`|`dev`), iteration/concurrency caps (`BOUCLE_MAX_ITERATIONS`,
+`BOUCLE_MAX_PARALLEL_ISSUES`), models per agent, vision routing, provider
+fallback (`BOUCLE_FALLBACK_*`), deploy overrides, staleness, attachment caps —
+is documented in [LOOP.md](LOOP.md).
 
 ### The bot user
 
