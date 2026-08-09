@@ -105,6 +105,22 @@ Full list of boucle CI/CD variables (set as repo secrets/variables). Defaults sh
 | `BOUCLE_VISION_MODEL` | `minimax-m3` | Vision model for image-enabled roles |
 | `BOUCLE_VISION_ROLES` | `triage,worker,reviewer` | Roles eligible for vision model routing |
 
+### Bot token (GitHub)
+
+On GitHub the bot **is** the account that owns the `BOUCLE_TOKEN` PAT. Create it at
+[https://github.com/settings/tokens/new](https://github.com/settings/tokens/new)
+with **`repo` + `workflow`** scopes (optionally `admin:org` for
+branch-protection checks) — see
+[Scopes for OAuth apps](https://docs.github.com/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps).
+Select a sensible expiration (fine-grained or classic PATs both work; classic
+with the two scopes is the simplest).
+
+`bin/setup --forge github` resolves the PAT's account, seeds
+`BOUCLE_BOT_USERNAME` with it and stores the PAT as `BOUCLE_TOKEN` (secret). A
+**missing, invalid, or expired PAT fails setup with an explicit message** —
+the loop never runs half-configured. Renew the PAT and re-run `bin/setup`
+(idempotent) when the stored token expires.
+
 ## Bug policy
 
 See `.jcode/UPSTREAM-FIX-WORKFLOW.md` — fix upstream in boucle first, then
