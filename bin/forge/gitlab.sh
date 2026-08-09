@@ -23,7 +23,7 @@
 
 forge_issue_get() {
   local iid="$1"
-  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues/$iid" 2>/dev/null || true
+  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues/$iid" 2> /dev/null || true
 }
 
 forge_issue_note() {
@@ -34,13 +34,13 @@ forge_issue_note() {
 
 forge_issue_notes() {
   local iid="$1"
-  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues/$iid/notes" 2>/dev/null || echo "[]"
+  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues/$iid/notes" 2> /dev/null || echo "[]"
 }
 
 forge_issue_labels_get() {
   local iid="$1" resp
-  resp=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues/$iid" 2>/dev/null) || true
-  echo "$resp" | jq -r '.labels | join(",")' 2>/dev/null || true
+  resp=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues/$iid" 2> /dev/null) || true
+  echo "$resp" | jq -r '.labels | join(",")' 2> /dev/null || true
 }
 
 forge_issue_labels_set() {
@@ -51,7 +51,10 @@ forge_issue_labels_set() {
   local all_present=true lbl
   for lbl in $(echo "$labels" | tr ',' ' '); do
     [ -z "$lbl" ] && continue
-    echo "$current_all" | tr ',' '\n' | grep -qx "$lbl" || { all_present=false; break; }
+    echo "$current_all" | tr ',' '\n' | grep -qx "$lbl" || {
+      all_present=false
+      break
+    }
   done
   [ "$all_present" = true ] && return 0
   glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$BOUCLE_PROJECT_ID/issues/$iid" \
@@ -63,7 +66,7 @@ forge_issue_assign() {
   [ -z "$user_id" ] && return 0
   curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$BOUCLE_PROJECT_ID/issues/$iid" \
     --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-    --data-urlencode "assignee_ids[]=$user_id" 2>/dev/null || true
+    --data-urlencode "assignee_ids[]=$user_id" 2> /dev/null || true
 }
 
 forge_issue_close() {
@@ -76,12 +79,12 @@ forge_issue_create() {
   local title="$1" description="$2" labels="${3:-}"
   local -a args=(--hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$BOUCLE_PROJECT_ID/issues" -f title="$title" -f description="$description")
   [ -n "$labels" ] && args+=(-f labels="$labels")
-  glab api "${args[@]}" 2>/dev/null | jq -r '.iid // empty' || true
+  glab api "${args[@]}" 2> /dev/null | jq -r '.iid // empty' || true
 }
 
 forge_issue_reactions() {
   local iid="$1"
-  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues/$iid/award_emoji" 2>/dev/null || echo "[]"
+  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues/$iid/award_emoji" 2> /dev/null || echo "[]"
 }
 
 forge_issue_add_reaction() {
@@ -90,11 +93,160 @@ forge_issue_add_reaction() {
     -f name="$emoji" > /dev/null 2>&1 || true
 }
 
+# ── Issue listing ─────────────────────────────────────────────────────────
+
+forge_issue_list_by_label() {
+  local label_csv="$1" state="${2:-opened}"
+  glab api --hostname "$BOUCLE_FORGE_HOST" \
+    "/projects/$BOUCLE_PROJECT_ID/issues?state=$state&labels=$label_csv&per_page=100" 2> /dev/null || echo "[]"
+}
+
+forge_issue_list_all() {
+  local state="${1:-opened}"
+  glab api --hostname "$BOUCLE_FORGE_HOST" \
+    "/projects/$BOUCLE_PROJECT_ID/issues?state=$state&per_page=100" 2> /dev/null || echo "[]"
+}
+
+forge_issue_count_by_label() {
+  local label_csv="$1" state="$2"
+  local data
+  data=$(forge_issue_list_by_label "$label_csv" "$state")
+  echo "$data" | jq 'length' 2> /dev/null || echo 0
+}
+
+# ── Issue update ──────────────────────────────────────────────────────────
+
+forge_issue_update() {
+  local iid="$1" key="$2" value="$3"
+  glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$BOUCLE_PROJECT_ID/issues/$iid" \
+    -f "$key=$value" > /dev/null 2>&1 || true
+}
+
+# ── Issue links ───────────────────────────────────────────────────────────
+
+forge_issue_links() {
+  local iid="$1"
+  local resp
+  resp=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues/$iid/links" 2> /dev/null) || {
+    echo "[]"
+    return
+  }
+  # GitLab returns an object with .issue_link or an array; coerce to array
+  echo "$resp" | jq -c 'if type == "array" then . else [] end' 2> /dev/null || echo "[]"
+}
+
+forge_issue_link_relates_to() {
+  local child_iid="$1" parent_iid="$2"
+  glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$BOUCLE_PROJECT_ID/issues/$child_iid/links" \
+    -f target_issue_iid="$parent_iid" -f link_type=relates_to > /dev/null 2>&1 || true
+}
+
+# ── Note operations ───────────────────────────────────────────────────────
+
+forge_issue_note_get() {
+  local iid="$1" note_id="$2"
+  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues/$iid/notes/$note_id" 2> /dev/null || true
+}
+
+forge_issue_note_update() {
+  local iid="$1" note_id="$2" new_body="$3"
+  glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$BOUCLE_PROJECT_ID/issues/$iid/notes/$note_id" \
+    -f body="$new_body" > /dev/null 2>&1 || true
+}
+
+forge_mr_note_update() {
+  local mr_iid="$1" note_id="$2" new_body="$3"
+  glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/notes/$note_id" \
+    -f body="$new_body" > /dev/null 2>&1 || true
+}
+
+forge_note_delete() {
+  local kind="$1" object_iid="$2" note_id="$3"
+  local endpoint
+  case "$kind" in
+    issue) endpoint="issues" ;;
+    mr | merge_request) endpoint="merge_requests" ;;
+    *) return 0 ;;
+  esac
+  glab api --hostname "$BOUCLE_FORGE_HOST" -X DELETE \
+    "/projects/$BOUCLE_PROJECT_ID/$endpoint/$object_iid/notes/$note_id" > /dev/null 2>&1 || true
+}
+
+# ── MR lookup + approvals + assign + close ────────────────────────────────
+
+forge_mr_lookup_by_branch() {
+  local branch="$1" state="${2:-opened}"
+  local encoded
+  encoded=$(printf '%s' "$branch" | jq -sRr @uri)
+  glab api --hostname "$BOUCLE_FORGE_HOST" \
+    "/projects/$BOUCLE_PROJECT_ID/merge_requests?source_branch=$encoded&state=$state&per_page=1" 2> /dev/null \
+    | jq -r '.[0].iid // empty' 2> /dev/null || true
+}
+
+forge_mr_merge_status() {
+  local mr_iid="$1"
+  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid" 2> /dev/null \
+    | jq -r '.["detailed_merge_status"] // .merge_status // "unknown"' 2> /dev/null || echo "unknown"
+}
+
+forge_mr_approvals() {
+  local mr_iid="$1"
+  local resp
+  resp=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/approvals" 2> /dev/null) || {
+    echo "false"
+    return
+  }
+  echo "$resp" | jq -r '.approved // false' 2> /dev/null || echo "false"
+}
+
+forge_mr_assign() {
+  local mr_iid="$1" user_login="$2"
+  [ -z "$user_login" ] && return 0
+  # glab array-param is broken for assignee_ids[] — use curl directly
+  curl -s -o /dev/null -X PUT "https://$BOUCLE_FORGE_HOST/api/v4/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid" \
+    --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+    --data-urlencode "assignee_ids[]=$user_login" 2> /dev/null || true
+}
+
+forge_mr_close() {
+  local mr_iid="$1"
+  glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid" \
+    -f state_event=close > /dev/null 2>&1 || true
+}
+
+# ── Note reactions ────────────────────────────────────────────────────────
+
+forge_note_reactions() {
+  local kind="$1" object_iid="$2" note_id="$3"
+  local endpoint
+  case "$kind" in
+    issue) endpoint="issues" ;;
+    mr | merge_request) endpoint="merge_requests" ;;
+    *)
+      echo "[]"
+      return
+      ;;
+  esac
+  glab api --hostname "$BOUCLE_FORGE_HOST" \
+    "/projects/$BOUCLE_PROJECT_ID/$endpoint/$object_iid/notes/$note_id/award_emoji" 2> /dev/null || echo "[]"
+}
+
+# ── Attachment upload ─────────────────────────────────────────────────────
+
+forge_attachment_upload() {
+  local iid="$1" file_path="$2" filename="$3"
+  [ ! -f "$file_path" ] && return 0
+  local resp
+  resp=$(glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$BOUCLE_PROJECT_ID/uploads" \
+    -F "file=@$file_path" 2> /dev/null) || return 0
+  echo "$resp" | jq -r '.["full_path"] // .url // empty' 2> /dev/null || true
+}
+
 # ── MR operations ─────────────────────────────────────────────────────────
 
 forge_mr_get() {
   local mr_iid="$1"
-  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid" 2>/dev/null || true
+  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid" 2> /dev/null || true
 }
 
 forge_mr_note() {
@@ -105,14 +257,14 @@ forge_mr_note() {
 
 forge_mr_notes() {
   local mr_iid="$1"
-  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/notes" 2>/dev/null || echo "[]"
+  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/notes" 2> /dev/null || echo "[]"
 }
 
 forge_mr_create() {
   local source_branch="$1" target_branch="$2" title="$3" description="$4"
   glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$BOUCLE_PROJECT_ID/merge_requests" \
     -f source_branch="$source_branch" -f target_branch="$target_branch" \
-    -f title="$title" -f description="$description" 2>/dev/null | jq -r '.iid // empty' || true
+    -f title="$title" -f description="$description" 2> /dev/null | jq -r '.iid // empty' || true
 }
 
 forge_mr_update() {
@@ -128,13 +280,13 @@ forge_mr_merge() {
   # Poll detailed_merge_status for up to 10 min (60×10s)
   local i status
   for i in $(seq 1 60); do
-    status=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid" 2>/dev/null | jq -r '.detailed_merge_status // "unknown"')
+    status=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid" 2> /dev/null | jq -r '.detailed_merge_status // "unknown"')
     case "$status" in
       mergeable)
         glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/merge" \
           -f should_remove_source_branch=true > /dev/null 2>&1 && return 0
         ;;
-      checking|pipeline_status_must_pass|pipeline_blocked)
+      checking | pipeline_status_must_pass | pipeline_blocked)
         sleep 10
         ;;
       *)
@@ -166,14 +318,20 @@ forge_mr_rebase() {
 
 forge_work_item_global_id() {
   local iid="$1" wi_data
-  wi_data=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/-/work_items/$iid" 2>/dev/null) || { echo ""; return; }
-  printf '%s' "$wi_data" | jq -r 'if (type == "object" and has("id")) then .id else empty end' 2>/dev/null || true
+  wi_data=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/-/work_items/$iid" 2> /dev/null) || {
+    echo ""
+    return
+  }
+  printf '%s' "$wi_data" | jq -r 'if (type == "object" and has("id")) then .id else empty end' 2> /dev/null || true
 }
 
 forge_work_item_children() {
   local parent_iid="$1" children
-  children=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/-/work_items/$parent_iid/children" 2>/dev/null) || { echo "[]"; return; }
-  printf '%s' "$children" | jq -c 'if type == "array" then . else [] end' 2>/dev/null || echo "[]"
+  children=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/-/work_items/$parent_iid/children" 2> /dev/null) || {
+    echo "[]"
+    return
+  }
+  printf '%s' "$children" | jq -c 'if type == "array" then . else [] end' 2> /dev/null || echo "[]"
 }
 
 forge_work_item_link_parent() {
@@ -184,7 +342,7 @@ forge_work_item_link_parent() {
     # Try hierarchy API first
     local http_code
     http_code=$(glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$BOUCLE_PROJECT_ID/issues/$child_iid/links" \
-      -f target_issue_iid="$parent_iid" -f link_type=relates_to 2>/dev/null | jq -r '.http_status // empty' 2>/dev/null)
+      -f target_issue_iid="$parent_iid" -f link_type=relates_to 2> /dev/null | jq -r '.http_status // empty' 2> /dev/null)
     # Fall back to REST relates_to link
     glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$BOUCLE_PROJECT_ID/issues/$child_iid/links" \
       -f target_issue_iid="$parent_iid" -f link_type=relates_to > /dev/null 2>&1 || true
@@ -207,7 +365,7 @@ forge_attachment_download() {
   filename=$(echo "$url" | sed -n 's|.*/uploads/[a-zA-Z0-9]*/\(.*\)|\1|p')
   if [ -n "$secret" ] && [ -n "$filename" ]; then
     glab api --hostname "$BOUCLE_FORGE_HOST" --method GET "/projects/$BOUCLE_PROJECT_ID/uploads/$secret/$filename" \
-      -H "Accept: application/octet-stream" > "$dest" 2>/dev/null
+      -H "Accept: application/octet-stream" > "$dest" 2> /dev/null
   fi
 }
 
@@ -237,13 +395,16 @@ forge_pipeline_list_active() {
   local issue_iid="$1"
   # List active pipelines and filter by BOUCLE_ISSUE variable
   local pipelines
-  pipelines=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/pipelines?status=running" 2>/dev/null) || { echo "[]"; return; }
+  pipelines=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/pipelines?status=running" 2> /dev/null) || {
+    echo "[]"
+    return
+  }
   # For each pipeline, check if BOUCLE_ISSUE matches
   local result="[]"
   local pid vars match
-  for pid in $(echo "$pipelines" | jq -r '.[].id' 2>/dev/null); do
-    vars=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/pipelines/$pid/variables" 2>/dev/null) || continue
-    match=$(echo "$vars" | jq -r --arg iid "$issue_iid" '.[] | select(.key == "BOUCLE_ISSUE" and .value == $iid) | .value' 2>/dev/null)
+  for pid in $(echo "$pipelines" | jq -r '.[].id' 2> /dev/null); do
+    vars=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/pipelines/$pid/variables" 2> /dev/null) || continue
+    match=$(echo "$vars" | jq -r --arg iid "$issue_iid" '.[] | select(.key == "BOUCLE_ISSUE" and .value == $iid) | .value' 2> /dev/null)
     [ -n "$match" ] && result=$(echo "$result" | jq --argjson p "{\"id\":$pid,\"status\":\"running\"}" '. + [$p]')
   done
   echo "$result"
@@ -254,7 +415,7 @@ forge_pipeline_list_active() {
 forge_resolve_user_id() {
   local username="$1"
   curl -s "https://$BOUCLE_FORGE_HOST/api/v4/users?username=$username" \
-    --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" 2>/dev/null | jq -r '.[0].id // empty' || true
+    --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" 2> /dev/null | jq -r '.[0].id // empty' || true
 }
 
 # ── Webhook payload parsing ──────────────────────────────────────────────
@@ -271,7 +432,7 @@ forge_parse_webhook() {
     actor: (.user.username // empty),
     body: (.object_attributes.description // .object_attributes.note // .object_attributes.content // empty),
     branch: (.object_attributes.source_branch // .object_attributes.ref // empty)
-  }' 2>/dev/null || echo '{}'
+  }' 2> /dev/null || echo '{}'
 }
 
 forge_webhook_issue_iid() {
@@ -285,7 +446,7 @@ forge_webhook_issue_iid() {
       (.object_attributes.noteable_id | tostring)
     else empty end) //
     empty
-  ' 2>/dev/null || true
+  ' 2> /dev/null || true
 }
 
 # ── CI variables ─────────────────────────────────────────────────────────
@@ -300,11 +461,11 @@ forge_ci_var_set() {
 
 forge_ci_var_get() {
   local key="$1"
-  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/variables/$key" 2>/dev/null | jq -r '.value // empty' || true
+  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/variables/$key" 2> /dev/null | jq -r '.value // empty' || true
 }
 
 forge_ci_var_list() {
-  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/variables" 2>/dev/null | jq -r '.[].key' 2>/dev/null || true
+  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/variables" 2> /dev/null | jq -r '.[].key' 2> /dev/null || true
 }
 
 # ── Branch protection ────────────────────────────────────────────────────
@@ -320,8 +481,8 @@ forge_branch_protect() {
 forge_runner_check() {
   local tag="$1"
   local runners
-  runners=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/runners" 2>/dev/null) || return 1
-  echo "$runners" | jq -r '.[].tag_list[]' 2>/dev/null | grep -qx "$tag"
+  runners=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/runners" 2> /dev/null) || return 1
+  echo "$runners" | jq -r '.[].tag_list[]' 2> /dev/null | grep -qx "$tag"
 }
 
 # ── Labels ───────────────────────────────────────────────────────────────
@@ -329,19 +490,19 @@ forge_runner_check() {
 forge_label_create() {
   local name="$1" color="$2"
   # Check if label exists first (idempotent)
-  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/labels?search=$name" 2>/dev/null | jq -e ".[] | select(.name == \"$name\")" > /dev/null 2>&1 && return 0
+  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/labels?search=$name" 2> /dev/null | jq -e ".[] | select(.name == \"$name\")" > /dev/null 2>&1 && return 0
   glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$BOUCLE_PROJECT_ID/labels" \
     -f name="$name" -f color="$color" > /dev/null 2>&1 || true
 }
 
 forge_label_list() {
-  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/labels" 2>/dev/null || echo "[]"
+  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/labels" 2> /dev/null || echo "[]"
 }
 
 # ── Project ─────────────────────────────────────────────────────────────
 
 forge_project_get() {
-  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID" 2>/dev/null || true
+  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID" 2> /dev/null || true
 }
 
 forge_webhook_create() {
