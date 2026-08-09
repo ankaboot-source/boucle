@@ -195,23 +195,16 @@ cost of one feature is the sum of all role invocations.
 
 The $/task figures are the **cost per Intelligence Index task** from
 [Artificial Analysis](https://artificialanalysis.ai) (v4.1.1, max-effort
-reasoning, retrieved 2026-08-09) — each model runs the same 9-evaluation
-benchmark suite, and the cost is derived from the published total cost and
-token usage. See [docs/cost-benchmark.md](docs/cost-benchmark.md) for the
-raw published data, per-role breakdown, and full derivation.
-
-¹ Nominal scenario, Large feature (refactor, multi-page). Three failure modes
-(feature KO, extra iterations, post-ship bugs) are modeled separately, each
-mapped to the role whose intelligence gap drives it, and weighted by feature
-size. Even at this pessimistic adjusted cost, boucle ships a large feature
-for **9.9× less** than Claude Code. See [docs/cost-benchmark.md](docs/cost-benchmark.md)
-for the full method, sensitivity analysis, and break-even.
+reasoning, retrieved 2026-08-09). ¹ Nominal Large feature: three failure
+modes (feature KO, extra iterations, post-ship bugs) modeled per role and
+weighted by feature size — boucle ships a large feature for **9.9× less**
+than Claude Code. Full method, sensitivity, and break-even in
+[docs/cost-benchmark.md](docs/cost-benchmark.md).
 
 At this intelligence tier (52–63), what impacts the outcome most is not raw
 intelligence but **deterministic CI/CD gates** (spec approval, preview
 verification, SHA-anchored e2e) and **specialized agents enriched with
-skills** — not the model's confidence. The full per-role breakdown and
-alternative configs are in [docs/cost-benchmark.md](docs/cost-benchmark.md).
+skills** — not the model's confidence.
 
 ### Monthly capacity, multiplied
 
