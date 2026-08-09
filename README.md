@@ -220,6 +220,13 @@ part of the install**: it is not a separate step.
   belongs to, seeds `BOUCLE_BOT_USERNAME` with that login (the loop detects
   the bot's own comments by it), and tells you if that account is not yet a
   collaborator of the repository so you can add it.
+  Create the PAT at
+  [github.com/settings/tokens/new](https://github.com/settings/tokens/new)
+  with **`repo` + `workflow`** scopes (optionally `admin:org` for
+  branch-protection checks) — see
+  [Scopes for OAuth apps](https://docs.github.com/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps).
+  An **invalid or expired PAT fails setup** with an explicit message pointing
+  here; renew it and re-run `bin/setup` (idempotent).
 
 If the GitLab service-account API is unavailable on your instance (feature
 flag off, or the endpoint 403s), setup falls back to the manual flow: create
