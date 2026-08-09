@@ -176,45 +176,60 @@ spec and approve the MR.
 
 boucle runs on a **subscription plan**, not per-token billing — you pay a
 fixed monthly fee for a usage allowance, and the loop runs within it. The
-default duo ([GLM-5.2](https://z.ai/blog/glm-5.2) for triage/review,
-[DeepSeek V4 Flash 0731](https://artificialanalysis.ai/models/deepseek-v4-flash)
-for the worker) is tuned for the cheapest plan that sustains an autonomous
-loop, while the equivalent Claude Code duo (Opus 5 + Sonnet 5) needs the
-top plan for the same workload.
+plan is the base; the question is how many issues per month boucle can
+sustain on it.
 
-### Per-task cost (Artificial Analysis, max-effort reasoning)
+### Per-role cost (Artificial Analysis, max-effort reasoning)
 
-| Model | Intelligence | Cost per task | Role in boucle |
-| --- | --- | --- | --- |
-| [GLM-5.2](https://z.ai/blog/glm-5.2) | 53 | $0.31 | triage, e2e |
-| [DeepSeek V4 Flash 0731](https://artificialanalysis.ai/models/deepseek-v4-flash) | 52 | $0.03 | worker, reviewer |
-| Claude Opus 5 | 63 | $2.34 | (equivalent: triage, e2e) |
-| Claude Sonnet 5 | 55 | $1.72 | (equivalent: worker, reviewer) |
+One issue flows through four roles, end to end: **triage** (analyze the
+issue, draft the spec) → **worker** (implement, up to 3 iterations) →
+**reviewer** (verify the preview, up to 3 iterations) → **e2e** (verify the
+live deployment). The cost of one issue is the sum of all role invocations.
 
-The boucle duo scores near-equal on intelligence (52–53 vs 55–63) at **7–57×
-less cost per task**. The intelligence gap is real but narrow; the cost gap is
-not.
+| Role | What it does | boucle model | $/task | Claude Code model | $/task |
+| --- | --- | --- | ---: | --- | ---: |
+| triage | analyze issue, draft spec | [GLM-5.2](https://z.ai/blog/glm-5.2) (intel 53) | $0.31 | Opus 5 (intel 63) | $2.34 |
+| worker | implement (×3 iterations) | [DeepSeek V4 Flash 0731](https://artificialanalysis.ai/models/deepseek-v4-flash) (intel 52) | $0.03 | Sonnet 5 (intel 55) | $1.72 |
+| reviewer | verify preview (×3 iterations) | DeepSeek V4 Flash 0731 (intel 52) | $0.03 | Sonnet 5 (intel 55) | $1.72 |
+| e2e | verify live deployment | GLM-5.2 (intel 53) | $0.31 | Opus 5 (intel 63) | $2.34 |
 
-### Monthly plan comparison
+The worker and reviewer run the most (3 iterations each), so their cost
+dominates the per-issue total. boucle puts the cheapest model (DeepSeek,
+$0.03) on the heaviest roles — where it reaches 95% of Sonnet 5's
+intelligence at 57× less cost. The triage role is strategic (it produces
+the spec that guides everything), so boucle keeps a stronger reasoner
+(GLM-5.2) there — 84% of Opus 5's intelligence at 7.5× less cost.
 
-| | boucle (Ollama) | Claude Code |
-| --- | --- | --- |
-| Cheapest usable plan | **Pro — $20/mo** | Pro — $20/mo (usage too low for an autonomous loop) |
-| Recommended plan | **Max — $100/mo** (continuous agents, 10 concurrent) | **Max 20× — $200/mo** (20× Pro usage) |
-| Capacity model | session limits reset every 5h, weekly every 7d; compute-weighted | usage limits, 5× or 20× Pro |
-| Concurrency | Pro: 3 models · Max: 10 models | (not published) |
-| Models included | GLM-5.2, DeepSeek V4 Flash 0731, + 40k community | Opus 5, Sonnet 5, Haiku |
-| Data retention | zero data retention, no training on prompts | Anthropic's standard policy |
+### From plans to capacity
 
-**Bottom line:** an autonomous loop that runs unattended needs the top tier on
-either side. boucle on Ollama Max ($100/mo) gives you continuous-agent
-capacity with 10 concurrent models; Claude Code Max 20× ($200/mo) costs
-**2× more** for a duo whose per-task cost is **7–57× higher**.
+boucle runs on a **subscription plan**, not per-token billing. The plan gives
+you a monthly usage allowance; the per-issue cost tells you how much of that
+allowance one issue consumes. So the plan is the base, and the question is:
+how many issues per month can boucle sustain on it?
 
-The quality gap is real but asymmetric, and the model choice on the **triage**
-role (issue analysis + spec) is the main lever. Three configurations, all
-gated by a human spec approval and a live-preview verification so the model
-decides what to *attempt* and the gates decide what *ships*:
+**Ollama Max — $100/mo** (continuous agents, 10 concurrent models). At
+boucle's per-issue cost, the plan sustains:
+
+| Config | $/issue | Issues/month on Max ($100) |
+| --- | ---: | ---: |
+| full DeepSeek | $0.24 | ~416 |
+| **default (GLM-5.2 + DeepSeek)** | $0.80 | ~125 |
+| Kimi K3 triage + DeepSeek | $1.22 | ~82 |
+
+**Claude Code Max 20× — $200/mo** (20× Pro usage). At the equivalent
+per-issue cost ($15.00 for Opus 5 + Sonnet 5), the plan sustains **~13
+issues/month** — for **2× the price**.
+
+So for half the monthly fee, boucle on Ollama Max processes **6–32× more
+issues** than Claude Code Max 20×, depending on the config. The capacity
+gap comes from the per-task cost gap (7–57×), not the plan price gap (2×).
+
+### Configurations
+
+All configs are gated by a human spec approval and a live-preview
+verification — the model decides what to *attempt*, the gates decide what
+*ships*. The model choice on the **triage** role (issue analysis + spec) is
+the main quality lever:
 
 | Config | Triage intel | $/issue | vs Claude Code |
 | --- | ---: | ---: | ---: |
@@ -224,15 +239,16 @@ decides what to *attempt* and the gates decide what *ships*:
 | Claude Code (Opus 5 + Sonnet 5) | 63 | $15.00 | — |
 
 The default duo is the shipped compromise. Full-DeepSeek is the cost floor
-($0.24/issue) at the price of a weaker triage. Swapping in Kimi K3 on triage
-closes most of the gap vs Opus 5 (from −10 to −3 pts) for +$0.42/issue — a
-quality upgrade at marginal cost, still 12.3× cheaper than Claude Code. See
-[docs/cost-benchmark.md](docs/cost-benchmark.md) for the full per-role
+at the price of a weaker triage (−1 pt vs GLM-5.2). Swapping in Kimi K3 on
+triage closes most of the gap vs Opus 5 (from −10 to −3 pts) for +$0.42/issue
+— a quality upgrade at marginal cost, still 12.3× cheaper than Claude Code.
+See [docs/cost-benchmark.md](docs/cost-benchmark.md) for the full per-role
 breakdown.
 
 > Note: new Ollama Max subscriptions are temporarily paused (capacity
-> expansion); Pro remains open and Pro users can buy extra usage balance to
-> go beyond the plan's included limits. See
+> expansion); Pro ($20/mo, 3 concurrent) remains open and sustains
+> ~25–100 issues/month depending on the config. Pro users can buy extra
+> usage balance to go beyond the plan's included limits. See
 > [Ollama pricing](https://ollama.com/pricing) and
 > [Claude pricing](https://claude.com/pricing) for the live numbers.
 
