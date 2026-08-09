@@ -214,6 +214,7 @@ default:
       # forge_* triggers/notes POST to an empty project id (silently dropped
       # by `|| true`) — observed re-trigger failure on framagit, 2026-08.
       export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:-}}"
+      export BOUCLE_WORKSPACE="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-$(pwd)}}"
       source "$BOUCLE_HOME/lib/boucle.sh"
 
       # ── jcode coding agent (standalone Rust binary) ──────────────
@@ -471,6 +472,7 @@ dispatch:
       # forge_* triggers/notes POST to an empty project id (silently dropped
       # by `|| true`) — observed re-trigger failure on framagit, 2026-08.
       export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:-}}"
+      export BOUCLE_WORKSPACE="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-$(pwd)}}"
       source "$BOUCLE_HOME/lib/boucle.sh"
   script:
     - |
@@ -3068,6 +3070,7 @@ merger:
       # forge_* triggers/notes POST to an empty project id (silently dropped
       # by `|| true`) — observed re-trigger failure on framagit, 2026-08.
       export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:-}}"
+      export BOUCLE_WORKSPACE="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-$(pwd)}}"
       source "$BOUCLE_HOME/lib/boucle.sh"
   script:
     - |
@@ -3322,6 +3325,7 @@ post-merge:
       # forge_* triggers/notes POST to an empty project id (silently dropped
       # by `|| true`) — observed re-trigger failure on framagit, 2026-08.
       export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:-}}"
+      export BOUCLE_WORKSPACE="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-$(pwd)}}"
       source "$BOUCLE_HOME/lib/boucle.sh"
   script:
     - |
@@ -3445,6 +3449,7 @@ catchup:
       # forge_* triggers/notes POST to an empty project id (silently dropped
       # by `|| true`) — observed re-trigger failure on framagit, 2026-08.
       export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:-}}"
+      export BOUCLE_WORKSPACE="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-$(pwd)}}"
       source "$BOUCLE_HOME/lib/boucle.sh"
   script:
     - |
