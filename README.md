@@ -55,12 +55,12 @@ pipelines. Your code, your data, your tokens stay yours.
 **By a product builder, for product builders.** Built by an indie Product
 Builder who got tired of babysitting agents overnight.
 
-If you've lived these irritants too — a daemon that dies overnight, a
+If you've lived these pain points too — a daemon that dies overnight, a
 review that ships broken code, a spec that freezes the moment you approve
 it — boucle was designed for you. The table below maps each one to how
 boucle handles it, if you want to compare:
 
-| Irritant | How boucle handles it |
+| Pain point | How boucle handles it |
 | --- | --- |
 | A daemon to babysit (dies silently, pollutes your disk with worktrees) | Runs on your forge's CI — nothing to install, nothing to restart |
 | Deadlocks (a bot can't review, approve, or merge its own PRs) | Label-driven state machine with no self-approval path |
