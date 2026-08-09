@@ -142,15 +142,6 @@ boucle_ci_reviewer() {
     echo "[boucle] WARN: could not fetch issue #$BOUCLE_ISSUE body — reviewer will grade without the original spec."
   fi
 
-  # Download attachments from MR comments (reviewer screenshots, human
-  # mockups) so the reviewer can see what the human pointed at.
-  # Gated on MR_IID being non-empty (it is set above from the MR lookup).
-  if [ -n "${MR_IID:-}" ]; then
-    export BOUCLE_MR_IID="$MR_IID"
-    "$BOUCLE_HOME"/bin/fetch-mr-attachments || echo "[boucle] WARN: MR attachment fetch failed — continuing without MR attachments"
-  fi
-  "$BOUCLE_HOME"/bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
-
   # Detect image attachments (issue + MR comments) and route to a
   # vision-capable model if needed.
   # Forge controls: BOUCLE_VISION_ROUTING, BOUCLE_VISION_MODEL, BOUCLE_VISION_ROLES.
