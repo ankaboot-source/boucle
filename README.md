@@ -194,6 +194,24 @@ cost of one feature is the sum of all role invocations.
 | reviewer (×3) | verify preview | DeepSeek V4 Flash 0731 (intel 52) | $0.03 | Sonnet 5 (intel 55) | $1.72 |
 | e2e | verify live deployment | GLM-5.2 (intel 53) | $0.31 | Opus 5 (intel 63) | $2.34 |
 
+The $/task figures are the **cost per Intelligence Index task** from
+[Artificial Analysis](https://artificialanalysis.ai) (v4.1.1, max-effort
+reasoning, retrieved 2026-08-09). Each model runs the same 9-evaluation
+benchmark suite; Artificial Analysis publishes the total cost and total
+output tokens, and derives $/task from them. The raw published data:
+
+| Model | Intel | Total II cost | Output tokens | In $/1M | Out $/1M |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| GLM-5.2 | 53 | $714.52 | 140M | $1.35 | $4.29 |
+| DeepSeek V4 Flash 0731 | 52 | $72.03 | 210M | $0.14 | $0.28 |
+| Claude Opus 5 | 63 | $3,836.05 | 100M | $5.00 | $25.00 |
+| Claude Sonnet 5 | 55 | $4,010.51 | 300M | $2.00 | $10.00 |
+
+So the cost ratios are grounded in published total-cost figures, not
+estimates: GLM-5.2 is 5.4× cheaper than Opus 5 on the same suite; DeepSeek
+V4 Flash 0731 is 55.7× cheaper than Sonnet 5. See
+[docs/cost-benchmark.md](docs/cost-benchmark.md) for the full derivation.
+
 Summing one pass through the loop (1 triage + 1 e2e + 3 worker + 3 reviewer):
 
 | | boucle | Claude Code |
