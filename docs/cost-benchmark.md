@@ -19,6 +19,34 @@
 (inferred from DeepSeek: $72.03 / $0.03 per task). Not displayed as a figure
 on the Artificial Analysis page; derived from the cost-per-task chart.
 
+### Published raw data (source of the $/task figures)
+
+Each model runs the same 9-evaluation Intelligence Index suite. Artificial
+Analysis publishes the total cost to run the full suite and the total output
+tokens generated; the $/task figure is derived from these. Source pages:
+[GLM-5.2](https://artificialanalysis.ai/models/glm-5-2),
+[DeepSeek V4 Flash 0731](https://artificialanalysis.ai/models/deepseek-v4-flash),
+[Kimi K3](https://artificialanalysis.ai/models/kimi-k3),
+[Claude Opus 5](https://artificialanalysis.ai/models/claude-opus-5),
+[Claude Sonnet 5](https://artificialanalysis.ai/models/claude-sonnet-5).
+
+| Model | Intel | Total II cost | Output tokens | In $/1M | Out $/1M |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| GLM-5.2 | 53 | $714.52 | 140M | $1.35 | $4.29 |
+| DeepSeek V4 Flash 0731 | 52 | $72.03 | 210M | $0.14 | $0.28 |
+| Kimi K3 | 60 | $2,425.11 | 130M | $3.00 | $15.00 |
+| Claude Opus 5 | 63 | $3,836.05 | 100M | $5.00 | $25.00 |
+| Claude Sonnet 5 | 55 | $4,010.51 | 300M | $2.00 | $10.00 |
+
+Cost ratios grounded in these published totals (same benchmark suite):
+
+| Pairing | Total II cost ratio |
+| --- | --- |
+| GLM-5.2 vs Opus 5 | 5.4× cheaper |
+| DeepSeek V4 Flash 0731 vs Sonnet 5 | 55.7× cheaper |
+| DeepSeek V4 Flash 0731 vs Opus 5 | 53.3× cheaper |
+| GLM-5.2 vs Sonnet 5 | 5.6× cheaper |
+
 ## Monthly plan comparison
 
 | | boucle (Ollama) | Claude Code |
