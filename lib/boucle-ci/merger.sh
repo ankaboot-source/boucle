@@ -40,13 +40,15 @@ boucle_ci_merger() {
   # avoidance mechanism: because merges are serialized, each rebase is
   # against a default branch that already includes all previously-merged MRs.
   git checkout "$BRANCH" 2> /dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
-  if ! git rebase "origin/$BOUCLE_DEFAULT_BRANCH"; then
+  local REBASE_OUTPUT=""
+  if ! REBASE_OUTPUT=$(git rebase "origin/$BOUCLE_DEFAULT_BRANCH" 2>&1); then
     echo "FAIL: rebase onto origin/$BOUCLE_DEFAULT_BRANCH conflicted — even after serial merge." >&2
     git rebase --abort 2> /dev/null || true
-    echo "Re-triggering worker (iteration 1) — the MR will be regenerated on fresh $BOUCLE_DEFAULT_BRANCH, no rebase needed." >&2
-    set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-    forge_issue_note "$BOUCLE_ISSUE" "🔄 Merger could not rebase MR !${MR_IID} onto $BOUCLE_DEFAULT_BRANCH (conflict). Re-running the worker on fresh $BOUCLE_DEFAULT_BRANCH to regenerate the MR."
-    chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=1
+    # S4: classify the conflict, then hand it to the human IMMEDIATELY with
+    # structured options — never re-trigger the worker blindly (a fresh run
+    # would reproduce the same semantic conflict; observed on framagit with a
+    # modify/delete on MobilisationBlock.astro, 2026-08).
+    boucle_escalate_merge_conflict "$BOUCLE_ISSUE" "$MR_IID" "$BOUCLE_DEFAULT_BRANCH" "$REBASE_OUTPUT"
     exit 1
   fi
 

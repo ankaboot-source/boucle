@@ -387,3 +387,54 @@ chain_to_role() {
   shift 2
   forge_trigger_role "$issue_iid" "$role" "$@"
 }
+# ── S4: merge-conflict escalation (human in the loop, no blind worker retry) ──
+# Parses rebase output, classifies the conflict, posts a structured note with
+# manual options, and parks the issue on the human. Called by the merger when
+# a rebase onto the default branch fails.
+
+# Pure parser: echo one line per conflicted path, format "- <path> (kind)".
+boucle_parse_merge_conflicts() {
+  local line kind file
+  while IFS= read -r line; do
+    case "$line" in
+      *"CONFLICT (modify/delete):"*) kind="modify/delete" ;;
+      *"CONFLICT (content):"*) kind="content (modify/modify)" ;;
+      *"CONFLICT"*) kind="other" ;;
+      *) continue ;;
+    esac
+    file=$(echo "$line" | sed 's/.*CONFLICT ([^)]*): //' | sed 's/^Merge conflict in //' | sed 's/ deleted in .*//' | sed 's/ modified in .*//')
+    echo "- ${file} (${kind})"
+  done <<< "$1"
+}
+
+boucle_escalate_merge_conflict() {
+  local issue="$1" mr_iid="$2" default_branch="$3" rebase_out="$4"
+  local conflicts parsed
+  conflicts=$(boucle_parse_merge_conflicts "$rebase_out")
+  [ -z "$conflicts" ] && conflicts="- (unclassified — see rebase output in the pipeline log)"
+
+  local body
+  body="⚠️ **Merge conflict — human intervention required**
+
+Issue #$issue (MR !$mr_iid, branch \`boucle/$issue\`) cannot be merged automatically: the rebase onto \`$default_branch\` hit a **semantic conflict** that no retry can resolve. The loop is **paused** on this issue and it is assigned to you.
+
+**Classification** : detected from the rebase output (modify/delete = this branch deletes a file the default branch has modified, or vice versa).
+
+**Conflicted paths** :
+$conflicts
+
+**What I did** : rebased onto $default_branch → conflict → aborted (branch preserved, nothing lost). I did **not** re-trigger the worker: a fresh run would reproduce the same conflict.
+
+**Manual options** :
+1. **Resolve on the branch, then re-run the merger** :
+   \`git checkout boucle/$issue && git fetch origin $default_branch && git rebase origin/$default_branch\`
+   — take this branch's version of each conflicted file, or the default branch's (\`git checkout origin/$default_branch -- <file>\`), then
+   \`git add -A && git rebase --continue && git push --force-with-lease origin boucle/$issue\`
+   and restore \`boucle:approval\` (the merger will pick it up).
+2. **Let the worker re-plan against fresh $default_branch** (if the issue's goal still stands): set \`boucle:todo\` + \`boucle::status::bot\` — the worker re-baselines and implements the goal on top of the current $default_branch.
+3. **Close the issue** if obsolete or contradictory with changes already on $default_branch (MR !$mr_iid closes with it).
+
+The loop is paused on #$issue until you decide."
+  set_boucle_label "$issue" "boucle:human" "boucle::status::human"
+  forge_issue_note "$issue" "$body"
+}
