@@ -319,35 +319,32 @@ check:
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
     # Run on pushes and MRs to $CI_DEFAULT_BRANCH.
-    # NOTE: the explicit $CI_PIPELINE_SOURCE == "merge_request_event" reference
-    # is REQUIRED — GitLab only creates merge-request pipelines when the config
-    # references it; a bare $CI_MERGE_REQUEST_TARGET_BRANCH_NAME rule never
-    # triggers an MR pipeline (observed on framagit, 2026-08).
+    # NOTE (framagit, 2026-08): the merge-request rule MUST reference
+    # $CI_PIPELINE_SOURCE == "merge_request_event" as a STANDALONE comparison —
+    # GitLab's MR-pipeline creation only triggers on the simple reference.
+    # A combined rule ("... == X && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == ...")
+    # lints valid but NEVER creates a merge-request pipeline (the check job
+    # never runs; verified: MR with && rule = no pipeline, MR with pure rule =
+    # pipeline created instantly). Keep the rule pure and guard the *script*
+    # below for the target-branch case instead.
     - if: $CI_COMMIT_BRANCH == "$CI_DEFAULT_BRANCH"
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "$CI_DEFAULT_BRANCH"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   before_script:
-    - apt-get update -qq && apt-get install -y -qq curl git make xz-utils jq python3
+    - export PATH="$HOME/.local/bin:$PATH"
     # Initialize bats test helper submodules
     - git submodule update --init --recursive
-    # shellcheck (static binary, pinned)
-    - |
-      SC_VER="v0.11.0"
-      curl -sSL "https://github.com/koalaman/shellcheck/releases/download/${SC_VER}/shellcheck-${SC_VER}.linux.x86_64.tar.xz" \
-        | tar -xJ -C /tmp
-      install -m 0755 "/tmp/shellcheck-${SC_VER}/shellcheck" /usr/local/bin/shellcheck
-    # shfmt (static binary, pinned)
-    - |
-      SHFMT_VER="v3.13.1"
-      curl -sSL -o /usr/local/bin/shfmt "https://github.com/mvdan/sh/releases/download/${SHFMT_VER}/shfmt_${SHFMT_VER}_linux_amd64"
-      chmod +x /usr/local/bin/shfmt
-    # bats-core (from source, pinned tag)
-    - |
-      git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats
-      /tmp/bats/install.sh /usr/local
+    # Toolchain (shellcheck/shfmt/bats, pinned) — root-safe bootstrap:
+    # falls back to $HOME/.local/bin when /usr/local/bin is not writable
+    # (shared shell executors, e.g. framagit's non-root runner). Fails with
+    # an actionable message when a system tool (make/tar/xz/...) is missing.
+    - bin/check-bootstrap.sh
     - shellcheck --version
     - shfmt --version
     - bats --version
   script:
+    # Pure merge_request_event rule above must create the pipeline; this guard
+    # keeps the MR gate scoped to MRs targeting the default branch.
+    - if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ] && [ "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" != "$CI_DEFAULT_BRANCH" ]; then echo "check skipped (MR targets $CI_MERGE_REQUEST_TARGET_BRANCH_NAME, not default)"; exit 0; fi
     - make check
 
 # ── Dispatcher ──────────────────────────────────────────────────────────
