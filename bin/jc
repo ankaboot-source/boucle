@@ -28,6 +28,11 @@
 # Temperature via JCODE_OPENAI_EXTRA_BODY='{"temperature":0.3}' env per role.
 
 set -euo pipefail
+# Normalize BOUCLE_WORKSPACE IMMEDIATELY: it is used below (agent file
+# discovery, STATE_DIR, ...) before the later default assignment — a job
+# that does not source lib/boucle-ci.sh (inline GitLab jobs) crashed with
+# "BOUCLE_WORKSPACE: unbound variable" (observed on framagit, 2026-08).
+: "${BOUCLE_WORKSPACE:=${CI_PROJECT_DIR:-$(pwd)}}"
 
 # ── Args ──────────────────────────────────────────────────────────────
 ROLE="${1:?usage: bin/jc <role>}"
