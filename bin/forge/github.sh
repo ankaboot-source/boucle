@@ -114,24 +114,39 @@ forge_issue_create() {
 
 forge_issue_reactions() {
   local iid="$1"
-  _gh_api "/repos/$BOUCLE_PROJECT_ID/issues/$iid/reactions" \
-    -H "Accept: application/vnd.github.squirrel-girl-preview+json" || echo "[]"
+  local resp
+  resp=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/issues/$iid/reactions" \
+    -H "Accept: application/vnd.github.squirrel-girl-preview+json" 2> /dev/null) || {
+    echo "[]"
+    return
+  }
+  # Normalize GitHub .content → canonical .name (contract shape
+  # {name, user:{id, username}}); drop reactions outside the canonical set
+  # (see forge_reaction_canonical).
+  echo "$resp" | jq -r '.[] | [.content, (.user.id // 0), (.user.login // "")] | @tsv' 2> /dev/null \
+    | while IFS=$'\t' read -r content uid uname; do
+      canon=$(forge_reaction_canonical "$content")
+      [ -n "$canon" ] || continue
+      jq -nc --arg name "$canon" --arg id "$uid" --arg uname "$uname" \
+        '{name: $name, user: {id: ($id | tonumber), username: $uname}}' 2> /dev/null
+    done | jq -s '.' 2> /dev/null || echo "[]"
 }
 
 forge_issue_add_reaction() {
   local iid="$1" emoji="$2"
-  # Map common emoji names to GitHub reaction content values
+  # Map canonical names / emoji aliases / legacy names to GitHub reaction
+  # content values via the shared canonical table.
   local content
-  case "$emoji" in
-    👍 | thumbs_up | +1) content="+1" ;;
-    👎 | thumbs_down | -1) content="-1" ;;
-    😄 | laugh | smile) content="laugh" ;;
-    😕 | confused) content="confused" ;;
-    ❤ | heart | love) content="heart" ;;
-    🎉 | hooray | party) content="hooray" ;;
-    🚀 | rocket) content="rocket" ;;
-    👀 | eyes) content="eyes" ;;
-    *) content="$emoji" ;;
+  case "$(forge_reaction_canonical "$emoji")" in
+    thumbsup) content="+1" ;;
+    thumbs_down) content="-1" ;;
+    smile) content="laugh" ;;
+    confused) content="confused" ;;
+    heart) content="heart" ;;
+    tada) content="hooray" ;;
+    rocket) content="rocket" ;;
+    eyes) content="eyes" ;;
+    *) content="$emoji" ;; # unknown → GitHub rejects (best-effort no-op)
   esac
   _gh_api_silent -X POST "/repos/$BOUCLE_PROJECT_ID/issues/$iid/reactions" \
     -f content="$content" \
@@ -271,11 +286,16 @@ forge_note_reactions() {
     echo "[]"
     return
   }
-  # Map GitHub .content → .name, .user.login → .user.username
-  echo "$resp" | jq -c '[.[] | {
-    name: .content,
-    user: { id: .user.id, username: .user.login }
-  }]' 2> /dev/null || echo "[]"
+  # Normalize GitHub .content → canonical .name (contract shape
+  # {name, user:{id, username}}); drop reactions outside the canonical set
+  # (see forge_reaction_canonical).
+  echo "$resp" | jq -r '.[] | [.content, (.user.id // 0), (.user.login // "")] | @tsv' 2> /dev/null \
+    | while IFS=$'\t' read -r content uid uname; do
+      canon=$(forge_reaction_canonical "$content")
+      [ -n "$canon" ] || continue
+      jq -nc --arg name "$canon" --arg id "$uid" --arg uname "$uname" \
+        '{name: $name, user: {id: ($id | tonumber), username: $uname}}' 2> /dev/null
+    done | jq -s '.' 2> /dev/null || echo "[]"
 }
 
 # ── Attachment upload ─────────────────────────────────────────────────────

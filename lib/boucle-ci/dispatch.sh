@@ -437,9 +437,11 @@ boucle_ci_dispatch() {
         exit 0
     fi
 
-    # Emoji reactions that count as spec approval (GitLab internal alpha codes).
-    # Skin-tone modifiers are ignored — GitLab stores the base name regardless.
-    BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup|white_check_mark|ballot_box_with_check|heavy_check_mark|ok|ok_hand"
+    # Emoji reactions that count as spec approval — canonical set only.
+    # The webhook carries the raw GitLab award name; the backends normalize
+    # via forge_reaction_canonical, so only "thumbsup" counts.
+    # Must mirror the doctor job's constant — each CI job runs its own shell.
+    BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup"
 
     # Detect if the bot was just assigned to this issue (update action with
     # an assignee change). This lets a human trigger boucle by assigning the
