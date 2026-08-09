@@ -85,6 +85,11 @@ while [[ $# -gt 0 ]]; do
       echo "  --bot-id <id>            Bot user ID (for adding as project member)"
       echo "  --bot-username <name>    Bot username (default: up-bot; used to seed BOUCLE_BOT_USERNAME CI variable)"
       echo "  --bot-token <pat>        Bot PAT (used as BOUCLE_TOKEN CI variable)"
+  echo "                           GitHub scopes: 'repo' + 'workflow' (optionally 'admin:org'"
+  echo "                           for branch-protection checks). Create one at"
+  echo "                           https://github.com/settings/tokens/new — see"
+  echo "                           https://docs.github.com/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps"
+  echo "                           An invalid/expired PAT fails setup with instructions."
       echo "  --cf-token <token>       Cloudflare API token (for Pages project)"
       echo "  --runner-tag <tag>       Runner tag baked into the root CI shim (default: boucle)"
       echo "  --skip-cf                Skip Cloudflare Pages project creation"
@@ -539,7 +544,11 @@ else
       fi
     else
       GH_LOGIN=""
-      log_skip "could not resolve the PAT account (gh api user failed) — BOUCLE_BOT_USERNAME not set"
+      log_fail "BOUCLE_TOKEN (--bot-token) is invalid or expired — 'gh api user' failed.
+              Create a new PAT at https://github.com/settings/tokens/new with scopes
+              'repo' + 'workflow' (see
+              https://docs.github.com/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps),
+              then re-run bin/setup with --bot-token <new-pat> (or export BOUCLE_TOKEN)."
     fi
   else
     log_skip "bot account (no --bot-token provided)"
