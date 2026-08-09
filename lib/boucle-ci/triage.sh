@@ -20,9 +20,12 @@
 #   - The original assumes notes arrive newest-first (`first` = newest in the
 #     COMMENT / PRE_RUN_TRIAGE_ID / TRIAGE_NOTE_ID jq filters). GitLab returns
 #     newest-first natively; a GitHub backend must reverse to match.
-#   - Remaining GitLab-specific calls (notes PUT, issue PUT, uploads API,
-#     hierarchy PATCH, relates_to link, working-count list) are marked
-#     `# TODO: forge_*` where no contract function exists yet.
+#   - Note read/update/delete (forge_issue_note_get/update, forge_note_delete),
+#     issue count (forge_issue_count_by_label), attachment upload
+#     (forge_attachment_upload), parent linking (forge_work_item_link_parent —
+#     hierarchy PATCH + relates_to fallback), and description update
+#     (forge_issue_update) are all ported to the contract. No raw glab/curl
+#     calls remain in this file.
 
 boucle_ci_triage() {
     set +o pipefail
@@ -60,12 +63,12 @@ boucle_ci_triage() {
     # the child-items hierarchy API). Issues and work items share the same
     # IID space since 16.0, so /work_items/:iid works for issues too.
     # Returns empty string on failure (loop must not break).
-    # NOTE: glab may exit 0 on HTTP 403 (e.g. when the work_item_rest_api
+    # NOTE: the forge CLI may exit 0 on HTTP 403 (e.g. when the work_item_rest_api
     # feature flag is disabled) and print the error JSON to stdout, so we
     # validate the response shape rather than rely on the exit code.
     # List child work items of a parent. Returns JSON array (empty array on
     # failure). Each child has .iid, .state ("opened"|"closed"), .title.
-    # NOTE: glab may exit 0 on HTTP 403 (e.g. when the work_item_rest_api
+    # NOTE: the forge CLI may exit 0 on HTTP 403 (e.g. when the work_item_rest_api
     # feature flag is disabled) and print the error JSON to stdout. A 403
     # error object like {"message":"403 Forbidden ..."} is a JSON OBJECT,
     # not an array — jq 'length' on an object returns its key count (1),
@@ -80,7 +83,7 @@ boucle_ci_triage() {
     eval "$($BOUCLE_HOME/bin/detect-vision-need triage)"
 
     # Fetch the issue body and export it so the triage agent does not
-    # waste steps calling glab issue view / gh issue view (minimax-m3
+    # waste steps calling forge issue view (minimax-m3
     # burned 4+ steps on failed fetches before posting its comment).
     export BOUCLE_ISSUE_BODY
     BOUCLE_ISSUE_BODY=$(forge_issue_get "$IID" | jq -r '.description // empty' 2>/dev/null || echo "")
@@ -99,8 +102,9 @@ boucle_ci_triage() {
     # excluded (type != null). The current run's about-to-be-posted
     # note does not exist yet at fetch time, so it is naturally absent.
     export BOUCLE_ISSUE_NOTES
-    # TODO: forge_* — forge_issue_notes does not paginate (GitLab default
-    # 20/page vs the original per_page=100); backend should support it.
+    # NOTE: forge_issue_notes paginates in the GitLab backend (--paginate,
+    # per_page=100) so all notes are returned, matching the original inline
+    # call. The GitHub backend paginates via _gh_api (gh api --paginate).
     BOUCLE_ISSUE_NOTES=$(forge_issue_notes "$IID" |
         jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | reverse | .[]' 2>/dev/null || echo "")
     if [ -z "$BOUCLE_ISSUE_NOTES" ]; then
@@ -149,7 +153,7 @@ boucle_ci_triage() {
         if [ -f "$AGENT_LOG" ]; then
             # Extract the drafted triage comment: from the boucle:triage marker
             # to the end of the fenced block. The agent prints the full comment
-            # (often inside a ``` fence) in its stdout when it can't call glab.
+            # (often inside a ``` fence) in its stdout when it can't call the forge CLI.
             # Marker patterns are anchored to start-of-line (AGENTS.md lesson
             # #47): a marker quoted in prose must not start the scrape.
             DRAFTED_COMMENT=$(awk '
@@ -203,7 +207,7 @@ boucle_ci_triage() {
         # ── Circuit breaker (silent-failure escalation) ─────────────────
         # bin/jc exits 3 when the agent produced NO posted comment AND NO
         # drafted comment (silent failure — e.g. hit OUTPUT_TOKEN_MAX
-        # mid-comment before reaching the glab tool call). If we leave the
+        # mid-comment before reaching the forge tool call). If we leave the
         # issue at boucle:triage, the doctor re-triggers it every 10 min
         # and the agent fails identically every time → infinite loop
         # (issue #27 on a consumer repo). Escalate to human instead
@@ -220,7 +224,9 @@ boucle_ci_triage() {
     fi
 
     # Collapse duplicate triage comments (agent may post a v2; CI replaces the first).
-    # TODO: forge_* — bin/collapse-duplicate-notes still uses glab internally.
+    # NOTE: bin/collapse-duplicate-notes is fully forge-agnostic (uses the
+    # forge_* contract: forge_issue_notes / forge_issue_note_update /
+    # forge_note_delete) since the GitHub-support port.
     $BOUCLE_HOME/bin/collapse-duplicate-notes triage "$BOUCLE_PROJECT_ID" "$IID" "$PRE_RUN_TRIAGE_ID" "$BOUCLE_FORGE_HOST"
     # Route based on disposition
     case "$DISPOSITION" in
@@ -293,18 +299,13 @@ boucle_ci_triage() {
                             | sort_by(.created_at) | last | .id' 2>/dev/null || echo "")
                 SPEC_MSG_APPENDED=false
                 if [ -n "$TRIAGE_NOTE_ID" ]; then
-                    # TODO: forge_* — no forge_issue_note_get; single note fetched
-                    # via forge_issue_notes + jq filter (contract only exposes list).
-                    EXISTING_BODY=$(forge_issue_notes "$IID" 2>/dev/null |
-                        jq -r --arg id "$TRIAGE_NOTE_ID" '.[] | select(.id == ($id|tonumber)) | .body' 2>/dev/null)
+                    EXISTING_BODY=$(forge_issue_note_get "$IID" "$TRIAGE_NOTE_ID" 2>/dev/null |
+                        jq -r '.body // empty' 2>/dev/null)
                     # Idempotency guard: skip if the validation section is already
                     # present (re-runs of triage on the same issue).
                     if [ -n "$EXISTING_BODY" ] && ! echo "$EXISTING_BODY" | grep -q "## Validation"; then
                         UPDATED_BODY=$(printf '%s\n\n%s' "$EXISTING_BODY" "$SPEC_MSG")
-                        # TODO: forge_* — no forge_issue_note_update in the contract.
-                        if glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT \
-                            "/projects/$BOUCLE_PROJECT_ID/issues/$IID/notes/$TRIAGE_NOTE_ID" \
-                            -f body="$UPDATED_BODY" >/dev/null 2>&1; then
+                        if forge_issue_note_update "$IID" "$TRIAGE_NOTE_ID" "$UPDATED_BODY"; then
                             SPEC_MSG_APPENDED=true
                         fi
                     elif [ -n "$EXISTING_BODY" ]; then
@@ -328,9 +329,7 @@ boucle_ci_triage() {
                     MAX_PARALLEL="${BOUCLE_MAX_PARALLEL_ISSUES:-0}"
                     WORKING_COUNT=0
                     if [ "$MAX_PARALLEL" -gt 0 ] 2>/dev/null; then
-                        # TODO: forge_* — no forge_issue_list in the contract
-                        # (count of issues with labels=boucle:working).
-                        WORKING_COUNT=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues?state=opened&labels=boucle:working&per_page=100" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
+                        WORKING_COUNT=$(forge_issue_count_by_label "boucle:working" "opened" 2>/dev/null || echo 0)
                         if [ "$WORKING_COUNT" -ge "$MAX_PARALLEL" ]; then
                             echo "[boucle] Max parallel issues ($MAX_PARALLEL) reached — $WORKING_COUNT already working. Deferring #$IID (stays at boucle:todo, doctor will re-trigger when a slot frees)."
                             forge_issue_note "$IID" "⏳ Worker deferred — $WORKING_COUNT issues already in progress (cap: $MAX_PARALLEL). Will start automatically when a slot frees up."
@@ -376,14 +375,12 @@ boucle_ci_triage() {
                     #    the modules installed in /tmp.
                     PREVIEW_PNG="$BOUCLE_WORKSPACE/.boucle/$IID/preview.png"
                     if NODE_PATH=/tmp/node_modules node "$BOUCLE_WORKSPACE/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2>/dev/null; then
-                        # 4. Upload the PNG via the uploads API.
-                        # TODO: forge_* — GitLab uploads API has no forge_*
-                        # equivalent yet (GitHub: issue attachment POST differs).
-                        UPLOAD_RESP=$(curl -s --request POST \
-                            --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-                            --form "file=@$PREVIEW_PNG" \
-                            "https://$BOUCLE_FORGE_HOST/api/v4/projects/$BOUCLE_PROJECT_ID/uploads" 2>/dev/null)
-                        IMG_URL=$(echo "$UPLOAD_RESP" | jq -r '.markdown // empty' 2>/dev/null)
+                        # 4. Upload the PNG via the forge contract. The backend
+                        #    returns the embeddable path (GitLab: /uploads/...;
+                        #    GitHub: no upload API → empty, handled below).
+                        IMG_PATH=$(forge_attachment_upload "$IID" "$PREVIEW_PNG" "preview.png" 2>/dev/null || true)
+                        IMG_URL=""
+                        [ -n "$IMG_PATH" ] && IMG_URL="![Aperçu](${IMG_PATH})"
 
                         if [ -n "$IMG_URL" ]; then
                             # 5. Fetch the existing comment, insert Aperçu right after
@@ -391,9 +388,8 @@ boucle_ci_triage() {
                             #    Guard: if EXISTING_BODY is empty (fetch failed), do NOT
                             #    PUT — otherwise we overwrite the entire triage comment
                             #    (losing the boucle:triage marker + criteria + disposition).
-                            # TODO: forge_* — no forge_issue_note_get (see above).
-                            EXISTING_BODY=$(forge_issue_notes "$IID" 2>/dev/null |
-                                jq -r --arg id "$TRIAGE_NOTE_ID" '.[] | select(.id == ($id|tonumber)) | .body' 2>/dev/null)
+                            EXISTING_BODY=$(forge_issue_note_get "$IID" "$TRIAGE_NOTE_ID" 2>/dev/null |
+                                jq -r '.body // empty' 2>/dev/null)
                             if [ -n "$EXISTING_BODY" ]; then
                                 NEW_BODY=$(printf '%s\n' "$EXISTING_BODY" | awk -v img="$IMG_URL" '
                                         /^## TL;DR/ { in_tldr=1; print; next }
@@ -403,10 +399,7 @@ boucle_ci_triage() {
                                         { print }
                                         END { if (!inserted) { print ""; print "## Aperçu"; print img } }
                                     ')
-                                # TODO: forge_* — no forge_issue_note_update in the contract.
-                                if glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT \
-                                    "/projects/$BOUCLE_PROJECT_ID/issues/$IID/notes/$TRIAGE_NOTE_ID" \
-                                    -f body="$NEW_BODY" >/dev/null 2>&1; then
+                                if forge_issue_note_update "$IID" "$TRIAGE_NOTE_ID" "$NEW_BODY"; then
                                     # 6. Idempotence: delete RENDER_REQUEST (no re-render on retry).
                                     rm -f "$RENDER_REQUEST_FILE"
                                     echo "[boucle] Visual preview embedded in triage comment #$TRIAGE_NOTE_ID"
@@ -570,38 +563,16 @@ boucle_ci_triage() {
                             if [ -n "${BOUCLE_BOT_ID:-}" ]; then
                                 forge_issue_assign "$NEW_IID" "$BOUCLE_BOT_ID"
                             fi
-                            # Set the parent via the work-items hierarchy API (child-items).
-                            # This creates the real "Éléments enfants" relationship visible
-                            # in the UI. Requires the parent's GLOBAL work-item ID
-                            # (not its project-scoped IID). If the hierarchy API is
-                            # unavailable (work_item_rest_api feature flag disabled on
-                            # self-managed GitLab), fall back to a REST relates_to issue
-                            # link (visible under "Linked items" on the parent). Final
-                            # fallback: the ## Parent issue body text provides navigation.
-                            # TODO: forge_* — the hierarchy PATCH + relates_to fallback
-                            # are GitLab-specific; forge_work_item_link_parent only
-                            # covers the relates_to link today.
-                            PARENT_GLOBAL_ID=$(get_work_item_global_id "$PARENT_IID")
-                            HIERARCHY_STATUS=""
-                            if [ -n "$PARENT_GLOBAL_ID" ] && [ "$PARENT_GLOBAL_ID" != "null" ]; then
-                                HIERARCHY_STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH \
-                                    "https://$BOUCLE_FORGE_HOST/api/v4/projects/$BOUCLE_PROJECT_ID/-/work_items/$NEW_IID" \
-                                    --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-                                    --header "Content-Type: application/json" \
-                                    --data "{\"features\":{\"hierarchy\":{\"parent_id\":$PARENT_GLOBAL_ID}}}" 2>/dev/null || echo "000")
-                            fi
-                            case "$HIERARCHY_STATUS" in
-                            2*) : ;; # hierarchy link set — nothing more to do
-                            *)
-                                echo "  → hierarchy API unavailable (HTTP ${HIERARCHY_STATUS:-no-global-id}) — falling back to relates_to issue link"
-                                # TODO: forge_* — no forge_issue_link in the contract.
-                                curl -s -o /dev/null -X POST \
-                                    "https://$BOUCLE_FORGE_HOST/api/v4/projects/$BOUCLE_PROJECT_ID/issues/$PARENT_IID/links" \
-                                    --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-                                    --header "Content-Type: application/json" \
-                                    --data "{\"target_project_id\":$BOUCLE_PROJECT_ID,\"target_issue_iid\":$NEW_IID,\"link_type\":\"relates_to\"}" 2>/dev/null || true
-                                ;;
-                            esac
+                            # Set the parent via the forge contract. The backend
+                            # tries the work-items hierarchy API first (real
+                            # "Éléments enfants" relationship — needs the parent's
+                            # GLOBAL work-item ID, not the project-scoped IID);
+                            # if unavailable (work_item_rest_api feature flag
+                            # disabled on self-managed GitLab), it falls back to
+                            # a REST relates_to issue link (visible under
+                            # "Linked items" on the parent). Final fallback: the
+                            # ## Parent issue body text provides navigation.
+                            forge_work_item_link_parent "$NEW_IID" "$PARENT_IID"
                             # Trigger triage directly via trigger API (bot-created issues would
                             # hit the anti-loop guard in dispatch because ACTOR=up-bot).
                             chain_to_role "$NEW_IID" ""
@@ -711,10 +682,7 @@ boucle_ci_triage() {
                 # Human-readable #N list + machine marker.
                 human_list=$(echo "$resolved_iids" | sed 's/,/, #/g; s/^/#/')
                 new_desc=$(printf '%s\n\n## Depends on\n%s\n<!-- boucle:depends-on iids=%s -->' "$cur_desc" "$human_list" "$resolved_iids")
-                # TODO: forge_* — no forge_issue_update in the contract
-                # (description append); glab PUT kept as-is.
-                glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$BOUCLE_PROJECT_ID/issues/$cur_iid" \
-                    -f description="$new_desc" >/dev/null 2>&1 ||
+                forge_issue_update "$cur_iid" "description" "$new_desc" ||
                     echo "WARN: failed to update #$cur_iid description with deps"
                 echo "  → #$cur_iid depends on $resolved_iids"
             done

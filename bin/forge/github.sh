@@ -22,7 +22,10 @@
 # ── Helper: gh api with auth ──────────────────────────────────────────────
 
 _gh_api() {
-  GH_TOKEN="$BOUCLE_TOKEN" gh api "$@" 2> /dev/null
+  # --paginate: gh api does NOT auto-paginate (30 items/page default).
+  # Boucle lists (notes, issues, labels, pipelines) routinely exceed one
+  # page, so paginate by default. Harmless no-op on single-object GETs.
+  GH_TOKEN="$BOUCLE_TOKEN" gh api --paginate "$@" 2> /dev/null
 }
 
 _gh_api_silent() {

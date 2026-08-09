@@ -15,31 +15,30 @@ setup() {
   load 'test_helper/bats-assert/load'
 }
 
-# Extract the upload-path regex from bin/fetch-issue-attachments source. The
-# script's regex is a bash double-quoted string containing both single
-# and double quotes; we extract it as-is so tests stay
-# faithful to real behavior. Output is the regex string suitable for
-# `grep -E`.
+# Extract the upload-path regex from the GitLab forge backend. The regex
+# moved out of bin/fetch-issue-attachments into
+# forge_attachments_extract() (bin/forge/gitlab.sh) during the
+# forge-abstraction port — the script now delegates extraction to the
+# contract function. We pull the single-quoted grep -oE pattern from the
+# backend so tests stay faithful to real behavior. Output is the regex
+# string suitable for `grep -E`.
 upload_regex() {
-  # awk -F'"' splits on unescaped double quotes. The script's pattern
-  # uses an escaped \" inside a "..." string, so the regex ends up
-  # across two awk fields. Re-insert the literal " between them.
-  grep -nE 'grep -oiE' bin/fetch-issue-attachments \
-    | head -1 \
-    | awk -F'"' '{print $2 "\"" $3}'
+  sed -n '/^forge_attachments_extract()/,/^}/p' bin/forge/gitlab.sh \
+    | grep -m1 -oE "'[^']+'" \
+    | tr -d "'"
 }
 
 # Write the upload regex to a fresh temp file, returning the path via
-# the global UPLOAD_REGEX_FILE. The file contains a single double-quoted
-# assignment `RE="<regex>"` that the test can `source` to set $RE
-# without running into shell-quoting headaches. (Single quotes can't be
-# used because the regex itself contains a literal ' character.)
+# the global UPLOAD_REGEX_FILE. The file contains a single-quoted
+# assignment `RE='<regex>'` that the test can `source` to set $RE
+# without running into shell-quoting headaches. (Single quotes are safe
+# because the backend regex contains a literal `"` — in `[^" )]` — but
+# no `'`; the old inline script regex had the opposite quoting problem.)
 write_upload_regex_file() {
   UPLOAD_REGEX_FILE="$(mktemp)"
   local re
   re=$(upload_regex)
-  # Double-quoted assignment: \" is literal ", ' is literal, \ is literal.
-  printf 'RE="%s"\n' "$re" > "$UPLOAD_REGEX_FILE"
+  printf "RE='%s'\n" "$re" > "$UPLOAD_REGEX_FILE"
 }
 
 teardown() {

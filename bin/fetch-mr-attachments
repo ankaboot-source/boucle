@@ -40,6 +40,27 @@ TOTAL_MAX_BYTES="${BOUCLE_IMAGE_TOTAL_MAX_BYTES:-52428800}"
 
 HOST="${BOUCLE_FORGE_HOST:-gitlab.example.com}"
 
+# ── Forge backend bootstrap ─────────────────────────────────────────
+# This script runs standalone in the CI job (not via bin/boucle-ci), so
+# it must source the forge abstraction itself. BOUCLE_FORGE defaults to
+# gitlab when the script is called outside CI (local dev, tests).
+BOUCLE_HOME="${BOUCLE_HOME:-}"
+if [ -z "$BOUCLE_HOME" ]; then
+  if [ -d "${CI_PROJECT_DIR:-}/.boucle/bin" ]; then
+    BOUCLE_HOME="$CI_PROJECT_DIR/.boucle"
+  else
+    BOUCLE_HOME="$(cd "$(dirname "$0")/.." && pwd)"
+  fi
+fi
+export BOUCLE_HOME
+export BOUCLE_FORGE="${BOUCLE_FORGE:-gitlab}"
+# shellcheck source=forge/common.sh
+. "$BOUCLE_HOME/bin/forge/common.sh"
+type forge_init &>/dev/null && {
+  type forge_issue_get &>/dev/null || forge_init
+} || true
+export BOUCLE_FORGE_HOST="${BOUCLE_FORGE_HOST:-${GITLAB_HOST:-gitlab.example.com}}"
+
 mkdir -p "$ATT_DIR"
 # Clean slate per run (re-download fresh each time)
 rm -f "$ATT_DIR"/* "$ENV_FILE" 2> /dev/null || true
@@ -51,7 +72,7 @@ if [ -z "$MR_IID" ]; then
   exit 0
 fi
 
-PROJECT_ID="${CI_PROJECT_ID:?CI_PROJECT_ID must be set}"
+export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:?CI_PROJECT_ID must be set}}"
 
 # Collect all markdown text from MR notes (oldest first).
 # Unlike the issue path, MRs have no parent-issue concept — no inheritance
@@ -62,16 +83,17 @@ ALL_TEXT=$(mktemp)
 trap 'rm -f "$ALL_TEXT"' EXIT
 
 {
-  glab api --hostname "$HOST" "/projects/$PROJECT_ID/merge_requests/$MR_IID/notes?per_page=100&order_by=created_at&sort=asc" 2> /dev/null \
+  forge_mr_notes "$MR_IID" 2> /dev/null \
     | jq -r '.[].body // empty' 2> /dev/null || true
 } > "$ALL_TEXT"
 
-# Extract all GitLab upload paths (any extension — images, PDFs, archives, etc.).
-# GitLab markdown references uploads as ![alt](/uploads/<hash>/<filename.ext>)
-# or as regular links [label](/uploads/...). We only download forge-hosted
-# uploads (not arbitrary internet URLs) for safety.
+# Extract all forge-hosted upload paths (any extension — images, PDFs,
+# archives, etc.). Delegated to the forge contract so the pattern matches
+# the active backend (GitLab /uploads/<hash>/<filename.ext>, GitHub
+# user-attachments URLs). We only download forge-hosted uploads (not
+# arbitrary internet URLs) for safety.
 mapfile -t UPLOAD_PATHS < <(
-  grep -oiE "/uploads/[^[:space:]\"')]+" "$ALL_TEXT" \
+  forge_attachments_extract "$(cat "$ALL_TEXT")" \
     | sort -u || true
 )
 
@@ -108,17 +130,15 @@ for path in "${UPLOAD_PATHS[@]}"; do
   remaining=$((TOTAL_MAX_BYTES - total_size))
   per_file_cap=$((MAX_BYTES < remaining ? MAX_BYTES : remaining))
 
-  # Download via the GitLab API (not the raw /uploads/ URL).
-  # The raw URL (https://$HOST/uploads/...) returns a login page for private
+  # Download via the forge contract (forge_attachment_download uses the
+  # API, not the raw /uploads/ URL — the raw URL
+  # (https://$HOST/uploads/...) returns a login page for private
   # projects — the /uploads/ endpoint uses cookie-based session auth, not the
   # PRIVATE-TOKEN header. The API endpoint
   #   GET /projects/:id/uploads/:secret/:filename
   # with `Accept: application/octet-stream` returns the binary blob correctly.
-  # See boucle lesson #31.
-  if glab api --hostname "$HOST" --method GET \
-    "/projects/$PROJECT_ID${path}" \
-    -H "Accept: application/octet-stream" \
-    > "$outpath" 2> /dev/null; then
+  # See boucle lesson #31).
+  if forge_attachment_download "$path" "$outpath"; then
     actual_size=$(wc -c < "$outpath")
     if [ "$actual_size" -eq 0 ]; then
       rm -f "$outpath"
