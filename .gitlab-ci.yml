@@ -209,6 +209,11 @@ default:
       # set by GitLab; resolve from the native CI_DEFAULT_BRANCH (fallback
       # master) so triggers target the real default branch, not "main".
       export BOUCLE_DEFAULT_BRANCH="${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}"
+      # BOUCLE_PROJECT_ID is normalized by lib/boucle-ci.sh for bin/boucle-ci
+      # jobs; INLINE jobs (merger, doctor, ...) must get it here too, or the
+      # forge_* triggers/notes POST to an empty project id (silently dropped
+      # by `|| true`) — observed re-trigger failure on framagit, 2026-08.
+      export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:-}}"
       source "$BOUCLE_HOME/lib/boucle.sh"
 
       # ── jcode coding agent (standalone Rust binary) ──────────────
@@ -461,6 +466,11 @@ dispatch:
       # set by GitLab; resolve from the native CI_DEFAULT_BRANCH (fallback
       # master) so triggers target the real default branch, not "main".
       export BOUCLE_DEFAULT_BRANCH="${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}"
+      # BOUCLE_PROJECT_ID is normalized by lib/boucle-ci.sh for bin/boucle-ci
+      # jobs; INLINE jobs (merger, doctor, ...) must get it here too, or the
+      # forge_* triggers/notes POST to an empty project id (silently dropped
+      # by `|| true`) — observed re-trigger failure on framagit, 2026-08.
+      export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:-}}"
       source "$BOUCLE_HOME/lib/boucle.sh"
   script:
     - |
@@ -3053,6 +3063,11 @@ merger:
       # set by GitLab; resolve from the native CI_DEFAULT_BRANCH (fallback
       # master) so triggers target the real default branch, not "main".
       export BOUCLE_DEFAULT_BRANCH="${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}"
+      # BOUCLE_PROJECT_ID is normalized by lib/boucle-ci.sh for bin/boucle-ci
+      # jobs; INLINE jobs (merger, doctor, ...) must get it here too, or the
+      # forge_* triggers/notes POST to an empty project id (silently dropped
+      # by `|| true`) — observed re-trigger failure on framagit, 2026-08.
+      export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:-}}"
       source "$BOUCLE_HOME/lib/boucle.sh"
   script:
     - |
@@ -3302,6 +3317,11 @@ post-merge:
       # set by GitLab; resolve from the native CI_DEFAULT_BRANCH (fallback
       # master) so triggers target the real default branch, not "main".
       export BOUCLE_DEFAULT_BRANCH="${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}"
+      # BOUCLE_PROJECT_ID is normalized by lib/boucle-ci.sh for bin/boucle-ci
+      # jobs; INLINE jobs (merger, doctor, ...) must get it here too, or the
+      # forge_* triggers/notes POST to an empty project id (silently dropped
+      # by `|| true`) — observed re-trigger failure on framagit, 2026-08.
+      export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:-}}"
       source "$BOUCLE_HOME/lib/boucle.sh"
   script:
     - |
@@ -3420,6 +3440,11 @@ catchup:
       # set by GitLab; resolve from the native CI_DEFAULT_BRANCH (fallback
       # master) so triggers target the real default branch, not "main".
       export BOUCLE_DEFAULT_BRANCH="${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}"
+      # BOUCLE_PROJECT_ID is normalized by lib/boucle-ci.sh for bin/boucle-ci
+      # jobs; INLINE jobs (merger, doctor, ...) must get it here too, or the
+      # forge_* triggers/notes POST to an empty project id (silently dropped
+      # by `|| true`) — observed re-trigger failure on framagit, 2026-08.
+      export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:-}}"
       source "$BOUCLE_HOME/lib/boucle.sh"
   script:
     - |
