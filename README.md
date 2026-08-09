@@ -12,16 +12,15 @@ never touch the engine itself.
 ## 📑 Table of contents
 
 - [✨ Why boucle?](#why-boucle)
-- [🩹 What most loop tools get wrong](#what-most-loop-tools-get-wrong)
 - [🚀 Quick start](#quick-start)
   - [Option 1 — copy/paste prompt](#option-1-copypaste-prompt-easiest)
   - [Option 2 — command line](#option-2-command-line)
   - [After install](#after-install)
-- [⚙️ How it works](#how-it-works)
-- [🛠️ Configuration](#configuration)
+- [⚙️ How it works](#️-how-it-works)
+- [🛠️ Configuration](#️-configuration)
   - [The bot user](#the-bot-user)
-- [🗺️ Roadmap](#roadmap)
-- [⚖️ License](#license)
+- [🗺️ Roadmap](#️-roadmap)
+- [⚖️ License](#️-license)
 - [📚 Docs](#docs)
 
 ## ✨ Why boucle?
@@ -29,24 +28,27 @@ never touch the engine itself.
 **End to end, from idea to shipped.** A ticket becomes a feature deployed to
 production — and you can **amend at any moment**: comment on the issue and
 the loop picks your feedback up, re-plans, and adjusts. You validate the
-result with **screenshots** of the live preview, not prose.
+**spec on mockups** before a line of code is written, and the **result on a
+live preview** with screenshots — not prose.
 
 **Fast and cheap — BYOK.** Lightweight, purpose-built agents run on your
 forge's existing CI, with your own LLM credentials. No Mac Mini, no VPS, no
 always-on laptop.
 
-**No new interface.** No web app, no TUI. Your forge stays the interface:
-create an issue, label it, approve the spec and the MR — everything happens
-where you already work.
+**No new interface.** No web app, no TUI. Your forge (GitLab or GitHub)
+stays the interface: create an issue, label it, approve the spec, then
+review and merge the PR/MR — everything happens where you already work.
 
 **Ready to use, not a framework.** boucle ships as a working product, not a
 loop-engineering framework you assemble. One command installs it;
 `bin/setup` verifies every prerequisite; then it just runs.
 
-**Built on fast, modern tools.** jcode, a standalone **Rust** binary (fast
-startup, zero runtime dependencies), plus a **codebase knowledge graph**
-that gives agents real structural understanding of your repository instead
-of blind grep.
+**Built on fast, modern tools — batteries included.** jcode, a standalone
+**Rust** binary (fast startup, zero runtime dependencies), a **codebase
+knowledge graph** that gives agents real structural understanding of your
+repository instead of blind grep, and a curated **skill library** —
+including UI/UX, design, and frontend engineering — so the agents ship
+polished results, not just functional code.
 
 **Not a SaaS. No server.** The whole loop runs on your forge's CI
 pipelines. Your code, your data, your tokens stay yours.
@@ -54,26 +56,18 @@ pipelines. Your code, your data, your tokens stay yours.
 **By a product builder, for product builders.** Built by an indie Product
 Builder who got tired of babysitting agents overnight.
 
-### 🩹 What most loop tools get wrong
+If you've lived these irritants too — a daemon that dies overnight, a
+review that ships broken code, a spec that freezes the moment you approve
+it — boucle was designed for you. The table below maps each one to how
+boucle handles it, if you want to compare:
 
-Boucle was designed against the common irritants, observed first-hand in a
-seven-run POC of a representative loop tool:
-
-- **A daemon to babysit.** Local daemons die silently, need restarts, and
-  pollute your disk with worktrees and sessions. → boucle runs on your
-  forge's CI: nothing to install, nothing to restart.
-- **Deadlocks.** Single-identity loops stall because a bot can't review,
-  approve, or merge its own PRs. → boucle's label-driven state machine has
-  no self-approval path.
-- **Reviews that ship broken code.** Diff-scoped review passes while
-  deployment-dependent bugs reach production. → boucle verifies *behavior*:
-  a preview URL, screenshots, and a post-deploy e2e gate anchored to the
-  commit SHA.
-- **Frozen specs.** Human comments after review never reach the worker. →
-  boucle feeds every human note back into the loop — amend at any moment.
-- **No budget control.** Token spend with no cap or visibility. → boucle
-  ships step and iteration caps per role, and a concurrency cap on parallel
-  issues.
+| Irritant | How boucle handles it |
+| --- | --- |
+| A daemon to babysit (dies silently, pollutes your disk with worktrees) | Runs on your forge's CI — nothing to install, nothing to restart |
+| Deadlocks (a bot can't review, approve, or merge its own PRs) | Label-driven state machine with no self-approval path |
+| Reviews that ship broken code (diff-scoped review passes) | Verifies *behavior*: a preview URL, screenshots, and a SHA-anchored post-deploy e2e gate |
+| Frozen specs (human comments after review never reach the worker) | Feeds every human note back into the loop — amend at any moment |
+| No budget control (token spend with no cap or visibility) | Step and iteration caps per role, plus a concurrency cap on parallel issues |
 
 ## 🚀 Quick start
 
