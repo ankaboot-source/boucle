@@ -14,630 +14,661 @@
 # Extracted from the .gitlab-ci.yml doctor job (lines 4006-4632).
 
 boucle_ci_doctor() {
-    # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script
-    # under set -eo pipefail. Without pipefail, the var is just empty (which
-    # we handle).
-    set +o pipefail
-    RECOVERED=0
-    # Emoji reactions that count as spec approval (GitLab internal alpha codes).
-    # Must mirror the dispatch job's constant — each CI job runs its own shell.
-    BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup|white_check_mark|ballot_box_with_check|heavy_check_mark|ok|ok_hand"
+  # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script
+  # under set -eo pipefail. Without pipefail, the var is just empty (which
+  # we handle).
+  set +o pipefail
+  RECOVERED=0
+  # Emoji reactions that count as spec approval (GitLab internal alpha codes).
+  # Must mirror the dispatch job's constant — each CI job runs its own shell.
+  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup|white_check_mark|ballot_box_with_check|heavy_check_mark|ok|ok_hand"
 
-    # ── Local helpers ──────────────────────────────────────────────────────
-    # set_boucle_label / chain_to_role / close_issue / get_work_item_children
-    # come from lib/boucle.sh (sourced by the lib/boucle-ci.sh bootstrap) —
-    # the local copies that used to live here are removed.
-    # issue_has_active_pipeline, doctor_should_skip_dedup and
-    # doctor_mark_triggered are NOT in lib/boucle.sh, so they stay local.
+  # ── Local helpers ──────────────────────────────────────────────────────
+  # set_boucle_label / chain_to_role / close_issue / get_work_item_children
+  # come from lib/boucle.sh (sourced by the lib/boucle-ci.sh bootstrap) —
+  # the local copies that used to live here are removed.
+  # issue_has_active_pipeline, doctor_should_skip_dedup and
+  # doctor_mark_triggered are NOT in lib/boucle.sh, so they stay local.
 
-    # Active-pipeline guard (lesson #33): a pipeline with BOUCLE_ISSUE=$iid
-    # is already running/pending/created — skip re-trigger. Replaces the
-    # unreliable updated_at proxy (bumped by any issue activity, not just
-    # pipeline runs). Delegates to forge_pipeline_list_active which matches
-    # pipelines to the issue via the BOUCLE_ISSUE variable — no false
-    # positives.
-    issue_has_active_pipeline() {
-        local iid="$1" pipelines
-        pipelines=$(forge_pipeline_list_active "$iid") || return 1
-        echo "$pipelines" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1
-    }
+  # Active-pipeline guard (lesson #33): a pipeline with BOUCLE_ISSUE=$iid
+  # is already running/pending/created — skip re-trigger. Replaces the
+  # unreliable updated_at proxy (bumped by any issue activity, not just
+  # pipeline runs). Delegates to forge_pipeline_list_active which matches
+  # pipelines to the issue via the BOUCLE_ISSUE variable — no false
+  # positives.
+  issue_has_active_pipeline() {
+    local iid="$1" pipelines
+    pipelines=$(forge_pipeline_list_active "$iid") || return 1
+    echo "$pipelines" | jq -e 'type == "array" and length > 0' > /dev/null 2>&1
+  }
 
-    # Doctor-side dedup: track the last time the doctor triggered each
-    # issue in $BOUCLE_STATE_CACHE/doctor-triggers/<iid>. Skip re-trigger
-    # if the doctor already triggered this issue within the STALENESS
-    # window — prevents the same issue from being re-fired every 10 min
-    # while waiting for a queued pipeline to start. The active-pipeline
-    # check (issue_has_active_pipeline) is the primary guard; this is a
-    # secondary backstop (lesson #33) for the case where a triggered
-    # pipeline is still in `created`/`waiting_for_resource` but the
-    # variables API hasn't caught up, or the pipeline was triggered but
-    # hasn't yet registered.
-    doctor_should_skip_dedup() {
-        local iid="$1" now_epoch last_epoch delta
-        local cache_dir="${BOUCLE_STATE_CACHE:-.boucle-state}/doctor-triggers"
-        local stamp_file="$cache_dir/$iid"
-        now_epoch=$(date +%s)
-        if [ -f "$stamp_file" ]; then
-            last_epoch=$(cat "$stamp_file" 2>/dev/null || echo 0)
-            delta=$((now_epoch - last_epoch))
-            local staleness="${BOUCLE_STALENESS_THRESHOLD:-2400}"
-            if [ "$delta" -lt "$staleness" ]; then
-                echo "  → #$iid: doctor already triggered ${delta}s ago (< ${staleness}s) — dedup skip"
-                return 0
-            fi
-        fi
-        return 1
-    }
-    doctor_mark_triggered() {
-        local iid="$1"
-        local cache_dir="${BOUCLE_STATE_CACHE:-.boucle-state}/doctor-triggers"
-        mkdir -p "$cache_dir" 2>/dev/null || true
-        date +%s >"$cache_dir/$iid" 2>/dev/null || true
-    }
+  # Doctor-side dedup: track the last time the doctor triggered each
+  # issue in $BOUCLE_STATE_CACHE/doctor-triggers/<iid>. Skip re-trigger
+  # if the doctor already triggered this issue within the STALENESS
+  # window — prevents the same issue from being re-fired every 10 min
+  # while waiting for a queued pipeline to start. The active-pipeline
+  # check (issue_has_active_pipeline) is the primary guard; this is a
+  # secondary backstop (lesson #33) for the case where a triggered
+  # pipeline is still in `created`/`waiting_for_resource` but the
+  # variables API hasn't caught up, or the pipeline was triggered but
+  # hasn't yet registered.
+  doctor_should_skip_dedup() {
+    local iid="$1" now_epoch last_epoch delta
+    local cache_dir="${BOUCLE_STATE_CACHE:-.boucle-state}/doctor-triggers"
+    local stamp_file="$cache_dir/$iid"
+    now_epoch=$(date +%s)
+    if [ -f "$stamp_file" ]; then
+      last_epoch=$(cat "$stamp_file" 2> /dev/null || echo 0)
+      delta=$((now_epoch - last_epoch))
+      local staleness="${BOUCLE_STALENESS_THRESHOLD:-2400}"
+      if [ "$delta" -lt "$staleness" ]; then
+        echo "  → #$iid: doctor already triggered ${delta}s ago (< ${staleness}s) — dedup skip"
+        return 0
+      fi
+    fi
+    return 1
+  }
+  doctor_mark_triggered() {
+    local iid="$1"
+    local cache_dir="${BOUCLE_STATE_CACHE:-.boucle-state}/doctor-triggers"
+    mkdir -p "$cache_dir" 2> /dev/null || true
+    date +%s > "$cache_dir/$iid" 2> /dev/null || true
+  }
 
-    # ── Recover orphaned boucle:needs-info issues ──────────────────────────
-    # A human reply after the last triage comment means the reporter
-    # answered the blocking questions. If the issue still has
-    # boucle:needs-info, the triage pipeline was canceled/orphaned — re-trigger.
-    # TODO: forge_* — no contract for listing issues by label yet.
-    NEEDS_INFO_ISSUES=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues?state=opened&labels=boucle:needs-info&per_page=100" |
-        jq -r '.[].iid')
+  # ── Recover orphaned boucle:needs-info issues ──────────────────────────
+  # A human reply after the last triage comment means the reporter
+  # answered the blocking questions. If the issue still has
+  # boucle:needs-info, the triage pipeline was canceled/orphaned — re-trigger.
+  # GitHub issues expose .number instead of .iid — extract either.
+  NEEDS_INFO_ISSUES=$(forge_issue_list_by_label "boucle:needs-info" opened \
+    | jq -r '.[] | .iid // .number')
 
-    for IID in $NEEDS_INFO_ISSUES; do
-        echo "Checking #$IID (boucle:needs-info)..."
+  for IID in $NEEDS_INFO_ISSUES; do
+    echo "Checking #$IID (boucle:needs-info)..."
 
-        # Fetch notes for the issue (newest-first).
-        NOTES=$(forge_issue_notes "$IID")
+    # Fetch notes for the issue (newest-first).
+    NOTES=$(forge_issue_notes "$IID")
 
-        # Find the last triage comment (has <!-- boucle:triage marker).
-        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
+    # Find the last triage comment (has <!-- boucle:triage marker).
+    LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
 
-        # Find the last human (non-bot) note after the triage comment.
-        HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
+    # Find the last human (non-bot) note after the triage comment.
+    HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
           [.[] | select(.author.username != $bname) | select(.id > ($tid | tonumber))]
           | length
         ')
 
-        if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ]; then
-            echo "  → #$IID has a human reply after last triage comment — orphaned triage detected"
-            # Active-pipeline guard: skip if a pipeline for this issue is
-            # already running/pending/created. Prevents the doctor from
-            # firing duplicate triggers every 10 min while a previous one
-            # is still queued in resource_group.
-            if issue_has_active_pipeline "$IID"; then
-                echo "  → #$IID: active pipeline already running — skipping re-trigger"
-                continue
-            fi
-            if doctor_should_skip_dedup "$IID"; then
-                continue
-            fi
-            # Re-trigger: set boucle:triage label (preserve non-boucle labels).
-            set_boucle_label "$IID" "boucle:triage" "boucle::status::bot"
-            # Trigger triage pipeline.
-            chain_to_role "$IID" ""
-            doctor_mark_triggered "$IID"
-            echo "  → re-triggered triage for #$IID"
-            RECOVERED=$((RECOVERED + 1))
-        else
-            echo "  → #$IID: no human reply after triage — still waiting for reporter"
-        fi
-    done
+    if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ]; then
+      echo "  → #$IID has a human reply after last triage comment — orphaned triage detected"
+      # Active-pipeline guard: skip if a pipeline for this issue is
+      # already running/pending/created. Prevents the doctor from
+      # firing duplicate triggers every 10 min while a previous one
+      # is still queued in resource_group.
+      if issue_has_active_pipeline "$IID"; then
+        echo "  → #$IID: active pipeline already running — skipping re-trigger"
+        continue
+      fi
+      if doctor_should_skip_dedup "$IID"; then
+        continue
+      fi
+      # Re-trigger: set boucle:triage label (preserve non-boucle labels).
+      set_boucle_label "$IID" "boucle:triage" "boucle::status::bot"
+      # Trigger triage pipeline.
+      chain_to_role "$IID" ""
+      doctor_mark_triggered "$IID"
+      echo "  → re-triggered triage for #$IID"
+      RECOVERED=$((RECOVERED + 1))
+    else
+      echo "  → #$IID: no human reply after triage — still waiting for reporter"
+    fi
+  done
 
-    # ── Recover orphaned boucle:spec-review issues ─────────────────────────
-    # The author replied (any non-bot note after the last triage comment) but
-    # the dispatch pipeline was canceled/orphaned before it could trigger the
-    # worker. Issue still has boucle:spec-review (dispatch didn't run to
-    # strip it). Worker relabels to boucle:working on start, which clears it.
-    # TODO: forge_* — no contract for listing issues by label yet.
-    SPEC_REVIEW_ISSUES=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues?state=opened&labels=boucle:spec-review&per_page=100" |
-        jq -r '.[].iid')
+  # ── Recover orphaned boucle:spec-review issues ─────────────────────────
+  # The author replied (any non-bot note after the last triage comment) but
+  # the dispatch pipeline was canceled/orphaned before it could trigger the
+  # worker. Issue still has boucle:spec-review (dispatch didn't run to
+  # strip it). Worker relabels to boucle:working on start, which clears it.
+  SPEC_REVIEW_ISSUES=$(forge_issue_list_by_label "boucle:spec-review" opened \
+    | jq -r '.[] | .iid // .number')
 
-    for IID in $SPEC_REVIEW_ISSUES; do
-        echo "Checking #$IID (boucle:spec-review) for spec approval..."
-        NOTES=$(forge_issue_notes "$IID")
-        # Find the last triage comment (same as needs-info recovery above).
-        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
-        # Detect any non-bot note after the last triage comment.
-        HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
+  for IID in $SPEC_REVIEW_ISSUES; do
+    echo "Checking #$IID (boucle:spec-review) for spec approval..."
+    NOTES=$(forge_issue_notes "$IID")
+    # Find the last triage comment (same as needs-info recovery above).
+    LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
+    # Detect any non-bot note after the last triage comment.
+    HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
           [.[] | select(.author.username != $bname) | select(.id > ($tid | tonumber))]
           | length
         ')
-        # Check for an approval emoji on the triage comment AND any standalone
-        # spec-review note. The validation instructions are appended to the
-        # triage comment itself (single message to read/approve), so the
-        # "React with" lookup usually resolves to the same note as the triage
-        # comment. The fallback path (triage note unresolved / PUT failed)
-        # posts a standalone note — poll both to cover that case too.
-        # Polls the award_emoji API — recovers even if the emoji webhook was
-        # missed (emoji_events disabled or webhook delivery failed).
-        SPEC_INVITE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("React with"))] | last | .id // 0')
-        EMOJI_APPROVAL_FOUND=false
-        for NOTE_ID in $LAST_TRIAGE_NOTE_ID $SPEC_INVITE_NOTE_ID; do
-            [ "$NOTE_ID" = "0" ] || [ -z "$NOTE_ID" ] && continue
-            # TODO: forge_* — note-level reactions; the contract only has
-            # issue-level forge_issue_reactions.
-            AWARDS=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
-                "/projects/$BOUCLE_PROJECT_ID/issues/$IID/notes/$NOTE_ID/award_emoji" 2>/dev/null)
-            if echo "$AWARDS" | jq -e --arg emojis "$BOUCLE_SPEC_APPROVAL_EMOJIS" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
+    # Check for an approval emoji on the triage comment AND any standalone
+    # spec-review note. The validation instructions are appended to the
+    # triage comment itself (single message to read/approve), so the
+    # "React with" lookup usually resolves to the same note as the triage
+    # comment. The fallback path (triage note unresolved / PUT failed)
+    # posts a standalone note — poll both to cover that case too.
+    # Polls the award_emoji API — recovers even if the emoji webhook was
+    # missed (emoji_events disabled or webhook delivery failed).
+    SPEC_INVITE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("React with"))] | last | .id // 0')
+    EMOJI_APPROVAL_FOUND=false
+    for NOTE_ID in $LAST_TRIAGE_NOTE_ID $SPEC_INVITE_NOTE_ID; do
+      [ "$NOTE_ID" = "0" ] || [ -z "$NOTE_ID" ] && continue
+      # forge_note_reactions normalizes both backends to
+      # {name, user.username} — the jq filter below works unchanged.
+      AWARDS=$(forge_note_reactions issue "$IID" "$NOTE_ID")
+      if echo "$AWARDS" | jq -e --arg emojis "$BOUCLE_SPEC_APPROVAL_EMOJIS" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
                 [.[] | select(.user.username != $bname) | .name]
                 | map(select(. as $n | ($emojis | split("|")) | index($n)))
                 | length > 0
-            ' >/dev/null 2>&1; then
-                EMOJI_APPROVAL_FOUND=true
-                break
-            fi
-        done
-        if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ] || [ "$EMOJI_APPROVAL_FOUND" = true ]; then
-            echo "  → #$IID approved (reply=$HUMAN_REPLY_AFTER_TRIAGE, emoji=$EMOJI_APPROVAL_FOUND) — re-triggering worker"
-            if issue_has_active_pipeline "$IID"; then
-                echo "  → #$IID: active pipeline already running — skipping re-trigger"
-                continue
-            fi
-            if doctor_should_skip_dedup "$IID"; then
-                continue
-            fi
-            set_boucle_label "$IID" "boucle:todo" "boucle::status::bot"
-            chain_to_role "$IID" "worker"
-            doctor_mark_triggered "$IID"
-            echo "  → re-triggered worker for #$IID"
-            RECOVERED=$((RECOVERED + 1))
-        else
-            echo "  → #$IID: still waiting for author reply or approval emoji"
-        fi
+            ' > /dev/null 2>&1; then
+        EMOJI_APPROVAL_FOUND=true
+        break
+      fi
     done
+    if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ] || [ "$EMOJI_APPROVAL_FOUND" = true ]; then
+      echo "  → #$IID approved (reply=$HUMAN_REPLY_AFTER_TRIAGE, emoji=$EMOJI_APPROVAL_FOUND) — re-triggering worker"
+      if issue_has_active_pipeline "$IID"; then
+        echo "  → #$IID: active pipeline already running — skipping re-trigger"
+        continue
+      fi
+      if doctor_should_skip_dedup "$IID"; then
+        continue
+      fi
+      set_boucle_label "$IID" "boucle:todo" "boucle::status::bot"
+      chain_to_role "$IID" "worker"
+      doctor_mark_triggered "$IID"
+      echo "  → re-triggered worker for #$IID"
+      RECOVERED=$((RECOVERED + 1))
+    else
+      echo "  → #$IID: still waiting for author reply or approval emoji"
+    fi
+  done
 
-    # ── Recover stuck boucle:triage issues ─────────────────────────────────
-    # Triage label set but no active pipeline running for them — e.g. the
-    # pipeline was canceled before dispatch ran. Re-trigger only if no triage
-    # comment exists at all, or the last one is older than 15 min (triage may
-    # still be in progress otherwise).
-    # TODO: forge_* — no contract for listing issues by label yet.
-    TRIAGE_ISSUES=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues?state=opened&labels=boucle:triage&per_page=100" |
-        jq -r '.[].iid')
+  # ── Recover stuck boucle:triage issues ─────────────────────────────────
+  # Triage label set but no active pipeline running for them — e.g. the
+  # pipeline was canceled before dispatch ran. Re-trigger only if no triage
+  # comment exists at all, or the last one is older than 15 min (triage may
+  # still be in progress otherwise).
+  TRIAGE_ISSUES=$(forge_issue_list_by_label "boucle:triage" opened \
+    | jq -r '.[] | .iid // .number')
 
-    for IID in $TRIAGE_ISSUES; do
-        echo "Checking #$IID (boucle:triage) for stuck pipeline..."
-        NOTES=$(forge_issue_notes "$IID")
-        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
+  for IID in $TRIAGE_ISSUES; do
+    echo "Checking #$IID (boucle:triage) for stuck pipeline..."
+    NOTES=$(forge_issue_notes "$IID")
+    LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
 
-        # If there's a recent triage comment (within last 15 min), skip —
-        # triage may still be running.
-        LAST_TRIAGE_TIME=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" '
+    # If there's a recent triage comment (within last 15 min), skip —
+    # triage may still be running.
+    LAST_TRIAGE_TIME=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" '
           [.[] | select(.id == ($tid | tonumber))] | first | .created_at // empty
-        ' 2>/dev/null)
+        ' 2> /dev/null)
 
-        if [ -n "$LAST_TRIAGE_TIME" ]; then
-            # Parse ISO timestamp and compare to now-15min.
-            LAST_EPOCH=$(date -d "$LAST_TRIAGE_TIME" +%s 2>/dev/null || echo 0)
-            NOW_EPOCH=$(date +%s)
-            AGE=$((NOW_EPOCH - LAST_EPOCH))
-            if [ "$AGE" -lt 900 ]; then
-                echo "  → #$IID: last triage comment is ${AGE}s old (< 15 min) — still in progress, skipping"
-                continue
-            fi
-        fi
+    if [ -n "$LAST_TRIAGE_TIME" ]; then
+      # Parse ISO timestamp and compare to now-15min.
+      LAST_EPOCH=$(date -d "$LAST_TRIAGE_TIME" +%s 2> /dev/null || echo 0)
+      NOW_EPOCH=$(date +%s)
+      AGE=$((NOW_EPOCH - LAST_EPOCH))
+      if [ "$AGE" -lt 900 ]; then
+        echo "  → #$IID: last triage comment is ${AGE}s old (< 15 min) — still in progress, skipping"
+        continue
+      fi
+    fi
 
-        # No recent triage comment — re-trigger.
-        echo "  → #$IID: boucle:triage with no recent triage comment — re-triggering"
-        if issue_has_active_pipeline "$IID"; then
-            echo "  → #$IID: active pipeline already running — skipping re-trigger"
-            continue
-        fi
-        if doctor_should_skip_dedup "$IID"; then
-            continue
-        fi
-        chain_to_role "$IID" ""
-        doctor_mark_triggered "$IID"
-        echo "  → re-triggered triage for #$IID"
-        RECOVERED=$((RECOVERED + 1))
-    done
+    # No recent triage comment — re-trigger.
+    echo "  → #$IID: boucle:triage with no recent triage comment — re-triggering"
+    if issue_has_active_pipeline "$IID"; then
+      echo "  → #$IID: active pipeline already running — skipping re-trigger"
+      continue
+    fi
+    if doctor_should_skip_dedup "$IID"; then
+      continue
+    fi
+    chain_to_role "$IID" ""
+    doctor_mark_triggered "$IID"
+    echo "  → re-triggered triage for #$IID"
+    RECOVERED=$((RECOVERED + 1))
+  done
 
-    # ── Recover orphaned triages on UNLABELED open issues ──────────────────
-    # Open issues with NO boucle label that have a triage comment AND a human
-    # reply after it. Root cause: triage ran, asked NEEDS-INFO, the user
-    # replied, but the issue never got a boucle:needs-info label (e.g. the
-    # triage pipeline was interrupted before labeling). The label-based
-    # recovery above can't see these issues — scan all unlabeled open issues.
-    echo "Scanning open issues without boucle labels for orphaned triages..."
-    # TODO: forge_* — no contract for listing issues by label yet.
-    UNLABELED_ISSUES=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues?state=opened&per_page=100" |
-        jq -r '[.[] | select(.labels | map(startswith("boucle:")) | any | not)] | .[].iid')
+  # ── Recover orphaned triages on UNLABELED open issues ──────────────────
+  # Open issues with NO boucle label that have a triage comment AND a human
+  # reply after it. Root cause: triage ran, asked NEEDS-INFO, the user
+  # replied, but the issue never got a boucle:needs-info label (e.g. the
+  # triage pipeline was interrupted before labeling). The label-based
+  # recovery above can't see these issues — scan all unlabeled open issues.
+  echo "Scanning open issues without boucle labels for orphaned triages..."
+  # GitHub issue labels are objects (.name), GitLab labels are strings —
+  # normalize in jq so the boucle:-prefix filter works on both backends.
+  UNLABELED_ISSUES=$(forge_issue_list_all opened \
+    | jq -r '[.[] | select(.labels | map(if type == "string" then . else .name end) | map(startswith("boucle:")) | any | not)] | .[] | .iid // .number')
 
-    for IID in $UNLABELED_ISSUES; do
-        echo "Checking #$IID (no boucle label) for orphaned triage..."
-        NOTES=$(forge_issue_notes "$IID")
+  for IID in $UNLABELED_ISSUES; do
+    echo "Checking #$IID (no boucle label) for orphaned triage..."
+    NOTES=$(forge_issue_notes "$IID")
 
-        # Does this issue have any triage comment at all?
-        LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
-        if [ "$LAST_TRIAGE_NOTE_ID" = "0" ]; then
-            # No triage comment — this is a brand-new issue that was never
-            # triaged. The dispatch job should pick it up on the next webhook.
-            # Skip to avoid re-triaging issues that are mid-dispatch.
-            continue
-        fi
+    # Does this issue have any triage comment at all?
+    LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
+    if [ "$LAST_TRIAGE_NOTE_ID" = "0" ]; then
+      # No triage comment — this is a brand-new issue that was never
+      # triaged. The dispatch job should pick it up on the next webhook.
+      # Skip to avoid re-triaging issues that are mid-dispatch.
+      continue
+    fi
 
-        # Is there a human reply after the last triage comment?
-        HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
+    # Is there a human reply after the last triage comment?
+    HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
           [.[] | select(.author.username != $bname) | select(.id > ($tid | tonumber))]
           | length
         ')
-        if [ "$HUMAN_REPLY_AFTER_TRIAGE" -eq 0 ]; then
-            echo "  → #$IID: triage comment exists but no human reply — still waiting"
-            continue
-        fi
-
-        # Orphaned triage detected: triage ran, user replied, but no boucle
-        # label was set. Re-trigger triage so the agent can re-read the user's
-        # answers and route the issue correctly this time.
-        echo "  → #$IID: orphaned triage (triage comment + human reply, no boucle label) — re-triggering"
-        if issue_has_active_pipeline "$IID"; then
-            echo "  → #$IID: active pipeline already running — skipping re-trigger"
-            continue
-        fi
-        if doctor_should_skip_dedup "$IID"; then
-            continue
-        fi
-        set_boucle_label "$IID" "boucle:triage" "boucle::status::bot"
-        chain_to_role "$IID" ""
-        doctor_mark_triggered "$IID"
-        echo "  → re-triggered triage for #$IID"
-        RECOVERED=$((RECOVERED + 1))
-    done
-
-    # ── Recover stuck boucle:working / boucle:review / boucle:blocked ──────
-    # A worker/reviewer pipeline can be interrupted (runner crash, manual
-    # cancel, force-push mid-run) leaving the issue stuck at boucle:working
-    # or boucle:review with no active pipeline. The dispatch job does NOT
-    # re-route these labels (it only handles triage/todo/needs-info/spec-
-    # review), so without this recovery the issue hangs forever. Re-trigger
-    # the appropriate role if the label has been stale (configurable via
-    # BOUCLE_STALENESS_THRESHOLD, default 300s/5min) with no matching role
-    # pipeline currently running.
-    echo "Scanning for stuck boucle:working / boucle:review / boucle:blocked issues..."
-    # TODO: forge_* — no contract for listing issues by label yet.
-    STUCK_WORKING=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues?state=opened&labels=boucle:working&per_page=100" |
-        jq -r '.[].iid')
-    STUCK_REVIEW=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues?state=opened&labels=boucle:review&per_page=100" |
-        jq -r '.[].iid')
-
-    # Stuck blocked issues: a blocked issue whose parent is closed is
-    # orphaned — its deps (siblings) will never close. Close it + boucle:done.
-    # TODO: forge_* — no contract for listing issues by label yet.
-    STUCK_BLOCKED=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues?state=opened&labels=boucle:blocked&per_page=100" |
-        jq -r '.[].iid')
-    for IID in $STUCK_BLOCKED; do
-        BLOCK_PARENT_IID=$(forge_issue_get "$IID" |
-            jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
-        if [ -n "$BLOCK_PARENT_IID" ]; then
-            PARENT_STATE=$(forge_issue_get "$BLOCK_PARENT_IID" | jq -r '.state // "unknown"')
-            if [ "$PARENT_STATE" = "closed" ]; then
-                echo "  → #$IID (boucle:blocked): parent #$BLOCK_PARENT_IID closed — closing orphaned sub-issue + boucle:done"
-                set_boucle_label "$IID" "boucle:done" "boucle::status::done"
-                close_issue "$IID"
-                RECOVERED=$((RECOVERED + 1))
-                continue
-            fi
-        fi
-    done
-
-    # ── Deferred todo recovery (worker slot freed) ─────────────────────────
-    # Only applies when BOUCLE_MAX_PARALLEL_ISSUES is set (> 0).
-    MAX_PARALLEL="${BOUCLE_MAX_PARALLEL_ISSUES:-0}"
-    if [ "$MAX_PARALLEL" -gt 0 ] 2>/dev/null; then
-        # TODO: forge_* — no contract for listing issues by label yet.
-        WORKING_COUNT=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues?state=opened&labels=boucle:working&per_page=100" | jq 'length')
-        if [ "$WORKING_COUNT" -lt "$MAX_PARALLEL" ]; then
-            TODO_ISSUES=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues?state=opened&labels=boucle:todo&per_page=100" | jq -r '.[].iid')
-            for IID in $TODO_ISSUES; do
-                # Re-check working count each iteration (a previous trigger may have flipped it).
-                WORKING_COUNT=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues?state=opened&labels=boucle:working&per_page=100" | jq 'length')
-                if [ "$WORKING_COUNT" -ge "$MAX_PARALLEL" ]; then
-                    echo "  → slots full again ($WORKING_COUNT/$MAX_PARALLEL) — stopping todo recovery"
-                    break
-                fi
-                echo "  → #$IID (boucle:todo): slot available ($WORKING_COUNT/$MAX_PARALLEL) — triggering worker"
-                if issue_has_active_pipeline "$IID"; then
-                    echo "  → #$IID: active pipeline already running — skipping re-trigger"
-                    continue
-                fi
-                if doctor_should_skip_dedup "$IID"; then
-                    continue
-                fi
-                chain_to_role "$IID" "worker"
-                doctor_mark_triggered "$IID"
-                RECOVERED=$((RECOVERED + 1))
-            done
-        fi
+    if [ "$HUMAN_REPLY_AFTER_TRIAGE" -eq 0 ]; then
+      echo "  → #$IID: triage comment exists but no human reply — still waiting"
+      continue
     fi
 
-    for IID in $STUCK_WORKING $STUCK_REVIEW; do
-        # Determine which role to re-trigger based on the label.
-        ISSUE_LABELS=$(forge_issue_get "$IID" | jq -r '.labels | join(",")')
-        if echo "$ISSUE_LABELS" | grep -q "boucle:working"; then
-            ROLE="worker"
-        elif echo "$ISSUE_LABELS" | grep -q "boucle:review"; then
-            ROLE="reviewer"
-        else
-            continue
-        fi
+    # Orphaned triage detected: triage ran, user replied, but no boucle
+    # label was set. Re-trigger triage so the agent can re-read the user's
+    # answers and route the issue correctly this time.
+    echo "  → #$IID: orphaned triage (triage comment + human reply, no boucle label) — re-triggering"
+    if issue_has_active_pipeline "$IID"; then
+      echo "  → #$IID: active pipeline already running — skipping re-trigger"
+      continue
+    fi
+    if doctor_should_skip_dedup "$IID"; then
+      continue
+    fi
+    set_boucle_label "$IID" "boucle:triage" "boucle::status::bot"
+    chain_to_role "$IID" ""
+    doctor_mark_triggered "$IID"
+    echo "  → re-triggered triage for #$IID"
+    RECOVERED=$((RECOVERED + 1))
+  done
 
-        # Check if a MR for this issue was already merged (branch boucle/$IID).
-        # If so, the issue should be closed + boucle:done, NOT re-triggered.
-        # This happens when a human merged the MR manually (bypassing the
-        # merger job), leaving the issue stuck at working/review forever.
-        #
-        # BUT: if there is also an OPEN MR with the same branch, the issue was
-        # reopened for a new iteration (e.g. human requested changes after
-        # approval, or a new MR was created after the first one was merged).
-        # In that case, do NOT close — the open MR is the active work.
-        # TODO: forge_* — no contract for listing MRs by source branch yet.
-        MR_STATE=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests?source_branch=boucle/$IID&state=merged" 2>/dev/null |
-            jq -r '.[0].state // empty')
-        if [ "$MR_STATE" = "merged" ]; then
-            MR_OPEN_STATE=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests?source_branch=boucle/$IID&state=opened" 2>/dev/null |
-                jq -r '.[0].state // empty')
-            if [ "$MR_OPEN_STATE" = "opened" ]; then
-                echo "  → #$IID ($ROLE): merged MR exists but an open MR also exists — issue reopened for new iteration, skipping close"
-                continue
-            fi
-            echo "  → #$IID ($ROLE): MR already merged — closing issue + boucle:done"
-            set_boucle_label "$IID" "boucle:done" "boucle::status::done"
-            close_issue "$IID"
-            RECOVERED=$((RECOVERED + 1))
-            continue
-        fi
+  # ── Recover stuck boucle:working / boucle:review / boucle:blocked ──────
+  # A worker/reviewer pipeline can be interrupted (runner crash, manual
+  # cancel, force-push mid-run) leaving the issue stuck at boucle:working
+  # or boucle:review with no active pipeline. The dispatch job does NOT
+  # re-route these labels (it only handles triage/todo/needs-info/spec-
+  # review), so without this recovery the issue hangs forever. Re-trigger
+  # the appropriate role if the label has been stale (configurable via
+  # BOUCLE_STALENESS_THRESHOLD, default 300s/5min) with no matching role
+  # pipeline currently running.
+  echo "Scanning for stuck boucle:working / boucle:review / boucle:blocked issues..."
+  STUCK_WORKING=$(forge_issue_list_by_label "boucle:working" opened \
+    | jq -r '.[] | .iid // .number')
+  STUCK_REVIEW=$(forge_issue_list_by_label "boucle:review" opened \
+    | jq -r '.[] | .iid // .number')
 
-        # If the MR is open, approved, and mergeable, trigger the merger
-        # instead of re-running the worker/reviewer. This recovers issues
-        # stuck at boucle:working/boucle:review where a human already
-        # approved the MR natively (the dispatch `approved` case only
-        # acts on boucle:approval, so these issues would otherwise loop
-        # forever re-running the worker/reviewer).
-        # TODO: forge_* — no contract for listing MRs by source branch yet.
-        MR_OPEN_DATA=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests?source_branch=boucle/$IID&state=opened" 2>/dev/null |
-            jq -c --arg branch "boucle/$IID" '[.[] | select(.source_branch == $branch)] | first // empty' 2>/dev/null)
-        if [ -n "$MR_OPEN_DATA" ] && [ "$MR_OPEN_DATA" != "null" ]; then
-            MR_OIID=$(echo "$MR_OPEN_DATA" | jq -r '.iid')
-            MR_OSTATUS=$(echo "$MR_OPEN_DATA" | jq -r '.detailed_merge_status // .merge_status // "unknown"')
-            # TODO: forge_* — no contract for fetching MR approvals yet.
-            MR_OAPPROVALS=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests/$MR_OIID/approvals" 2>/dev/null)
-            MR_OAPPROVED=$(echo "$MR_OAPPROVALS" | jq -r '[.approved_by[].user.username] | length' 2>/dev/null || echo 0)
-            if [ "$MR_OSTATUS" = "mergeable" ] && [ "$MR_OAPPROVED" -gt 0 ]; then
-                echo "  → #$IID ($ROLE): MR !$MR_OIID approved ($MR_OAPPROVED) + mergeable — triggering merger instead of $ROLE"
-                set_boucle_label "$IID" "boucle:merging" "boucle::status::bot"
-                chain_to_role "$IID" "merger"
-                echo "  → triggered merger for #$IID"
-                RECOVERED=$((RECOVERED + 1))
-                continue
-            fi
-        fi
-
-        # Also detect closed (non-merged) MRs: the work was abandoned or
-        # the user closed the MR rather than merging it. The loop should
-        # still settle the issue rather than re-triggering the worker
-        # forever (issue #34/#35 — the dispatch's close action now
-        # escalates to boucle:human or stays terminal, but the doctor
-        # needs to land the issue at boucle:done + close if the MR is
-        # already closed at the moment of recovery).
-        # TODO: forge_* — no contract for listing MRs by source branch yet.
-        MR_CLOSED_STATE=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests?source_branch=boucle/$IID&state=closed" 2>/dev/null |
-            jq -r '.[0].state // empty')
-        if [ "$MR_CLOSED_STATE" = "closed" ]; then
-            MR_OPEN_STATE=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests?source_branch=boucle/$IID&state=opened" 2>/dev/null |
-                jq -r '.[0].state // empty')
-            if [ "$MR_OPEN_STATE" = "opened" ]; then
-                echo "  → #$IID ($ROLE): closed MR exists but an open MR also exists — issue reopened for new iteration, skipping close"
-                continue
-            fi
-            echo "  → #$IID ($ROLE): MR already closed (non-merged) — closing issue + boucle:done"
-            set_boucle_label "$IID" "boucle:done" "boucle::status::done"
-            close_issue "$IID"
-            RECOVERED=$((RECOVERED + 1))
-            continue
-        fi
-
-        # Active-pipeline check: skip if a pipeline with BOUCLE_ISSUE=$IID is
-        # already running/pending/created. Replaces the unreliable updated_at
-        # proxy (lesson #33).
-        if issue_has_active_pipeline "$IID"; then
-            echo "  → #$IID ($ROLE): active pipeline already running — skipping re-trigger"
-            continue
-        fi
-        # Staleness backstop: only re-trigger if the issue has been stuck
-        # (no active pipeline) for longer than STALENESS. This catches the
-        # case where a pipeline finished but the label was never advanced
-        # (e.g. runner crashed mid-job before the label write).
-        UPDATED_AT=$(forge_issue_get "$IID" | jq -r '.updated_at')
-        UPDATED_EPOCH=$(date -d "$UPDATED_AT" +%s 2>/dev/null || echo 0)
-        NOW_EPOCH=$(date +%s)
-        AGE=$((NOW_EPOCH - UPDATED_EPOCH))
-        STALENESS="${BOUCLE_STALENESS_THRESHOLD:-2400}"
-        if [ "$AGE" -lt "$STALENESS" ]; then
-            echo "  → #$IID ($ROLE): issue updated ${AGE}s ago (< ${STALENESS}s) — may still be processing, skipping"
-            continue
-        fi
-        # Doctor-side dedup: skip if the doctor already triggered this issue
-        # within the STALENESS window. Secondary backstop for the case where
-        # a triggered pipeline is in `created`/`waiting_for_resource` but the
-        # variables API hasn't caught up yet.
-        if doctor_should_skip_dedup "$IID"; then
-            continue
-        fi
-
-        echo "  → #$IID ($ROLE): stuck for ${AGE}s — re-triggering $ROLE"
-        chain_to_role "$IID" "$ROLE"
-        doctor_mark_triggered "$IID"
-        echo "  → re-triggered $ROLE for #$IID"
-        RECOVERED=$((RECOVERED + 1))
-    done
-
-    # ── Recover CLOSED issues stuck at boucle:working/boucle:review ─────────
-    # The doctor's main scan filters state=opened, so a closed issue that
-    # still has boucle:working or boucle:review is invisible. This happens
-    # when a human merges the MR directly (catchup closes the issue) while
-    # a worker iteration is in flight — the worker's rebase-conflict
-    # re-trigger or the reviewer FAIL handler re-triggers the worker on
-    # the closed issue, creating zombie MRs and failed pipeline cascades
-    # (lesson #44). Recovery: set boucle:done + close any open zombie MRs.
-    # TODO: forge_* — no contract for listing issues by label yet.
-    ZOMBIE_WORKING=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues?state=closed&labels=boucle:working&per_page=100" 2>/dev/null | jq -r '.[].iid' 2>/dev/null)
-    ZOMBIE_REVIEW=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues?state=closed&labels=boucle:review&per_page=100" 2>/dev/null | jq -r '.[].iid' 2>/dev/null)
-    for IID in $ZOMBIE_WORKING $ZOMBIE_REVIEW; do
-        echo "  → #$IID: closed but stuck at working/review — zombie recovery"
-        # Close any open MR on the boucle/$IID branch (zombie MR created by
-        # the worker running on the closed issue).
-        # TODO: forge_* — no contract for listing MRs by source branch yet.
-        ZOMBIE_MR_IID=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests?source_branch=boucle/$IID&state=opened" 2>/dev/null | jq -r '.[0].iid // empty')
-        if [ -n "$ZOMBIE_MR_IID" ]; then
-            echo "  → #$IID: closing zombie MR !${ZOMBIE_MR_IID}"
-            # TODO: forge_* — no contract for closing a MR by ID yet.
-            glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$BOUCLE_PROJECT_ID/merge_requests/$ZOMBIE_MR_IID" -f state_event=close >/dev/null 2>&1 || true
-        fi
+  # Stuck blocked issues: a blocked issue whose parent is closed is
+  # orphaned — its deps (siblings) will never close. Close it + boucle:done.
+  STUCK_BLOCKED=$(forge_issue_list_by_label "boucle:blocked" opened \
+    | jq -r '.[] | .iid // .number')
+  for IID in $STUCK_BLOCKED; do
+    BLOCK_PARENT_IID=$(forge_issue_get "$IID" \
+      | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+    if [ -n "$BLOCK_PARENT_IID" ]; then
+      PARENT_STATE=$(forge_issue_get "$BLOCK_PARENT_IID" | jq -r '.state // "unknown"')
+      if [ "$PARENT_STATE" = "closed" ]; then
+        echo "  → #$IID (boucle:blocked): parent #$BLOCK_PARENT_IID closed — closing orphaned sub-issue + boucle:done"
         set_boucle_label "$IID" "boucle:done" "boucle::status::done"
+        close_issue "$IID"
         RECOVERED=$((RECOVERED + 1))
-    done
+        continue
+      fi
+    fi
+  done
 
-    # ── Recover boucle:human AND boucle:approval issues with approved MRs ──
-    # The reviewer agent may escalate to boucle:human after 3 failed
-    # verdict attempts (agent step budget exhausted). But if a human has
-    # manually approved the MR, the loop should still merge it — the
-    # work is done, it just needs the merger to run. Also scan
-    # boucle:approval: a race condition can occur where the human approves
-    # the MR BEFORE the reviewer finishes (the dispatch `approved` handler
-    # silently skips when the issue is at boucle:review, not boucle:approval).
-    # When the reviewer then PASSes and sets boucle:approval, the already-
-    # existing approval is stranded — the loop waits for an approval that
-    # already happened. This recovery path catches that race.
-    # Accept both `mergeable` and `conflict` MRs: the merger handles rebase
-    # conflicts by re-triggering the worker (rebase conflict → boucle:todo
-    # → worker iteration 1), so triggering the merger on a conflicted MR
-    # is safe — it either merges (after successful rebase) or re-runs the
-    # worker on fresh $BOUCLE_DEFAULT_BRANCH.
-    echo "Scanning boucle:human + boucle:approval issues for approved MRs..."
-    RECOVERY_IIDS=""
-    for RECOV_LABEL in boucle:human boucle:approval; do
-        # TODO: forge_* — no contract for listing issues by label yet.
-        RECOV_IIDS=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues?state=opened&labels=$RECOV_LABEL&per_page=100" |
-            jq -r '.[].iid' 2>/dev/null)
-        RECOVERY_IIDS="$RECOVERY_IIDS $RECOV_IIDS"
-    done
-
-    for IID in $RECOVERY_IIDS; do
-        [ -z "$IID" ] && continue
-        echo "Checking #$IID (boucle:human/approval) for approved MR..."
-        # Find an open MR for this issue (branch boucle/$IID).
-        # TODO: forge_* — no contract for listing MRs by source branch yet.
-        MR_DATA=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests?state=opened" |
-            jq -c --arg branch "boucle/$IID" '[.[] | select(.source_branch == $branch)] | first // empty' 2>/dev/null)
-        if [ -z "$MR_DATA" ] || [ "$MR_DATA" = "null" ]; then
-            echo "  → #$IID: no open MR — skipping"
-            continue
+  # ── Deferred todo recovery (worker slot freed) ─────────────────────────
+  # Only applies when BOUCLE_MAX_PARALLEL_ISSUES is set (> 0).
+  MAX_PARALLEL="${BOUCLE_MAX_PARALLEL_ISSUES:-0}"
+  if [ "$MAX_PARALLEL" -gt 0 ] 2> /dev/null; then
+    WORKING_COUNT=$(forge_issue_count_by_label "boucle:working" opened)
+    if [ "$WORKING_COUNT" -lt "$MAX_PARALLEL" ]; then
+      TODO_ISSUES=$(forge_issue_list_by_label "boucle:todo" opened | jq -r '.[] | .iid // .number')
+      for IID in $TODO_ISSUES; do
+        # Re-check working count each iteration (a previous trigger may have flipped it).
+        WORKING_COUNT=$(forge_issue_count_by_label "boucle:working" opened)
+        if [ "$WORKING_COUNT" -ge "$MAX_PARALLEL" ]; then
+          echo "  → slots full again ($WORKING_COUNT/$MAX_PARALLEL) — stopping todo recovery"
+          break
         fi
-        MR_IID=$(echo "$MR_DATA" | jq -r '.iid')
-        MR_MERGE_STATUS=$(echo "$MR_DATA" | jq -r '.detailed_merge_status // .merge_status // "unknown"')
-        # Check approvals on the MR.
-        # TODO: forge_* — no contract for fetching MR approvals yet.
-        APPROVALS=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests/$MR_IID/approvals" 2>/dev/null)
-        APPROVED_COUNT=$(echo "$APPROVALS" | jq -r '[.approved_by[].user.username] | length' 2>/dev/null || echo 0)
-        if [ "$APPROVED_COUNT" -gt 0 ] && { [ "$MR_MERGE_STATUS" = "mergeable" ] || [ "$MR_MERGE_STATUS" = "conflict" ]; }; then
-            echo "  → #$IID: MR !$MR_IID is approved ($APPROVED_COUNT) + $MR_MERGE_STATUS — triggering merger"
-            set_boucle_label "$IID" "boucle:merging" "boucle::status::bot"
-            chain_to_role "$IID" "merger"
-            echo "  → triggered merger for #$IID"
-            RECOVERED=$((RECOVERED + 1))
-        elif [ "$APPROVED_COUNT" -gt 0 ] && [ "$MR_MERGE_STATUS" != "mergeable" ]; then
-            # Approved but NOT mergeable (conflict/checking/blocked). Trigger
-            # the merger anyway: it will rebase onto fresh $BOUCLE_DEFAULT_BRANCH.
-            # On conflict the merger reverts to boucle:todo + worker (iter 1) to
-            # regenerate the MR. Without this, an approved MR with conflicts
-            # at boucle:approval/boucle:human hangs forever — no other path
-            # triggers the merger for these labels.
-            echo "  → #$IID: MR !$MR_IID approved ($APPROVED_COUNT) but not mergeable ($MR_MERGE_STATUS) — triggering merger to rebase/recover"
-            set_boucle_label "$IID" "boucle:merging" "boucle::status::bot"
-            chain_to_role "$IID" "merger"
-            echo "  → triggered merger for #$IID (recovery path)"
-            RECOVERED=$((RECOVERED + 1))
-        else
-            echo "  → #$IID: MR !$MR_IID status=$MR_MERGE_STATUS, approvals=$APPROVED_COUNT — not ready, skipping"
+        echo "  → #$IID (boucle:todo): slot available ($WORKING_COUNT/$MAX_PARALLEL) — triggering worker"
+        if issue_has_active_pipeline "$IID"; then
+          echo "  → #$IID: active pipeline already running — skipping re-trigger"
+          continue
         fi
-    done
+        if doctor_should_skip_dedup "$IID"; then
+          continue
+        fi
+        chain_to_role "$IID" "worker"
+        doctor_mark_triggered "$IID"
+        RECOVERED=$((RECOVERED + 1))
+      done
+    fi
+  fi
 
-    # ── Split-parent cascade ────────────────────────────────────────────────
-    # Also check boucle:split parents: close the parent when all its
-    # sub-issues are closed. This is the fallback cascade for sub-issues
-    # closed via MR merge (Closes #N) where the deploy-triggered e2e
-    # had no BOUCLE_ISSUE context and maybe_close_parent() never ran.
-    # TODO: forge_* — no contract for listing issues by label yet.
-    SPLIT_PARENTS=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues?state=opened&labels=boucle:split&per_page=100" |
-        jq -r '.[].iid')
+  for IID in $STUCK_WORKING $STUCK_REVIEW; do
+    # Determine which role to re-trigger based on the label.
+    ISSUE_LABELS=$(forge_issue_get "$IID" | jq -r '.labels | join(",")')
+    if echo "$ISSUE_LABELS" | grep -q "boucle:working"; then
+      ROLE="worker"
+    elif echo "$ISSUE_LABELS" | grep -q "boucle:review"; then
+      ROLE="reviewer"
+    else
+      continue
+    fi
 
-    for IID in $SPLIT_PARENTS; do
-        echo "Checking #$IID (boucle:split) for parent-close cascade..."
-        # Check children via the work-items hierarchy API (source of truth).
-        CHILDREN_DATA=$(get_work_item_children "$IID")
-        SIBLING_IIDS=$(echo "$CHILDREN_DATA" | jq -r '[.[].iid] | join(",")' 2>/dev/null)
+    # Check if a MR for this issue was already merged (branch boucle/$IID).
+    # If so, the issue should be closed + boucle:done, NOT re-triggered.
+    # This happens when a human merged the MR manually (bypassing the
+    # merger job), leaving the issue stuck at working/review forever.
+    #
+    # BUT: if there is also an OPEN MR with the same branch, the issue was
+    # reopened for a new iteration (e.g. human requested changes after
+    # approval, or a new MR was created after the first one was merged).
+    # In that case, do NOT close — the open MR is the active work.
+    # forge_mr_lookup_by_branch returns only the IID — fetch the full MR
+    # via forge_mr_get for .state. GitHub has no state=merged filter (a
+    # merged PR surfaces via state=closed + .merged=true), so normalize
+    # .merged → "merged" here; on GitHub the closed-MR branch below still
+    # recovers the issue (state=closed includes merged PRs).
+    MR_MERGED_IID=$(forge_mr_lookup_by_branch "boucle/$IID" merged)
+    MR_STATE=""
+    if [ -n "$MR_MERGED_IID" ]; then
+      MR_STATE=$(forge_mr_get "$MR_MERGED_IID" | jq -r 'if .merged == true then "merged" else .state // empty end')
+    fi
+    if [ "$MR_STATE" = "merged" ]; then
+      MR_OPEN_IID=$(forge_mr_lookup_by_branch "boucle/$IID" opened)
+      MR_OPEN_STATE=""
+      if [ -n "$MR_OPEN_IID" ]; then
+        # GitHub reports .state="open" — normalize to "opened".
+        MR_OPEN_STATE=$(forge_mr_get "$MR_OPEN_IID" | jq -r 'if .state == "open" then "opened" else .state // empty end')
+      fi
+      if [ "$MR_OPEN_STATE" = "opened" ]; then
+        echo "  → #$IID ($ROLE): merged MR exists but an open MR also exists — issue reopened for new iteration, skipping close"
+        continue
+      fi
+      echo "  → #$IID ($ROLE): MR already merged — closing issue + boucle:done"
+      set_boucle_label "$IID" "boucle:done" "boucle::status::done"
+      close_issue "$IID"
+      RECOVERED=$((RECOVERED + 1))
+      continue
+    fi
+
+    # If the MR is open, approved, and mergeable, trigger the merger
+    # instead of re-running the worker/reviewer. This recovers issues
+    # stuck at boucle:working/boucle:review where a human already
+    # approved the MR natively (the dispatch `approved` case only
+    # acts on boucle:approval, so these issues would otherwise loop
+    # forever re-running the worker/reviewer).
+    MR_OPEN_DATA=""
+    MR_OPEN_IID=$(forge_mr_lookup_by_branch "boucle/$IID" opened)
+    if [ -n "$MR_OPEN_IID" ]; then
+      MR_OPEN_DATA=$(forge_mr_get "$MR_OPEN_IID")
+    fi
+    if [ -n "$MR_OPEN_DATA" ] && [ "$MR_OPEN_DATA" != "null" ]; then
+      MR_OIID=$(echo "$MR_OPEN_DATA" | jq -r '.iid // .number')
+      # GitHub PRs expose .mergeable_state (clean/unstable ≈ mergeable,
+      # dirty ≈ conflict) — normalize to the GitLab-style statuses the
+      # logic below switches on.
+      MR_OSTATUS=$(echo "$MR_OPEN_DATA" | jq -r 'if has("mergeable_state") then
+                (if .mergeable_state == "clean" or .mergeable_state == "unstable" then "mergeable"
+                 elif .mergeable_state == "dirty" then "conflict"
+                 else .mergeable_state end)
+                else (.detailed_merge_status // .merge_status // "unknown") end')
+      # forge_mr_approvals returns "true"/"false" — map to 1/0 so the
+      # count-based checks and log messages below keep working.
+      MR_OAPPROVED=$(forge_mr_approvals "$MR_OIID")
+      [ "$MR_OAPPROVED" = "true" ] && MR_OAPPROVED=1 || MR_OAPPROVED=0
+      if [ "$MR_OSTATUS" = "mergeable" ] && [ "$MR_OAPPROVED" -gt 0 ]; then
+        echo "  → #$IID ($ROLE): MR !$MR_OIID approved ($MR_OAPPROVED) + mergeable — triggering merger instead of $ROLE"
+        set_boucle_label "$IID" "boucle:merging" "boucle::status::bot"
+        chain_to_role "$IID" "merger"
+        echo "  → triggered merger for #$IID"
+        RECOVERED=$((RECOVERED + 1))
+        continue
+      fi
+    fi
+
+    # Also detect closed (non-merged) MRs: the work was abandoned or
+    # the user closed the MR rather than merging it. The loop should
+    # still settle the issue rather than re-triggering the worker
+    # forever (issue #34/#35 — the dispatch's close action now
+    # escalates to boucle:human or stays terminal, but the doctor
+    # needs to land the issue at boucle:done + close if the MR is
+    # already closed at the moment of recovery).
+    MR_CLOSED_IID=$(forge_mr_lookup_by_branch "boucle/$IID" closed)
+    MR_CLOSED_STATE=""
+    if [ -n "$MR_CLOSED_IID" ]; then
+      # On GitHub a merged PR also reports .state="closed" — but the
+      # merged branch above already handled it (or the open-MR check
+      # below distinguishes a reopened iteration), so the net effect
+      # (close issue + boucle:done) is the same on both backends.
+      MR_CLOSED_STATE=$(forge_mr_get "$MR_CLOSED_IID" | jq -r '.state // empty')
+    fi
+    if [ "$MR_CLOSED_STATE" = "closed" ]; then
+      MR_OPEN_IID=$(forge_mr_lookup_by_branch "boucle/$IID" opened)
+      MR_OPEN_STATE=""
+      if [ -n "$MR_OPEN_IID" ]; then
+        # GitHub reports .state="open" — normalize to "opened".
+        MR_OPEN_STATE=$(forge_mr_get "$MR_OPEN_IID" | jq -r 'if .state == "open" then "opened" else .state // empty end')
+      fi
+      if [ "$MR_OPEN_STATE" = "opened" ]; then
+        echo "  → #$IID ($ROLE): closed MR exists but an open MR also exists — issue reopened for new iteration, skipping close"
+        continue
+      fi
+      echo "  → #$IID ($ROLE): MR already closed (non-merged) — closing issue + boucle:done"
+      set_boucle_label "$IID" "boucle:done" "boucle::status::done"
+      close_issue "$IID"
+      RECOVERED=$((RECOVERED + 1))
+      continue
+    fi
+
+    # Active-pipeline check: skip if a pipeline with BOUCLE_ISSUE=$IID is
+    # already running/pending/created. Replaces the unreliable updated_at
+    # proxy (lesson #33).
+    if issue_has_active_pipeline "$IID"; then
+      echo "  → #$IID ($ROLE): active pipeline already running — skipping re-trigger"
+      continue
+    fi
+    # Staleness backstop: only re-trigger if the issue has been stuck
+    # (no active pipeline) for longer than STALENESS. This catches the
+    # case where a pipeline finished but the label was never advanced
+    # (e.g. runner crashed mid-job before the label write).
+    UPDATED_AT=$(forge_issue_get "$IID" | jq -r '.updated_at')
+    UPDATED_EPOCH=$(date -d "$UPDATED_AT" +%s 2> /dev/null || echo 0)
+    NOW_EPOCH=$(date +%s)
+    AGE=$((NOW_EPOCH - UPDATED_EPOCH))
+    STALENESS="${BOUCLE_STALENESS_THRESHOLD:-2400}"
+    if [ "$AGE" -lt "$STALENESS" ]; then
+      echo "  → #$IID ($ROLE): issue updated ${AGE}s ago (< ${STALENESS}s) — may still be processing, skipping"
+      continue
+    fi
+    # Doctor-side dedup: skip if the doctor already triggered this issue
+    # within the STALENESS window. Secondary backstop for the case where
+    # a triggered pipeline is in `created`/`waiting_for_resource` but the
+    # variables API hasn't caught up yet.
+    if doctor_should_skip_dedup "$IID"; then
+      continue
+    fi
+
+    echo "  → #$IID ($ROLE): stuck for ${AGE}s — re-triggering $ROLE"
+    chain_to_role "$IID" "$ROLE"
+    doctor_mark_triggered "$IID"
+    echo "  → re-triggered $ROLE for #$IID"
+    RECOVERED=$((RECOVERED + 1))
+  done
+
+  # ── Recover CLOSED issues stuck at boucle:working/boucle:review ─────────
+  # The doctor's main scan filters state=opened, so a closed issue that
+  # still has boucle:working or boucle:review is invisible. This happens
+  # when a human merges the MR directly (catchup closes the issue) while
+  # a worker iteration is in flight — the worker's rebase-conflict
+  # re-trigger or the reviewer FAIL handler re-triggers the worker on
+  # the closed issue, creating zombie MRs and failed pipeline cascades
+  # (lesson #44). Recovery: set boucle:done + close any open zombie MRs.
+  ZOMBIE_WORKING=$(forge_issue_list_by_label "boucle:working" closed | jq -r '.[] | .iid // .number')
+  ZOMBIE_REVIEW=$(forge_issue_list_by_label "boucle:review" closed | jq -r '.[] | .iid // .number')
+  for IID in $ZOMBIE_WORKING $ZOMBIE_REVIEW; do
+    echo "  → #$IID: closed but stuck at working/review — zombie recovery"
+    # Close any open MR on the boucle/$IID branch (zombie MR created by
+    # the worker running on the closed issue).
+    ZOMBIE_MR_IID=$(forge_mr_lookup_by_branch "boucle/$IID" opened)
+    if [ -n "$ZOMBIE_MR_IID" ]; then
+      echo "  → #$IID: closing zombie MR !${ZOMBIE_MR_IID}"
+      forge_mr_close "$ZOMBIE_MR_IID"
+    fi
+    set_boucle_label "$IID" "boucle:done" "boucle::status::done"
+    RECOVERED=$((RECOVERED + 1))
+  done
+
+  # ── Recover boucle:human AND boucle:approval issues with approved MRs ──
+  # The reviewer agent may escalate to boucle:human after 3 failed
+  # verdict attempts (agent step budget exhausted). But if a human has
+  # manually approved the MR, the loop should still merge it — the
+  # work is done, it just needs the merger to run. Also scan
+  # boucle:approval: a race condition can occur where the human approves
+  # the MR BEFORE the reviewer finishes (the dispatch `approved` handler
+  # silently skips when the issue is at boucle:review, not boucle:approval).
+  # When the reviewer then PASSes and sets boucle:approval, the already-
+  # existing approval is stranded — the loop waits for an approval that
+  # already happened. This recovery path catches that race.
+  # Accept both `mergeable` and `conflict` MRs: the merger handles rebase
+  # conflicts by re-triggering the worker (rebase conflict → boucle:todo
+  # → worker iteration 1), so triggering the merger on a conflicted MR
+  # is safe — it either merges (after successful rebase) or re-runs the
+  # worker on fresh $BOUCLE_DEFAULT_BRANCH.
+  echo "Scanning boucle:human + boucle:approval issues for approved MRs..."
+  RECOVERY_IIDS=""
+  for RECOV_LABEL in boucle:human boucle:approval; do
+    RECOV_IIDS=$(forge_issue_list_by_label "$RECOV_LABEL" opened \
+      | jq -r '.[] | .iid // .number')
+    RECOVERY_IIDS="$RECOVERY_IIDS $RECOV_IIDS"
+  done
+
+  for IID in $RECOVERY_IIDS; do
+    [ -z "$IID" ] && continue
+    echo "Checking #$IID (boucle:human/approval) for approved MR..."
+    # Find an open MR for this issue (branch boucle/$IID).
+    MR_DATA=""
+    MR_LOOKUP_IID=$(forge_mr_lookup_by_branch "boucle/$IID" opened)
+    if [ -n "$MR_LOOKUP_IID" ]; then
+      MR_DATA=$(forge_mr_get "$MR_LOOKUP_IID")
+    fi
+    if [ -z "$MR_DATA" ] || [ "$MR_DATA" = "null" ]; then
+      echo "  → #$IID: no open MR — skipping"
+      continue
+    fi
+    MR_IID=$(echo "$MR_DATA" | jq -r '.iid // .number')
+    # GitHub PRs expose .mergeable_state — normalize to the GitLab-style
+    # statuses (clean/unstable ≈ mergeable, dirty ≈ conflict) the logic
+    # below switches on.
+    MR_MERGE_STATUS=$(echo "$MR_DATA" | jq -r 'if has("mergeable_state") then
+            (if .mergeable_state == "clean" or .mergeable_state == "unstable" then "mergeable"
+             elif .mergeable_state == "dirty" then "conflict"
+             else .mergeable_state end)
+            else (.detailed_merge_status // .merge_status // "unknown") end')
+    # Check approvals on the MR. forge_mr_approvals returns "true"/"false"
+    # — map to 0/1 so the count-based logic and messages keep working.
+    APPROVED_COUNT=$(forge_mr_approvals "$MR_IID")
+    [ "$APPROVED_COUNT" = "true" ] && APPROVED_COUNT=1 || APPROVED_COUNT=0
+    if [ "$APPROVED_COUNT" -gt 0 ] && { [ "$MR_MERGE_STATUS" = "mergeable" ] || [ "$MR_MERGE_STATUS" = "conflict" ]; }; then
+      echo "  → #$IID: MR !$MR_IID is approved ($APPROVED_COUNT) + $MR_MERGE_STATUS — triggering merger"
+      set_boucle_label "$IID" "boucle:merging" "boucle::status::bot"
+      chain_to_role "$IID" "merger"
+      echo "  → triggered merger for #$IID"
+      RECOVERED=$((RECOVERED + 1))
+    elif [ "$APPROVED_COUNT" -gt 0 ] && [ "$MR_MERGE_STATUS" != "mergeable" ]; then
+      # Approved but NOT mergeable (conflict/checking/blocked). Trigger
+      # the merger anyway: it will rebase onto fresh $BOUCLE_DEFAULT_BRANCH.
+      # On conflict the merger reverts to boucle:todo + worker (iter 1) to
+      # regenerate the MR. Without this, an approved MR with conflicts
+      # at boucle:approval/boucle:human hangs forever — no other path
+      # triggers the merger for these labels.
+      echo "  → #$IID: MR !$MR_IID approved ($APPROVED_COUNT) but not mergeable ($MR_MERGE_STATUS) — triggering merger to rebase/recover"
+      set_boucle_label "$IID" "boucle:merging" "boucle::status::bot"
+      chain_to_role "$IID" "merger"
+      echo "  → triggered merger for #$IID (recovery path)"
+      RECOVERED=$((RECOVERED + 1))
+    else
+      echo "  → #$IID: MR !$MR_IID status=$MR_MERGE_STATUS, approvals=$APPROVED_COUNT — not ready, skipping"
+    fi
+  done
+
+  # ── Split-parent cascade ────────────────────────────────────────────────
+  # Also check boucle:split parents: close the parent when all its
+  # sub-issues are closed. This is the fallback cascade for sub-issues
+  # closed via MR merge (Closes #N) where the deploy-triggered e2e
+  # had no BOUCLE_ISSUE context and maybe_close_parent() never ran.
+  SPLIT_PARENTS=$(forge_issue_list_by_label "boucle:split" opened \
+    | jq -r '.[] | .iid // .number')
+
+  for IID in $SPLIT_PARENTS; do
+    echo "Checking #$IID (boucle:split) for parent-close cascade..."
+    # Check children via the work-items hierarchy API (source of truth).
+    CHILDREN_DATA=$(get_work_item_children "$IID")
+    SIBLING_IIDS=$(echo "$CHILDREN_DATA" | jq -r '[.[].iid] | join(",")' 2> /dev/null)
+    if [ -z "$SIBLING_IIDS" ]; then
+      # No children via hierarchy API — fall back to legacy marker comment.
+      NOTES=$(forge_issue_notes "$IID")
+      SIBLING_IIDS=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | first | .body // empty' | grep -oE 'iids=[0-9,]+' | cut -d= -f2)
+      if [ -z "$SIBLING_IIDS" ]; then
+        # No legacy marker — fall back to REST issue links API.
+        echo "  → #$IID: no children via hierarchy API and no split-parent marker — checking REST links..."
+        # forge_issue_links returns a JSON array on both backends
+        # (GitHub always [] — sub-issues use the hierarchy API).
+        LINKS_DATA=$(forge_issue_links "$IID")
+        SIBLING_IIDS=$(echo "$LINKS_DATA" | jq -r '[.[] | select(.iid != null) | .iid] | join(",")')
         if [ -z "$SIBLING_IIDS" ]; then
-            # No children via hierarchy API — fall back to legacy marker comment.
-            NOTES=$(forge_issue_notes "$IID")
-            SIBLING_IIDS=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | first | .body // empty' | grep -oE 'iids=[0-9,]+' | cut -d= -f2)
-            if [ -z "$SIBLING_IIDS" ]; then
-                # No legacy marker — fall back to REST issue links API.
-                echo "  → #$IID: no children via hierarchy API and no split-parent marker — checking REST links..."
-                # TODO: forge_* — no contract for listing issue links yet.
-                LINKS_DATA=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues/$IID/links" 2>/dev/null) || LINKS_DATA="[]"
-                SIBLING_IIDS=$(echo "$LINKS_DATA" | jq -r '[.[] | select(.iid != null) | .iid] | join(",")')
-                if [ -z "$SIBLING_IIDS" ]; then
-                    echo "  → #$IID: no children, no marker, and no REST links — skipping"
-                    continue
-                fi
-                echo "  → #$IID: found siblings $SIBLING_IIDS via REST links fallback"
-                # REST links fallback: check each sibling individually.
-                ALL_CLOSED=true
-                for SIB in $(echo "$SIBLING_IIDS" | tr ',' ' '); do
-                    SIB_STATE=$(forge_issue_get "$SIB" | jq -r '.state // "unknown"')
-                    if [ "$SIB_STATE" != "closed" ]; then
-                        echo "  → #$IID: sibling #$SIB is $SIB_STATE — parent stays open"
-                        ALL_CLOSED=false
-                        break
-                    fi
-                done
-                if [ "$ALL_CLOSED" = "true" ]; then
-                    echo "  → #$IID: all sub-issues closed — closing parent"
-                    close_issue "$IID"
-                    RECOVERED=$((RECOVERED + 1))
-                fi
-                continue
-            fi
-            echo "  → #$IID: found siblings $SIBLING_IIDS via legacy split-parent marker"
-            # Legacy marker fallback: check each sibling individually.
-            ALL_CLOSED=true
-            for SIB in $(echo "$SIBLING_IIDS" | tr ',' ' '); do
-                SIB_STATE=$(forge_issue_get "$SIB" | jq -r '.state // "unknown"')
-                if [ "$SIB_STATE" != "closed" ]; then
-                    echo "  → #$IID: sibling #$SIB is $SIB_STATE — parent stays open"
-                    ALL_CLOSED=false
-                    break
-                fi
-            done
-            if [ "$ALL_CLOSED" = "true" ]; then
-                echo "  → #$IID: all sub-issues closed — closing parent"
-                close_issue "$IID"
-                RECOVERED=$((RECOVERED + 1))
-            fi
-            continue
+          echo "  → #$IID: no children, no marker, and no REST links — skipping"
+          continue
         fi
-
-        # Hierarchy API path: children response includes .state directly.
-        OPEN_COUNT=$(echo "$CHILDREN_DATA" | jq '[.[] | select(.state != "closed")] | length' 2>/dev/null || echo 1)
-        if [ "${OPEN_COUNT:-1}" -eq 0 ]; then
-            echo "  → #$IID: all sub-issues closed — closing parent"
-            close_issue "$IID"
-            RECOVERED=$((RECOVERED + 1))
-        else
-            OPEN_IIDS=$(echo "$CHILDREN_DATA" | jq -r '[.[] | select(.state != "closed") | .iid] | join(",")')
-            echo "  → #$IID: open sub-issue(s) #$OPEN_IIDS — parent stays open"
+        echo "  → #$IID: found siblings $SIBLING_IIDS via REST links fallback"
+        # REST links fallback: check each sibling individually.
+        ALL_CLOSED=true
+        for SIB in $(echo "$SIBLING_IIDS" | tr ',' ' '); do
+          SIB_STATE=$(forge_issue_get "$SIB" | jq -r '.state // "unknown"')
+          if [ "$SIB_STATE" != "closed" ]; then
+            echo "  → #$IID: sibling #$SIB is $SIB_STATE — parent stays open"
+            ALL_CLOSED=false
+            break
+          fi
+        done
+        if [ "$ALL_CLOSED" = "true" ]; then
+          echo "  → #$IID: all sub-issues closed — closing parent"
+          close_issue "$IID"
+          RECOVERED=$((RECOVERED + 1))
         fi
-    done
+        continue
+      fi
+      echo "  → #$IID: found siblings $SIBLING_IIDS via legacy split-parent marker"
+      # Legacy marker fallback: check each sibling individually.
+      ALL_CLOSED=true
+      for SIB in $(echo "$SIBLING_IIDS" | tr ',' ' '); do
+        SIB_STATE=$(forge_issue_get "$SIB" | jq -r '.state // "unknown"')
+        if [ "$SIB_STATE" != "closed" ]; then
+          echo "  → #$IID: sibling #$SIB is $SIB_STATE — parent stays open"
+          ALL_CLOSED=false
+          break
+        fi
+      done
+      if [ "$ALL_CLOSED" = "true" ]; then
+        echo "  → #$IID: all sub-issues closed — closing parent"
+        close_issue "$IID"
+        RECOVERED=$((RECOVERED + 1))
+      fi
+      continue
+    fi
 
-    echo "Doctor complete. Recovered $RECOVERED orphaned issue(s)."
+    # Hierarchy API path: children response includes .state directly.
+    OPEN_COUNT=$(echo "$CHILDREN_DATA" | jq '[.[] | select(.state != "closed")] | length' 2> /dev/null || echo 1)
+    if [ "${OPEN_COUNT:-1}" -eq 0 ]; then
+      echo "  → #$IID: all sub-issues closed — closing parent"
+      close_issue "$IID"
+      RECOVERED=$((RECOVERED + 1))
+    else
+      OPEN_IIDS=$(echo "$CHILDREN_DATA" | jq -r '[.[] | select(.state != "closed") | .iid] | join(",")')
+      echo "  → #$IID: open sub-issue(s) #$OPEN_IIDS — parent stays open"
+    fi
+  done
+
+  echo "Doctor complete. Recovered $RECOVERED orphaned issue(s)."
 }
