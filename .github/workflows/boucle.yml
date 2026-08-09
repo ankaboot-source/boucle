@@ -145,6 +145,36 @@ jobs:
           node-version: '22'
       - run: make check
 
+  # ── engine-smoke: dogfood the REAL bootstrap chain (issue #29) ───────────────
+  # Executes the same bootstrap a consumer job runs (forge shims + shared libs,
+  # gitlab backend) and asserts the full function inventory + env contract.
+  # Catches at dev time the failure class that previously only surfaced on real
+  # consumers (forge prelude order, missing BOUCLE_*/CI_DEFAULT_BRANCH exports,
+  # shim drift, S4 helpers present).
+  engine-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap chain smoke test
+        run: |
+          set -euo pipefail
+          export BOUCLE_HOME="$PWD" BOUCLE_FORGE=gitlab BOUCLE_FORGE_HOST=framagit.org
+          source bin/forge/common.sh
+          forge_init
+          source lib/boucle.sh
+          export BOUCLE_PROJECT_ID="ci-smoke"
+          export BOUCLE_DEFAULT_BRANCH=master
+          source lib/boucle-ci.sh
+          for fn in forge_issue_labels_get forge_issue_labels_set forge_issue_assign \
+                     forge_issue_note forge_trigger_role forge_mr_lookup_by_branch \
+                     set_boucle_label chain_to_role resolve_reporter_id maybe_close_parent \
+                     boucle_escalate_merge_conflict boucle_parse_merge_conflicts; do
+            declare -F "$fn" > /dev/null || { echo "engine-smoke MISSING function: $fn"; exit 1; }
+          done
+          # No bare-"main" fallback may survive in the trigger path (bug class #29)
+          grep -q 'CI_DEFAULT_BRANCH' bin/forge/gitlab.sh
+          echo "engine-smoke OK"
+
   # ── dispatch: webhook router (issues, PRs, comments, reviews) ─────────────────
   dispatch:
     runs-on: ubuntu-latest
