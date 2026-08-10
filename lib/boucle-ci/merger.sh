@@ -29,6 +29,7 @@ boucle_ci_merger() {
   # ref that triggered the pipeline, so the MR branch ref is NOT present by default.
   BRANCH="boucle/$BOUCLE_ISSUE"
   git fetch origin "$BOUCLE_DEFAULT_BRANCH" "$BRANCH"
+  boucle_deepen_rebase_fetch
 
   # Set git identity BEFORE the rebase — git rebase rewrites commits and
   # needs a committer identity.
