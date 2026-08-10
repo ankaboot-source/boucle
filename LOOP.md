@@ -98,6 +98,7 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_PREVIEW_MARKER_PATH` | `__boucle_commit__.txt` | SHA marker probe path (relative to URL root). |
 | `BOUCLE_PREVIEW_PROPAGATION_WAIT` | `60` | Seconds to wait for preview CDN propagation. |
 | `BOUCLE_PREVIEW_DISABLE` | `false` | Skip Chromium visual preview in triage: `true` or `false`. |
+| `BOUCLE_PREVIEW_VIEWPORTS` | `390x844,1440x900` | Viewports rendered for the triage mockup, comma-separated `WxH`. One screenshot per entry, labelled by device class in the triage comment. Total bytes respect `BOUCLE_IMAGE_TOTAL_MAX_BYTES`; a malformed entry is skipped, and one failing viewport never loses the others. |
 | `BOUCLE_EXTERNAL_DEPLOY_WAIT` | `600` | Max seconds to wait for consumer's own CI on merged commit. |
 | `BOUCLE_REVIEW_CHECKS_WAIT` | `900` | Max seconds to wait for PR check suites in diff mode. |
 | `BOUCLE_BUILD_CMD` | `npm ci && npm run build` | Build command. |
@@ -107,6 +108,11 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_MAX_PARALLEL_ISSUES` | `5` | Max concurrent boucle:working issues (`0` = unlimited). |
 | `BOUCLE_MAX_ITERATIONS` | `3` | Max worker re-runs per issue before escalation. |
 | `BOUCLE_STALENESS_THRESHOLD` | `2400` | Seconds before a stuck issue is re-triggered (must exceed max job timeout, 30 min). |
+| `BOUCLE_SCHEDULES_ENABLED` | `false` | Opt-in: create issues from `.boucle/schedules/*.md` when their cron is due. |
+| `BOUCLE_BOARD_ENABLED` | `true` | Maintain a pinned status-board issue answering "what is waiting on me?". |
+| `BOUCLE_DOCTOR_ADAPTIVE` | `true` | Skip the full sweep when the board has not moved since the last check. |
+| `BOUCLE_DOCTOR_BACKSTOP` | `21600` | Seconds after which a full sweep runs regardless of the fingerprint (6 h). |
+| `BOUCLE_STALENESS_IDLE_FACTOR` | `3` | Multiplier applied to `BOUCLE_STALENESS_THRESHOLD` when nothing is in flight. |
 | `BOUCLE_UPDATE_MODE` | `release` | Update mode: `release` (pinned engine release) or `dev` (tracking branch). |
 | `BOUCLE_LLM_BASE_URL` | — | LLM API endpoint (any OpenAI-compatible). |
 | `BOUCLE_LLM_API_KEY` | — | LLM API key (masked secret). |
@@ -123,6 +129,17 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_PROVIDER_PROFILE` | `boucle` | jcode provider profile name. |
 | `BOUCLE_IMAGE_MAX_BYTES` | `10485760` | Max bytes per attachment (10 MiB). |
 | `BOUCLE_IMAGE_TOTAL_MAX_BYTES` | `52428800` | Max total bytes per issue (50 MiB). |
+| `BOUCLE_PRICING_JSON` | *(empty)* | Per-model price map, USD per 1M tokens: `{"model":{"in":0.10,"out":0.30}}`. Empty = tokens are reported, dollars are not. |
+| `BOUCLE_RETRY_STRATEGY` | `adaptive` | Worktree handling on a worker re-run: `adaptive` (reset only after a contamination failure), `preserve` (always keep prior commits), `reset` (always start clean). |
+| `BOUCLE_QUOTA_PROBE` | `true` | Ask the provider whether it can answer before spinning up an agent run. |
+| `BOUCLE_QUOTA_PROBE_TTL` | `300` | Seconds a probe result is reused, so parallel jobs probe once. |
+| `BOUCLE_NOTIFY_URL` | *(empty)* | Send-only webhook for human gates and escalations. Empty = disabled. Set as a **masked** variable. |
+| `BOUCLE_NOTIFY_FORMAT` | `slack` | Payload envelope: `slack` (also Discord via a `/slack` endpoint), `ntfy`, `telegram`, `raw`. |
+| `BOUCLE_NOTIFY_EVENTS` | `spec-review,approval,human,blocked` | Which transitions fire a notification. |
+| `BOUCLE_REVIEW_ANCHORING` | `full` | How much of a prior reviewer verdict reaches the next review pass: `full`, `criteria-only`, `none`. See §Anti-anchored re-review. |
+| `BOUCLE_MAX_NOTE_CHARS` | `1500` | Per-note cap when a note thread is injected into a prompt. Every note survives — only its tail is elided. `0` disables trimming (escape hatch). |
+| `BOUCLE_MAX_PROMPT_CHARS` | `0` | Thread-level ceiling on the **assembled** prompt. `0` = disabled. See §Prompt budget. |
+| `BOUCLE_PROMPT_WARN_CHARS` | `0` | Log a warning above this assembled size without altering the prompt. `0` = never warn. |
 
 ### Bot token (GitHub)
 
@@ -139,6 +156,293 @@ with the two scopes is the simplest).
 **missing, invalid, or expired PAT fails setup with an explicit message** —
 the loop never runs half-configured. Renew the PAT and re-run `bin/setup`
 (idempotent) when the stored token expires.
+
+## Scheduled maintenance issues
+
+Boucle has exactly one entry point: a human creates an issue. Its scheduled
+job is inward-facing — the doctor heals state, it never produces work. So
+recurring maintenance (dependency bumps, accessibility audits, dead-link
+sweeps) is work the loop suits but could never start on its own.
+
+Opt in with `BOUCLE_SCHEDULES_ENABLED=true` and drop templates in
+`.boucle/schedules/*.md` — an issue body with YAML frontmatter
+(`cron`, `title`, `labels`, `enabled`). When the cron is due, boucle creates
+the issue with `boucle:triage` and the normal loop owns it from there;
+nothing about it is special-cased downstream. See
+[docs/schedules-example.md](docs/schedules-example.md).
+
+- **Granularity is hourly.** The doctor sweeps every few minutes, so the
+  minute field is parsed and ignored. Times are UTC.
+- **Never a second issue while a previous one is open**, and a missed window
+  fires once rather than once per sweep. Deduplication reads the last firing
+  from the forge (a marker in the issue body), not from a runner cache — so
+  a fresh runner cannot re-fire a template it already fired.
+- **A cron cannot starve human work**: scheduled issues count against
+  `BOUCLE_MAX_PARALLEL_ISSUES` like any other.
+- **A malformed template is skipped with a warning**, never fatal, and never
+  blocks the other templates.
+
+## Status board
+
+Boucle's state is fully legible — it lives in labels — but only if you know
+which labels to filter on and you go looking. With five issues in flight
+plus blocked and dependent ones, nothing answered *what is waiting on me?*
+
+The doctor maintains one issue, `➰ boucle — status board` (label
+`boucle:board`), with four sections: **Waiting on you**, **In flight**,
+**Blocked**, **Waiting on a dependency**.
+
+- It is **a forge issue**, not a web app. The forge is the UI — that is the
+  whole thesis (`CONTEXT.md` §7).
+- It is **edited in place** and never commented on. `CONTEXT.md` §8 already
+  warns that no-op writes pollute the event history; a board that comments
+  would be worse. An unchanged body produces **zero** API writes.
+- It is **never dispatched**. Creating it fires an issue webhook like any
+  other, so the dispatcher exits early on `boucle:board` — otherwise the
+  loop would start working on itself.
+- Deleting it by hand simply makes the next sweep recreate it.
+
+## Configuration audit
+
+`bin/doctor --audit` is read-only and forge-independent: it checks that the
+**configuration** is coherent, which is the class of problem otherwise
+discovered mid-loop, one failed run at a time.
+
+```
+$ bin/doctor --audit
+  ✗ BLOCKER  BOUCLE_DEPLOY_MODE=external without BOUCLE_LIVE_URL
+             → external mode never deploys, so e2e has no target. Set BOUCLE_LIVE_URL at …
+
+Readiness: 54/100  (1 blocker(s), 0 degraded, 2 advisory)
+```
+
+| Severity | Meaning | Weight |
+|---|---|---:|
+| **blocker** | The loop cannot complete | −40 |
+| **degraded** | Works, silently wrong (an inert fallback, a re-trigger that fires mid-job) | −15 |
+| **advisory** | Worth knowing (a UTC quiet window, a missing visual charter) | −3 |
+
+Blockers dominate on purpose: a repository that cannot complete a loop must
+not score well because everything else is tidy. A blocker exits non-zero, so
+the audit works as a CI check.
+
+`bin/setup` prints it on completion — you learn what is missing before the
+first issue, not during it. It never fails the install: a blocker there is a
+variable you set in the forge UI afterwards.
+
+## Doctor cadence
+
+The doctor ran on a fixed schedule and always performed the full sweep — on
+an idle repository, a runner provisioned to confirm nothing changed.
+
+It now fingerprints the board first (every boucle-labelled open issue and
+when it last moved) and skips the sweep when nothing has shifted. A backstop
+forces a full sweep every `BOUCLE_DOCTOR_BACKSTOP` regardless, so a stale
+fingerprint cannot strand the board. When nothing is in flight, the
+staleness threshold is relaxed by `BOUCLE_STALENESS_IDLE_FACTOR`; the busy
+value is unchanged and still exceeds the max job timeout.
+
+**Two deliberate degradations**, both toward doing more work rather than
+less:
+
+- A listing that fails produces an empty fingerprint and a full sweep. The
+  doctor exists to unstick things; a probe that cannot see the board must
+  never be the reason it stops.
+- The snapshot lives in the state cache, which survives on a shell-executor
+  runner. On an **ephemeral runner (GitHub-hosted) it is never found**, so
+  every run is a full sweep — the old behaviour exactly. No regression, and
+  no saving either.
+
+## Cost accounting
+
+Every agent invocation appends one entry to `.boucle/<issue>/cost.json`
+(role, iteration, model, provider, tokens, cost) and emits a
+`[boucle:metrics]` line. The accumulator survives across iterations like
+`iterations.md`, so a re-run adds to the total instead of overwriting it.
+The MR description carries a `### Cost` breakdown grouped by role.
+
+Two deliberate refusals:
+
+- **No dollars without `BOUCLE_PRICING_JSON`.** Prices drift and boucle is
+  provider-agnostic; hardcoding them in the engine would produce confident
+  wrong numbers. Unset, you get token counts.
+- **No fabricated token counts.** Providers report usage inconsistently and
+  some not at all. A missing count records `n/a` and the run continues.
+
+A run that fell back is attributed to the **fallback** model, not the
+primary — otherwise the breakdown blames the wrong provider. When only some
+runs are priced, the total is flagged as a lower bound.
+
+This is the prerequisite for a real budget cap (§Caps below still reads
+"not set at MVP"): measure first, cap second.
+
+## Retry strategy
+
+Boucle already gets most of a Ralph-style recovery cycle for free: every
+iteration is a fresh CI job and a fresh agent process, so no conversation
+survives, and `iterations.md` carries the failure trace forward. The one
+piece that was missing is the worktree reset.
+
+| Previous iteration ended with | `adaptive` does | Why |
+|---|---|---|
+| A reviewer FAIL (code was shipped) | **Preserve** and rebase | The fix is incremental; discarding valid work burns iterations re-doing it |
+| No code changes / step budget exhausted | **Reset** to the default branch | The safety-net commit makes the half-written tree durable, so N+1 would spend its budget working out what N was in the middle of |
+
+`preserve` reproduces the old behaviour, `reset` always starts clean, and an
+unknown value falls back to `preserve` — which never destroys work.
+
+**A reset never loses work silently.** The discarded head is tagged
+`boucle/<issue>/discarded-<timestamp>`, the tag is pushed so the commits
+survive the branch force-push, and the tag is named in an issue comment.
+`state.md` and `iterations.md` survive untouched — they are restored from
+the state cache after checkout. Only the *code* is discarded; the notes on
+why the previous attempt failed are exactly what the fresh run needs.
+
+## Provider probe
+
+Boucle used to discover an exhausted quota the expensive way: provision the
+runner, clone the repo, build the prompt, run the agent, burn the retry
+budget, *then* fall back. With `BOUCLE_MAX_PARALLEL_ISSUES=5` that waste is
+multiplied by five before anyone notices.
+
+The probe asks first — one cheap request to `<base_url>/models`:
+
+| Response | Meaning | Action |
+|---|---|---|
+| `2xx` | ok | Run normally |
+| `429`, `402` | quota exhausted | Switch to the fallback **before** the run, consuming no retry budget |
+| `5xx` | provider down | Same |
+| `401`, `403` | auth problem | Same, and the status is named in the escalation |
+| unreachable | unknown | **Run anyway** |
+
+When neither provider can answer, boucle does not start the agent: it exits
+with the established provider-down code (4), CI posts a diagnostic and
+escalates. Burning a runner to produce nothing is the worst outcome.
+
+**This does not replace the reactive path.** A quota can be exhausted
+mid-run, and only the in-flight fallback catches that. The probe removes the
+waste in the case that was knowable in advance.
+
+**Fail-open by construction.** An unreachable or unparseable probe runs the
+agent anyway — a runner with flaky egress must not stop the loop. The probe
+is an optimisation; it must never become a new failure mode.
+
+## Notifications
+
+The loop is asynchronous by design — you are not meant to watch it. But the
+forge's own emails arrive with the same weight as any other repository
+activity, so the two moments that actually need you (spec gate, MR gate)
+look identical to a label tweak.
+
+Set `BOUCLE_NOTIFY_URL` and boucle POSTs to it on four transitions:
+`spec-review`, `approval`, `human`, `blocked`. Narrow the list with
+`BOUCLE_NOTIFY_EVENTS`. Routine transitions (`working`, `review`, `todo`,
+`done`, `merging`) never fire — a channel that pings on every state change
+gets muted within a day, which is worse than silence.
+
+**Send-only, on purpose.** `CONTEXT.md` §7 forbids a new frontend, a server,
+or a machine to keep running. boucle POSTs; nothing listens. To reply, you
+comment on the issue or the MR — the loop already reads those.
+
+| Format | Endpoint | Body |
+|---|---|---|
+| `slack` (default) | Slack incoming webhook, or a Discord webhook with `/slack` appended | `{"text": "…"}` |
+| `telegram` | `https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<ID>` | `{"text": "…"}` |
+| `ntfy` | `https://ntfy.sh/<topic>` | plain text |
+| `raw` | anything | `{"event","issue","title","url","waiting_for"}` |
+
+Two guarantees:
+
+- **Fail-open.** A webhook that times out, 404s or 500s logs a warning and
+  the job continues. A dead webhook must never block the loop.
+- **Silent during DND.** Notifications are suppressed inside the quiet
+  window — not being contacted is the entire point of it.
+
+Notifications fire on the **transition**, never on the state: the doctor
+sweep re-applies labels that are already set, and notifying on presence
+would re-fire on every sweep.
+
+## Anti-anchored re-review
+
+On iteration N the reviewer reads its **own** iteration N-1 verdict. That
+invites two opposite failures:
+
+- **ratification** — the previous reasoning gets re-endorsed, and a
+  regression introduced *by* the fix slips through unexamined;
+- **tunnel vision** — only the previously failed criteria get re-checked.
+
+| `BOUCLE_REVIEW_ANCHORING` | What the reviewer sees of a prior verdict |
+|---|---|
+| `full` (default) | Everything — the verdict, met and unmet criteria, and the reasoning |
+| `criteria-only` | The `VERDICT:` line and the unmet `- [ ]` criteria, with the rationale stripped: what must still pass, not why it failed |
+| `none` | A placeholder; the verdict is withheld |
+
+Two things are never filtered, at any setting:
+
+- **Human comments.** They amend the spec and outrank the frozen criteria in
+  `state.md`. Withholding one is a spec regression, not a saving.
+- **Bot notes that are not verdicts** (CI status notes). They carry loop
+  context, not review reasoning.
+
+The **worker** always receives full verdict reasoning — it has to act on a
+FAIL, so it needs the why. Only the reviewer's own view is filtered.
+
+**The default is `full` on purpose.** Withholding prior verdicts is not
+obviously correct: a reviewer that forgets what it already rejected can
+flip-flop across iterations, and the worker then chases a moving target and
+burns the iteration cap. Turn on `criteria-only`, compare verdict stability
+across iterations on real issues, and only then decide. An unknown value
+falls back to `full` rather than filtering blind.
+
+## Agent transcript
+
+Every agent job uploads `agent-output.log` as a CI artifact (`when: always`
+on GitLab, `if: always()` on GitHub, 7-day retention). A failed run is
+exactly the one whose transcript matters, so it is uploaded on failure too.
+
+Every escalation comment — "produced no code changes", "not mergeable",
+"human intervention needed" — carries a link to the job that produced it.
+Follow the link, open the artifacts, read the transcript.
+
+The log is **scrubbed before it leaves the runner**: `bin/jc` redacts the
+values of `BOUCLE_LLM_API_KEY`, `BOUCLE_FALLBACK_API_KEY`, `BOUCLE_TOKEN`,
+`BOUCLE_BOT_TOKEN` and the Cloudflare token, plus generic token shapes
+(`ghp_…`, `glpat-…`, `sk-…`, `Bearer …`). Redaction is literal, not
+regex-based, so a key containing regex metacharacters is still caught. It
+runs before every exit path, including the failure ones.
+
+## Prompt budget
+
+`BOUCLE_MAX_NOTE_CHARS` bounds the **worst note**; it does not bound the
+**assembled prompt**. A note thread grows monotonically (triage analysis,
+per-criterion reviewer verdicts, CI status notes, human comments), so forty
+notes at 1500 chars is 60k chars that pass through untouched. Context rot
+does not raise an error — the agent silently misses a file, which surfaces
+one stage later as a reviewer FAIL and burns an iteration.
+
+**Measure before you cap.** Every agent invocation logs an assembled size on
+stderr:
+
+```
+[boucle:prompt] total role=worker iteration=2 total_chars=48213 est_tokens=12053 body_chars=1840 notes_chars_raw=51002 feedback_chars_raw=9310 ceiling=0
+```
+
+Set `BOUCLE_PROMPT_WARN_CHARS` first to see how close your repository runs,
+then set `BOUCLE_MAX_PROMPT_CHARS` from observed values. Choosing a ceiling
+blind truncates legitimate context.
+
+When the ceiling is exceeded, boucle tightens **bot-authored notes only**,
+along the ladder 750 → 300 → 120 chars, stopping at the first rung that
+fits. Two invariants hold at every setting:
+
+- **Human comments are never trimmed.** They amend the spec and take
+  precedence over the frozen acceptance criteria in `state.md`; a truncated
+  human amendment is a spec regression, not a saving.
+- **No note is ever dropped.** Only tails are elided — the early
+  preservation instructions must keep standing alongside later amendments.
+
+If the floor is reached and the prompt still exceeds the ceiling, boucle
+logs a warning and proceeds. It will not close the gap by dropping notes.
 
 ## Bug policy
 

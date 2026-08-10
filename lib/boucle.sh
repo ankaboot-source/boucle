@@ -26,6 +26,463 @@ type forge_init &> /dev/null && {
   type forge_issue_get &> /dev/null || forge_init
 } || true
 
+# ── Escalation context ──────────────────────────────────────────────────
+
+# job_link — markdown pointer to the CI job behind the current run.
+#
+# Every escalation comment boucle posts ("agent likely exhausted its step
+# budget", "produced no code changes", "not mergeable") states that the loop
+# stopped without saying WHY. The agent transcript is uploaded as a job
+# artifact (#33); this is the link that makes it reachable.
+#
+# Prints nothing when the forge exposes no job URL, so callers can append it
+# unconditionally without emitting a dangling "(job: )".
+job_link() {
+  local url="${BOUCLE_JOB_URL:-}"
+  [ -n "$url" ] || return 0
+  printf '\n\n[🔍 Job log & agent transcript](%s) — the `agent-output.log` artifact shows what the agent actually did.' "$url"
+}
+
+# ── Scheduled maintenance issues (#39) ──────────────────────────────────
+
+# Boucle has exactly one entry point: a human creates an issue. Its only
+# scheduled job is inward-facing — the doctor heals state, it never produces
+# work. So recurring product maintenance (dependency bumps, accessibility
+# audits, dead-link sweeps) is work the loop is well suited for but can
+# never start on its own.
+#
+# Opt-in (BOUCLE_SCHEDULES_ENABLED, default false): a repository that writes
+# no template sees no behaviour change.
+
+# boucle_cron_field_matches <field> <value>
+# Supports "*", a number, a list "a,b,c", a range "a-b" and a step "*/n" —
+# the subset a maintenance schedule actually needs.
+boucle_cron_field_matches() {
+  local field="$1" value="$2" part
+  [ "$field" = "*" ] && return 0
+  case "$field" in
+    '*/'*)
+      local step="${field#*/}"
+      case "$step" in
+        '' | *[!0-9]*) return 1 ;;
+      esac
+      [ "$step" -eq 0 ] && return 1
+      [ $((value % step)) -eq 0 ] && return 0
+      return 1
+      ;;
+  esac
+  # Same globbing hazard as above when a field reaches the list branch.
+  local restore_glob=0
+  case "$-" in
+    *f*) ;;
+    *) restore_glob=1 ;;
+  esac
+  set -f
+  local IFS=','
+  for part in $field; do
+    case "$part" in
+      *-*)
+        local lo="${part%%-*}" hi="${part##*-}"
+        case "$lo$hi" in
+          '' | *[!0-9]*) continue ;;
+        esac
+        if [ "$value" -ge "$lo" ] && [ "$value" -le "$hi" ]; then
+          [ "$restore_glob" -eq 1 ] && set +f
+          return 0
+        fi
+        ;;
+      *)
+        if [ "$part" = "$value" ]; then
+          [ "$restore_glob" -eq 1 ] && set +f
+          return 0
+        fi
+        ;;
+    esac
+  done
+  [ "$restore_glob" -eq 1 ] && set +f
+  return 1
+}
+
+# boucle_cron_due <cron> — does this 5-field expression match now?
+#
+# Granularity is HOURLY on purpose: the doctor sweeps every few minutes, so
+# minute-level precision would fire a template several times inside its own
+# minute. The minute field is parsed and ignored; the caller enforces the
+# once-per-window rule with the last-fire check.
+boucle_cron_due() {
+  local cron="$1"
+  # Globbing MUST be off while splitting: an unquoted "*" field expands to
+  # the working directory's file list, and every expression silently stops
+  # having five fields.
+  local restore_glob=0
+  case "$-" in
+    *f*) ;;
+    *) restore_glob=1 ;;
+  esac
+  set -f
+  local -a fields
+  # shellcheck disable=SC2206
+  fields=($cron)
+  [ "$restore_glob" -eq 1 ] && set +f
+  [ "${#fields[@]}" -eq 5 ] || return 1
+  local hour dom mon dow
+  hour=$(date -u +%-H)
+  dom=$(date -u +%-d)
+  mon=$(date -u +%-m)
+  dow=$(date -u +%w)
+  boucle_cron_field_matches "${fields[1]}" "$hour" || return 1
+  boucle_cron_field_matches "${fields[2]}" "$dom" || return 1
+  boucle_cron_field_matches "${fields[3]}" "$mon" || return 1
+  boucle_cron_field_matches "${fields[4]}" "$dow" || return 1
+  return 0
+}
+
+# boucle_schedule_frontmatter <file> <key> — read one YAML frontmatter key.
+boucle_schedule_frontmatter() {
+  awk -v key="$2" '
+    NR == 1 && $0 == "---" { inside = 1; next }
+    inside && $0 == "---" { exit }
+    inside {
+      idx = index($0, ":")
+      if (idx == 0) next
+      k = substr($0, 1, idx - 1)
+      v = substr($0, idx + 1)
+      gsub(/^[ \t]+|[ \t]+$/, "", k)
+      gsub(/^[ \t]+|[ \t]+$/, "", v)
+      gsub(/^"|"$/, "", v)
+      if (k == key) { print v; exit }
+    }
+  ' "$1" 2> /dev/null || true
+}
+
+# boucle_schedule_body <file> — everything after the frontmatter.
+boucle_schedule_body() {
+  awk '
+    NR == 1 && $0 == "---" { inside = 1; next }
+    inside && $0 == "---" { inside = 0; started = 1; next }
+    started || (NR == 1 && $0 != "---") { print }
+  ' "$1" 2> /dev/null || true
+}
+
+# boucle_schedules_run — create issues for every template whose cron is due.
+#
+# Deduplication is FORGE-persisted, not cache-persisted: the last firing is
+# read from the most recent issue carrying the template's marker. A fresh
+# runner therefore cannot re-fire a template it already fired.
+boucle_schedules_run() {
+  [ "${BOUCLE_SCHEDULES_ENABLED:-false}" = "true" ] || return 0
+  local dir="${BOUCLE_WORKSPACE:-.}/.boucle/schedules"
+  [ -d "$dir" ] || return 0
+
+  # A cron must never starve human-created work.
+  local max_parallel="${BOUCLE_MAX_PARALLEL_ISSUES:-0}"
+  case "$max_parallel" in
+    '' | *[!0-9]*) max_parallel=0 ;;
+  esac
+  if [ "$max_parallel" -gt 0 ]; then
+    local in_flight
+    in_flight=$(forge_issue_count_by_label "boucle:working" opened 2> /dev/null || echo 0)
+    case "$in_flight" in
+      '' | *[!0-9]*) in_flight=0 ;;
+    esac
+    if [ "$in_flight" -ge "$max_parallel" ]; then
+      echo "  → schedules skipped: $in_flight issue(s) in flight, cap is $max_parallel"
+      return 0
+    fi
+  fi
+
+  local existing
+  existing=$(forge_issue_list_by_label "boucle:scheduled" all 2> /dev/null || echo "[]")
+
+  local file name cron title labels enabled body marker
+  for file in "$dir"/*.md; do
+    [ -f "$file" ] || continue
+    name=$(basename "$file" .md)
+    marker="<!-- boucle:schedule id=$name -->"
+
+    enabled=$(boucle_schedule_frontmatter "$file" enabled)
+    if [ "$enabled" = "false" ]; then
+      continue
+    fi
+    cron=$(boucle_schedule_frontmatter "$file" cron)
+    title=$(boucle_schedule_frontmatter "$file" title)
+    labels=$(boucle_schedule_frontmatter "$file" labels)
+    if [ -z "$cron" ] || [ -z "$title" ]; then
+      # A malformed template is skipped, never fatal: one bad file must not
+      # stop the others or fail the job (CONTEXT.md §7 fail-open).
+      echo "  → schedule '$name' skipped: missing cron or title"
+      continue
+    fi
+
+    boucle_cron_due "$cron" || continue
+
+    # Never a second issue while a previous one is still open.
+    local open_count
+    open_count=$(echo "$existing" | jq -r --arg m "$marker" \
+      '[.[] | select((.state // "opened") != "closed") | select((.description // .body // "") | contains($m))] | length' \
+      2> /dev/null || echo 0)
+    if [ "${open_count:-0}" -gt 0 ]; then
+      echo "  → schedule '$name' due but a previous issue is still open — skipping"
+      continue
+    fi
+
+    # A missed window fires once, not once per sweep.
+    local last_created age
+    last_created=$(echo "$existing" | jq -r --arg m "$marker" \
+      '[.[] | select((.description // .body // "") | contains($m)) | .created_at] | sort | last // ""' \
+      2> /dev/null || echo "")
+    if [ -n "$last_created" ]; then
+      age=$(($(date -u +%s) - $(date -u -d "$last_created" +%s 2> /dev/null || echo 0)))
+      if [ "$age" -lt 3600 ]; then
+        echo "  → schedule '$name' already fired ${age}s ago — skipping"
+        continue
+      fi
+    fi
+
+    body="$marker
+$(boucle_schedule_body "$file")"
+    local all_labels="boucle:triage,boucle:scheduled"
+    [ -n "$labels" ] && all_labels="${all_labels},${labels}"
+    local new_iid
+    new_iid=$(forge_issue_create "$title" "$body" "$all_labels" 2> /dev/null || echo "")
+    if [ -n "$new_iid" ]; then
+      echo "  → schedule '$name' fired: created #$new_iid"
+    else
+      echo "  → WARN: schedule '$name' due but issue creation failed"
+    fi
+  done
+}
+
+# ── Status board (#36) ──────────────────────────────────────────────────
+
+# boucle_board_render — the four sections of the board, as markdown.
+#
+# Boucle's state is fully legible: it lives in labels. But only if you know
+# which labels to filter on and you go looking. With five issues in flight
+# plus blocked and dependent ones, nothing answers "what is waiting on me?".
+#
+# The board is a forge ISSUE that boucle edits in place — the forge is the
+# UI, which is the whole thesis (CONTEXT.md §7: no new frontend, no server).
+boucle_board_render() {
+  local section label iids body=""
+  body="<!-- boucle:board v=1 -->
+_Maintained by boucle. Edited in place — do not reply here; act on the linked issues._
+"
+  local -a groups=(
+    "⏳ Waiting on you|boucle:spec-review boucle:approval"
+    "🔄 In flight|boucle:working boucle:review boucle:merging"
+    "🚧 Blocked|boucle:blocked boucle:human boucle:needs-info"
+    "🔗 Waiting on a dependency|boucle:depends-on"
+  )
+  local group title labels rows
+  for group in "${groups[@]}"; do
+    title="${group%%|*}"
+    labels="${group#*|}"
+    rows=""
+    for label in $labels; do
+      iids=$(forge_issue_list_by_label "$label" opened 2> /dev/null \
+        | jq -r --arg l "${label#boucle:}" \
+          '.[] | "| #\(.iid // .number) | \(.title // "" | .[0:70]) | \($l) | \(.updated_at // "" | .[0:10]) |"' \
+          2> /dev/null || true)
+      [ -n "$iids" ] && rows="${rows}${iids}
+"
+    done
+    body="${body}
+## ${title}
+"
+    if [ -z "$(printf '%s' "$rows" | tr -d '[:space:]')" ]; then
+      body="${body}
+_Nothing._
+"
+    else
+      body="${body}
+| Issue | Title | State | Last moved |
+|---|---|---|---|
+${rows}"
+    fi
+  done
+  printf '%s' "$body"
+}
+
+# boucle_board_upsert — create the board issue once, then edit it in place.
+#
+# NEVER posts a comment. CONTEXT.md §8 already warns that no-op label writes
+# pollute the event history; a board that comments would be worse. And the
+# write is skipped entirely when the rendered body is unchanged.
+boucle_board_upsert() {
+  [ "${BOUCLE_BOARD_ENABLED:-true}" = "true" ] || return 0
+  command -v forge_issue_list_by_label > /dev/null 2>&1 || return 0
+
+  local board_iid
+  board_iid=$(forge_issue_list_by_label "boucle:board" opened 2> /dev/null \
+    | jq -r 'sort_by(.iid // .number) | .[0] | .iid // .number // empty' 2> /dev/null || echo "")
+
+  local body
+  body=$(boucle_board_render) || return 0
+  [ -n "$body" ] || return 0
+
+  if [ -z "$board_iid" ]; then
+    # Idempotent by find-then-create: deleting the board by hand simply
+    # makes the next sweep recreate it.
+    board_iid=$(forge_issue_create "➰ boucle — status board" "$body" "boucle:board" 2> /dev/null || echo "")
+    if [ -n "$board_iid" ]; then
+      echo "  → status board created as #$board_iid"
+    else
+      echo "  → WARN: could not create the status board"
+    fi
+    return 0
+  fi
+
+  local current
+  current=$(forge_issue_get "$board_iid" 2> /dev/null | jq -r '.description // .body // ""' 2> /dev/null || echo "")
+  if [ "$current" = "$body" ]; then
+    echo "  → status board #$board_iid unchanged — no write"
+    return 0
+  fi
+  forge_issue_update "$board_iid" "description" "$body" 2> /dev/null || true
+  echo "  → status board #$board_iid refreshed"
+}
+
+# ── Cost accounting (#35) ───────────────────────────────────────────────
+
+# boucle_cost_summary <issue> — markdown breakdown of what this issue cost.
+#
+# Reads the accumulator bin/jc appends to on every agent invocation. Prints
+# nothing when there is no data, so callers can embed it unconditionally.
+#
+# Dollar figures appear ONLY when BOUCLE_PRICING_JSON supplied a price for
+# the model that actually ran. Boucle is provider-agnostic and prices drift:
+# a confident wrong number is worse than tokens alone.
+boucle_cost_summary() {
+  local iid="$1"
+  local file="${BOUCLE_WORKSPACE:-.}/.boucle/${iid}/cost.json"
+  [ -s "$file" ] || return 0
+  command -v jq > /dev/null 2>&1 || return 0
+  jq -r '
+    if (.entries | length) == 0 then empty else
+    ([.entries[] | .prompt_tokens // 0] | add) as $pt
+    | ([.entries[] | .completion_tokens // 0] | add) as $ct
+    | ([.entries[] | .cost_usd // 0] | add) as $cost
+    | ([.entries[] | select(.cost_usd != null)] | length) as $priced
+    | "### Cost\n\n| Role | Runs | Prompt | Completion |"
+      + (if $priced > 0 then " Cost |" else "" end)
+      + "\n|---|---:|---:|---:|"
+      + (if $priced > 0 then "---:|" else "" end)
+      + "\n"
+      + ([.entries | group_by(.role)[]
+          | "| \(.[0].role) | \(length) | \([.[] | .prompt_tokens // 0] | add) | \([.[] | .completion_tokens // 0] | add) |"
+            + (if $priced > 0 then " $\([.[] | .cost_usd // 0] | add | .*10000 | round / 10000) |" else "" end)]
+         | join("\n"))
+      + "\n| **total** | \(.entries | length) | **\($pt)** | **\($ct)** |"
+      + (if $priced > 0 then " **$\($cost * 10000 | round / 10000)** |" else "" end)
+      + (if $priced > 0 and $priced < (.entries | length) then "\n\n_Some runs have no price for their model — the total is a lower bound._" else "" end)
+    end
+  ' "$file" 2> /dev/null || true
+}
+
+# ── Outbound notification (send-only) ───────────────────────────────────
+
+# boucle_notify <iid> <new_label>
+#
+# The loop is asynchronous by design: the human is not meant to watch it.
+# But the forge's own email notifications are indistinguishable from any
+# other repository activity, so the two moments that actually need a human —
+# the spec gate and the MR gate — arrive with the same weight as a label
+# tweak. This pushes those, and escalations, to one webhook.
+#
+# SEND-ONLY on purpose. CONTEXT.md §7 forbids a new frontend, a server, or a
+# machine to keep running: boucle POSTs, nothing listens. The reply path
+# stays the forge comment, which the loop already reads.
+#
+# Silent by default (BOUCLE_NOTIFY_URL unset) and fail-open always: a dead
+# webhook logs a warning and returns 0. Same rule as auto-update — a
+# notification failure must never block the loop.
+boucle_notify() {
+  local iid="$1" label="$2"
+  local hook="${BOUCLE_NOTIFY_URL:-}"
+  [ -n "$hook" ] || return 0
+
+  # Only the transitions a human has to act on. Notifying every state change
+  # would get the channel muted within a day, which is worse than silence.
+  local event waiting
+  case "$label" in
+    boucle:spec-review)
+      event="spec-review"
+      waiting="Approve the spec (👍) or comment to amend it."
+      ;;
+    boucle:approval)
+      event="approval"
+      waiting="Review and approve the MR (👍) or comment on it."
+      ;;
+    boucle:human)
+      event="human"
+      waiting="The loop escalated — it needs you to unblock it."
+      ;;
+    boucle:blocked)
+      event="blocked"
+      waiting="Blocked on a dependency or a decision."
+      ;;
+    *) return 0 ;;
+  esac
+
+  local events="${BOUCLE_NOTIFY_EVENTS:-spec-review,approval,human,blocked}"
+  echo "$events" | tr ',' '\n' | grep -qx "$event" || return 0
+
+  # The whole point of a quiet window is not being contacted during it.
+  # bin/dnd exits 0 inside the window and handles BOUCLE_DND_ENABLED itself.
+  if [ -x "${BOUCLE_HOME:-}/bin/dnd" ] && "${BOUCLE_HOME}/bin/dnd" > /dev/null 2>&1; then
+    echo "[boucle:notify] suppressed ($event, #$iid) — inside the DND window" >&2
+    return 0
+  fi
+
+  # Title and URL are best-effort: a notification naming only the issue
+  # number still beats no notification.
+  local meta="" title="" issue_url=""
+  if command -v forge_issue_get > /dev/null 2>&1; then
+    meta=$(forge_issue_get "$iid" 2> /dev/null || echo "")
+  fi
+  if [ -n "$meta" ]; then
+    title=$(echo "$meta" | jq -r '.title // ""' 2> /dev/null || echo "")
+    issue_url=$(echo "$meta" | jq -r '.web_url // .html_url // ""' 2> /dev/null || echo "")
+  fi
+
+  local text="➰ boucle — ${event}
+#${iid} ${title:-(title unavailable)}
+${waiting}"
+  [ -n "$issue_url" ] && text="${text}
+${issue_url}"
+
+  local body content_type="application/json"
+  case "${BOUCLE_NOTIFY_FORMAT:-slack}" in
+    # Slack incoming webhooks; Discord accepts the same shape on a /slack
+    # endpoint. Telegram's sendMessage takes chat_id in the URL query.
+    slack | telegram)
+      body=$(jq -n --arg t "$text" '{text: $t}')
+      ;;
+    ntfy)
+      body="$text"
+      content_type="text/plain"
+      ;;
+    raw)
+      body=$(jq -n \
+        --arg e "$event" --arg i "$iid" --arg ti "$title" \
+        --arg u "$issue_url" --arg w "$waiting" \
+        '{event: $e, issue: $i, title: $ti, url: $u, waiting_for: $w}')
+      ;;
+    *)
+      echo "WARN: unknown BOUCLE_NOTIFY_FORMAT='${BOUCLE_NOTIFY_FORMAT}' — using slack." >&2
+      body=$(jq -n --arg t "$text" '{text: $t}')
+      ;;
+  esac
+
+  if ! curl -fsS --max-time 10 -X POST \
+    -H "Content-Type: $content_type" \
+    --data-binary "$body" "$hook" > /dev/null 2>&1; then
+    echo "WARN: [boucle:notify] webhook POST failed ($event, #$iid) — continuing. A dead webhook must never block the loop." >&2
+  fi
+  return 0
+}
+
 # ── Label management ────────────────────────────────────────────────────
 
 # set_boucle_label <iid> <new_detail_label> <gross_status_label>
@@ -48,6 +505,14 @@ set_boucle_label() {
   current_non_boucle=$(echo "$current_all" | tr ',' '\n' | grep -v '^boucle:' | tr '\n' ',' | sed 's/,$//')
   local merged="${current_non_boucle:+$current_non_boucle,}$new,$gross"
   forge_issue_labels_set "$iid" "$merged"
+  # Notify on the TRANSITION, never on the state. The doctor sweep re-applies
+  # labels that are already set (CONTEXT.md §8: the forge records an event on
+  # every PUT), so notifying on presence would re-fire on every sweep and get
+  # the channel muted. Hooked here rather than at the ~19 call sites so future
+  # transitions are covered by construction. Fail-open: never blocks the loop.
+  if ! echo "$current_all" | tr ',' '\n' | grep -qx "$new"; then
+    boucle_notify "$iid" "$new" || true
+  fi
   # When the issue moves to the bot side, assign it to the bot user so
   # the board reflects who owns the next action. Best-effort: skip
   # silently if BOUCLE_BOT_ID is unset (backward compat).

@@ -70,7 +70,7 @@ boucle_ci_reviewer() {
     else
       echo "boucle: no MR at all for issue #$BOUCLE_ISSUE — escalating to boucle:human"
       set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-      forge_issue_note "$BOUCLE_ISSUE" "⚠️ Reviewer: no MR found for branch boucle/$BOUCLE_ISSUE (no opened, closed, or merged MR). Escalated to **boucle:human**."
+      forge_issue_note "$BOUCLE_ISSUE" "⚠️ Reviewer: no MR found for branch boucle/$BOUCLE_ISSUE (no opened, closed, or merged MR). Escalated to **boucle:human**.$(job_link)"
     fi
     exit 1
   fi
@@ -103,12 +103,12 @@ boucle_ci_reviewer() {
     MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
     echo "FAIL: worker shipped zero commits (MR !${MR_IID} empty — base_sha == head_sha). Re-triggering worker (iteration $((ITERATION + 1))/$MAX_ITER)." >&2
     set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-    forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker shipped zero commits (MR !${MR_IID} has empty diff). Re-running the worker (iteration $((ITERATION + 1))/$MAX_ITER)."
+    forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker shipped zero commits (MR !${MR_IID} has empty diff). Re-running the worker (iteration $((ITERATION + 1))/$MAX_ITER).$(job_link)"
     if [ "$ITERATION" -lt "$MAX_ITER" ]; then
       chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=$((ITERATION + 1))
     else
       set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-      forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker shipped zero commits after $MAX_ITER attempts. Human intervention needed."
+      forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker shipped zero commits after $MAX_ITER attempts. Human intervention needed.$(job_link)"
     fi
     exit 1
   fi
@@ -430,7 +430,7 @@ boucle_ci_reviewer() {
       # Assign the MR to the issue author on escalation (same rationale as
       # the FAIL-after-max branch above).
       assign_mr_to_author
-      forge_issue_note "$BOUCLE_ISSUE" "Verdict unparsable or uncertain. Human review needed. The MR has been assigned to you."
+      forge_issue_note "$BOUCLE_ISSUE" "Verdict unparsable or uncertain. Human review needed. The MR has been assigned to you.$(job_link)"
       ;;
   esac
 
