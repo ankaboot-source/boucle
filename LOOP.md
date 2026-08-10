@@ -108,6 +108,9 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_MAX_PARALLEL_ISSUES` | `5` | Max concurrent boucle:working issues (`0` = unlimited). |
 | `BOUCLE_MAX_ITERATIONS` | `3` | Max worker re-runs per issue before escalation. |
 | `BOUCLE_STALENESS_THRESHOLD` | `2400` | Seconds before a stuck issue is re-triggered (must exceed max job timeout, 30 min). |
+| `BOUCLE_DOCTOR_ADAPTIVE` | `true` | Skip the full sweep when the board has not moved since the last check. |
+| `BOUCLE_DOCTOR_BACKSTOP` | `21600` | Seconds after which a full sweep runs regardless of the fingerprint (6 h). |
+| `BOUCLE_STALENESS_IDLE_FACTOR` | `3` | Multiplier applied to `BOUCLE_STALENESS_THRESHOLD` when nothing is in flight. |
 | `BOUCLE_UPDATE_MODE` | `release` | Update mode: `release` (pinned engine release) or `dev` (tracking branch). |
 | `BOUCLE_LLM_BASE_URL` | — | LLM API endpoint (any OpenAI-compatible). |
 | `BOUCLE_LLM_API_KEY` | — | LLM API key (masked secret). |
@@ -151,6 +154,29 @@ with the two scopes is the simplest).
 **missing, invalid, or expired PAT fails setup with an explicit message** —
 the loop never runs half-configured. Renew the PAT and re-run `bin/setup`
 (idempotent) when the stored token expires.
+
+## Doctor cadence
+
+The doctor ran on a fixed schedule and always performed the full sweep — on
+an idle repository, a runner provisioned to confirm nothing changed.
+
+It now fingerprints the board first (every boucle-labelled open issue and
+when it last moved) and skips the sweep when nothing has shifted. A backstop
+forces a full sweep every `BOUCLE_DOCTOR_BACKSTOP` regardless, so a stale
+fingerprint cannot strand the board. When nothing is in flight, the
+staleness threshold is relaxed by `BOUCLE_STALENESS_IDLE_FACTOR`; the busy
+value is unchanged and still exceeds the max job timeout.
+
+**Two deliberate degradations**, both toward doing more work rather than
+less:
+
+- A listing that fails produces an empty fingerprint and a full sweep. The
+  doctor exists to unstick things; a probe that cannot see the board must
+  never be the reason it stops.
+- The snapshot lives in the state cache, which survives on a shell-executor
+  runner. On an **ephemeral runner (GitHub-hosted) it is never found**, so
+  every run is a full sweep — the old behaviour exactly. No regression, and
+  no saving either.
 
 ## Cost accounting
 
