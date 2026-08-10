@@ -513,6 +513,107 @@ BOUCLE_MR_ATTACHMENTS="${BOUCLE_MR_ATTACHMENTS:-}"
 # Notes arrive as "[<author>] <body>" entries whose bodies may span lines;
 # a new note is detected by the "[<author>] " prefix at start of line.
 # BOUCLE_MAX_NOTE_CHARS=0 disables trimming entirely (escape hatch).
+#
+# BOT vs HUMAN caps: the per-note cap applies to every note, but the thread
+# budget (see build_prompt_within_budget) tightens BOT-authored notes only.
+# Human comments AMEND the spec and take precedence over the frozen criteria
+# in state.md (see build_prompt), so they are never squeezed to make room —
+# a truncated human amendment is a spec regression, not a saving.
+# BOUCLE_BOT_NOTE_CHARS is set by the budget enforcer; it defaults to the
+# same value as BOUCLE_MAX_NOTE_CHARS, so nothing changes unless a ceiling
+# is configured AND exceeded.
+# ── Anti-anchored re-review (#43) ─────────────────────────────────────
+# On iteration N the reviewer reads its OWN iteration N-1 verdict. Two
+# failure modes follow, pulling in opposite directions:
+#   - ratification: the previous reasoning gets re-endorsed and a regression
+#     introduced BY the fix slips through unexamined;
+#   - tunnel vision: only the previously failed criteria are re-checked.
+#
+# BOUCLE_REVIEW_ANCHORING controls how much of a prior verdict survives:
+#   full          — everything (default, unchanged behaviour)
+#   criteria-only — the VERDICT line + unmet "- [ ]" criteria, reasoning
+#                   stripped: what still has to pass, not why it failed
+#   none          — verdicts replaced by a placeholder
+#
+# Two things are NEVER filtered:
+#   - human comments: they AMEND the spec and outrank the frozen criteria in
+#     state.md. A withheld human amendment is a spec regression.
+#   - bot notes that are not verdicts (CI status notes): they carry loop
+#     context, not review reasoning.
+#
+# Reviewer-only. The WORKER needs the full reasoning to act on a FAIL, so
+# build_prompt applies this to the reviewer branch alone.
+filter_mr_discussion() {
+  local text="$1"
+  local mode="${BOUCLE_REVIEW_ANCHORING:-full}"
+  if [ -z "$text" ] || [ "$mode" = "full" ]; then
+    printf '%s' "$text"
+    return 0
+  fi
+  case "$mode" in
+    criteria-only | none) ;;
+    *)
+      echo "WARN: unknown BOUCLE_REVIEW_ANCHORING='$mode' — falling back to 'full'." >&2
+      printf '%s' "$text"
+      return 0
+      ;;
+  esac
+  printf '%s\n' "$text" | awk -v mode="$mode" -v bot="${BOUCLE_BOT_USERNAME:-}" '
+    # A note is a verdict only if the boucle bot wrote it AND it carries a
+    # verdict marker. Everything else passes through untouched.
+    function is_verdict() { return (bot != "" && author == bot && seen_verdict) }
+    # Drop the rationale that follows the criterion. index() is byte-literal:
+    # the separator is an em dash (multi-byte UTF-8) and a bracket expression
+    # would mis-parse it under mawk.
+    function strip_reason(line,   p) {
+      p = index(line, " — ")
+      if (p > 0) return substr(line, 1, p - 1)
+      p = index(line, " -- ")
+      if (p > 0) return substr(line, 1, p - 1)
+      return line
+    }
+    # Author prefix alone, so the thread keeps its shape without carrying
+    # any of the withheld verdict.
+    function header_only(line,   p) {
+      p = index(line, "] ")
+      if (p > 0) return substr(line, 1, p)
+      return line
+    }
+    function flush(   i, line) {
+      if (n == 0) return
+      if (!is_verdict()) {
+        for (i = 1; i <= n; i++) print buf[i]
+      } else if (mode == "none") {
+        print header_only(buf[1]) " (previous reviewer verdict withheld — BOUCLE_REVIEW_ANCHORING=none)"
+      } else {
+        print header_only(buf[1])
+        for (i = 1; i <= n; i++) {
+          line = buf[i]
+          if (line ~ /^VERDICT:/) { print line; continue }
+          # Unmet criteria only, rationale removed: the reviewer is told what
+          # must still pass, not why it failed — that is the anchor.
+          if (line ~ /^- \[ \]/) print strip_reason(line)
+        }
+      }
+      n = 0; seen_verdict = 0
+    }
+    /^\[[^]]+\] / {
+      flush()
+      author = $0
+      sub(/^\[/, "", author)
+      sub(/\].*$/, "", author)
+      n = 1; buf[1] = $0
+      if ($0 ~ /boucle:verdict|VERDICT:/) seen_verdict = 1
+      next
+    }
+    {
+      if (n == 0) { n = 1; buf[1] = $0 } else { n++; buf[n] = $0 }
+      if ($0 ~ /boucle:verdict|VERDICT:/) seen_verdict = 1
+    }
+    END { flush() }
+  '
+}
+
 trim_notes() {
   local label="$1" text="$2"
   local max="${BOUCLE_MAX_NOTE_CHARS:-1500}"
@@ -527,25 +628,47 @@ trim_notes() {
     printf '%s' "$text"
     return 0
   fi
+  local bot_max="${BOUCLE_BOT_NOTE_CHARS:-$max}"
+  case "$bot_max" in
+    '' | *[!0-9]*) bot_max="$max" ;;
+  esac
+  # Never let the bot cap exceed the global cap — it only ever tightens.
+  [ "$bot_max" -gt "$max" ] && bot_max="$max"
+  local bot="${BOUCLE_BOT_USERNAME:-}"
   local out
-  out=$(printf '%s\n' "$text" | awk -v max="$max" '
-    function flush(   n) {
+  out=$(printf '%s\n' "$text" | awk -v max="$max" -v bot_max="$bot_max" -v bot="$bot" '
+    # Cap for the note currently buffered: the tightened bot cap when the
+    # note was authored by the boucle bot, the global cap otherwise.
+    function cap() { return (bot != "" && author == bot) ? bot_max : max }
+    function flush(   n, c) {
       if (buf == "") return
+      c = cap()
       n = length(buf)
-      if (n > max) {
-        printf "%s\n[... %d chars elided by boucle (BOUCLE_MAX_NOTE_CHARS=%d) ...]\n", substr(buf, 1, max), n - max, max
+      if (c > 0 && n > c) {
+        printf "%s\n[... %d chars elided by boucle (cap=%d) ...]\n", substr(buf, 1, c), n - c, c
       } else {
         printf "%s\n", buf
       }
       buf = ""
     }
-    /^\[[^]]+\] / { flush(); buf = $0; next }
+    /^\[[^]]+\] / {
+      flush()
+      buf = $0
+      author = $0
+      sub(/^\[/, "", author)
+      sub(/\].*$/, "", author)
+      next
+    }
     { buf = (buf == "" ? $0 : buf "\n" $0) }
     END { flush() }
   ')
   # Report on stderr (stdout is the prompt payload). Mirrors the existing
   # [boucle:metrics] channel so the before/after is measurable in CI logs.
-  echo "[boucle:prompt] $label chars_before=${#text} chars_after=${#out} max_note_chars=$max" >&2
+  # Silenced during the budget enforcer's trial passes so the log carries one
+  # report per section, not one per ladder rung.
+  if [ -z "${BOUCLE_TRIM_QUIET:-}" ]; then
+    echo "[boucle:prompt] $label chars_before=${#text} chars_after=${#out} max_note_chars=$max bot_note_chars=$bot_max" >&2
+  fi
   printf '%s' "$out"
 }
 
@@ -660,8 +783,14 @@ ${BOUCLE_SIBLINGS}
       # BOUCLE_REVIEWER_FEEDBACK). Human comments MUST take precedence over
       # state.md. Trimmed per note: this thread carries the reviewer's own
       # prior verdicts, the single bulkiest re-billed block in the loop.
+      #
+      # Anchoring filter runs BEFORE trimming (#43): reducing a verdict to
+      # its unmet criteria removes far more than a tail elision would, and
+      # trimming a already-reduced note keeps the per-note cap meaningful.
+      # Human comments pass through both stages untouched.
       local feedback
-      feedback="$(trim_notes reviewer_feedback "${BOUCLE_REVIEWER_FEEDBACK:-}")"
+      feedback="$(filter_mr_discussion "${BOUCLE_REVIEWER_FEEDBACK:-}")"
+      feedback="$(trim_notes reviewer_feedback "$feedback")"
       prompt="Review the MR for issue #${ISSUE}. Test the deployed preview at \$BOUCLE_PREVIEW_URL. Post your verdict with the boucle:verdict marker.
 
 Verify content fidelity: the issue body below is the original spec. Check that the MR preserves the instructed content (URLs, citations, texts) verbatim — no placeholders, no rewrites, no substitutions. A MR that degrades instructed content is a FAIL even if it satisfies the latest amendments.
@@ -734,8 +863,84 @@ ${feedback}
   fi
 }
 
+# ── 4b. Thread-level prompt budget + measurement ──────────────────────
+# trim_notes caps each NOTE; it does not cap the assembled PROMPT. A note
+# thread grows monotonically — triage analysis, per-criterion verdicts, CI
+# status notes, human comments — so the prompt grows unbounded even with a
+# per-note cap: 40 notes at 1500 chars is 60k chars passing untouched.
+# Context rot does not raise an error; the agent silently misses a file,
+# which surfaces one stage later as a reviewer FAIL and burns an iteration.
+#
+# BOUCLE_MAX_PROMPT_CHARS defaults to 0 (disabled): measure first, then set
+# a ceiling informed by the [boucle:prompt] total line below. Degradation
+# tightens BOT-authored notes only, in ladder order — human comments amend
+# the spec and are never squeezed, and no note is ever dropped outright.
+BOT_NOTE_LADDER="750 300 120"
+
+# Estimated tokens from characters. Deliberately crude (~4 chars/token):
+# the number that matters is the trend across runs, not a billing figure.
+# Real token counts land in [boucle:metrics] once the provider reports them.
+report_prompt_size() {
+  local role="$1" text="$2"
+  local body="${BOUCLE_ISSUE_BODY:-}"
+  local notes="${BOUCLE_ISSUE_NOTES:-}"
+  local feedback="${BOUCLE_REVIEWER_FEEDBACK:-}"
+  local total=${#text}
+  local warn="${BOUCLE_PROMPT_WARN_CHARS:-0}"
+  case "$warn" in
+    '' | *[!0-9]*) warn=0 ;;
+  esac
+  echo "[boucle:prompt] total role=$role iteration=$ITERATION total_chars=$total est_tokens=$((total / 4)) body_chars=${#body} notes_chars_raw=${#notes} feedback_chars_raw=${#feedback} ceiling=${BOUCLE_MAX_PROMPT_CHARS:-0}" >&2
+  if [ "$warn" -gt 0 ] && [ "$total" -gt "$warn" ]; then
+    echo "WARN: assembled prompt is $total chars (BOUCLE_PROMPT_WARN_CHARS=$warn). Context degrades well before any hard limit — consider setting BOUCLE_MAX_PROMPT_CHARS." >&2
+  fi
+}
+
+# Build the prompt, tightening bot-note trimming until it fits the ceiling.
+# Trial passes run silently (BOUCLE_TRIM_QUIET) so the job log carries one
+# report per section rather than one per ladder rung; the winning cap is
+# then rebuilt with reporting restored.
+build_prompt_within_budget() {
+  local role="$1"
+  local ceiling="${BOUCLE_MAX_PROMPT_CHARS:-0}"
+  case "$ceiling" in
+    '' | *[!0-9]*) ceiling=0 ;;
+  esac
+
+  if [ "$ceiling" -le 0 ]; then
+    build_prompt "$role"
+    return 0
+  fi
+
+  local p rung chosen=""
+  export BOUCLE_TRIM_QUIET=1
+  p=$(build_prompt "$role")
+  if [ "${#p}" -gt "$ceiling" ]; then
+    for rung in $BOT_NOTE_LADDER; do
+      if [ "$rung" -ge "${BOUCLE_MAX_NOTE_CHARS:-1500}" ]; then
+        continue
+      fi
+      chosen="$rung"
+      export BOUCLE_BOT_NOTE_CHARS="$rung"
+      p=$(build_prompt "$role")
+      if [ "${#p}" -le "$ceiling" ]; then
+        break
+      fi
+    done
+    if [ "${#p}" -gt "$ceiling" ]; then
+      # Floor reached. We do NOT drop notes or touch human comments to close
+      # the gap — that would break the invariant that early preservation
+      # instructions stand alongside later amendments. Report and proceed.
+      echo "WARN: prompt is ${#p} chars, still above BOUCLE_MAX_PROMPT_CHARS=$ceiling after tightening bot notes to ${chosen:-n/a}. Human comments are never trimmed and no note is dropped — raise the ceiling or split the issue." >&2
+    fi
+  fi
+  unset BOUCLE_TRIM_QUIET
+  build_prompt "$role"
+}
+
 # ── 5. Run the agent ──────────────────────────────────────────────────
-PROMPT=$(build_prompt "$ROLE")
+PROMPT=$(build_prompt_within_budget "$ROLE")
+report_prompt_size "$ROLE" "$PROMPT"
 
 # Write the role-specific system prompt to .jcode/prompt-overlay.md
 # so jcode loads it in addition to the repo-root AGENTS.md.
@@ -749,6 +954,89 @@ write_prompt_overlay "$AGENT_FILE"
 # variable. Redirect+cat preserves exit-code propagation with no race.
 AGENT_LOG="$STATE_DIR/agent-output.log"
 : > "$AGENT_LOG"
+
+# ── 4c. Pre-flight provider probe (#42) ───────────────────────────────
+# The reactive path (section 5b) discovers an exhausted quota the expensive
+# way: provision the runner, clone the repo, build the prompt, run the
+# agent, burn the retry budget, THEN fall back. With
+# BOUCLE_MAX_PARALLEL_ISSUES=5 that waste is multiplied by five before
+# anyone notices.
+#
+# This asks the provider first. It does NOT replace the reactive path — a
+# quota can be exhausted mid-run, and only 5b catches that.
+#
+# Fail-open by construction: an unreachable or unparseable probe runs the
+# agent anyway. The probe is an optimisation; it must never become a new
+# failure mode.
+probe_provider() {
+  local base_url="$1" api_key="$2"
+  [ -n "$base_url" ] && [ -n "$api_key" ] || {
+    echo "ok"
+    return 0
+  }
+  local code
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+    -H "Authorization: Bearer $api_key" \
+    "${base_url%/}/models" 2> /dev/null || echo "000")
+  case "$code" in
+    429 | 402) echo "quota" ;;
+    401 | 403) echo "auth" ;;
+    5??) echo "down" ;;
+    # 000 = curl could not reach the endpoint at all. Treat as unknown, not
+    # as down: a runner with flaky egress must not stop the loop.
+    000) echo "ok" ;;
+    *) echo "ok" ;;
+  esac
+}
+
+# One probe per TTL window shared by every job on this runner, so five
+# parallel issues do not issue five probes.
+probe_cached() {
+  local name="$1" base_url="$2" api_key="$3"
+  local ttl="${BOUCLE_QUOTA_PROBE_TTL:-300}"
+  case "$ttl" in
+    '' | *[!0-9]*) ttl=300 ;;
+  esac
+  local cache="${TMPDIR:-/tmp}/boucle-probe-${name}.cache"
+  if [ -f "$cache" ]; then
+    local age
+    age=$(($(date +%s) - $(stat -c %Y "$cache" 2> /dev/null || echo 0)))
+    if [ "$age" -lt "$ttl" ]; then
+      cat "$cache"
+      return 0
+    fi
+  fi
+  local result
+  result=$(probe_provider "$base_url" "$api_key")
+  echo "$result" > "$cache" 2> /dev/null || true
+  echo "$result"
+}
+
+if [ "${BOUCLE_QUOTA_PROBE:-true}" = "true" ] && [ "$DRY_RUN" != "true" ]; then
+  PRIMARY_STATUS=$(probe_cached primary "${BOUCLE_LLM_BASE_URL:-}" "${BOUCLE_LLM_API_KEY:-}")
+  if [ "$PRIMARY_STATUS" != "ok" ]; then
+    echo "[boucle:probe] primary provider unavailable ($PRIMARY_STATUS) before the run" >&2
+    FALLBACK_STATUS="unconfigured"
+    if [ -n "$FALLBACK_PROVIDER" ] && [ -n "${BOUCLE_FALLBACK_BASE_URL:-}" ]; then
+      FALLBACK_STATUS=$(probe_cached fallback "${BOUCLE_FALLBACK_BASE_URL:-}" "${BOUCLE_FALLBACK_API_KEY:-}")
+    fi
+    if [ "$FALLBACK_STATUS" = "ok" ]; then
+      # Switch BEFORE the run so the fallback attempt does not consume a
+      # run_with_retry budget on a provider already known to be down.
+      echo "[boucle:probe] switching to fallback provider ($FALLBACK_PROVIDER/$FALLBACK_MODEL) pre-emptively" >&2
+      PROVIDER_PROFILE="$FALLBACK_PROVIDER"
+      MODEL="$FALLBACK_MODEL"
+      FALLBACK_USED=1
+    else
+      # Starting the agent here would burn a runner to produce nothing.
+      # Exit 4 is the established provider-down contract: CI posts a
+      # diagnostic and escalates instead of blaming the step budget.
+      echo "[boucle] ERROR: primary provider is $PRIMARY_STATUS and fallback is $FALLBACK_STATUS — not starting the agent (exit 4)." >&2
+      echo "[boucle] No runner time is spent on a provider that cannot answer. Check the provider quota, then re-trigger." >&2
+      exit 4
+    fi
+  fi
+fi
 
 if [ "$DRY_RUN" = "true" ]; then
   echo "[boucle] DRY RUN — agent output goes to log only, nothing pushed"
@@ -834,6 +1122,58 @@ if [ -n "$FALLBACK_PROVIDER" ] && [ -n "$FALLBACK_REASON" ]; then
   fi
   rm -f "${AGENT_LOG}.primary" 2> /dev/null || true
 fi
+
+# ── 5a0. Scrub secrets from the agent log ─────────────────────────────
+# The log is raw agent stdout+stderr and it leaves the runner: CI uploads it
+# as an artifact (#33) so a human can see WHY the loop escalated. Anything
+# the agent echoed — an env dump, a curl invocation, a provider error body
+# quoting the key back — would otherwise ship with it.
+#
+# Section 2 removes CLOUDFLARE_API_TOKEN from the agent's *environment*;
+# that is a different guarantee and does not cover log *content*. The LLM
+# key in particular CANNOT be unset (jcode reads it via api_key_env), so
+# redaction here is the only thing standing between it and the artifact.
+#
+# Runs BEFORE every exit path below: a failed run is exactly the one whose
+# log gets read, so scrubbing only on success would protect nothing.
+scrub_agent_log() {
+  local log="$1"
+  [ -f "$log" ] || return 0
+  # Literal replacement (not regex) for known values: a key containing a
+  # regex metacharacter must still be redacted. Values shorter than 8 chars
+  # are skipped — redacting a short string would shred unrelated output.
+  BOUCLE_SCRUB_CF="${SCRUBBED_CF_TOKEN:-}" awk '
+    function lit_replace(s, find, repl,   out, p) {
+      out = ""
+      while ((p = index(s, find)) > 0) {
+        out = out substr(s, 1, p - 1) repl
+        s = substr(s, p + length(find))
+      }
+      return out s
+    }
+    BEGIN {
+      n = split("BOUCLE_LLM_API_KEY BOUCLE_FALLBACK_API_KEY BOUCLE_TOKEN BOUCLE_BOT_TOKEN BOUCLE_SCRUB_CF CLOUDFLARE_API_TOKEN", names, " ")
+    }
+    {
+      line = $0
+      for (i = 1; i <= n; i++) {
+        v = ENVIRON[names[i]]
+        if (length(v) >= 8) line = lit_replace(line, v, "[REDACTED:" names[i] "]")
+      }
+      # Token shapes that may arrive from anywhere (a forge CLI trace, a
+      # provider error body). Prefix-anchored so ordinary words survive.
+      gsub(/gh[pousr]_[A-Za-z0-9]+/, "[REDACTED:github-token]", line)
+      gsub(/glpat-[A-Za-z0-9_-]+/, "[REDACTED:gitlab-pat]", line)
+      gsub(/sk-[A-Za-z0-9._-]+/, "[REDACTED:api-key]", line)
+      gsub(/[Bb]earer +[A-Za-z0-9._-]+/, "Bearer [REDACTED]", line)
+      print line
+    }
+  ' "$log" > "${log}.scrubbed" 2> /dev/null \
+    && mv "${log}.scrubbed" "$log" \
+    || rm -f "${log}.scrubbed" 2> /dev/null || true
+}
+
+scrub_agent_log "$AGENT_LOG"
 
 # ── 5a. Empty-output guard (silent-failure detection) ─────────────────
 # If the agent produced NO posted comment AND NO drafted triage comment
@@ -927,6 +1267,74 @@ cat >> "$ITERATIONS_FILE" << EOF
 - Files touched: ${FILES_TOUCHED:-none}
 - Side effect asserted: <see job assertion>
 EOF
+
+# ── 7b. Cost accounting (#35) ─────────────────────────────────────────
+# Boucle's pitch is a 9.9x cost advantage over Claude Code (docs/cost-
+# benchmark.md), and until now a user could not verify that on their own
+# repository: the number lived in the README, not in the product.
+#
+# Best-effort by design. Providers report usage inconsistently and some not
+# at all; a missing count records "n/a" and the run continues. Fabricating a
+# number would be worse than reporting none.
+extract_token_usage() {
+  local log="$1" field="$2"
+  [ -f "$log" ] || return 0
+  grep -oE "\"?${field}\"?[[:space:]]*[:=][[:space:]]*[0-9]+" "$log" 2> /dev/null \
+    | grep -oE '[0-9]+$' \
+    | awk '{ s += $1 } END { if (NR > 0) print s }'
+}
+
+# Append one entry per agent invocation. The accumulator survives across
+# iterations exactly like iterations.md, so a re-run adds to the total
+# instead of overwriting it.
+record_cost() {
+  local pt ct cost="" model_used="$MODEL" provider_used="$PROVIDER_PROFILE"
+  pt=$(extract_token_usage "$AGENT_LOG" "prompt_tokens")
+  ct=$(extract_token_usage "$AGENT_LOG" "completion_tokens")
+  [ -z "$pt" ] && pt=$(extract_token_usage "$AGENT_LOG" "input_tokens")
+  [ -z "$ct" ] && ct=$(extract_token_usage "$AGENT_LOG" "output_tokens")
+
+  # A run that fell back is attributed to the fallback model, not the
+  # primary — otherwise the breakdown blames the wrong provider.
+  if [ -n "${FALLBACK_USED:-}" ]; then
+    model_used="${FALLBACK_MODEL:-$MODEL}"
+    provider_used="${FALLBACK_PROVIDER:-$PROVIDER_PROFILE}"
+  fi
+
+  # Dollars only when the consumer supplied a price table. Provider prices
+  # drift and boucle is provider-agnostic: hardcoding them in the engine
+  # would produce confident wrong numbers.
+  if [ -n "${BOUCLE_PRICING_JSON:-}" ] && [ -n "$pt$ct" ]; then
+    cost=$(echo "${BOUCLE_PRICING_JSON}" \
+      | jq -r --arg m "$model_used" --argjson p "${pt:-0}" --argjson c "${ct:-0}" \
+        '(.[$m] // empty) as $x | if $x then (($p / 1000000) * ($x.in // 0) + ($c / 1000000) * ($x.out // 0)) else "" end' \
+        2> /dev/null || echo "")
+    [ "$cost" = "null" ] && cost=""
+  fi
+
+  echo "[boucle:metrics] role=$ROLE iteration=$ITERATION model=$model_used prompt_tokens=${pt:-n/a} completion_tokens=${ct:-n/a} cost_usd=${cost:-n/a}" >&2
+
+  local file="$STATE_DIR/cost.json"
+  [ -s "$file" ] || echo '{"entries":[]}' > "$file" 2> /dev/null || return 0
+  local tmp="${file}.tmp"
+  if jq --arg role "$ROLE" --arg model "$model_used" --arg provider "$provider_used" \
+    --arg iter "$ITERATION" --arg pt "${pt:-}" --arg ct "${ct:-}" --arg cost "${cost:-}" \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '.entries += [{
+       timestamp: $ts, role: $role, iteration: ($iter | tonumber? // $iter),
+       model: $model, provider: $provider,
+       prompt_tokens: ($pt | if . == "" then null else tonumber end),
+       completion_tokens: ($ct | if . == "" then null else tonumber end),
+       cost_usd: ($cost | if . == "" then null else tonumber end)
+     }]' "$file" > "$tmp" 2> /dev/null; then
+    mv "$tmp" "$file"
+  else
+    rm -f "$tmp" 2> /dev/null || true
+    echo "[boucle] WARN: could not append to $file — cost accounting skipped for this run" >&2
+  fi
+}
+
+record_cost || true
 
 # ── 8. Assert declared side effect ────────────────────────────────────
 # The job (not bin/jc) asserts the side effect after this script exits.

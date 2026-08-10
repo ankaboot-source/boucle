@@ -45,16 +45,59 @@ boucle_ci_worker() {
   # ── Fetch latest default branch ──────────────────────────────────
   git fetch origin "$BOUCLE_DEFAULT_BRANCH"
 
-  # ── Branch checkout (preserve prior worker commits) ──────────────
+  # ── Retry strategy: classify the previous iteration (#44) ────────
+  # Boucle always retried CUMULATIVELY: prior worker commits were rebased
+  # and kept. That is right after a reviewer FAIL — the fix is incremental
+  # and discarding valid work would burn iterations re-doing it.
+  #
+  # It is wrong after a contamination failure. A run that exhausted its step
+  # budget still gets a safety-net commit (see below), so the half-written
+  # tree becomes DURABLE on the branch, and iteration N+1 spends its budget
+  # working out what the previous run was in the middle of instead of
+  # implementing. That is the compounding-error case a Ralph-style loop
+  # resets to avoid.
+  #
+  # Boucle already gets the rest of that cycle for free: every iteration is
+  # a fresh CI job and a fresh agent process, so no conversation is carried.
+  # Only the worktree was missing.
+  local retry_strategy="${BOUCLE_RETRY_STRATEGY:-adaptive}"
+  local prev_outcome=""
+  if [ -f "$ISSUE_STATE_CACHE/last-outcome" ]; then
+    prev_outcome=$(cat "$ISSUE_STATE_CACHE/last-outcome" 2> /dev/null || echo "")
+  fi
+  local want_reset=0
+  case "$retry_strategy" in
+    preserve) want_reset=0 ;;
+    reset) want_reset=1 ;;
+    adaptive) [ "$prev_outcome" = "no-changes" ] && want_reset=1 ;;
+    *)
+      echo "[boucle] WARN: unknown BOUCLE_RETRY_STRATEGY='$retry_strategy' — using 'preserve' (never destroys work)."
+      retry_strategy="preserve"
+      ;;
+  esac
+  echo "[boucle] retry strategy=$retry_strategy previous_outcome=${prev_outcome:-none} reset=$want_reset"
+
+  # ── Branch checkout ──────────────────────────────────────────────
   BRANCH="boucle/$BOUCLE_ISSUE"
+  DISCARDED_SHA=""
+  DISCARDED_TAG=""
   if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
     git checkout "$BRANCH"
     if git log --oneline "origin/$BOUCLE_DEFAULT_BRANCH..$BRANCH" 2> /dev/null | grep -q .; then
-      echo "[boucle] Branch has prior worker commits — rebasing onto origin/$BOUCLE_DEFAULT_BRANCH to preserve work."
-      if ! git rebase "origin/$BOUCLE_DEFAULT_BRANCH"; then
-        echo "[boucle] Rebase conflicted — resetting to origin/$BOUCLE_DEFAULT_BRANCH (prior work lost)."
-        git rebase --abort 2> /dev/null || true
+      if [ "$want_reset" -eq 1 ]; then
+        # Never lose work silently: the discarded head is tagged and named
+        # in an issue comment below, once git credentials are configured.
+        DISCARDED_SHA=$(git rev-parse HEAD 2> /dev/null || echo "")
+        DISCARDED_TAG="boucle/$BOUCLE_ISSUE/discarded-$(date -u +%Y%m%d%H%M%S)"
+        echo "[boucle] Previous iteration shipped no code (contaminated tree) — resetting to origin/$BOUCLE_DEFAULT_BRANCH. Discarded head: ${DISCARDED_SHA:-unknown}"
         git reset --hard "origin/$BOUCLE_DEFAULT_BRANCH"
+      else
+        echo "[boucle] Branch has prior worker commits — rebasing onto origin/$BOUCLE_DEFAULT_BRANCH to preserve work."
+        if ! git rebase "origin/$BOUCLE_DEFAULT_BRANCH"; then
+          echo "[boucle] Rebase conflicted — resetting to origin/$BOUCLE_DEFAULT_BRANCH (prior work lost)."
+          git rebase --abort 2> /dev/null || true
+          git reset --hard "origin/$BOUCLE_DEFAULT_BRANCH"
+        fi
       fi
     else
       git reset --hard "origin/$BOUCLE_DEFAULT_BRANCH"
@@ -74,6 +117,19 @@ boucle_ci_worker() {
   git config user.email "bot@ankaboot.dev"
   git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
   git remote set-url origin "https://${BOUCLE_BOT_USERNAME:-up-bot}:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${BOUCLE_PROJECT_PATH}.git"
+
+  # ── Publish the discarded head (#44) ─────────────────────────────
+  # A reset that cannot be inspected afterwards is a data-loss bug. The tag
+  # is pushed so the commits survive the force-push of the reset branch.
+  # Best-effort: failing to tag must not stop the run.
+  if [ -n "$DISCARDED_SHA" ] && [ -n "$DISCARDED_TAG" ]; then
+    if git tag -f "$DISCARDED_TAG" "$DISCARDED_SHA" 2> /dev/null \
+      && git push -f origin "refs/tags/$DISCARDED_TAG" 2> /dev/null; then
+      forge_issue_note "$BOUCLE_ISSUE" "♻️ Previous iteration shipped no code, so the worker restarted from a clean \`$BOUCLE_DEFAULT_BRANCH\` instead of building on a half-written tree. The discarded work is kept at tag \`$DISCARDED_TAG\` (\`${DISCARDED_SHA:0:8}\`).$(job_link)"
+    else
+      echo "[boucle] WARN: could not publish discarded head $DISCARDED_SHA as $DISCARDED_TAG"
+    fi
+  fi
 
   # ── Seed state.md on first run ───────────────────────────────────
   if [ ! -f ".boucle-state/$BOUCLE_ISSUE/state.md" ]; then
@@ -245,18 +301,27 @@ EOF
       local nochg_title="feat: worker iteration $ITERATION — no code changes yet (#$BOUCLE_ISSUE)"
       forge_mr_update "$existing_mr_iid" "$nochg_title" ""
     fi
+    # Record the outcome so the NEXT iteration can classify this failure
+    # (#44). A step-exhausted run leaves a half-written tree that the
+    # safety-net commit makes durable on the branch; iteration N+1 would
+    # otherwise inherit it and spend its budget working out what happened.
+    mkdir -p "$BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE" 2> /dev/null || true
+    echo "no-changes" > "$BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE/last-outcome" 2> /dev/null || true
     if [ "$ITERATION" -lt "$max_iter" ]; then
       echo "WARN: worker produced no changes — re-triggering (iteration $((ITERATION + 1))/$max_iter)." >&2
       set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-      forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker produced no code changes on iteration $ITERATION (agent likely exhausted its step budget). Re-running (iteration $((ITERATION + 1))/$max_iter)."
+      forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker produced no code changes on iteration $ITERATION (agent likely exhausted its step budget). Re-running (iteration $((ITERATION + 1))/$max_iter).$(job_link)"
       chain_to_role "$BOUCLE_ISSUE" "worker" "BOUCLE_ITERATION=$((ITERATION + 1))"
     else
       echo "Escalating to human — worker produced no changes after $max_iter attempts." >&2
       set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-      forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker produced no code changes after $max_iter attempts. The agent may be unable to implement this issue within its step budget. Human intervention needed."
+      forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker produced no code changes after $max_iter attempts. The agent may be unable to implement this issue within its step budget. Human intervention needed.$(job_link)"
     fi
     exit 1
   fi
+
+  # The worker shipped code: the next iteration must PRESERVE this work.
+  echo "committed" > ".boucle/$BOUCLE_ISSUE/last-outcome" 2> /dev/null || true
 
   # ── Rebase before build ──────────────────────────────────────────
   git fetch origin "$BOUCLE_DEFAULT_BRANCH"
@@ -275,12 +340,12 @@ EOF
       fi
       echo "Re-triggering worker (iteration $((ITERATION + 1))/$max_iter)." >&2
       set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-      forge_issue_note "$BOUCLE_ISSUE" "🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh $BOUCLE_DEFAULT_BRANCH (iteration $((ITERATION + 1))/$max_iter)."
+      forge_issue_note "$BOUCLE_ISSUE" "🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh $BOUCLE_DEFAULT_BRANCH (iteration $((ITERATION + 1))/$max_iter).$(job_link)"
       chain_to_role "$BOUCLE_ISSUE" "worker" "BOUCLE_ITERATION=$((ITERATION + 1))"
     else
       echo "Escalating to human — iteration cap ($max_iter) reached after repeated rebase conflicts." >&2
       set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-      forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker could not rebase onto $BOUCLE_DEFAULT_BRANCH (conflict) after $max_iter attempts. Master keeps advancing. Human intervention needed."
+      forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker could not rebase onto $BOUCLE_DEFAULT_BRANCH (conflict) after $max_iter attempts. Master keeps advancing. Human intervention needed.$(job_link)"
     fi
     exit 1
   fi
@@ -388,9 +453,15 @@ EOF
   if [ -n "$preview_url" ]; then
     preview_line="Preview: $preview_url"
   fi
+  # Cost breakdown (#35): empty until an agent run reported usage, so the
+  # description is unchanged on providers that report none. Only added on
+  # runs that ship code — lesson #24 keeps no-changes runs from clobbering
+  # a useful description, and lesson #19 wants it refreshed otherwise.
+  local cost_block
+  cost_block=$(boucle_cost_summary "$BOUCLE_ISSUE" || true)
   local mr_description
-  mr_description=$(printf '## Issue #%s — iteration %s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s_ | mode: deploy=%s review=%s' \
-    "$BOUCLE_ISSUE" "$ITERATION" "$preview_line" "${commit_summary:-(no commits)}" "${approach:-(not recorded)}" "$BOUCLE_ISSUE" "$commit_count" "$ITERATION" "$(boucle_deploy_mode)" "$(boucle_review_mode)")
+  mr_description=$(printf '## Issue #%s — iteration %s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s_ | mode: deploy=%s review=%s' \
+    "$BOUCLE_ISSUE" "$ITERATION" "$preview_line" "${commit_summary:-(no commits)}" "${approach:-(not recorded)}" "$cost_block" "$BOUCLE_ISSUE" "$commit_count" "$ITERATION" "$(boucle_deploy_mode)" "$(boucle_review_mode)")
 
   # ── MR create or update ──────────────────────────────────────────
   local mr_iid

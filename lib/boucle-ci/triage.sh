@@ -374,13 +374,53 @@ boucle_ci_triage() {
             #    NODE_PATH=/tmp/node_modules so the script (bin/) resolves
             #    the modules installed in /tmp.
             PREVIEW_PNG="$BOUCLE_WORKSPACE/.boucle/$IID/preview.png"
-            if NODE_PATH=/tmp/node_modules node "$BOUCLE_WORKSPACE/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2> /dev/null; then
-              # 4. Upload the PNG via the forge contract. The backend
+            #    The renderer emits one PNG per BOUCLE_PREVIEW_VIEWPORTS
+            #    entry (default: one phone, one desktop) and prints each
+            #    path on stdout. A spec approved on a desktop-only shot
+            #    hides exactly the class of regression this audience
+            #    cannot read from a diff.
+            RENDERED_PNGS=$(NODE_PATH=/tmp/node_modules node "$BOUCLE_WORKSPACE/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2> /dev/null || true)
+            if [ -n "$RENDERED_PNGS" ]; then
+              # 4. Upload each PNG via the forge contract. The backend
               #    returns the embeddable path (GitLab: /uploads/...;
               #    GitHub: no upload API → empty, handled below).
-              IMG_PATH=$(forge_attachment_upload "$IID" "$PREVIEW_PNG" "preview.png" 2> /dev/null || true)
+              #    Total bytes respect BOUCLE_IMAGE_TOTAL_MAX_BYTES: N
+              #    viewports must not blow the per-issue attachment budget.
               IMG_URL=""
-              [ -n "$IMG_PATH" ] && IMG_URL="![Aperçu](${IMG_PATH})"
+              PREVIEW_BYTES=0
+              PREVIEW_MAX="${BOUCLE_IMAGE_TOTAL_MAX_BYTES:-52428800}"
+              while IFS= read -r png; do
+                [ -s "$png" ] || continue
+                png_size=$(wc -c < "$png" 2> /dev/null || echo 0)
+                if [ "$((PREVIEW_BYTES + png_size))" -gt "$PREVIEW_MAX" ]; then
+                  echo "[boucle] WARN: viewport $(basename "$png") skipped — would exceed BOUCLE_IMAGE_TOTAL_MAX_BYTES"
+                  continue
+                fi
+                # "preview-390x844.png" → "390x844" → a label the human reads.
+                dims=$(basename "$png" .png | sed 's/^.*-//')
+                width=${dims%%x*}
+                case "$width" in
+                  '' | *[!0-9]*) label="$dims" ;;
+                  *)
+                    if [ "$width" -lt 600 ]; then
+                      label="📱 Mobile ($dims)"
+                    elif [ "$width" -lt 1024 ]; then
+                      label="📲 Tablet ($dims)"
+                    else
+                      label="🖥️ Desktop ($dims)"
+                    fi
+                    ;;
+                esac
+                img_path=$(forge_attachment_upload "$IID" "$png" "$(basename "$png")" 2> /dev/null || true)
+                if [ -n "$img_path" ]; then
+                  PREVIEW_BYTES=$((PREVIEW_BYTES + png_size))
+                  IMG_URL="${IMG_URL}**${label}**
+
+![Aperçu ${dims}](${img_path})
+
+"
+                fi
+              done <<< "$RENDERED_PNGS"
 
               if [ -n "$IMG_URL" ]; then
                 # 5. Fetch the existing comment, insert Aperçu right after

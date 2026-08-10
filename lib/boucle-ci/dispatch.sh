@@ -487,6 +487,13 @@ boucle_ci_dispatch() {
 
   SHOULD_TRIAGE=false
   SHOULD_WORK=false
+  # The status board (#36) is boucle's own artefact, not work. Creating it
+  # fires an issue webhook like any other; without this guard the dispatcher
+  # would triage the board and the loop would start working on itself.
+  if echo "$LABELS" | tr ',' '\n' | grep -qx "boucle:board"; then
+    echo "Issue #$IID is the boucle status board — never dispatched."
+    exit 0
+  fi
   if echo "$LABELS" | grep -q "boucle:triage"; then
     SHOULD_TRIAGE=true
   elif echo "$LABELS" | grep -q "boucle:needs-info"; then

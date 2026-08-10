@@ -18,7 +18,7 @@ boucle_ci_merger() {
   if [ -z "$MR_IID" ]; then
     echo "FAIL: no open MR found for issue #$BOUCLE_ISSUE (branch boucle/$BOUCLE_ISSUE)" >&2
     set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-    forge_issue_note "$BOUCLE_ISSUE" "⚠️ Merger could not find an open MR for branch boucle/$BOUCLE_ISSUE. Human intervention needed."
+    forge_issue_note "$BOUCLE_ISSUE" "⚠️ Merger could not find an open MR for branch boucle/$BOUCLE_ISSUE. Human intervention needed.$(job_link)"
     exit 1
   fi
 
@@ -92,7 +92,7 @@ boucle_ci_merger() {
   elif [ "$MERGE_STATUS" != "mergeable" ]; then
     echo "FAIL: MR !${MR_IID} not mergeable after rebase (status: $MERGE_STATUS)" >&2
     set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-    forge_issue_note "$BOUCLE_ISSUE" "⚠️ MR !${MR_IID} is not mergeable after rebase (status: $MERGE_STATUS). Human intervention needed."
+    forge_issue_note "$BOUCLE_ISSUE" "⚠️ MR !${MR_IID} is not mergeable after rebase (status: $MERGE_STATUS). Human intervention needed.$(job_link)"
     exit 1
   fi
 
