@@ -124,6 +124,7 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_PROVIDER_PROFILE` | `boucle` | jcode provider profile name. |
 | `BOUCLE_IMAGE_MAX_BYTES` | `10485760` | Max bytes per attachment (10 MiB). |
 | `BOUCLE_IMAGE_TOTAL_MAX_BYTES` | `52428800` | Max total bytes per issue (50 MiB). |
+| `BOUCLE_RETRY_STRATEGY` | `adaptive` | Worktree handling on a worker re-run: `adaptive` (reset only after a contamination failure), `preserve` (always keep prior commits), `reset` (always start clean). |
 | `BOUCLE_QUOTA_PROBE` | `true` | Ask the provider whether it can answer before spinning up an agent run. |
 | `BOUCLE_QUOTA_PROBE_TTL` | `300` | Seconds a probe result is reused, so parallel jobs probe once. |
 | `BOUCLE_NOTIFY_URL` | *(empty)* | Send-only webhook for human gates and escalations. Empty = disabled. Set as a **masked** variable. |
@@ -149,6 +150,28 @@ with the two scopes is the simplest).
 **missing, invalid, or expired PAT fails setup with an explicit message** —
 the loop never runs half-configured. Renew the PAT and re-run `bin/setup`
 (idempotent) when the stored token expires.
+
+## Retry strategy
+
+Boucle already gets most of a Ralph-style recovery cycle for free: every
+iteration is a fresh CI job and a fresh agent process, so no conversation
+survives, and `iterations.md` carries the failure trace forward. The one
+piece that was missing is the worktree reset.
+
+| Previous iteration ended with | `adaptive` does | Why |
+|---|---|---|
+| A reviewer FAIL (code was shipped) | **Preserve** and rebase | The fix is incremental; discarding valid work burns iterations re-doing it |
+| No code changes / step budget exhausted | **Reset** to the default branch | The safety-net commit makes the half-written tree durable, so N+1 would spend its budget working out what N was in the middle of |
+
+`preserve` reproduces the old behaviour, `reset` always starts clean, and an
+unknown value falls back to `preserve` — which never destroys work.
+
+**A reset never loses work silently.** The discarded head is tagged
+`boucle/<issue>/discarded-<timestamp>`, the tag is pushed so the commits
+survive the branch force-push, and the tag is named in an issue comment.
+`state.md` and `iterations.md` survive untouched — they are restored from
+the state cache after checkout. Only the *code* is discarded; the notes on
+why the previous attempt failed are exactly what the fresh run needs.
 
 ## Provider probe
 
