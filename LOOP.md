@@ -155,6 +155,34 @@ with the two scopes is the simplest).
 the loop never runs half-configured. Renew the PAT and re-run `bin/setup`
 (idempotent) when the stored token expires.
 
+## Configuration audit
+
+`bin/doctor --audit` is read-only and forge-independent: it checks that the
+**configuration** is coherent, which is the class of problem otherwise
+discovered mid-loop, one failed run at a time.
+
+```
+$ bin/doctor --audit
+  ✗ BLOCKER  BOUCLE_DEPLOY_MODE=external without BOUCLE_LIVE_URL
+             → external mode never deploys, so e2e has no target. Set BOUCLE_LIVE_URL at …
+
+Readiness: 54/100  (1 blocker(s), 0 degraded, 2 advisory)
+```
+
+| Severity | Meaning | Weight |
+|---|---|---:|
+| **blocker** | The loop cannot complete | −40 |
+| **degraded** | Works, silently wrong (an inert fallback, a re-trigger that fires mid-job) | −15 |
+| **advisory** | Worth knowing (a UTC quiet window, a missing visual charter) | −3 |
+
+Blockers dominate on purpose: a repository that cannot complete a loop must
+not score well because everything else is tidy. A blocker exits non-zero, so
+the audit works as a CI check.
+
+`bin/setup` prints it on completion — you learn what is missing before the
+first issue, not during it. It never fails the install: a blocker there is a
+variable you set in the forge UI afterwards.
+
 ## Doctor cadence
 
 The doctor ran on a fixed schedule and always performed the full sweep — on

@@ -1238,4 +1238,14 @@ else
   fi
 fi
 
+# ── Configuration readiness (#41) ─────────────────────────────────────
+# Print the audit here so a fresh install reports what is still missing
+# BEFORE the first issue, rather than one failed run at a time. Never fails
+# the install: setup has already done its work, and a blocker here is a
+# variable the operator sets in the forge UI afterwards.
+if [ -x "$(dirname "$0")/doctor" ]; then
+  echo ""
+  "$(dirname "$0")/doctor" --audit || true
+fi
+
 exit 0
