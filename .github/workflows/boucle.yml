@@ -226,6 +226,19 @@ jobs:
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
           bin/boucle-ci triage
+      # Agent transcript (#33). if: always() is the point — a failed run is
+      # exactly the one whose transcript gets read. bin/jc redacts secrets
+      # from the log before every exit path, so this is safe to upload.
+      - name: Upload agent transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boucle-agent-log-triage-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .boucle/**/agent-output.log
+            .boucle-state/**/agent-output.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   # ── worker: implement on branch boucle/<iid> ─────────────────────────────────
   worker:
@@ -259,6 +272,16 @@ jobs:
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
           bin/boucle-ci worker
+      - name: Upload agent transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boucle-agent-log-worker-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .boucle/**/agent-output.log
+            .boucle-state/**/agent-output.log
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Save boucle state cache
         if: always()
         uses: actions/cache/save@v4
@@ -287,6 +310,16 @@ jobs:
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
           bin/boucle-ci reviewer
+      - name: Upload agent transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boucle-agent-log-reviewer-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .boucle/**/agent-output.log
+            .boucle-state/**/agent-output.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   # ── merger: rebase + merge PR (serial) ────────────────────────────────────────
   merger:
@@ -386,6 +419,16 @@ jobs:
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
           bin/boucle-ci e2e
+      - name: Upload agent transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boucle-agent-log-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .boucle/**/agent-output.log
+            .boucle-state/**/agent-output.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   # ── doctor: periodic recovery (schedule) ──────────────────────────────────────
   doctor:
