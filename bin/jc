@@ -809,7 +809,7 @@ Issue body: NOT available — fetch it via \`bin/forge-note issue ${ISSUE}\` or 
       fi
       if [ -n "$feedback" ]; then
         prompt="${prompt}
-Prior MR discussion (reviewer verdicts + human comments, oldest first — human comments AMEND the spec and take precedence over the frozen acceptance criteria in state.md):
+Prior MR discussion (reviewer verdicts + human comments, oldest first — human comments AMEND the spec and take precedence over the frozen acceptance criteria in state.md). You MUST enumerate every human amendment below and verify it is addressed in the deployed code; any human amendment NOT addressed is a FAIL, even if the original criteria are satisfied:
 ---
 ${feedback}
 ---
