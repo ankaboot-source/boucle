@@ -316,12 +316,6 @@ the loop reassigns issues to it automatically.
 - [ ] **servo rendering** — migrate preview rendering from Puppeteer to
       [servo](https://github.com/servo/servo) (Rust-native, no Chromium)
 - [ ] **cost estimate** — per-issue token-cost estimate and tracking
-- [ ] **GitHub/GitLab Pages deploy recipes** — first-class
-      `BOUCLE_DEPLOY_PROVIDER=github-pages|gitlab-pages` publisher and
-      `bin/setup`/`bin/doctor` support (issue [#29](https://github.com/ankaboot-source/boucle/issues/29), W1.7)
-- [ ] **Pilot consumers** — install and run the loop on the first
-      non-Cloudflare, GitHub-hosted consumer repos (issue
-      [#29](https://github.com/ankaboot-source/boucle/issues/29), W4/W5)
 
 ## ⚖️ License
 
