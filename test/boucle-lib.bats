@@ -975,3 +975,100 @@ extract_job_link() {
   run grep -q 'job_link' lib/boucle-ci/merger.sh
   assert_success
 }
+
+# ── Send-only notification webhook (#34) ──────────────────────────────
+# The two gates that need a human (spec, MR) arrive in the forge's email
+# stream with the same weight as a label tweak. This pushes them out.
+# Send-only: boucle POSTs, nothing listens (CONTEXT.md §7 — no server).
+
+extract_notify() {
+  awk '
+    /^boucle_notify\(\) \{/ { p = 1 }
+    p { print }
+    p && /^}/ { exit }
+  ' lib/boucle.sh > "$1"
+}
+
+@test "notify: silent when BOUCLE_NOTIFY_URL is unset (default)" {
+  TMPF=$(mktemp)
+  extract_notify "$TMPF"
+  run bash -c "unset BOUCLE_NOTIFY_URL; source '$TMPF'; boucle_notify 42 'boucle:approval'"
+  assert_success
+  assert_output ""
+  rm -f "$TMPF"
+}
+
+@test "notify: an unreachable webhook warns and returns 0 (fail-open)" {
+  # A dead webhook must never block the loop — same rule as auto-update.
+  TMPF=$(mktemp)
+  extract_notify "$TMPF"
+  run bash -c "set -e; export BOUCLE_NOTIFY_URL='http://127.0.0.1:9/dead' BOUCLE_DND_ENABLED=false; source '$TMPF'; boucle_notify 42 'boucle:approval' 2>&1"
+  assert_success
+  assert_output --partial "webhook POST failed"
+  rm -f "$TMPF"
+}
+
+@test "notify: routine transitions are not notifiable" {
+  # Notifying every state change gets the channel muted within a day.
+  TMPF=$(mktemp)
+  extract_notify "$TMPF"
+  for label in boucle:working boucle:review boucle:todo boucle:done boucle:merging; do
+    run bash -c "export BOUCLE_NOTIFY_URL='http://127.0.0.1:9/dead' BOUCLE_DND_ENABLED=false; source '$TMPF'; boucle_notify 42 '$label' 2>&1"
+    assert_success
+    assert_output ""
+  done
+  rm -f "$TMPF"
+}
+
+@test "notify: BOUCLE_NOTIFY_EVENTS narrows which transitions fire" {
+  TMPF=$(mktemp)
+  extract_notify "$TMPF"
+  run bash -c "export BOUCLE_NOTIFY_URL='http://127.0.0.1:9/dead' BOUCLE_NOTIFY_EVENTS='approval' BOUCLE_DND_ENABLED=false; source '$TMPF'; boucle_notify 42 'boucle:spec-review' 2>&1"
+  assert_success
+  assert_output ""
+  run bash -c "export BOUCLE_NOTIFY_URL='http://127.0.0.1:9/dead' BOUCLE_NOTIFY_EVENTS='approval' BOUCLE_DND_ENABLED=false; source '$TMPF'; boucle_notify 42 'boucle:approval' 2>&1"
+  assert_success
+  assert_output --partial "webhook POST failed"
+  rm -f "$TMPF"
+}
+
+@test "notify: suppressed inside the DND window" {
+  # The point of a quiet window is not being contacted during it.
+  TMPF=$(mktemp)
+  extract_notify "$TMPF"
+  # 23:00 UTC sits inside the default 22:00-07:00 window.
+  NOW=$(date -u -d '2026-01-15 23:00:00' +%s 2> /dev/null || date -u -j -f '%Y-%m-%d %H:%M:%S' '2026-01-15 23:00:00' +%s)
+  run bash -c "export BOUCLE_HOME='$PWD' BOUCLE_NOTIFY_URL='http://127.0.0.1:9/dead' BOUCLE_DND_ENABLED=true BOUCLE_DND_TZ=UTC BOUCLE_DND_NOW=$NOW; source '$TMPF'; boucle_notify 42 'boucle:approval' 2>&1"
+  assert_success
+  assert_output --partial "inside the DND window"
+  refute_output --partial "webhook POST failed"
+  rm -f "$TMPF"
+}
+
+@test "notify: fires outside the DND window" {
+  TMPF=$(mktemp)
+  extract_notify "$TMPF"
+  NOW=$(date -u -d '2026-01-15 12:00:00' +%s 2> /dev/null || date -u -j -f '%Y-%m-%d %H:%M:%S' '2026-01-15 12:00:00' +%s)
+  run bash -c "export BOUCLE_HOME='$PWD' BOUCLE_NOTIFY_URL='http://127.0.0.1:9/dead' BOUCLE_DND_ENABLED=true BOUCLE_DND_TZ=UTC BOUCLE_DND_NOW=$NOW; source '$TMPF'; boucle_notify 42 'boucle:approval' 2>&1"
+  assert_success
+  assert_output --partial "webhook POST failed"
+  rm -f "$TMPF"
+}
+
+@test "notify: an unknown format warns and falls back to slack" {
+  TMPF=$(mktemp)
+  extract_notify "$TMPF"
+  run bash -c "export BOUCLE_NOTIFY_URL='http://127.0.0.1:9/dead' BOUCLE_NOTIFY_FORMAT=carrier-pigeon BOUCLE_DND_ENABLED=false; source '$TMPF'; boucle_notify 42 'boucle:approval' 2>&1"
+  assert_success
+  assert_output --partial "unknown BOUCLE_NOTIFY_FORMAT"
+  rm -f "$TMPF"
+}
+
+@test "notify: hooked on the transition, not on the state" {
+  # The doctor sweep re-applies labels that are already set. Notifying on
+  # presence rather than on change would re-fire on every sweep.
+  run grep -A3 'forge_issue_labels_set "\$iid" "\$merged"' lib/boucle.sh
+  assert_success
+  run bash -c "grep -B2 'boucle_notify \"\$iid\" \"\$new\"' lib/boucle.sh | grep -c 'grep -qx \"\$new\"'"
+  assert_output "1"
+}

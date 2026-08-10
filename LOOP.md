@@ -123,6 +123,9 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_PROVIDER_PROFILE` | `boucle` | jcode provider profile name. |
 | `BOUCLE_IMAGE_MAX_BYTES` | `10485760` | Max bytes per attachment (10 MiB). |
 | `BOUCLE_IMAGE_TOTAL_MAX_BYTES` | `52428800` | Max total bytes per issue (50 MiB). |
+| `BOUCLE_NOTIFY_URL` | *(empty)* | Send-only webhook for human gates and escalations. Empty = disabled. Set as a **masked** variable. |
+| `BOUCLE_NOTIFY_FORMAT` | `slack` | Payload envelope: `slack` (also Discord via a `/slack` endpoint), `ntfy`, `telegram`, `raw`. |
+| `BOUCLE_NOTIFY_EVENTS` | `spec-review,approval,human,blocked` | Which transitions fire a notification. |
 | `BOUCLE_REVIEW_ANCHORING` | `full` | How much of a prior reviewer verdict reaches the next review pass: `full`, `criteria-only`, `none`. See §Anti-anchored re-review. |
 | `BOUCLE_MAX_NOTE_CHARS` | `1500` | Per-note cap when a note thread is injected into a prompt. Every note survives — only its tail is elided. `0` disables trimming (escape hatch). |
 | `BOUCLE_MAX_PROMPT_CHARS` | `0` | Thread-level ceiling on the **assembled** prompt. `0` = disabled. See §Prompt budget. |
@@ -143,6 +146,41 @@ with the two scopes is the simplest).
 **missing, invalid, or expired PAT fails setup with an explicit message** —
 the loop never runs half-configured. Renew the PAT and re-run `bin/setup`
 (idempotent) when the stored token expires.
+
+## Notifications
+
+The loop is asynchronous by design — you are not meant to watch it. But the
+forge's own emails arrive with the same weight as any other repository
+activity, so the two moments that actually need you (spec gate, MR gate)
+look identical to a label tweak.
+
+Set `BOUCLE_NOTIFY_URL` and boucle POSTs to it on four transitions:
+`spec-review`, `approval`, `human`, `blocked`. Narrow the list with
+`BOUCLE_NOTIFY_EVENTS`. Routine transitions (`working`, `review`, `todo`,
+`done`, `merging`) never fire — a channel that pings on every state change
+gets muted within a day, which is worse than silence.
+
+**Send-only, on purpose.** `CONTEXT.md` §7 forbids a new frontend, a server,
+or a machine to keep running. boucle POSTs; nothing listens. To reply, you
+comment on the issue or the MR — the loop already reads those.
+
+| Format | Endpoint | Body |
+|---|---|---|
+| `slack` (default) | Slack incoming webhook, or a Discord webhook with `/slack` appended | `{"text": "…"}` |
+| `telegram` | `https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<ID>` | `{"text": "…"}` |
+| `ntfy` | `https://ntfy.sh/<topic>` | plain text |
+| `raw` | anything | `{"event","issue","title","url","waiting_for"}` |
+
+Two guarantees:
+
+- **Fail-open.** A webhook that times out, 404s or 500s logs a warning and
+  the job continues. A dead webhook must never block the loop.
+- **Silent during DND.** Notifications are suppressed inside the quiet
+  window — not being contacted is the entire point of it.
+
+Notifications fire on the **transition**, never on the state: the doctor
+sweep re-applies labels that are already set, and notifying on presence
+would re-fire on every sweep.
 
 ## Anti-anchored re-review
 

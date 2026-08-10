@@ -43,6 +43,109 @@ job_link() {
   printf '\n\n[🔍 Job log & agent transcript](%s) — the `agent-output.log` artifact shows what the agent actually did.' "$url"
 }
 
+# ── Outbound notification (send-only) ───────────────────────────────────
+
+# boucle_notify <iid> <new_label>
+#
+# The loop is asynchronous by design: the human is not meant to watch it.
+# But the forge's own email notifications are indistinguishable from any
+# other repository activity, so the two moments that actually need a human —
+# the spec gate and the MR gate — arrive with the same weight as a label
+# tweak. This pushes those, and escalations, to one webhook.
+#
+# SEND-ONLY on purpose. CONTEXT.md §7 forbids a new frontend, a server, or a
+# machine to keep running: boucle POSTs, nothing listens. The reply path
+# stays the forge comment, which the loop already reads.
+#
+# Silent by default (BOUCLE_NOTIFY_URL unset) and fail-open always: a dead
+# webhook logs a warning and returns 0. Same rule as auto-update — a
+# notification failure must never block the loop.
+boucle_notify() {
+  local iid="$1" label="$2"
+  local hook="${BOUCLE_NOTIFY_URL:-}"
+  [ -n "$hook" ] || return 0
+
+  # Only the transitions a human has to act on. Notifying every state change
+  # would get the channel muted within a day, which is worse than silence.
+  local event waiting
+  case "$label" in
+    boucle:spec-review)
+      event="spec-review"
+      waiting="Approve the spec (👍) or comment to amend it."
+      ;;
+    boucle:approval)
+      event="approval"
+      waiting="Review and approve the MR (👍) or comment on it."
+      ;;
+    boucle:human)
+      event="human"
+      waiting="The loop escalated — it needs you to unblock it."
+      ;;
+    boucle:blocked)
+      event="blocked"
+      waiting="Blocked on a dependency or a decision."
+      ;;
+    *) return 0 ;;
+  esac
+
+  local events="${BOUCLE_NOTIFY_EVENTS:-spec-review,approval,human,blocked}"
+  echo "$events" | tr ',' '\n' | grep -qx "$event" || return 0
+
+  # The whole point of a quiet window is not being contacted during it.
+  # bin/dnd exits 0 inside the window and handles BOUCLE_DND_ENABLED itself.
+  if [ -x "${BOUCLE_HOME:-}/bin/dnd" ] && "${BOUCLE_HOME}/bin/dnd" > /dev/null 2>&1; then
+    echo "[boucle:notify] suppressed ($event, #$iid) — inside the DND window" >&2
+    return 0
+  fi
+
+  # Title and URL are best-effort: a notification naming only the issue
+  # number still beats no notification.
+  local meta="" title="" issue_url=""
+  if command -v forge_issue_get > /dev/null 2>&1; then
+    meta=$(forge_issue_get "$iid" 2> /dev/null || echo "")
+  fi
+  if [ -n "$meta" ]; then
+    title=$(echo "$meta" | jq -r '.title // ""' 2> /dev/null || echo "")
+    issue_url=$(echo "$meta" | jq -r '.web_url // .html_url // ""' 2> /dev/null || echo "")
+  fi
+
+  local text="➰ boucle — ${event}
+#${iid} ${title:-(title unavailable)}
+${waiting}"
+  [ -n "$issue_url" ] && text="${text}
+${issue_url}"
+
+  local body content_type="application/json"
+  case "${BOUCLE_NOTIFY_FORMAT:-slack}" in
+    # Slack incoming webhooks; Discord accepts the same shape on a /slack
+    # endpoint. Telegram's sendMessage takes chat_id in the URL query.
+    slack | telegram)
+      body=$(jq -n --arg t "$text" '{text: $t}')
+      ;;
+    ntfy)
+      body="$text"
+      content_type="text/plain"
+      ;;
+    raw)
+      body=$(jq -n \
+        --arg e "$event" --arg i "$iid" --arg ti "$title" \
+        --arg u "$issue_url" --arg w "$waiting" \
+        '{event: $e, issue: $i, title: $ti, url: $u, waiting_for: $w}')
+      ;;
+    *)
+      echo "WARN: unknown BOUCLE_NOTIFY_FORMAT='${BOUCLE_NOTIFY_FORMAT}' — using slack." >&2
+      body=$(jq -n --arg t "$text" '{text: $t}')
+      ;;
+  esac
+
+  if ! curl -fsS --max-time 10 -X POST \
+    -H "Content-Type: $content_type" \
+    --data-binary "$body" "$hook" > /dev/null 2>&1; then
+    echo "WARN: [boucle:notify] webhook POST failed ($event, #$iid) — continuing. A dead webhook must never block the loop." >&2
+  fi
+  return 0
+}
+
 # ── Label management ────────────────────────────────────────────────────
 
 # set_boucle_label <iid> <new_detail_label> <gross_status_label>
@@ -65,6 +168,14 @@ set_boucle_label() {
   current_non_boucle=$(echo "$current_all" | tr ',' '\n' | grep -v '^boucle:' | tr '\n' ',' | sed 's/,$//')
   local merged="${current_non_boucle:+$current_non_boucle,}$new,$gross"
   forge_issue_labels_set "$iid" "$merged"
+  # Notify on the TRANSITION, never on the state. The doctor sweep re-applies
+  # labels that are already set (CONTEXT.md §8: the forge records an event on
+  # every PUT), so notifying on presence would re-fire on every sweep and get
+  # the channel muted. Hooked here rather than at the ~19 call sites so future
+  # transitions are covered by construction. Fail-open: never blocks the loop.
+  if ! echo "$current_all" | tr ',' '\n' | grep -qx "$new"; then
+    boucle_notify "$iid" "$new" || true
+  fi
   # When the issue moves to the bot side, assign it to the bot user so
   # the board reflects who owns the next action. Best-effort: skip
   # silently if BOUCLE_BOT_ID is unset (backward compat).
