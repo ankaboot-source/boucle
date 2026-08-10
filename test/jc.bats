@@ -989,3 +989,102 @@ extract_scrub() {
   [ -n "$guard_line" ]
   [ "$scrub_line" -lt "$guard_line" ]
 }
+
+# ── Anti-anchored re-review (#43) ─────────────────────────────────────
+# On iteration N the reviewer reads its own N-1 verdict, which invites
+# ratification (re-endorsing the prior reasoning, missing a regression the
+# fix introduced) and tunnel vision (re-checking only what failed before).
+
+extract_anchor() {
+  extract_func_body filter_mr_discussion "$1"
+}
+
+# A realistic MR thread: a human amendment, a bot verdict, a bot status note.
+anchor_fixture() {
+  printf '%s' '[human] AMENDMENT-KEEP-ME use https://example.org/v — do not substitute
+[up-bot] <!-- boucle:verdict v=1 role=reviewer sha=abc -->
+VERDICT: FAIL
+- [x] Header renders — verified via curl
+- [ ] Footer link present — RATIONALE-ANCHOR relative path 404s
+[up-bot] Master advanced since this branch was created.'
+}
+
+@test "anchoring: full is the default and changes nothing" {
+  TMPF=$(mktemp)
+  extract_anchor "$TMPF"
+  run bash -c "unset BOUCLE_REVIEW_ANCHORING; BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$(cat)\"" <<< "$(anchor_fixture)"
+  assert_success
+  assert_output --partial "RATIONALE-ANCHOR"
+  assert_output --partial "- [x] Header renders"
+  rm -f "$TMPF"
+}
+
+@test "anchoring: criteria-only keeps unmet criteria and drops the reasoning" {
+  TMPF=$(mktemp)
+  extract_anchor "$TMPF"
+  run bash -c "BOUCLE_REVIEW_ANCHORING=criteria-only BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$(cat)\"" <<< "$(anchor_fixture)"
+  assert_success
+  assert_output --partial "VERDICT: FAIL"
+  assert_output --partial "- [ ] Footer link present"
+  # The anchor itself is gone.
+  refute_output --partial "RATIONALE-ANCHOR"
+  # Met criteria are not re-listed either — the reviewer re-checks all of
+  # them from state.md, it is not handed a shortlist.
+  refute_output --partial "- [x] Header renders"
+  rm -f "$TMPF"
+}
+
+@test "anchoring: none withholds the verdict entirely" {
+  TMPF=$(mktemp)
+  extract_anchor "$TMPF"
+  run bash -c "BOUCLE_REVIEW_ANCHORING=none BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$(cat)\"" <<< "$(anchor_fixture)"
+  assert_success
+  refute_output --partial "VERDICT: FAIL"
+  refute_output --partial "RATIONALE-ANCHOR"
+  assert_output --partial "withheld"
+  rm -f "$TMPF"
+}
+
+@test "anchoring: human comments reach the reviewer in full under EVERY mode" {
+  # Human comments amend the spec and outrank the frozen criteria in
+  # state.md. Filtering one would be a spec regression, not a saving.
+  TMPF=$(mktemp)
+  extract_anchor "$TMPF"
+  for mode in full criteria-only none; do
+    out=$(BOUCLE_REVIEW_ANCHORING="$mode" BOUCLE_BOT_USERNAME=up-bot bash -c "source '$TMPF'; filter_mr_discussion \"\$1\"" _ "$(anchor_fixture)")
+    echo "$out" | grep -q "AMENDMENT-KEEP-ME use https://example.org/v — do not substitute" \
+      || { echo "mode=$mode lost the human amendment"; false; }
+  done
+  rm -f "$TMPF"
+}
+
+@test "anchoring: bot notes that are not verdicts pass through untouched" {
+  TMPF=$(mktemp)
+  extract_anchor "$TMPF"
+  run bash -c "BOUCLE_REVIEW_ANCHORING=none BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$(cat)\"" <<< "$(anchor_fixture)"
+  assert_success
+  assert_output --partial "Master advanced since this branch was created."
+  rm -f "$TMPF"
+}
+
+@test "anchoring: an unknown mode falls back to full instead of filtering blind" {
+  TMPF=$(mktemp)
+  extract_anchor "$TMPF"
+  run bash -c "BOUCLE_REVIEW_ANCHORING=typo BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$1\" 2>&1" _ "$(anchor_fixture)"
+  assert_success
+  assert_output --partial "WARN: unknown BOUCLE_REVIEW_ANCHORING"
+  assert_output --partial "RATIONALE-ANCHOR"
+  rm -f "$TMPF"
+}
+
+@test "anchoring: the worker still receives full verdict reasoning" {
+  # The worker must act on a FAIL, so it needs the why. Only the reviewer
+  # branch of build_prompt is filtered.
+  run bash -c "awk '/^    worker\\)/,/^    reviewer\\)/' bin/jc | grep -c filter_mr_discussion || true"
+  assert_output "0"
+}
+
+@test "anchoring: the reviewer prompt requires re-checking every criterion" {
+  run grep -q "Re-check EVERY acceptance criterion on every iteration" .jcode/agents/reviewer.md
+  assert_success
+}

@@ -123,6 +123,7 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_PROVIDER_PROFILE` | `boucle` | jcode provider profile name. |
 | `BOUCLE_IMAGE_MAX_BYTES` | `10485760` | Max bytes per attachment (10 MiB). |
 | `BOUCLE_IMAGE_TOTAL_MAX_BYTES` | `52428800` | Max total bytes per issue (50 MiB). |
+| `BOUCLE_REVIEW_ANCHORING` | `full` | How much of a prior reviewer verdict reaches the next review pass: `full`, `criteria-only`, `none`. See §Anti-anchored re-review. |
 | `BOUCLE_MAX_NOTE_CHARS` | `1500` | Per-note cap when a note thread is injected into a prompt. Every note survives — only its tail is elided. `0` disables trimming (escape hatch). |
 | `BOUCLE_MAX_PROMPT_CHARS` | `0` | Thread-level ceiling on the **assembled** prompt. `0` = disabled. See §Prompt budget. |
 | `BOUCLE_PROMPT_WARN_CHARS` | `0` | Log a warning above this assembled size without altering the prompt. `0` = never warn. |
@@ -142,6 +143,38 @@ with the two scopes is the simplest).
 **missing, invalid, or expired PAT fails setup with an explicit message** —
 the loop never runs half-configured. Renew the PAT and re-run `bin/setup`
 (idempotent) when the stored token expires.
+
+## Anti-anchored re-review
+
+On iteration N the reviewer reads its **own** iteration N-1 verdict. That
+invites two opposite failures:
+
+- **ratification** — the previous reasoning gets re-endorsed, and a
+  regression introduced *by* the fix slips through unexamined;
+- **tunnel vision** — only the previously failed criteria get re-checked.
+
+| `BOUCLE_REVIEW_ANCHORING` | What the reviewer sees of a prior verdict |
+|---|---|
+| `full` (default) | Everything — the verdict, met and unmet criteria, and the reasoning |
+| `criteria-only` | The `VERDICT:` line and the unmet `- [ ]` criteria, with the rationale stripped: what must still pass, not why it failed |
+| `none` | A placeholder; the verdict is withheld |
+
+Two things are never filtered, at any setting:
+
+- **Human comments.** They amend the spec and outrank the frozen criteria in
+  `state.md`. Withholding one is a spec regression, not a saving.
+- **Bot notes that are not verdicts** (CI status notes). They carry loop
+  context, not review reasoning.
+
+The **worker** always receives full verdict reasoning — it has to act on a
+FAIL, so it needs the why. Only the reviewer's own view is filtered.
+
+**The default is `full` on purpose.** Withholding prior verdicts is not
+obviously correct: a reviewer that forgets what it already rejected can
+flip-flop across iterations, and the worker then chases a moving target and
+burns the iteration cap. Turn on `criteria-only`, compare verdict stability
+across iterations on real issues, and only then decide. An unknown value
+falls back to `full` rather than filtering blind.
 
 ## Agent transcript
 

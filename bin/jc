@@ -522,6 +522,98 @@ BOUCLE_MR_ATTACHMENTS="${BOUCLE_MR_ATTACHMENTS:-}"
 # BOUCLE_BOT_NOTE_CHARS is set by the budget enforcer; it defaults to the
 # same value as BOUCLE_MAX_NOTE_CHARS, so nothing changes unless a ceiling
 # is configured AND exceeded.
+# ── Anti-anchored re-review (#43) ─────────────────────────────────────
+# On iteration N the reviewer reads its OWN iteration N-1 verdict. Two
+# failure modes follow, pulling in opposite directions:
+#   - ratification: the previous reasoning gets re-endorsed and a regression
+#     introduced BY the fix slips through unexamined;
+#   - tunnel vision: only the previously failed criteria are re-checked.
+#
+# BOUCLE_REVIEW_ANCHORING controls how much of a prior verdict survives:
+#   full          — everything (default, unchanged behaviour)
+#   criteria-only — the VERDICT line + unmet "- [ ]" criteria, reasoning
+#                   stripped: what still has to pass, not why it failed
+#   none          — verdicts replaced by a placeholder
+#
+# Two things are NEVER filtered:
+#   - human comments: they AMEND the spec and outrank the frozen criteria in
+#     state.md. A withheld human amendment is a spec regression.
+#   - bot notes that are not verdicts (CI status notes): they carry loop
+#     context, not review reasoning.
+#
+# Reviewer-only. The WORKER needs the full reasoning to act on a FAIL, so
+# build_prompt applies this to the reviewer branch alone.
+filter_mr_discussion() {
+  local text="$1"
+  local mode="${BOUCLE_REVIEW_ANCHORING:-full}"
+  if [ -z "$text" ] || [ "$mode" = "full" ]; then
+    printf '%s' "$text"
+    return 0
+  fi
+  case "$mode" in
+    criteria-only | none) ;;
+    *)
+      echo "WARN: unknown BOUCLE_REVIEW_ANCHORING='$mode' — falling back to 'full'." >&2
+      printf '%s' "$text"
+      return 0
+      ;;
+  esac
+  printf '%s\n' "$text" | awk -v mode="$mode" -v bot="${BOUCLE_BOT_USERNAME:-}" '
+    # A note is a verdict only if the boucle bot wrote it AND it carries a
+    # verdict marker. Everything else passes through untouched.
+    function is_verdict() { return (bot != "" && author == bot && seen_verdict) }
+    # Drop the rationale that follows the criterion. index() is byte-literal:
+    # the separator is an em dash (multi-byte UTF-8) and a bracket expression
+    # would mis-parse it under mawk.
+    function strip_reason(line,   p) {
+      p = index(line, " — ")
+      if (p > 0) return substr(line, 1, p - 1)
+      p = index(line, " -- ")
+      if (p > 0) return substr(line, 1, p - 1)
+      return line
+    }
+    # Author prefix alone, so the thread keeps its shape without carrying
+    # any of the withheld verdict.
+    function header_only(line,   p) {
+      p = index(line, "] ")
+      if (p > 0) return substr(line, 1, p)
+      return line
+    }
+    function flush(   i, line) {
+      if (n == 0) return
+      if (!is_verdict()) {
+        for (i = 1; i <= n; i++) print buf[i]
+      } else if (mode == "none") {
+        print header_only(buf[1]) " (previous reviewer verdict withheld — BOUCLE_REVIEW_ANCHORING=none)"
+      } else {
+        print header_only(buf[1])
+        for (i = 1; i <= n; i++) {
+          line = buf[i]
+          if (line ~ /^VERDICT:/) { print line; continue }
+          # Unmet criteria only, rationale removed: the reviewer is told what
+          # must still pass, not why it failed — that is the anchor.
+          if (line ~ /^- \[ \]/) print strip_reason(line)
+        }
+      }
+      n = 0; seen_verdict = 0
+    }
+    /^\[[^]]+\] / {
+      flush()
+      author = $0
+      sub(/^\[/, "", author)
+      sub(/\].*$/, "", author)
+      n = 1; buf[1] = $0
+      if ($0 ~ /boucle:verdict|VERDICT:/) seen_verdict = 1
+      next
+    }
+    {
+      if (n == 0) { n = 1; buf[1] = $0 } else { n++; buf[n] = $0 }
+      if ($0 ~ /boucle:verdict|VERDICT:/) seen_verdict = 1
+    }
+    END { flush() }
+  '
+}
+
 trim_notes() {
   local label="$1" text="$2"
   local max="${BOUCLE_MAX_NOTE_CHARS:-1500}"
@@ -691,8 +783,14 @@ ${BOUCLE_SIBLINGS}
       # BOUCLE_REVIEWER_FEEDBACK). Human comments MUST take precedence over
       # state.md. Trimmed per note: this thread carries the reviewer's own
       # prior verdicts, the single bulkiest re-billed block in the loop.
+      #
+      # Anchoring filter runs BEFORE trimming (#43): reducing a verdict to
+      # its unmet criteria removes far more than a tail elision would, and
+      # trimming a already-reduced note keeps the per-note cap meaningful.
+      # Human comments pass through both stages untouched.
       local feedback
-      feedback="$(trim_notes reviewer_feedback "${BOUCLE_REVIEWER_FEEDBACK:-}")"
+      feedback="$(filter_mr_discussion "${BOUCLE_REVIEWER_FEEDBACK:-}")"
+      feedback="$(trim_notes reviewer_feedback "$feedback")"
       prompt="Review the MR for issue #${ISSUE}. Test the deployed preview at \$BOUCLE_PREVIEW_URL. Post your verdict with the boucle:verdict marker.
 
 Verify content fidelity: the issue body below is the original spec. Check that the MR preserves the instructed content (URLs, citations, texts) verbatim — no placeholders, no rewrites, no substitutions. A MR that degrades instructed content is a FAIL even if it satisfies the latest amendments.
