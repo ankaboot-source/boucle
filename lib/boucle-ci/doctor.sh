@@ -90,7 +90,7 @@ boucle_ci_doctor() {
   # runner, and nothing is in flight to be stuck. The busy value is
   # unchanged and must keep exceeding the max job timeout.
   if [ "${BOUCLE_DOCTOR_ADAPTIVE:-true}" = "true" ]; then
-    IN_FLIGHT=$(forge_issue_count_by_label "boucle:working" 2> /dev/null || echo 1)
+    IN_FLIGHT=$(forge_issue_count_by_label "boucle:working" opened 2> /dev/null || echo 1)
     case "$IN_FLIGHT" in
       '' | *[!0-9]*) IN_FLIGHT=1 ;;
     esac
@@ -751,6 +751,11 @@ boucle_ci_doctor() {
       echo "  → #$IID: open sub-issue(s) #$OPEN_IIDS — parent stays open"
     fi
   done
+
+  # ── Scheduled maintenance issues (#39) ─────────────────────────────────
+  # Opt-in. Turns the doctor from purely inward-facing (healing state) into
+  # an entry point that can also produce work.
+  boucle_schedules_run || true
 
   # ── Status board (#36) ─────────────────────────────────────────────────
   # The sweep already holds the data; rendering it costs one read and, when

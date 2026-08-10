@@ -43,6 +43,216 @@ job_link() {
   printf '\n\n[🔍 Job log & agent transcript](%s) — the `agent-output.log` artifact shows what the agent actually did.' "$url"
 }
 
+# ── Scheduled maintenance issues (#39) ──────────────────────────────────
+
+# Boucle has exactly one entry point: a human creates an issue. Its only
+# scheduled job is inward-facing — the doctor heals state, it never produces
+# work. So recurring product maintenance (dependency bumps, accessibility
+# audits, dead-link sweeps) is work the loop is well suited for but can
+# never start on its own.
+#
+# Opt-in (BOUCLE_SCHEDULES_ENABLED, default false): a repository that writes
+# no template sees no behaviour change.
+
+# boucle_cron_field_matches <field> <value>
+# Supports "*", a number, a list "a,b,c", a range "a-b" and a step "*/n" —
+# the subset a maintenance schedule actually needs.
+boucle_cron_field_matches() {
+  local field="$1" value="$2" part
+  [ "$field" = "*" ] && return 0
+  case "$field" in
+    '*/'*)
+      local step="${field#*/}"
+      case "$step" in
+        '' | *[!0-9]*) return 1 ;;
+      esac
+      [ "$step" -eq 0 ] && return 1
+      [ $((value % step)) -eq 0 ] && return 0
+      return 1
+      ;;
+  esac
+  # Same globbing hazard as above when a field reaches the list branch.
+  local restore_glob=0
+  case "$-" in
+    *f*) ;;
+    *) restore_glob=1 ;;
+  esac
+  set -f
+  local IFS=','
+  for part in $field; do
+    case "$part" in
+      *-*)
+        local lo="${part%%-*}" hi="${part##*-}"
+        case "$lo$hi" in
+          '' | *[!0-9]*) continue ;;
+        esac
+        if [ "$value" -ge "$lo" ] && [ "$value" -le "$hi" ]; then
+          [ "$restore_glob" -eq 1 ] && set +f
+          return 0
+        fi
+        ;;
+      *)
+        if [ "$part" = "$value" ]; then
+          [ "$restore_glob" -eq 1 ] && set +f
+          return 0
+        fi
+        ;;
+    esac
+  done
+  [ "$restore_glob" -eq 1 ] && set +f
+  return 1
+}
+
+# boucle_cron_due <cron> — does this 5-field expression match now?
+#
+# Granularity is HOURLY on purpose: the doctor sweeps every few minutes, so
+# minute-level precision would fire a template several times inside its own
+# minute. The minute field is parsed and ignored; the caller enforces the
+# once-per-window rule with the last-fire check.
+boucle_cron_due() {
+  local cron="$1"
+  # Globbing MUST be off while splitting: an unquoted "*" field expands to
+  # the working directory's file list, and every expression silently stops
+  # having five fields.
+  local restore_glob=0
+  case "$-" in
+    *f*) ;;
+    *) restore_glob=1 ;;
+  esac
+  set -f
+  local -a fields
+  # shellcheck disable=SC2206
+  fields=($cron)
+  [ "$restore_glob" -eq 1 ] && set +f
+  [ "${#fields[@]}" -eq 5 ] || return 1
+  local hour dom mon dow
+  hour=$(date -u +%-H)
+  dom=$(date -u +%-d)
+  mon=$(date -u +%-m)
+  dow=$(date -u +%w)
+  boucle_cron_field_matches "${fields[1]}" "$hour" || return 1
+  boucle_cron_field_matches "${fields[2]}" "$dom" || return 1
+  boucle_cron_field_matches "${fields[3]}" "$mon" || return 1
+  boucle_cron_field_matches "${fields[4]}" "$dow" || return 1
+  return 0
+}
+
+# boucle_schedule_frontmatter <file> <key> — read one YAML frontmatter key.
+boucle_schedule_frontmatter() {
+  awk -v key="$2" '
+    NR == 1 && $0 == "---" { inside = 1; next }
+    inside && $0 == "---" { exit }
+    inside {
+      idx = index($0, ":")
+      if (idx == 0) next
+      k = substr($0, 1, idx - 1)
+      v = substr($0, idx + 1)
+      gsub(/^[ \t]+|[ \t]+$/, "", k)
+      gsub(/^[ \t]+|[ \t]+$/, "", v)
+      gsub(/^"|"$/, "", v)
+      if (k == key) { print v; exit }
+    }
+  ' "$1" 2> /dev/null || true
+}
+
+# boucle_schedule_body <file> — everything after the frontmatter.
+boucle_schedule_body() {
+  awk '
+    NR == 1 && $0 == "---" { inside = 1; next }
+    inside && $0 == "---" { inside = 0; started = 1; next }
+    started || (NR == 1 && $0 != "---") { print }
+  ' "$1" 2> /dev/null || true
+}
+
+# boucle_schedules_run — create issues for every template whose cron is due.
+#
+# Deduplication is FORGE-persisted, not cache-persisted: the last firing is
+# read from the most recent issue carrying the template's marker. A fresh
+# runner therefore cannot re-fire a template it already fired.
+boucle_schedules_run() {
+  [ "${BOUCLE_SCHEDULES_ENABLED:-false}" = "true" ] || return 0
+  local dir="${BOUCLE_WORKSPACE:-.}/.boucle/schedules"
+  [ -d "$dir" ] || return 0
+
+  # A cron must never starve human-created work.
+  local max_parallel="${BOUCLE_MAX_PARALLEL_ISSUES:-0}"
+  case "$max_parallel" in
+    '' | *[!0-9]*) max_parallel=0 ;;
+  esac
+  if [ "$max_parallel" -gt 0 ]; then
+    local in_flight
+    in_flight=$(forge_issue_count_by_label "boucle:working" opened 2> /dev/null || echo 0)
+    case "$in_flight" in
+      '' | *[!0-9]*) in_flight=0 ;;
+    esac
+    if [ "$in_flight" -ge "$max_parallel" ]; then
+      echo "  → schedules skipped: $in_flight issue(s) in flight, cap is $max_parallel"
+      return 0
+    fi
+  fi
+
+  local existing
+  existing=$(forge_issue_list_by_label "boucle:scheduled" all 2> /dev/null || echo "[]")
+
+  local file name cron title labels enabled body marker
+  for file in "$dir"/*.md; do
+    [ -f "$file" ] || continue
+    name=$(basename "$file" .md)
+    marker="<!-- boucle:schedule id=$name -->"
+
+    enabled=$(boucle_schedule_frontmatter "$file" enabled)
+    if [ "$enabled" = "false" ]; then
+      continue
+    fi
+    cron=$(boucle_schedule_frontmatter "$file" cron)
+    title=$(boucle_schedule_frontmatter "$file" title)
+    labels=$(boucle_schedule_frontmatter "$file" labels)
+    if [ -z "$cron" ] || [ -z "$title" ]; then
+      # A malformed template is skipped, never fatal: one bad file must not
+      # stop the others or fail the job (CONTEXT.md §7 fail-open).
+      echo "  → schedule '$name' skipped: missing cron or title"
+      continue
+    fi
+
+    boucle_cron_due "$cron" || continue
+
+    # Never a second issue while a previous one is still open.
+    local open_count
+    open_count=$(echo "$existing" | jq -r --arg m "$marker" \
+      '[.[] | select((.state // "opened") != "closed") | select((.description // .body // "") | contains($m))] | length' \
+      2> /dev/null || echo 0)
+    if [ "${open_count:-0}" -gt 0 ]; then
+      echo "  → schedule '$name' due but a previous issue is still open — skipping"
+      continue
+    fi
+
+    # A missed window fires once, not once per sweep.
+    local last_created age
+    last_created=$(echo "$existing" | jq -r --arg m "$marker" \
+      '[.[] | select((.description // .body // "") | contains($m)) | .created_at] | sort | last // ""' \
+      2> /dev/null || echo "")
+    if [ -n "$last_created" ]; then
+      age=$(($(date -u +%s) - $(date -u -d "$last_created" +%s 2> /dev/null || echo 0)))
+      if [ "$age" -lt 3600 ]; then
+        echo "  → schedule '$name' already fired ${age}s ago — skipping"
+        continue
+      fi
+    fi
+
+    body="$marker
+$(boucle_schedule_body "$file")"
+    local all_labels="boucle:triage,boucle:scheduled"
+    [ -n "$labels" ] && all_labels="${all_labels},${labels}"
+    local new_iid
+    new_iid=$(forge_issue_create "$title" "$body" "$all_labels" 2> /dev/null || echo "")
+    if [ -n "$new_iid" ]; then
+      echo "  → schedule '$name' fired: created #$new_iid"
+    else
+      echo "  → WARN: schedule '$name' due but issue creation failed"
+    fi
+  done
+}
+
 # ── Status board (#36) ──────────────────────────────────────────────────
 
 # boucle_board_render — the four sections of the board, as markdown.

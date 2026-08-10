@@ -108,6 +108,7 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_MAX_PARALLEL_ISSUES` | `5` | Max concurrent boucle:working issues (`0` = unlimited). |
 | `BOUCLE_MAX_ITERATIONS` | `3` | Max worker re-runs per issue before escalation. |
 | `BOUCLE_STALENESS_THRESHOLD` | `2400` | Seconds before a stuck issue is re-triggered (must exceed max job timeout, 30 min). |
+| `BOUCLE_SCHEDULES_ENABLED` | `false` | Opt-in: create issues from `.boucle/schedules/*.md` when their cron is due. |
 | `BOUCLE_BOARD_ENABLED` | `true` | Maintain a pinned status-board issue answering "what is waiting on me?". |
 | `BOUCLE_DOCTOR_ADAPTIVE` | `true` | Skip the full sweep when the board has not moved since the last check. |
 | `BOUCLE_DOCTOR_BACKSTOP` | `21600` | Seconds after which a full sweep runs regardless of the fingerprint (6 h). |
@@ -155,6 +156,31 @@ with the two scopes is the simplest).
 **missing, invalid, or expired PAT fails setup with an explicit message** —
 the loop never runs half-configured. Renew the PAT and re-run `bin/setup`
 (idempotent) when the stored token expires.
+
+## Scheduled maintenance issues
+
+Boucle has exactly one entry point: a human creates an issue. Its scheduled
+job is inward-facing — the doctor heals state, it never produces work. So
+recurring maintenance (dependency bumps, accessibility audits, dead-link
+sweeps) is work the loop suits but could never start on its own.
+
+Opt in with `BOUCLE_SCHEDULES_ENABLED=true` and drop templates in
+`.boucle/schedules/*.md` — an issue body with YAML frontmatter
+(`cron`, `title`, `labels`, `enabled`). When the cron is due, boucle creates
+the issue with `boucle:triage` and the normal loop owns it from there;
+nothing about it is special-cased downstream. See
+[docs/schedules-example.md](docs/schedules-example.md).
+
+- **Granularity is hourly.** The doctor sweeps every few minutes, so the
+  minute field is parsed and ignored. Times are UTC.
+- **Never a second issue while a previous one is open**, and a missed window
+  fires once rather than once per sweep. Deduplication reads the last firing
+  from the forge (a marker in the issue body), not from a runner cache — so
+  a fresh runner cannot re-fire a template it already fired.
+- **A cron cannot starve human work**: scheduled issues count against
+  `BOUCLE_MAX_PARALLEL_ISSUES` like any other.
+- **A malformed template is skipped with a warning**, never fatal, and never
+  blocks the other templates.
 
 ## Status board
 
