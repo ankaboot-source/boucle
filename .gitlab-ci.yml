@@ -790,6 +790,12 @@ dispatch:
               -f labels="${NON_BOUCLE:+$NON_BOUCLE,}boucle:todo,boucle::status::bot" > /dev/null
           fi
           chain_to_role "$MR_NOTE_ISSUE_IID" "worker" "BOUCLE_ITERATION=$MR_NOTE_ITERATION"
+          # Record the work in .boucle-issue so the anti-accumulation EXIT trap
+          # ($CI_PIPELINE_SOURCE == webhook, no .boucle-issue → exit 1) does NOT
+          # fail this job: this handler DID produce work (chained the worker).
+          # Without this, every human MR comment failed the dispatch job after
+          # successfully triggering the worker, flooding CI with red pipelines.
+          echo "$MR_NOTE_ISSUE_IID" > .boucle-issue
           exit 0
         fi
         IID=$(jq -r '.issue.iid // .work_item.iid // .epic.iid // empty' "$TRIGGER_PAYLOAD" 2>/dev/null) || true
