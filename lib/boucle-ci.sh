@@ -55,6 +55,13 @@ forge_init
 : "${BOUCLE_PIPELINE_SOURCE:=${CI_PIPELINE_SOURCE:-push}}"
 : "${BOUCLE_JOB_ID:=${CI_JOB_ID:-${GITHUB_RUN_ID:-0}}}"
 : "${BOUCLE_JOB_URL:=${CI_JOB_URL:-}}"
+# GitHub Actions exposes no per-job URL. The run URL is the closest
+# equivalent and lands the human on the job list with the artifacts panel —
+# which is where the agent transcript (#33) is. Without this the job link in
+# every escalation comment would be silently empty on GitHub.
+if [ -z "$BOUCLE_JOB_URL" ] && [ -n "${GITHUB_RUN_ID:-}" ]; then
+  BOUCLE_JOB_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-}/actions/runs/${GITHUB_RUN_ID}"
+fi
 : "${BOUCLE_TRIGGER_PAYLOAD:=${TRIGGER_PAYLOAD:-}}"
 : "${BOUCLE_BOT_USERNAME:=up-bot}"
 

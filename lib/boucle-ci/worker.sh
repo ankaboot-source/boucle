@@ -248,12 +248,12 @@ EOF
     if [ "$ITERATION" -lt "$max_iter" ]; then
       echo "WARN: worker produced no changes — re-triggering (iteration $((ITERATION + 1))/$max_iter)." >&2
       set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-      forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker produced no code changes on iteration $ITERATION (agent likely exhausted its step budget). Re-running (iteration $((ITERATION + 1))/$max_iter)."
+      forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker produced no code changes on iteration $ITERATION (agent likely exhausted its step budget). Re-running (iteration $((ITERATION + 1))/$max_iter).$(job_link)"
       chain_to_role "$BOUCLE_ISSUE" "worker" "BOUCLE_ITERATION=$((ITERATION + 1))"
     else
       echo "Escalating to human — worker produced no changes after $max_iter attempts." >&2
       set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-      forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker produced no code changes after $max_iter attempts. The agent may be unable to implement this issue within its step budget. Human intervention needed."
+      forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker produced no code changes after $max_iter attempts. The agent may be unable to implement this issue within its step budget. Human intervention needed.$(job_link)"
     fi
     exit 1
   fi
@@ -275,12 +275,12 @@ EOF
       fi
       echo "Re-triggering worker (iteration $((ITERATION + 1))/$max_iter)." >&2
       set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-      forge_issue_note "$BOUCLE_ISSUE" "🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh $BOUCLE_DEFAULT_BRANCH (iteration $((ITERATION + 1))/$max_iter)."
+      forge_issue_note "$BOUCLE_ISSUE" "🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh $BOUCLE_DEFAULT_BRANCH (iteration $((ITERATION + 1))/$max_iter).$(job_link)"
       chain_to_role "$BOUCLE_ISSUE" "worker" "BOUCLE_ITERATION=$((ITERATION + 1))"
     else
       echo "Escalating to human — iteration cap ($max_iter) reached after repeated rebase conflicts." >&2
       set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-      forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker could not rebase onto $BOUCLE_DEFAULT_BRANCH (conflict) after $max_iter attempts. Master keeps advancing. Human intervention needed."
+      forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker could not rebase onto $BOUCLE_DEFAULT_BRANCH (conflict) after $max_iter attempts. Master keeps advancing. Human intervention needed.$(job_link)"
     fi
     exit 1
   fi

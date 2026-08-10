@@ -942,6 +942,58 @@ if [ -n "$FALLBACK_PROVIDER" ] && [ -n "$FALLBACK_REASON" ]; then
   rm -f "${AGENT_LOG}.primary" 2> /dev/null || true
 fi
 
+# ── 5a0. Scrub secrets from the agent log ─────────────────────────────
+# The log is raw agent stdout+stderr and it leaves the runner: CI uploads it
+# as an artifact (#33) so a human can see WHY the loop escalated. Anything
+# the agent echoed — an env dump, a curl invocation, a provider error body
+# quoting the key back — would otherwise ship with it.
+#
+# Section 2 removes CLOUDFLARE_API_TOKEN from the agent's *environment*;
+# that is a different guarantee and does not cover log *content*. The LLM
+# key in particular CANNOT be unset (jcode reads it via api_key_env), so
+# redaction here is the only thing standing between it and the artifact.
+#
+# Runs BEFORE every exit path below: a failed run is exactly the one whose
+# log gets read, so scrubbing only on success would protect nothing.
+scrub_agent_log() {
+  local log="$1"
+  [ -f "$log" ] || return 0
+  # Literal replacement (not regex) for known values: a key containing a
+  # regex metacharacter must still be redacted. Values shorter than 8 chars
+  # are skipped — redacting a short string would shred unrelated output.
+  BOUCLE_SCRUB_CF="${SCRUBBED_CF_TOKEN:-}" awk '
+    function lit_replace(s, find, repl,   out, p) {
+      out = ""
+      while ((p = index(s, find)) > 0) {
+        out = out substr(s, 1, p - 1) repl
+        s = substr(s, p + length(find))
+      }
+      return out s
+    }
+    BEGIN {
+      n = split("BOUCLE_LLM_API_KEY BOUCLE_FALLBACK_API_KEY BOUCLE_TOKEN BOUCLE_BOT_TOKEN BOUCLE_SCRUB_CF CLOUDFLARE_API_TOKEN", names, " ")
+    }
+    {
+      line = $0
+      for (i = 1; i <= n; i++) {
+        v = ENVIRON[names[i]]
+        if (length(v) >= 8) line = lit_replace(line, v, "[REDACTED:" names[i] "]")
+      }
+      # Token shapes that may arrive from anywhere (a forge CLI trace, a
+      # provider error body). Prefix-anchored so ordinary words survive.
+      gsub(/gh[pousr]_[A-Za-z0-9]+/, "[REDACTED:github-token]", line)
+      gsub(/glpat-[A-Za-z0-9_-]+/, "[REDACTED:gitlab-pat]", line)
+      gsub(/sk-[A-Za-z0-9._-]+/, "[REDACTED:api-key]", line)
+      gsub(/[Bb]earer +[A-Za-z0-9._-]+/, "Bearer [REDACTED]", line)
+      print line
+    }
+  ' "$log" > "${log}.scrubbed" 2> /dev/null \
+    && mv "${log}.scrubbed" "$log" \
+    || rm -f "${log}.scrubbed" 2> /dev/null || true
+}
+
+scrub_agent_log "$AGENT_LOG"
+
 # ── 5a. Empty-output guard (silent-failure detection) ─────────────────
 # If the agent produced NO posted comment AND NO drafted triage comment
 # in its log, it failed silently (e.g. hit the model output cap mid-comment

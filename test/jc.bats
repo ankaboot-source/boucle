@@ -905,3 +905,87 @@ EOF
   assert_output --partial "AGENT_EXIT=1"
   rm -f "$TMPF"
 }
+
+# ── Agent log secret scrub (#33) ──────────────────────────────────────
+# The log leaves the runner as a CI artifact. Section 2 of bin/jc removes
+# CLOUDFLARE_API_TOKEN from the agent's ENVIRONMENT — a different
+# guarantee that does not cover log CONTENT. The LLM key cannot be unset
+# at all (jcode reads it via api_key_env), so this redaction is the only
+# barrier between it and the artifact.
+
+extract_scrub() {
+  extract_func_body scrub_agent_log "$1"
+}
+
+@test "scrub: the LLM API key value never survives in the log" {
+  TMPF=$(mktemp); LOG=$(mktemp)
+  extract_scrub "$TMPF"
+  printf 'calling provider with key supersecretvalue123 now\n' > "$LOG"
+  run bash -c "BOUCLE_LLM_API_KEY=supersecretvalue123 SCRUBBED_CF_TOKEN='' bash -c \"source '$TMPF'; scrub_agent_log '$LOG'\"; cat '$LOG'"
+  assert_success
+  refute_output --partial "supersecretvalue123"
+  assert_output --partial "[REDACTED:BOUCLE_LLM_API_KEY]"
+  rm -f "$TMPF" "$LOG"
+}
+
+@test "scrub: forge token shapes are redacted whatever their source" {
+  TMPF=$(mktemp); LOG=$(mktemp)
+  extract_scrub "$TMPF"
+  printf 'glpat-AbCdEf1234567890 ghp_ZZZZ1111YYYY2222 sk-abc123DEF456ghi\n' > "$LOG"
+  run bash -c "SCRUBBED_CF_TOKEN='' bash -c \"source '$TMPF'; scrub_agent_log '$LOG'\"; cat '$LOG'"
+  assert_success
+  refute_output --partial "glpat-AbCdEf1234567890"
+  refute_output --partial "ghp_ZZZZ1111YYYY2222"
+  refute_output --partial "sk-abc123DEF456ghi"
+  rm -f "$TMPF" "$LOG"
+}
+
+@test "scrub: a key containing regex metacharacters is still redacted" {
+  # Literal replacement, not regex — a key like 'a+b.c*d' must not be
+  # treated as a pattern, or it silently fails to match itself.
+  TMPF=$(mktemp); LOG=$(mktemp)
+  extract_scrub "$TMPF"
+  printf 'key=a+b.c*d[ef]g here\n' > "$LOG"
+  run bash -c "BOUCLE_LLM_API_KEY='a+b.c*d[ef]g' SCRUBBED_CF_TOKEN='' bash -c \"source '$TMPF'; scrub_agent_log '$LOG'\"; cat '$LOG'"
+  assert_success
+  refute_output --partial "a+b.c*d[ef]g"
+  rm -f "$TMPF" "$LOG"
+}
+
+@test "scrub: ordinary agent output is left intact" {
+  TMPF=$(mktemp); LOG=$(mktemp)
+  extract_scrub "$TMPF"
+  printf 'wrote src/pages/index.astro and ran npm run build\n' > "$LOG"
+  run bash -c "BOUCLE_LLM_API_KEY=supersecretvalue123 SCRUBBED_CF_TOKEN='' bash -c \"source '$TMPF'; scrub_agent_log '$LOG'\"; cat '$LOG'"
+  assert_success
+  assert_output --partial "wrote src/pages/index.astro and ran npm run build"
+  rm -f "$TMPF" "$LOG"
+}
+
+@test "scrub: a short secret value is not redacted (would shred the log)" {
+  TMPF=$(mktemp); LOG=$(mktemp)
+  extract_scrub "$TMPF"
+  printf 'the build is ok and the value is ok\n' > "$LOG"
+  run bash -c "BOUCLE_LLM_API_KEY=ok SCRUBBED_CF_TOKEN='' bash -c \"source '$TMPF'; scrub_agent_log '$LOG'\"; cat '$LOG'"
+  assert_success
+  assert_output --partial "the build is ok and the value is ok"
+  rm -f "$TMPF" "$LOG"
+}
+
+@test "scrub: a missing log file is a no-op, never an error" {
+  TMPF=$(mktemp)
+  extract_scrub "$TMPF"
+  run bash -c "SCRUBBED_CF_TOKEN='' bash -c \"source '$TMPF'; scrub_agent_log /nonexistent/path.log\""
+  assert_success
+  rm -f "$TMPF"
+}
+
+@test "scrub: runs before every exit path, not only on success" {
+  # A failed run is exactly the one whose transcript gets read. If the
+  # scrub sat after the exit-3/exit-4 guards it would protect nothing.
+  scrub_line=$(grep -n '^scrub_agent_log "\$AGENT_LOG"' bin/jc | cut -d: -f1)
+  guard_line=$(grep -n '5a. Empty-output guard' bin/jc | cut -d: -f1)
+  [ -n "$scrub_line" ]
+  [ -n "$guard_line" ]
+  [ "$scrub_line" -lt "$guard_line" ]
+}

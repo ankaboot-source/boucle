@@ -143,6 +143,23 @@ with the two scopes is the simplest).
 the loop never runs half-configured. Renew the PAT and re-run `bin/setup`
 (idempotent) when the stored token expires.
 
+## Agent transcript
+
+Every agent job uploads `agent-output.log` as a CI artifact (`when: always`
+on GitLab, `if: always()` on GitHub, 7-day retention). A failed run is
+exactly the one whose transcript matters, so it is uploaded on failure too.
+
+Every escalation comment — "produced no code changes", "not mergeable",
+"human intervention needed" — carries a link to the job that produced it.
+Follow the link, open the artifacts, read the transcript.
+
+The log is **scrubbed before it leaves the runner**: `bin/jc` redacts the
+values of `BOUCLE_LLM_API_KEY`, `BOUCLE_FALLBACK_API_KEY`, `BOUCLE_TOKEN`,
+`BOUCLE_BOT_TOKEN` and the Cloudflare token, plus generic token shapes
+(`ghp_…`, `glpat-…`, `sk-…`, `Bearer …`). Redaction is literal, not
+regex-based, so a key containing regex metacharacters is still caught. It
+runs before every exit path, including the failure ones.
+
 ## Prompt budget
 
 `BOUCLE_MAX_NOTE_CHARS` bounds the **worst note**; it does not bound the

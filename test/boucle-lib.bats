@@ -918,3 +918,60 @@ HELPER
   assert_success
   assert_output "OK"
 }
+
+# ── job_link (#33) ────────────────────────────────────────────────────
+# Escalation comments state that the loop stopped, never why. job_link is
+# the pointer to the transcript that makes them actionable.
+
+extract_job_link() {
+  awk '
+    /^job_link\(\) \{/ { p = 1 }
+    p { print }
+    p && /^}/ { exit }
+  ' lib/boucle.sh > "$1"
+}
+
+@test "job_link: prints nothing when the forge exposes no job URL" {
+  TMPF=$(mktemp)
+  extract_job_link "$TMPF"
+  run bash -c "unset BOUCLE_JOB_URL; source '$TMPF'; job_link"
+  assert_success
+  assert_output ""
+  rm -f "$TMPF"
+}
+
+@test "job_link: emits a markdown link to the job when the URL is set" {
+  TMPF=$(mktemp)
+  extract_job_link "$TMPF"
+  run bash -c "BOUCLE_JOB_URL='https://gitlab.example.com/g/p/-/jobs/42'; source '$TMPF'; job_link"
+  assert_success
+  assert_output --partial "https://gitlab.example.com/g/p/-/jobs/42"
+  assert_output --partial "agent-output.log"
+  rm -f "$TMPF"
+}
+
+@test "job_link: GitHub Actions run URL is derived when CI_JOB_URL is absent" {
+  run bash -c "
+    unset CI_JOB_URL BOUCLE_JOB_URL
+    BOUCLE_JOB_URL=''
+    GITHUB_RUN_ID=987
+    GITHUB_SERVER_URL='https://github.com'
+    GITHUB_REPOSITORY='ankaboot-source/boucle'
+    $(sed -n '/^if \[ -z "\$BOUCLE_JOB_URL" \] && \[ -n "\${GITHUB_RUN_ID:-}" \]; then/,/^fi$/p' lib/boucle-ci.sh)
+    echo \"\$BOUCLE_JOB_URL\"
+  "
+  assert_success
+  assert_output "https://github.com/ankaboot-source/boucle/actions/runs/987"
+}
+
+@test "escalation comments carry the job link" {
+  # Every note that asks a human to act, or announces a re-run, must point
+  # at the transcript — otherwise the human is told the loop stopped with
+  # no way to find out why.
+  run grep -c 'Human intervention needed.\$(job_link)' lib/boucle-ci/worker.sh
+  assert_success
+  run grep -q 'job_link' lib/boucle-ci/reviewer.sh
+  assert_success
+  run grep -q 'job_link' lib/boucle-ci/merger.sh
+  assert_success
+}

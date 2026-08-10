@@ -26,6 +26,23 @@ type forge_init &> /dev/null && {
   type forge_issue_get &> /dev/null || forge_init
 } || true
 
+# ── Escalation context ──────────────────────────────────────────────────
+
+# job_link — markdown pointer to the CI job behind the current run.
+#
+# Every escalation comment boucle posts ("agent likely exhausted its step
+# budget", "produced no code changes", "not mergeable") states that the loop
+# stopped without saying WHY. The agent transcript is uploaded as a job
+# artifact (#33); this is the link that makes it reachable.
+#
+# Prints nothing when the forge exposes no job URL, so callers can append it
+# unconditionally without emitting a dangling "(job: )".
+job_link() {
+  local url="${BOUCLE_JOB_URL:-}"
+  [ -n "$url" ] || return 0
+  printf '\n\n[🔍 Job log & agent transcript](%s) — the `agent-output.log` artifact shows what the agent actually did.' "$url"
+}
+
 # ── Label management ────────────────────────────────────────────────────
 
 # set_boucle_label <iid> <new_detail_label> <gross_status_label>
