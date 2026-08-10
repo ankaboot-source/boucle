@@ -44,6 +44,7 @@ boucle_ci_worker() {
 
   # ── Fetch latest default branch ──────────────────────────────────
   git fetch origin "$BOUCLE_DEFAULT_BRANCH"
+  boucle_deepen_rebase_fetch
 
   # ── Retry strategy: classify the previous iteration (#44) ────────
   # Boucle always retried CUMULATIVELY: prior worker commits were rebased
@@ -325,6 +326,7 @@ EOF
 
   # ── Rebase before build ──────────────────────────────────────────
   git fetch origin "$BOUCLE_DEFAULT_BRANCH"
+  boucle_deepen_rebase_fetch
   if ! git rebase "origin/$BOUCLE_DEFAULT_BRANCH"; then
     echo "FAIL: rebase onto origin/$BOUCLE_DEFAULT_BRANCH conflicted." >&2
     git rebase --abort 2> /dev/null || true
