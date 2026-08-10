@@ -1107,6 +1107,33 @@ atomic.
       shims; stable — GitLab detection behavior, version-independent so far;
       not covered by any existing lesson.
 
+53. **Reviewer MUST verify every human amendment is addressed before PASS**
+    - ❌ DO NOT grade the MR against the frozen triage/issue-body acceptance
+      criteria alone when the Prior MR discussion contains human amendments —
+      a PASS that reports "initiale (first letter) fallback: OK" while the
+      human explicitly wrote "pas de logo basé sur la lettre" validates the
+      exact thing the human rejected. Initials ARE letters; an amended
+      criterion is not satisfied by the original implementation.
+    - ❌ DO NOT report a criterion as PASS when a human amendment has changed
+      what that criterion requires, even if the pre-amendment text is still
+      in the issue body — the human comment wins over the frozen spec.
+    - ❌ DO NOT treat human amendments as mere suggestions ("the original
+      acceptance criteria are all satisfied, amendments not addressed") and
+      PASS anyway — an acknowledged-but-unaddressed amendment is a FAIL.
+    - ✅ DO: enumerate EVERY human amendment from the Prior MR discussion
+      (comments authored by the human, not the bot's own verdicts), verify
+      each is addressed in the deployed code, and FAIL if any is not —
+      even when every original criterion is satisfied.
+    - Admission: class — reviewer grades against frozen criteria and ignores
+      human amendments (3 consecutive PASS verdicts on MR !61 while 3 rounds
+      of human amendments were unaddressed, including a PASS that explicitly
+      acknowledged "amendments are NOT addressed in this MR"); recurrence —
+      the model demonstrably ignored the existing "human comments win" rule
+      (deepseek-v4-flash), so the prompt fix alone is not a guarantee; the
+      doc contract reinforces the prompt; stable — no line numbers;
+      distinct from lesson #16 (feeding reviewer feedback FORWARD to the
+      worker) — this is the reviewer's own obligation to APPLY amendments.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
