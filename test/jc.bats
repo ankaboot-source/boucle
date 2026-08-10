@@ -358,6 +358,103 @@ line two continues the same note
   rm -f "$TMPF"
 }
 
+# ── Thread-level prompt budget (#45) ──────────────────────────────────
+# trim_notes bounds the worst NOTE; it does not bound the assembled PROMPT.
+# The ceiling degrades bot notes only — human comments amend the spec and
+# must reach the agent in full at every setting, and no note is ever
+# dropped outright (same invariant trim_notes protects).
+
+# build_prompt_within_budget calls build_prompt, which calls trim_notes.
+# All three plus the ladder must be extracted together.
+extract_budget_funcs() {
+  local tmp
+  tmp=$(mktemp)
+  extract_prompt_funcs "$1"
+  echo 'BOT_NOTE_LADDER="750 300 120"' >> "$1"
+  extract_func build_prompt_within_budget "$tmp"
+  cat "$tmp" >> "$1"
+  extract_func report_prompt_size "$tmp"
+  cat "$tmp" >> "$1"
+  rm -f "$tmp"
+}
+
+@test "prompt budget: disabled by default — the prompt is byte-identical" {
+  TMPF=$(mktemp)
+  extract_budget_funcs "$TMPF"
+  BIG=$(printf 'z%.0s' $(seq 1 4000))
+  ENV="ISSUE=42; BOUCLE_BOT_USERNAME=up-bot; BOUCLE_ISSUE_BODY='Build it'; BOUCLE_ISSUE_NOTES='[human] keep me
+[up-bot] $BIG'"
+  plain=$(bash -c "$ENV; source '$TMPF'; build_prompt worker" 2> /dev/null)
+  budgeted=$(bash -c "$ENV; source '$TMPF'; build_prompt_within_budget worker" 2> /dev/null)
+  [ "$plain" = "$budgeted" ]
+  rm -f "$TMPF"
+}
+
+@test "prompt budget: over the ceiling, human comments survive in full" {
+  TMPF=$(mktemp)
+  extract_budget_funcs "$TMPF"
+  BIG=$(printf 'z%.0s' $(seq 1 6000))
+  HUMAN="KEEP-THIS-AMENDMENT use https://example.org/exact-video and do not substitute it"
+  run bash -c "ISSUE=42; BOUCLE_BOT_USERNAME=up-bot; BOUCLE_MAX_PROMPT_CHARS=2000; BOUCLE_ISSUE_BODY='Build it'; BOUCLE_ISSUE_NOTES='[human] $HUMAN
+[up-bot] $BIG
+[up-bot] $BIG'; source '$TMPF'; build_prompt_within_budget worker" 2> /dev/null
+  assert_success
+  # The whole human amendment, not a truncated head of it.
+  assert_output --partial "$HUMAN"
+  # Bot notes were squeezed instead.
+  assert_output --partial "elided by boucle"
+  rm -f "$TMPF"
+}
+
+@test "prompt budget: no note disappears under an aggressive ceiling" {
+  TMPF=$(mktemp)
+  extract_budget_funcs "$TMPF"
+  BIG=$(printf 'z%.0s' $(seq 1 6000))
+  run bash -c "ISSUE=42; BOUCLE_BOT_USERNAME=up-bot; BOUCLE_MAX_PROMPT_CHARS=500; BOUCLE_ISSUE_BODY='Build it'; BOUCLE_ISSUE_NOTES='[human] OLDEST-INSTRUCTION
+[up-bot] FIRST-BOT-NOTE $BIG
+[up-bot] SECOND-BOT-NOTE $BIG'; source '$TMPF'; build_prompt_within_budget worker" 2> /dev/null
+  assert_success
+  assert_output --partial "OLDEST-INSTRUCTION"
+  assert_output --partial "FIRST-BOT-NOTE"
+  assert_output --partial "SECOND-BOT-NOTE"
+  rm -f "$TMPF"
+}
+
+@test "prompt budget: bot cap tightens bot notes only, humans keep the global cap" {
+  TMPF=$(mktemp)
+  extract_func_body trim_notes "$TMPF"
+  BIG=$(printf 'h%.0s' $(seq 1 600))
+  run bash -c "source '$TMPF'; BOUCLE_BOT_USERNAME=up-bot; BOUCLE_MAX_NOTE_CHARS=1000; BOUCLE_BOT_NOTE_CHARS=50 trim_notes t '[human] $BIG
+[up-bot] $BIG'" 2> /dev/null
+  assert_success
+  # The 600-char human note is under the 1000 global cap → untouched.
+  assert_output --partial "$BIG"
+  # The bot note is over the 50-char bot cap → elided.
+  assert_output --partial "elided by boucle (cap=50)"
+  rm -f "$TMPF"
+}
+
+@test "report_prompt_size: emits a total line with size and estimated tokens" {
+  TMPF=$(mktemp)
+  extract_budget_funcs "$TMPF"
+  run bash -c "ITERATION=2; source '$TMPF'; report_prompt_size worker 'hello world' 2>&1"
+  assert_success
+  assert_output --partial "[boucle:prompt] total"
+  assert_output --partial "role=worker"
+  assert_output --partial "total_chars=11"
+  assert_output --partial "est_tokens="
+  rm -f "$TMPF"
+}
+
+@test "report_prompt_size: warns above BOUCLE_PROMPT_WARN_CHARS without altering anything" {
+  TMPF=$(mktemp)
+  extract_budget_funcs "$TMPF"
+  run bash -c "ITERATION=1; BOUCLE_PROMPT_WARN_CHARS=5; source '$TMPF'; report_prompt_size worker 'well over five chars' 2>&1"
+  assert_success
+  assert_output --partial "WARN: assembled prompt is"
+  rm -f "$TMPF"
+}
+
 # ── Empty-output guard (silent-failure detection) ─────────────────────
 # bin/jc exits 3 when the agent produced NO posted comment AND NO drafted
 # comment in its log. This breaks the doctor re-trigger loop (issue #27).

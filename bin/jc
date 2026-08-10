@@ -513,6 +513,15 @@ BOUCLE_MR_ATTACHMENTS="${BOUCLE_MR_ATTACHMENTS:-}"
 # Notes arrive as "[<author>] <body>" entries whose bodies may span lines;
 # a new note is detected by the "[<author>] " prefix at start of line.
 # BOUCLE_MAX_NOTE_CHARS=0 disables trimming entirely (escape hatch).
+#
+# BOT vs HUMAN caps: the per-note cap applies to every note, but the thread
+# budget (see build_prompt_within_budget) tightens BOT-authored notes only.
+# Human comments AMEND the spec and take precedence over the frozen criteria
+# in state.md (see build_prompt), so they are never squeezed to make room —
+# a truncated human amendment is a spec regression, not a saving.
+# BOUCLE_BOT_NOTE_CHARS is set by the budget enforcer; it defaults to the
+# same value as BOUCLE_MAX_NOTE_CHARS, so nothing changes unless a ceiling
+# is configured AND exceeded.
 trim_notes() {
   local label="$1" text="$2"
   local max="${BOUCLE_MAX_NOTE_CHARS:-1500}"
@@ -527,25 +536,47 @@ trim_notes() {
     printf '%s' "$text"
     return 0
   fi
+  local bot_max="${BOUCLE_BOT_NOTE_CHARS:-$max}"
+  case "$bot_max" in
+    '' | *[!0-9]*) bot_max="$max" ;;
+  esac
+  # Never let the bot cap exceed the global cap — it only ever tightens.
+  [ "$bot_max" -gt "$max" ] && bot_max="$max"
+  local bot="${BOUCLE_BOT_USERNAME:-}"
   local out
-  out=$(printf '%s\n' "$text" | awk -v max="$max" '
-    function flush(   n) {
+  out=$(printf '%s\n' "$text" | awk -v max="$max" -v bot_max="$bot_max" -v bot="$bot" '
+    # Cap for the note currently buffered: the tightened bot cap when the
+    # note was authored by the boucle bot, the global cap otherwise.
+    function cap() { return (bot != "" && author == bot) ? bot_max : max }
+    function flush(   n, c) {
       if (buf == "") return
+      c = cap()
       n = length(buf)
-      if (n > max) {
-        printf "%s\n[... %d chars elided by boucle (BOUCLE_MAX_NOTE_CHARS=%d) ...]\n", substr(buf, 1, max), n - max, max
+      if (c > 0 && n > c) {
+        printf "%s\n[... %d chars elided by boucle (cap=%d) ...]\n", substr(buf, 1, c), n - c, c
       } else {
         printf "%s\n", buf
       }
       buf = ""
     }
-    /^\[[^]]+\] / { flush(); buf = $0; next }
+    /^\[[^]]+\] / {
+      flush()
+      buf = $0
+      author = $0
+      sub(/^\[/, "", author)
+      sub(/\].*$/, "", author)
+      next
+    }
     { buf = (buf == "" ? $0 : buf "\n" $0) }
     END { flush() }
   ')
   # Report on stderr (stdout is the prompt payload). Mirrors the existing
   # [boucle:metrics] channel so the before/after is measurable in CI logs.
-  echo "[boucle:prompt] $label chars_before=${#text} chars_after=${#out} max_note_chars=$max" >&2
+  # Silenced during the budget enforcer's trial passes so the log carries one
+  # report per section, not one per ladder rung.
+  if [ -z "${BOUCLE_TRIM_QUIET:-}" ]; then
+    echo "[boucle:prompt] $label chars_before=${#text} chars_after=${#out} max_note_chars=$max bot_note_chars=$bot_max" >&2
+  fi
   printf '%s' "$out"
 }
 
@@ -734,8 +765,84 @@ ${feedback}
   fi
 }
 
+# ── 4b. Thread-level prompt budget + measurement ──────────────────────
+# trim_notes caps each NOTE; it does not cap the assembled PROMPT. A note
+# thread grows monotonically — triage analysis, per-criterion verdicts, CI
+# status notes, human comments — so the prompt grows unbounded even with a
+# per-note cap: 40 notes at 1500 chars is 60k chars passing untouched.
+# Context rot does not raise an error; the agent silently misses a file,
+# which surfaces one stage later as a reviewer FAIL and burns an iteration.
+#
+# BOUCLE_MAX_PROMPT_CHARS defaults to 0 (disabled): measure first, then set
+# a ceiling informed by the [boucle:prompt] total line below. Degradation
+# tightens BOT-authored notes only, in ladder order — human comments amend
+# the spec and are never squeezed, and no note is ever dropped outright.
+BOT_NOTE_LADDER="750 300 120"
+
+# Estimated tokens from characters. Deliberately crude (~4 chars/token):
+# the number that matters is the trend across runs, not a billing figure.
+# Real token counts land in [boucle:metrics] once the provider reports them.
+report_prompt_size() {
+  local role="$1" text="$2"
+  local body="${BOUCLE_ISSUE_BODY:-}"
+  local notes="${BOUCLE_ISSUE_NOTES:-}"
+  local feedback="${BOUCLE_REVIEWER_FEEDBACK:-}"
+  local total=${#text}
+  local warn="${BOUCLE_PROMPT_WARN_CHARS:-0}"
+  case "$warn" in
+    '' | *[!0-9]*) warn=0 ;;
+  esac
+  echo "[boucle:prompt] total role=$role iteration=$ITERATION total_chars=$total est_tokens=$((total / 4)) body_chars=${#body} notes_chars_raw=${#notes} feedback_chars_raw=${#feedback} ceiling=${BOUCLE_MAX_PROMPT_CHARS:-0}" >&2
+  if [ "$warn" -gt 0 ] && [ "$total" -gt "$warn" ]; then
+    echo "WARN: assembled prompt is $total chars (BOUCLE_PROMPT_WARN_CHARS=$warn). Context degrades well before any hard limit — consider setting BOUCLE_MAX_PROMPT_CHARS." >&2
+  fi
+}
+
+# Build the prompt, tightening bot-note trimming until it fits the ceiling.
+# Trial passes run silently (BOUCLE_TRIM_QUIET) so the job log carries one
+# report per section rather than one per ladder rung; the winning cap is
+# then rebuilt with reporting restored.
+build_prompt_within_budget() {
+  local role="$1"
+  local ceiling="${BOUCLE_MAX_PROMPT_CHARS:-0}"
+  case "$ceiling" in
+    '' | *[!0-9]*) ceiling=0 ;;
+  esac
+
+  if [ "$ceiling" -le 0 ]; then
+    build_prompt "$role"
+    return 0
+  fi
+
+  local p rung chosen=""
+  export BOUCLE_TRIM_QUIET=1
+  p=$(build_prompt "$role")
+  if [ "${#p}" -gt "$ceiling" ]; then
+    for rung in $BOT_NOTE_LADDER; do
+      if [ "$rung" -ge "${BOUCLE_MAX_NOTE_CHARS:-1500}" ]; then
+        continue
+      fi
+      chosen="$rung"
+      export BOUCLE_BOT_NOTE_CHARS="$rung"
+      p=$(build_prompt "$role")
+      if [ "${#p}" -le "$ceiling" ]; then
+        break
+      fi
+    done
+    if [ "${#p}" -gt "$ceiling" ]; then
+      # Floor reached. We do NOT drop notes or touch human comments to close
+      # the gap — that would break the invariant that early preservation
+      # instructions stand alongside later amendments. Report and proceed.
+      echo "WARN: prompt is ${#p} chars, still above BOUCLE_MAX_PROMPT_CHARS=$ceiling after tightening bot notes to ${chosen:-n/a}. Human comments are never trimmed and no note is dropped — raise the ceiling or split the issue." >&2
+    fi
+  fi
+  unset BOUCLE_TRIM_QUIET
+  build_prompt "$role"
+}
+
 # ── 5. Run the agent ──────────────────────────────────────────────────
-PROMPT=$(build_prompt "$ROLE")
+PROMPT=$(build_prompt_within_budget "$ROLE")
+report_prompt_size "$ROLE" "$PROMPT"
 
 # Write the role-specific system prompt to .jcode/prompt-overlay.md
 # so jcode loads it in addition to the repo-root AGENTS.md.

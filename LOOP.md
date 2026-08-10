@@ -123,6 +123,9 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_PROVIDER_PROFILE` | `boucle` | jcode provider profile name. |
 | `BOUCLE_IMAGE_MAX_BYTES` | `10485760` | Max bytes per attachment (10 MiB). |
 | `BOUCLE_IMAGE_TOTAL_MAX_BYTES` | `52428800` | Max total bytes per issue (50 MiB). |
+| `BOUCLE_MAX_NOTE_CHARS` | `1500` | Per-note cap when a note thread is injected into a prompt. Every note survives — only its tail is elided. `0` disables trimming (escape hatch). |
+| `BOUCLE_MAX_PROMPT_CHARS` | `0` | Thread-level ceiling on the **assembled** prompt. `0` = disabled. See §Prompt budget. |
+| `BOUCLE_PROMPT_WARN_CHARS` | `0` | Log a warning above this assembled size without altering the prompt. `0` = never warn. |
 
 ### Bot token (GitHub)
 
@@ -139,6 +142,39 @@ with the two scopes is the simplest).
 **missing, invalid, or expired PAT fails setup with an explicit message** —
 the loop never runs half-configured. Renew the PAT and re-run `bin/setup`
 (idempotent) when the stored token expires.
+
+## Prompt budget
+
+`BOUCLE_MAX_NOTE_CHARS` bounds the **worst note**; it does not bound the
+**assembled prompt**. A note thread grows monotonically (triage analysis,
+per-criterion reviewer verdicts, CI status notes, human comments), so forty
+notes at 1500 chars is 60k chars that pass through untouched. Context rot
+does not raise an error — the agent silently misses a file, which surfaces
+one stage later as a reviewer FAIL and burns an iteration.
+
+**Measure before you cap.** Every agent invocation logs an assembled size on
+stderr:
+
+```
+[boucle:prompt] total role=worker iteration=2 total_chars=48213 est_tokens=12053 body_chars=1840 notes_chars_raw=51002 feedback_chars_raw=9310 ceiling=0
+```
+
+Set `BOUCLE_PROMPT_WARN_CHARS` first to see how close your repository runs,
+then set `BOUCLE_MAX_PROMPT_CHARS` from observed values. Choosing a ceiling
+blind truncates legitimate context.
+
+When the ceiling is exceeded, boucle tightens **bot-authored notes only**,
+along the ladder 750 → 300 → 120 chars, stopping at the first rung that
+fits. Two invariants hold at every setting:
+
+- **Human comments are never trimmed.** They amend the spec and take
+  precedence over the frozen acceptance criteria in `state.md`; a truncated
+  human amendment is a spec regression, not a saving.
+- **No note is ever dropped.** Only tails are elided — the early
+  preservation instructions must keep standing alongside later amendments.
+
+If the floor is reached and the prompt still exceeds the ceiling, boucle
+logs a warning and proceeds. It will not close the gap by dropping notes.
 
 ## Bug policy
 
