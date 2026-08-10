@@ -903,3 +903,22 @@ The loop is paused on #$issue until you decide."
   set_boucle_label "$issue" "boucle:human" "boucle::status::human"
   forge_issue_note "$issue" "$body"
 }
+
+# ── Shallow-clone depth fix for rebases ─────────────────────────────────
+# CI clones are shallow (GIT_DEPTH default 20; the merger CI comment says
+# --depth=1). Once the default branch advances past the depth, the merge
+# base between boucle/<iid> and origin/<default> sits BEYOND the shallow
+# boundary and `git rebase origin/<default>` fails with CONFLICT (add/add)
+# on EVERY file — "Rebasing (1/N)" then a wall of Auto-merging + add/add
+# conflicts — even when the server-side merge is trivially mergeable
+# (framagit 2026-08, MR !61: 3 worker rebase attempts + 1 merger attempt
+# all failed this way and the issue escalated to boucle:human). Call this
+# AFTER `git fetch origin <refs>` and BEFORE `git rebase`.
+boucle_deepen_rebase_fetch() {
+  if [ -f .git/shallow ]; then
+    echo "[boucle] Shallow clone detected — deepening so rebase can find the merge base..."
+    git fetch --unshallow origin 2> /dev/null \
+      || git fetch --deepen=1000 origin 2> /dev/null \
+      || echo "[boucle] WARN: could not deepen the clone — rebase may fail with add/add conflicts."
+  fi
+}

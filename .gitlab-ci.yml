@@ -1942,6 +1942,7 @@ worker:
       # Fetch latest $CI_DEFAULT_BRANCH so the branch is based on current $CI_DEFAULT_BRANCH, not the
       # stale CI clone ($CI_DEFAULT_BRANCH may have advanced between clone and this job).
       git fetch origin $CI_DEFAULT_BRANCH
+      boucle_deepen_rebase_fetch
 
       # Create/checkout branch (stable name — iteration 2+ reuses the branch).
       # Preserve prior worker commits across iterations: rebase onto
@@ -2292,6 +2293,7 @@ worker:
       # tree (tracked files like public/), and rebase refuses to run on a dirty
       # tree ("cannot rebase: You have unstaged changes").
       git fetch origin $CI_DEFAULT_BRANCH
+      boucle_deepen_rebase_fetch
       if ! git rebase origin/$CI_DEFAULT_BRANCH; then
         echo "FAIL: rebase onto origin/$CI_DEFAULT_BRANCH conflicted — $CI_DEFAULT_BRANCH advanced since branch creation." >&2
         git rebase --abort 2>/dev/null || true
@@ -3149,6 +3151,7 @@ merger:
       # branch ref is NOT present in the local clone by default.
       BRANCH="boucle/$BOUCLE_ISSUE"
       git fetch origin $CI_DEFAULT_BRANCH "$BRANCH"
+      boucle_deepen_rebase_fetch
 
       # Set git identity BEFORE the rebase — git rebase rewrites commits and
       # needs a committer identity. On a fresh docker executor there is no

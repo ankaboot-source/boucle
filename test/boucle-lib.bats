@@ -913,6 +913,11 @@ HELPER
   assert_output ""
 }
 
+@test "boucle_deepen_rebase_fetch is a no-op on a full clone (no .git/shallow)" {
+  run bash -c 'source lib/boucle.sh; [ -f .git/shallow ] && skip "repo is shallow"; boucle_deepen_rebase_fetch'
+  assert_success
+}
+
 @test "merger detects S4 escalation helper exists (no blind worker retry)" {
   run bash -c 'source lib/boucle.sh; declare -F boucle_escalate_merge_conflict >/dev/null && declare -F boucle_parse_merge_conflicts >/dev/null && echo OK'
   assert_success
