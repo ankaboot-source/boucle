@@ -1268,6 +1268,74 @@ cat >> "$ITERATIONS_FILE" << EOF
 - Side effect asserted: <see job assertion>
 EOF
 
+# ── 7b. Cost accounting (#35) ─────────────────────────────────────────
+# Boucle's pitch is a 9.9x cost advantage over Claude Code (docs/cost-
+# benchmark.md), and until now a user could not verify that on their own
+# repository: the number lived in the README, not in the product.
+#
+# Best-effort by design. Providers report usage inconsistently and some not
+# at all; a missing count records "n/a" and the run continues. Fabricating a
+# number would be worse than reporting none.
+extract_token_usage() {
+  local log="$1" field="$2"
+  [ -f "$log" ] || return 0
+  grep -oE "\"?${field}\"?[[:space:]]*[:=][[:space:]]*[0-9]+" "$log" 2> /dev/null \
+    | grep -oE '[0-9]+$' \
+    | awk '{ s += $1 } END { if (NR > 0) print s }'
+}
+
+# Append one entry per agent invocation. The accumulator survives across
+# iterations exactly like iterations.md, so a re-run adds to the total
+# instead of overwriting it.
+record_cost() {
+  local pt ct cost="" model_used="$MODEL" provider_used="$PROVIDER_PROFILE"
+  pt=$(extract_token_usage "$AGENT_LOG" "prompt_tokens")
+  ct=$(extract_token_usage "$AGENT_LOG" "completion_tokens")
+  [ -z "$pt" ] && pt=$(extract_token_usage "$AGENT_LOG" "input_tokens")
+  [ -z "$ct" ] && ct=$(extract_token_usage "$AGENT_LOG" "output_tokens")
+
+  # A run that fell back is attributed to the fallback model, not the
+  # primary — otherwise the breakdown blames the wrong provider.
+  if [ -n "${FALLBACK_USED:-}" ]; then
+    model_used="${FALLBACK_MODEL:-$MODEL}"
+    provider_used="${FALLBACK_PROVIDER:-$PROVIDER_PROFILE}"
+  fi
+
+  # Dollars only when the consumer supplied a price table. Provider prices
+  # drift and boucle is provider-agnostic: hardcoding them in the engine
+  # would produce confident wrong numbers.
+  if [ -n "${BOUCLE_PRICING_JSON:-}" ] && [ -n "$pt$ct" ]; then
+    cost=$(echo "${BOUCLE_PRICING_JSON}" \
+      | jq -r --arg m "$model_used" --argjson p "${pt:-0}" --argjson c "${ct:-0}" \
+        '(.[$m] // empty) as $x | if $x then (($p / 1000000) * ($x.in // 0) + ($c / 1000000) * ($x.out // 0)) else "" end' \
+        2> /dev/null || echo "")
+    [ "$cost" = "null" ] && cost=""
+  fi
+
+  echo "[boucle:metrics] role=$ROLE iteration=$ITERATION model=$model_used prompt_tokens=${pt:-n/a} completion_tokens=${ct:-n/a} cost_usd=${cost:-n/a}" >&2
+
+  local file="$STATE_DIR/cost.json"
+  [ -s "$file" ] || echo '{"entries":[]}' > "$file" 2> /dev/null || return 0
+  local tmp="${file}.tmp"
+  if jq --arg role "$ROLE" --arg model "$model_used" --arg provider "$provider_used" \
+    --arg iter "$ITERATION" --arg pt "${pt:-}" --arg ct "${ct:-}" --arg cost "${cost:-}" \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '.entries += [{
+       timestamp: $ts, role: $role, iteration: ($iter | tonumber? // $iter),
+       model: $model, provider: $provider,
+       prompt_tokens: ($pt | if . == "" then null else tonumber end),
+       completion_tokens: ($ct | if . == "" then null else tonumber end),
+       cost_usd: ($cost | if . == "" then null else tonumber end)
+     }]' "$file" > "$tmp" 2> /dev/null; then
+    mv "$tmp" "$file"
+  else
+    rm -f "$tmp" 2> /dev/null || true
+    echo "[boucle] WARN: could not append to $file — cost accounting skipped for this run" >&2
+  fi
+}
+
+record_cost || true
+
 # ── 8. Assert declared side effect ────────────────────────────────────
 # The job (not bin/jc) asserts the side effect after this script exits.
 # bin/jc just runs the agent and logs. The job checks exit code + git/API state.

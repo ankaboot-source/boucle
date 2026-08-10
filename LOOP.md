@@ -124,6 +124,7 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_PROVIDER_PROFILE` | `boucle` | jcode provider profile name. |
 | `BOUCLE_IMAGE_MAX_BYTES` | `10485760` | Max bytes per attachment (10 MiB). |
 | `BOUCLE_IMAGE_TOTAL_MAX_BYTES` | `52428800` | Max total bytes per issue (50 MiB). |
+| `BOUCLE_PRICING_JSON` | *(empty)* | Per-model price map, USD per 1M tokens: `{"model":{"in":0.10,"out":0.30}}`. Empty = tokens are reported, dollars are not. |
 | `BOUCLE_RETRY_STRATEGY` | `adaptive` | Worktree handling on a worker re-run: `adaptive` (reset only after a contamination failure), `preserve` (always keep prior commits), `reset` (always start clean). |
 | `BOUCLE_QUOTA_PROBE` | `true` | Ask the provider whether it can answer before spinning up an agent run. |
 | `BOUCLE_QUOTA_PROBE_TTL` | `300` | Seconds a probe result is reused, so parallel jobs probe once. |
@@ -150,6 +151,29 @@ with the two scopes is the simplest).
 **missing, invalid, or expired PAT fails setup with an explicit message** —
 the loop never runs half-configured. Renew the PAT and re-run `bin/setup`
 (idempotent) when the stored token expires.
+
+## Cost accounting
+
+Every agent invocation appends one entry to `.boucle/<issue>/cost.json`
+(role, iteration, model, provider, tokens, cost) and emits a
+`[boucle:metrics]` line. The accumulator survives across iterations like
+`iterations.md`, so a re-run adds to the total instead of overwriting it.
+The MR description carries a `### Cost` breakdown grouped by role.
+
+Two deliberate refusals:
+
+- **No dollars without `BOUCLE_PRICING_JSON`.** Prices drift and boucle is
+  provider-agnostic; hardcoding them in the engine would produce confident
+  wrong numbers. Unset, you get token counts.
+- **No fabricated token counts.** Providers report usage inconsistently and
+  some not at all. A missing count records `n/a` and the run continues.
+
+A run that fell back is attributed to the **fallback** model, not the
+primary — otherwise the breakdown blames the wrong provider. When only some
+runs are priced, the total is flagged as a lower bound.
+
+This is the prerequisite for a real budget cap (§Caps below still reads
+"not set at MVP"): measure first, cap second.
 
 ## Retry strategy
 

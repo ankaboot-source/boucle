@@ -43,6 +43,43 @@ job_link() {
   printf '\n\n[🔍 Job log & agent transcript](%s) — the `agent-output.log` artifact shows what the agent actually did.' "$url"
 }
 
+# ── Cost accounting (#35) ───────────────────────────────────────────────
+
+# boucle_cost_summary <issue> — markdown breakdown of what this issue cost.
+#
+# Reads the accumulator bin/jc appends to on every agent invocation. Prints
+# nothing when there is no data, so callers can embed it unconditionally.
+#
+# Dollar figures appear ONLY when BOUCLE_PRICING_JSON supplied a price for
+# the model that actually ran. Boucle is provider-agnostic and prices drift:
+# a confident wrong number is worse than tokens alone.
+boucle_cost_summary() {
+  local iid="$1"
+  local file="${BOUCLE_WORKSPACE:-.}/.boucle/${iid}/cost.json"
+  [ -s "$file" ] || return 0
+  command -v jq > /dev/null 2>&1 || return 0
+  jq -r '
+    if (.entries | length) == 0 then empty else
+    ([.entries[] | .prompt_tokens // 0] | add) as $pt
+    | ([.entries[] | .completion_tokens // 0] | add) as $ct
+    | ([.entries[] | .cost_usd // 0] | add) as $cost
+    | ([.entries[] | select(.cost_usd != null)] | length) as $priced
+    | "### Cost\n\n| Role | Runs | Prompt | Completion |"
+      + (if $priced > 0 then " Cost |" else "" end)
+      + "\n|---|---:|---:|---:|"
+      + (if $priced > 0 then "---:|" else "" end)
+      + "\n"
+      + ([.entries | group_by(.role)[]
+          | "| \(.[0].role) | \(length) | \([.[] | .prompt_tokens // 0] | add) | \([.[] | .completion_tokens // 0] | add) |"
+            + (if $priced > 0 then " $\([.[] | .cost_usd // 0] | add | .*10000 | round / 10000) |" else "" end)]
+         | join("\n"))
+      + "\n| **total** | \(.entries | length) | **\($pt)** | **\($ct)** |"
+      + (if $priced > 0 then " **$\($cost * 10000 | round / 10000)** |" else "" end)
+      + (if $priced > 0 and $priced < (.entries | length) then "\n\n_Some runs have no price for their model — the total is a lower bound._" else "" end)
+    end
+  ' "$file" 2> /dev/null || true
+}
+
 # ── Outbound notification (send-only) ───────────────────────────────────
 
 # boucle_notify <iid> <new_label>

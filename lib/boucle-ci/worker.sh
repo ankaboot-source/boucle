@@ -453,9 +453,15 @@ EOF
   if [ -n "$preview_url" ]; then
     preview_line="Preview: $preview_url"
   fi
+  # Cost breakdown (#35): empty until an agent run reported usage, so the
+  # description is unchanged on providers that report none. Only added on
+  # runs that ship code — lesson #24 keeps no-changes runs from clobbering
+  # a useful description, and lesson #19 wants it refreshed otherwise.
+  local cost_block
+  cost_block=$(boucle_cost_summary "$BOUCLE_ISSUE" || true)
   local mr_description
-  mr_description=$(printf '## Issue #%s — iteration %s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s_ | mode: deploy=%s review=%s' \
-    "$BOUCLE_ISSUE" "$ITERATION" "$preview_line" "${commit_summary:-(no commits)}" "${approach:-(not recorded)}" "$BOUCLE_ISSUE" "$commit_count" "$ITERATION" "$(boucle_deploy_mode)" "$(boucle_review_mode)")
+  mr_description=$(printf '## Issue #%s — iteration %s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s_ | mode: deploy=%s review=%s' \
+    "$BOUCLE_ISSUE" "$ITERATION" "$preview_line" "${commit_summary:-(no commits)}" "${approach:-(not recorded)}" "$cost_block" "$BOUCLE_ISSUE" "$commit_count" "$ITERATION" "$(boucle_deploy_mode)" "$(boucle_review_mode)")
 
   # ── MR create or update ──────────────────────────────────────────
   local mr_iid
