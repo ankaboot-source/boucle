@@ -103,6 +103,11 @@ EOF
 
   # ── Seed iterations.md on first run ───────────────────────────────
   if [ ! -f ".boucle/$BOUCLE_ISSUE/iterations.md" ]; then
+    # mkdir is NOT conditional here: the restore-from-cache block above only
+    # creates .boucle/<iid>/ when the cache exists — on a first run (or after
+    # GIT_CLEAN_FLAGS wiped the gitignored dir) the seed below would fail
+    # with "No such file or directory" (observed on framagit, 2026-08).
+    mkdir -p ".boucle/$BOUCLE_ISSUE"
     cat > ".boucle/$BOUCLE_ISSUE/iterations.md" << 'EOF'
 # Iteration log — issue #$BOUCLE_ISSUE
 
