@@ -652,6 +652,21 @@ boucle_ci_doctor() {
     # — map to 0/1 so the count-based logic and messages keep working.
     APPROVED_COUNT=$(forge_mr_approvals "$MR_IID")
     [ "$APPROVED_COUNT" = "true" ] && APPROVED_COUNT=1 || APPROVED_COUNT=0
+    # Guard: if the merger already escalated a SEMANTIC merge conflict on
+    # this issue (boucle_escalate_merge_conflict posts a note with "Merge
+    # conflict — human intervention required" and sets boucle:human), do
+    # NOT re-trigger the merger — it will reproduce the same conflict.
+    # The human must resolve it manually (the escalation note gives them
+    # options). Without this check, the doctor re-triggers the merger
+    # every run (10 min) for a conflicted MR at boucle:human, producing
+    # an infinite loop of duplicate merge-conflict notes (framagit
+    # 2026-08, issue #62: 100+ duplicate notes in ~15 hours).
+    ESCALATION_NOTES=$(forge_issue_notes "$IID" 2>/dev/null \
+      | jq -r '[.[] | select(.body | test("Merge conflict — human intervention required"))] | length' 2>/dev/null || echo 0)
+    if [ "$ESCALATION_NOTES" -gt 0 ]; then
+      echo "  → #$IID: merger already escalated a merge conflict ($ESCALATION_NOTES note(s)) — human must resolve, skipping"
+      continue
+    fi
     if [ "$APPROVED_COUNT" -gt 0 ] && { [ "$MR_MERGE_STATUS" = "mergeable" ] || [ "$MR_MERGE_STATUS" = "conflict" ]; }; then
       echo "  → #$IID: MR !$MR_IID is approved ($APPROVED_COUNT) + $MR_MERGE_STATUS — triggering merger"
       set_boucle_label "$IID" "boucle:merging" "boucle::status::bot"
