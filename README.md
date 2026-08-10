@@ -155,10 +155,15 @@ flowchart TD
 ```
 
 The loop runs asynchronously on CI. You intervene at two named gates —
-spec approval and MR review — not in a live chat. **Do-Not-Disturb**
-(`BOUCLE_DND_*`) auto-validates the spec gate during your off-hours. You
-approve over morning coffee; by lunch the MR is waiting. The agent works on
-its clock; you work on yours.
+spec approval and MR review — not in a live chat. A chat-based agent demands
+your attention *now*; boucle inverts that: you take back control of the
+timing.
+
+**Do-Not-Disturb** (`BOUCLE_DND_*`) auto-validates the spec gate during your
+off-hours, so the loop never blocks on you overnight. You approve the spec
+over morning coffee; by lunch the worker has implemented, the reviewer has
+verified the preview, and the MR is waiting. A calmer workflow, driven by
+your agenda — not the agent's.
 
 At this intelligence tier, **how** you scaffold the agent matters more than
 **which** model you pick. Raw intelligence has diminishing returns — from
@@ -185,9 +190,7 @@ right skill outperforms a generalist with higher raw intelligence.
 
 The per-feature cost below serves two purposes: it tells you the **direct
 cost** of shipping one feature, and — on a fixed-budget plan — it tells you
-the **capacity**: how many features that budget sustains per month. As a
-bonus, the gated, asynchronous loop gives you a calmer workflow driven by
-the human's agenda, not the agent's.
+the **capacity**: how many features that budget sustains per month.
 
 ### Cost per feature
 
