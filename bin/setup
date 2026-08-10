@@ -786,7 +786,7 @@ echo "=== Labels ==="
 if [ "$FORGE" = "gitlab" ]; then
   # boucle:* labels (14)
   # shellcheck disable=SC1010 # 'done' is a label name, not the loop keyword
-  for label in triage needs-info todo working review human blocked done split approval approved spec-review spec-approved merging; do
+  for label in triage needs-info todo working review human blocked done split approval approved spec-review spec-approved merging board; do
     EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2> /dev/null | jq -r '.[0].name // empty' || true)
     if [ -n "$EXISTING" ]; then
       log_skip "boucle:$label already exists"
@@ -828,7 +828,7 @@ else
   # GitHub: forge_label_create (idempotent, uses gh label create)
   # boucle:* labels (14) — same names/colors as GitLab
   # shellcheck disable=SC1010 # 'done' is a label name, not the loop keyword
-  for label in triage needs-info todo working review human blocked done split approval approved spec-review spec-approved merging; do
+  for label in triage needs-info todo working review human blocked done split approval approved spec-review spec-approved merging board; do
     run "forge_label_create 'boucle:$label' '#0033CC'"
     log_pass "boucle:$label created"
   done
@@ -863,7 +863,7 @@ if [ "$FORGE" = "gitlab" ]; then
     if [ -n "$BOARD_ID" ] && [ "$BOARD_ID" != "null" ]; then
       log_pass "boucle board created (ID: $BOARD_ID)"
       # shellcheck disable=SC1010
-      for label in triage needs-info todo working review human blocked done split approval spec-review spec-approved merging; do
+      for label in triage needs-info todo working review human blocked done split approval spec-review spec-approved merging board; do
         LABEL_ID=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2> /dev/null | jq -r '.[0].id' || true)
         if [ -n "$LABEL_ID" ] && [ "$LABEL_ID" != "null" ]; then
           run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/boards/$BOARD_ID/lists -f label_id=$LABEL_ID >/dev/null"

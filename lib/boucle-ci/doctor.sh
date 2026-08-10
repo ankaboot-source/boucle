@@ -752,5 +752,10 @@ boucle_ci_doctor() {
     fi
   done
 
+  # ── Status board (#36) ─────────────────────────────────────────────────
+  # The sweep already holds the data; rendering it costs one read and, when
+  # nothing moved, zero writes.
+  boucle_board_upsert || true
+
   echo "Doctor complete. Recovered $RECOVERED orphaned issue(s)."
 }

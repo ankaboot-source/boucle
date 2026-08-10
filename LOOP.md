@@ -108,6 +108,7 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_MAX_PARALLEL_ISSUES` | `5` | Max concurrent boucle:working issues (`0` = unlimited). |
 | `BOUCLE_MAX_ITERATIONS` | `3` | Max worker re-runs per issue before escalation. |
 | `BOUCLE_STALENESS_THRESHOLD` | `2400` | Seconds before a stuck issue is re-triggered (must exceed max job timeout, 30 min). |
+| `BOUCLE_BOARD_ENABLED` | `true` | Maintain a pinned status-board issue answering "what is waiting on me?". |
 | `BOUCLE_DOCTOR_ADAPTIVE` | `true` | Skip the full sweep when the board has not moved since the last check. |
 | `BOUCLE_DOCTOR_BACKSTOP` | `21600` | Seconds after which a full sweep runs regardless of the fingerprint (6 h). |
 | `BOUCLE_STALENESS_IDLE_FACTOR` | `3` | Multiplier applied to `BOUCLE_STALENESS_THRESHOLD` when nothing is in flight. |
@@ -154,6 +155,26 @@ with the two scopes is the simplest).
 **missing, invalid, or expired PAT fails setup with an explicit message** —
 the loop never runs half-configured. Renew the PAT and re-run `bin/setup`
 (idempotent) when the stored token expires.
+
+## Status board
+
+Boucle's state is fully legible — it lives in labels — but only if you know
+which labels to filter on and you go looking. With five issues in flight
+plus blocked and dependent ones, nothing answered *what is waiting on me?*
+
+The doctor maintains one issue, `➰ boucle — status board` (label
+`boucle:board`), with four sections: **Waiting on you**, **In flight**,
+**Blocked**, **Waiting on a dependency**.
+
+- It is **a forge issue**, not a web app. The forge is the UI — that is the
+  whole thesis (`CONTEXT.md` §7).
+- It is **edited in place** and never commented on. `CONTEXT.md` §8 already
+  warns that no-op writes pollute the event history; a board that comments
+  would be worse. An unchanged body produces **zero** API writes.
+- It is **never dispatched**. Creating it fires an issue webhook like any
+  other, so the dispatcher exits early on `boucle:board` — otherwise the
+  loop would start working on itself.
+- Deleting it by hand simply makes the next sweep recreate it.
 
 ## Configuration audit
 

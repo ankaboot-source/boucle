@@ -43,6 +43,96 @@ job_link() {
   printf '\n\n[🔍 Job log & agent transcript](%s) — the `agent-output.log` artifact shows what the agent actually did.' "$url"
 }
 
+# ── Status board (#36) ──────────────────────────────────────────────────
+
+# boucle_board_render — the four sections of the board, as markdown.
+#
+# Boucle's state is fully legible: it lives in labels. But only if you know
+# which labels to filter on and you go looking. With five issues in flight
+# plus blocked and dependent ones, nothing answers "what is waiting on me?".
+#
+# The board is a forge ISSUE that boucle edits in place — the forge is the
+# UI, which is the whole thesis (CONTEXT.md §7: no new frontend, no server).
+boucle_board_render() {
+  local section label iids body=""
+  body="<!-- boucle:board v=1 -->
+_Maintained by boucle. Edited in place — do not reply here; act on the linked issues._
+"
+  local -a groups=(
+    "⏳ Waiting on you|boucle:spec-review boucle:approval"
+    "🔄 In flight|boucle:working boucle:review boucle:merging"
+    "🚧 Blocked|boucle:blocked boucle:human boucle:needs-info"
+    "🔗 Waiting on a dependency|boucle:depends-on"
+  )
+  local group title labels rows
+  for group in "${groups[@]}"; do
+    title="${group%%|*}"
+    labels="${group#*|}"
+    rows=""
+    for label in $labels; do
+      iids=$(forge_issue_list_by_label "$label" opened 2> /dev/null \
+        | jq -r --arg l "${label#boucle:}" \
+          '.[] | "| #\(.iid // .number) | \(.title // "" | .[0:70]) | \($l) | \(.updated_at // "" | .[0:10]) |"' \
+          2> /dev/null || true)
+      [ -n "$iids" ] && rows="${rows}${iids}
+"
+    done
+    body="${body}
+## ${title}
+"
+    if [ -z "$(printf '%s' "$rows" | tr -d '[:space:]')" ]; then
+      body="${body}
+_Nothing._
+"
+    else
+      body="${body}
+| Issue | Title | State | Last moved |
+|---|---|---|---|
+${rows}"
+    fi
+  done
+  printf '%s' "$body"
+}
+
+# boucle_board_upsert — create the board issue once, then edit it in place.
+#
+# NEVER posts a comment. CONTEXT.md §8 already warns that no-op label writes
+# pollute the event history; a board that comments would be worse. And the
+# write is skipped entirely when the rendered body is unchanged.
+boucle_board_upsert() {
+  [ "${BOUCLE_BOARD_ENABLED:-true}" = "true" ] || return 0
+  command -v forge_issue_list_by_label > /dev/null 2>&1 || return 0
+
+  local board_iid
+  board_iid=$(forge_issue_list_by_label "boucle:board" opened 2> /dev/null \
+    | jq -r 'sort_by(.iid // .number) | .[0] | .iid // .number // empty' 2> /dev/null || echo "")
+
+  local body
+  body=$(boucle_board_render) || return 0
+  [ -n "$body" ] || return 0
+
+  if [ -z "$board_iid" ]; then
+    # Idempotent by find-then-create: deleting the board by hand simply
+    # makes the next sweep recreate it.
+    board_iid=$(forge_issue_create "➰ boucle — status board" "$body" "boucle:board" 2> /dev/null || echo "")
+    if [ -n "$board_iid" ]; then
+      echo "  → status board created as #$board_iid"
+    else
+      echo "  → WARN: could not create the status board"
+    fi
+    return 0
+  fi
+
+  local current
+  current=$(forge_issue_get "$board_iid" 2> /dev/null | jq -r '.description // .body // ""' 2> /dev/null || echo "")
+  if [ "$current" = "$body" ]; then
+    echo "  → status board #$board_iid unchanged — no write"
+    return 0
+  fi
+  forge_issue_update "$board_iid" "description" "$body" 2> /dev/null || true
+  echo "  → status board #$board_iid refreshed"
+}
+
 # ── Cost accounting (#35) ───────────────────────────────────────────────
 
 # boucle_cost_summary <issue> — markdown breakdown of what this issue cost.
