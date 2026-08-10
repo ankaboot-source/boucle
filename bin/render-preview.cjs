@@ -1,21 +1,57 @@
 #!/usr/bin/env node
-// bin/render-preview.cjs — renders preview.html → preview.png via @sparticuz/chromium
+// bin/render-preview.cjs — renders preview.html → one PNG per viewport
 // Called by the triage CI job's visual-preview block (opt-in, exceptional).
 // Usage: NODE_PATH=/tmp/node_modules node bin/render-preview.cjs <input.html> <output.png>
+//
+// Viewports come from BOUCLE_PREVIEW_VIEWPORTS (comma-separated WxH,
+// default "390x844,1440x900" — one phone, one desktop). The human approving
+// a spec on a phone-first site cannot judge it from a desktop shot alone,
+// and boucle's audience is Product Builders who read a screenshot, not a
+// media query.
+//
+// Output: <output-stem>-<W>x<H>.png per viewport. Each produced path is
+// printed on stdout, one per line, so the caller uploads them in order
+// without re-deriving the names.
 //
 // Self-contained: no project dependencies. Relies on puppeteer-core +
 // @sparticuz/chromium being resolvable via NODE_PATH (installed on-demand
 // by the CI block into /tmp/node_modules).
 const path = require('path');
 
-const [,, input, output] = process.argv;
+const [, , input, output] = process.argv;
 
-if (!input || !output) {
-  console.error('Usage: node bin/render-preview.cjs <input.html> <output.png>');
-  process.exit(2);
+
+// Parse "390x844,1440x900" → [{width, height}]. A malformed entry is skipped
+// with a warning rather than failing the render: a bad viewport must not cost
+// the human the preview entirely.
+function parseViewports(spec) {
+  const out = [];
+  for (const raw of String(spec).split(',')) {
+    const entry = raw.trim();
+    if (!entry) continue;
+    const m = /^(\d+)x(\d+)$/i.exec(entry);
+    if (!m) {
+      console.error(`render-preview: ignoring malformed viewport "${entry}" (expected WxH)`);
+      continue;
+    }
+    out.push({ width: parseInt(m[1], 10), height: parseInt(m[2], 10) });
+  }
+  return out;
 }
 
-(async () => {
+const DEFAULT_VIEWPORTS = '390x844,1440x900';
+
+// Guarded so parseViewports can be unit-tested by requiring this file
+// without launching Chromium or needing argv.
+async function main() {
+  if (!input || !output) {
+    console.error('Usage: node bin/render-preview.cjs <input.html> <output.png>');
+    process.exit(2);
+  }
+  let viewports = parseViewports(process.env.BOUCLE_PREVIEW_VIEWPORTS || DEFAULT_VIEWPORTS);
+  if (viewports.length === 0) viewports = parseViewports(DEFAULT_VIEWPORTS);
+  const ext = path.extname(output) || '.png';
+  const stem = path.join(path.dirname(output), path.basename(output, ext));
   // Resolved at call time so NODE_PATH=/tmp/node_modules (installed on-demand
   // by the CI block) takes effect — keeping these requires inside the IIFE.
   const puppeteer = require('puppeteer-core');
@@ -32,15 +68,38 @@ if (!input || !output) {
       : chromium.executablePath,
     headless: chromium.headless,
   });
+  const produced = [];
   try {
     const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 800 });
-    await page.goto('file://' + path.resolve(input), { waitUntil: 'networkidle0' });
-    await page.screenshot({ path: output, fullPage: true });
+    const url = 'file://' + path.resolve(input);
+    for (const vp of viewports) {
+      const target = `${stem}-${vp.width}x${vp.height}${ext}`;
+      try {
+        await page.setViewport({ width: vp.width, height: vp.height });
+        await page.goto(url, { waitUntil: 'networkidle0' });
+        await page.screenshot({ path: target, fullPage: true });
+        produced.push(target);
+      } catch (e) {
+        // One viewport failing must not lose the others. A partial set of
+        // screenshots still lets the human judge the proposal.
+        console.error(`render-preview: viewport ${vp.width}x${vp.height} failed:`, e.message);
+      }
+    }
   } finally {
     await browser.close();
   }
-})().catch((e) => {
-  console.error('render-preview failed:', e);
-  process.exit(1);
-});
+  if (produced.length === 0) {
+    console.error('render-preview: every viewport failed');
+    process.exit(1);
+  }
+  for (const p of produced) console.log(p);
+}
+
+module.exports = { parseViewports };
+
+if (require.main === module) {
+  main().catch((e) => {
+    console.error('render-preview failed:', e);
+    process.exit(1);
+  });
+}

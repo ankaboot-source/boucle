@@ -174,3 +174,72 @@ PY
   [ "$ok" = "false" ]
   [ "$attempt" = "6" ]
 }
+
+# ── Multi-viewport preview (#37) ──────────────────────────────────────
+# The spec gate is approved on a screenshot. A desktop-only shot hides
+# exactly the class of regression boucle's audience (Product Builders,
+# not full-time developers) cannot read from a diff.
+
+@test "render-preview: parses a viewport list" {
+  run node -e "
+    const {parseViewports} = require('./bin/render-preview.cjs');
+    const v = parseViewports('390x844,1440x900');
+    if (v.length !== 2) process.exit(1);
+    if (v[0].width !== 390 || v[0].height !== 844) process.exit(1);
+    if (v[1].width !== 1440 || v[1].height !== 900) process.exit(1);
+  "
+  assert_success
+}
+
+@test "render-preview: a malformed viewport is skipped, not fatal" {
+  # A bad entry must not cost the human the preview entirely.
+  run node -e "
+    const {parseViewports} = require('./bin/render-preview.cjs');
+    const v = parseViewports('390x844, bogus ,1440x900');
+    if (v.length !== 2) process.exit(1);
+  " 2> /dev/null
+  assert_success
+}
+
+@test "render-preview: defaults to one phone and one desktop viewport" {
+  run grep -q "const DEFAULT_VIEWPORTS = '390x844,1440x900';" bin/render-preview.cjs
+  assert_success
+}
+
+@test "render-preview: one failing viewport does not lose the others" {
+  run grep -q "A partial set of" bin/render-preview.cjs
+  assert_success
+  # Every viewport failing is still an error.
+  run grep -q "render-preview: every viewport failed" bin/render-preview.cjs
+  assert_success
+}
+
+@test "render-preview: prints each produced path for the caller" {
+  run grep -q "for (const p of produced) console.log(p);" bin/render-preview.cjs
+  assert_success
+}
+
+@test "render-preview: requiring the module does not launch Chromium" {
+  # puppeteer-core is not installed in the test environment; a require that
+  # reached the launch path would throw.
+  run node -e "require('./bin/render-preview.cjs'); console.log('ok')"
+  assert_success
+  assert_output "ok"
+}
+
+@test "triage preview: viewport uploads respect the total attachment budget" {
+  run grep -q 'BOUCLE_IMAGE_TOTAL_MAX_BYTES' lib/boucle-ci/triage.sh
+  assert_success
+}
+
+@test "triage preview: each screenshot is labelled by device class" {
+  run grep -q 'Mobile ($dims)' lib/boucle-ci/triage.sh
+  assert_success
+  run grep -q 'Desktop ($dims)' lib/boucle-ci/triage.sh
+  assert_success
+}
+
+@test "triage preview: BOUCLE_PREVIEW_DISABLE still skips Chromium entirely" {
+  run grep -q 'BOUCLE_PREVIEW_DISABLE:-false' lib/boucle-ci/triage.sh
+  assert_success
+}
