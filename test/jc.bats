@@ -1088,3 +1088,111 @@ VERDICT: FAIL
   run grep -q "Re-check EVERY acceptance criterion on every iteration" .jcode/agents/reviewer.md
   assert_success
 }
+
+# ── Pre-flight provider probe (#42) ───────────────────────────────────
+# The reactive path (section 5b) discovers an exhausted quota only after
+# provisioning a runner, cloning, building the prompt and burning the retry
+# budget. With BOUCLE_MAX_PARALLEL_ISSUES=5 that waste is multiplied by five.
+# The probe asks first. It never replaces 5b — a quota can die mid-run.
+
+extract_probe() {
+  extract_func_body probe_provider "$1"
+}
+
+# Shadow curl so classification is tested hermetically, with no server.
+probe_with_code() {
+  local code="$1" tmpf="$2"
+  bash -c "
+    source '$tmpf'
+    curl() { echo '$code'; }
+    probe_provider 'https://api.example.com/v1' 'key123'
+  "
+}
+
+@test "probe: 429 and 402 are quota exhaustion" {
+  TMPF=$(mktemp); extract_probe "$TMPF"
+  [ "$(probe_with_code 429 "$TMPF")" = "quota" ]
+  [ "$(probe_with_code 402 "$TMPF")" = "quota" ]
+  rm -f "$TMPF"
+}
+
+@test "probe: 5xx is provider-down" {
+  TMPF=$(mktemp); extract_probe "$TMPF"
+  [ "$(probe_with_code 500 "$TMPF")" = "down" ]
+  [ "$(probe_with_code 503 "$TMPF")" = "down" ]
+  rm -f "$TMPF"
+}
+
+@test "probe: 401 and 403 are an auth problem, not a quota one" {
+  TMPF=$(mktemp); extract_probe "$TMPF"
+  [ "$(probe_with_code 401 "$TMPF")" = "auth" ]
+  [ "$(probe_with_code 403 "$TMPF")" = "auth" ]
+  rm -f "$TMPF"
+}
+
+@test "probe: 200 is ok" {
+  TMPF=$(mktemp); extract_probe "$TMPF"
+  [ "$(probe_with_code 200 "$TMPF")" = "ok" ]
+  rm -f "$TMPF"
+}
+
+@test "probe: an unreachable endpoint is ok, not down (fail-open)" {
+  # A runner with flaky egress must not stop the loop. The probe is an
+  # optimisation; it must never become a new failure mode.
+  TMPF=$(mktemp); extract_probe "$TMPF"
+  [ "$(probe_with_code 000 "$TMPF")" = "ok" ]
+  run bash -c "source '$TMPF'; probe_provider 'http://127.0.0.1:9/v1' 'key123'"
+  assert_success
+  assert_output "ok"
+  rm -f "$TMPF"
+}
+
+@test "probe: no base URL or no key configured is ok (nothing to probe)" {
+  TMPF=$(mktemp); extract_probe "$TMPF"
+  run bash -c "source '$TMPF'; probe_provider '' 'key123'"
+  assert_output "ok"
+  run bash -c "source '$TMPF'; probe_provider 'https://api.example.com/v1' ''"
+  assert_output "ok"
+  rm -f "$TMPF"
+}
+
+@test "probe: results are cached within the TTL so parallel jobs probe once" {
+  TMPF=$(mktemp)
+  extract_func_body probe_provider "$TMPF"
+  extract_func_body probe_cached "$TMPF.c"
+  cat "$TMPF.c" >> "$TMPF"
+  CACHEDIR=$(mktemp -d)
+  # First call records 429; a second call with a would-be-200 curl must
+  # still read the cached value.
+  run bash -c "
+    export TMPDIR='$CACHEDIR'
+    source '$TMPF'
+    curl() { echo 429; }
+    probe_cached testprov 'https://api.example.com/v1' 'key123'
+    curl() { echo 200; }
+    probe_cached testprov 'https://api.example.com/v1' 'key123'
+  "
+  assert_success
+  assert_line --index 0 "quota"
+  assert_line --index 1 "quota"
+  rm -rf "$TMPF" "$TMPF.c" "$CACHEDIR"
+}
+
+@test "probe: BOUCLE_QUOTA_PROBE=false removes the probe entirely" {
+  run grep -q 'if \[ "${BOUCLE_QUOTA_PROBE:-true}" = "true" \]' bin/jc
+  assert_success
+}
+
+@test "probe: exits 4 (provider-down contract) rather than starting the agent" {
+  # Starting the agent when no provider can answer burns a runner to
+  # produce nothing. Exit 4 is the established contract: CI posts a
+  # diagnostic and escalates instead of blaming the step budget.
+  run bash -c "awk '/4c. Pre-flight provider probe/,/^fi$/' bin/jc | grep -cE '^ +exit 4$'"
+  assert_output "1"
+}
+
+@test "probe: the reactive fallback path is still present" {
+  # A quota can be exhausted mid-run; only section 5b catches that.
+  run grep -q "5b. Provider fallback" bin/jc
+  assert_success
+}

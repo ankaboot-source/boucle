@@ -955,6 +955,89 @@ write_prompt_overlay "$AGENT_FILE"
 AGENT_LOG="$STATE_DIR/agent-output.log"
 : > "$AGENT_LOG"
 
+# ── 4c. Pre-flight provider probe (#42) ───────────────────────────────
+# The reactive path (section 5b) discovers an exhausted quota the expensive
+# way: provision the runner, clone the repo, build the prompt, run the
+# agent, burn the retry budget, THEN fall back. With
+# BOUCLE_MAX_PARALLEL_ISSUES=5 that waste is multiplied by five before
+# anyone notices.
+#
+# This asks the provider first. It does NOT replace the reactive path — a
+# quota can be exhausted mid-run, and only 5b catches that.
+#
+# Fail-open by construction: an unreachable or unparseable probe runs the
+# agent anyway. The probe is an optimisation; it must never become a new
+# failure mode.
+probe_provider() {
+  local base_url="$1" api_key="$2"
+  [ -n "$base_url" ] && [ -n "$api_key" ] || {
+    echo "ok"
+    return 0
+  }
+  local code
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+    -H "Authorization: Bearer $api_key" \
+    "${base_url%/}/models" 2> /dev/null || echo "000")
+  case "$code" in
+    429 | 402) echo "quota" ;;
+    401 | 403) echo "auth" ;;
+    5??) echo "down" ;;
+    # 000 = curl could not reach the endpoint at all. Treat as unknown, not
+    # as down: a runner with flaky egress must not stop the loop.
+    000) echo "ok" ;;
+    *) echo "ok" ;;
+  esac
+}
+
+# One probe per TTL window shared by every job on this runner, so five
+# parallel issues do not issue five probes.
+probe_cached() {
+  local name="$1" base_url="$2" api_key="$3"
+  local ttl="${BOUCLE_QUOTA_PROBE_TTL:-300}"
+  case "$ttl" in
+    '' | *[!0-9]*) ttl=300 ;;
+  esac
+  local cache="${TMPDIR:-/tmp}/boucle-probe-${name}.cache"
+  if [ -f "$cache" ]; then
+    local age
+    age=$(($(date +%s) - $(stat -c %Y "$cache" 2> /dev/null || echo 0)))
+    if [ "$age" -lt "$ttl" ]; then
+      cat "$cache"
+      return 0
+    fi
+  fi
+  local result
+  result=$(probe_provider "$base_url" "$api_key")
+  echo "$result" > "$cache" 2> /dev/null || true
+  echo "$result"
+}
+
+if [ "${BOUCLE_QUOTA_PROBE:-true}" = "true" ] && [ "$DRY_RUN" != "true" ]; then
+  PRIMARY_STATUS=$(probe_cached primary "${BOUCLE_LLM_BASE_URL:-}" "${BOUCLE_LLM_API_KEY:-}")
+  if [ "$PRIMARY_STATUS" != "ok" ]; then
+    echo "[boucle:probe] primary provider unavailable ($PRIMARY_STATUS) before the run" >&2
+    FALLBACK_STATUS="unconfigured"
+    if [ -n "$FALLBACK_PROVIDER" ] && [ -n "${BOUCLE_FALLBACK_BASE_URL:-}" ]; then
+      FALLBACK_STATUS=$(probe_cached fallback "${BOUCLE_FALLBACK_BASE_URL:-}" "${BOUCLE_FALLBACK_API_KEY:-}")
+    fi
+    if [ "$FALLBACK_STATUS" = "ok" ]; then
+      # Switch BEFORE the run so the fallback attempt does not consume a
+      # run_with_retry budget on a provider already known to be down.
+      echo "[boucle:probe] switching to fallback provider ($FALLBACK_PROVIDER/$FALLBACK_MODEL) pre-emptively" >&2
+      PROVIDER_PROFILE="$FALLBACK_PROVIDER"
+      MODEL="$FALLBACK_MODEL"
+      FALLBACK_USED=1
+    else
+      # Starting the agent here would burn a runner to produce nothing.
+      # Exit 4 is the established provider-down contract: CI posts a
+      # diagnostic and escalates instead of blaming the step budget.
+      echo "[boucle] ERROR: primary provider is $PRIMARY_STATUS and fallback is $FALLBACK_STATUS — not starting the agent (exit 4)." >&2
+      echo "[boucle] No runner time is spent on a provider that cannot answer. Check the provider quota, then re-trigger." >&2
+      exit 4
+    fi
+  fi
+fi
+
 if [ "$DRY_RUN" = "true" ]; then
   echo "[boucle] DRY RUN — agent output goes to log only, nothing pushed"
   # Start RSS sampler; /usr/bin/time wrapper is skipped in dry-run to keep

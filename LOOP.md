@@ -123,6 +123,8 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_PROVIDER_PROFILE` | `boucle` | jcode provider profile name. |
 | `BOUCLE_IMAGE_MAX_BYTES` | `10485760` | Max bytes per attachment (10 MiB). |
 | `BOUCLE_IMAGE_TOTAL_MAX_BYTES` | `52428800` | Max total bytes per issue (50 MiB). |
+| `BOUCLE_QUOTA_PROBE` | `true` | Ask the provider whether it can answer before spinning up an agent run. |
+| `BOUCLE_QUOTA_PROBE_TTL` | `300` | Seconds a probe result is reused, so parallel jobs probe once. |
 | `BOUCLE_NOTIFY_URL` | *(empty)* | Send-only webhook for human gates and escalations. Empty = disabled. Set as a **masked** variable. |
 | `BOUCLE_NOTIFY_FORMAT` | `slack` | Payload envelope: `slack` (also Discord via a `/slack` endpoint), `ntfy`, `telegram`, `raw`. |
 | `BOUCLE_NOTIFY_EVENTS` | `spec-review,approval,human,blocked` | Which transitions fire a notification. |
@@ -146,6 +148,35 @@ with the two scopes is the simplest).
 **missing, invalid, or expired PAT fails setup with an explicit message** —
 the loop never runs half-configured. Renew the PAT and re-run `bin/setup`
 (idempotent) when the stored token expires.
+
+## Provider probe
+
+Boucle used to discover an exhausted quota the expensive way: provision the
+runner, clone the repo, build the prompt, run the agent, burn the retry
+budget, *then* fall back. With `BOUCLE_MAX_PARALLEL_ISSUES=5` that waste is
+multiplied by five before anyone notices.
+
+The probe asks first — one cheap request to `<base_url>/models`:
+
+| Response | Meaning | Action |
+|---|---|---|
+| `2xx` | ok | Run normally |
+| `429`, `402` | quota exhausted | Switch to the fallback **before** the run, consuming no retry budget |
+| `5xx` | provider down | Same |
+| `401`, `403` | auth problem | Same, and the status is named in the escalation |
+| unreachable | unknown | **Run anyway** |
+
+When neither provider can answer, boucle does not start the agent: it exits
+with the established provider-down code (4), CI posts a diagnostic and
+escalates. Burning a runner to produce nothing is the worst outcome.
+
+**This does not replace the reactive path.** A quota can be exhausted
+mid-run, and only the in-flight fallback catches that. The probe removes the
+waste in the case that was knowable in advance.
+
+**Fail-open by construction.** An unreachable or unparseable probe runs the
+agent anyway — a runner with flaky egress must not stop the loop. The probe
+is an optimisation; it must never become a new failure mode.
 
 ## Notifications
 
