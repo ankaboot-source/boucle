@@ -358,6 +358,103 @@ line two continues the same note
   rm -f "$TMPF"
 }
 
+# ── Thread-level prompt budget (#45) ──────────────────────────────────
+# trim_notes bounds the worst NOTE; it does not bound the assembled PROMPT.
+# The ceiling degrades bot notes only — human comments amend the spec and
+# must reach the agent in full at every setting, and no note is ever
+# dropped outright (same invariant trim_notes protects).
+
+# build_prompt_within_budget calls build_prompt, which calls trim_notes.
+# All three plus the ladder must be extracted together.
+extract_budget_funcs() {
+  local tmp
+  tmp=$(mktemp)
+  extract_prompt_funcs "$1"
+  echo 'BOT_NOTE_LADDER="750 300 120"' >> "$1"
+  extract_func build_prompt_within_budget "$tmp"
+  cat "$tmp" >> "$1"
+  extract_func report_prompt_size "$tmp"
+  cat "$tmp" >> "$1"
+  rm -f "$tmp"
+}
+
+@test "prompt budget: disabled by default — the prompt is byte-identical" {
+  TMPF=$(mktemp)
+  extract_budget_funcs "$TMPF"
+  BIG=$(printf 'z%.0s' $(seq 1 4000))
+  ENV="ISSUE=42; BOUCLE_BOT_USERNAME=up-bot; BOUCLE_ISSUE_BODY='Build it'; BOUCLE_ISSUE_NOTES='[human] keep me
+[up-bot] $BIG'"
+  plain=$(bash -c "$ENV; source '$TMPF'; build_prompt worker" 2> /dev/null)
+  budgeted=$(bash -c "$ENV; source '$TMPF'; build_prompt_within_budget worker" 2> /dev/null)
+  [ "$plain" = "$budgeted" ]
+  rm -f "$TMPF"
+}
+
+@test "prompt budget: over the ceiling, human comments survive in full" {
+  TMPF=$(mktemp)
+  extract_budget_funcs "$TMPF"
+  BIG=$(printf 'z%.0s' $(seq 1 6000))
+  HUMAN="KEEP-THIS-AMENDMENT use https://example.org/exact-video and do not substitute it"
+  run bash -c "ISSUE=42; BOUCLE_BOT_USERNAME=up-bot; BOUCLE_MAX_PROMPT_CHARS=2000; BOUCLE_ISSUE_BODY='Build it'; BOUCLE_ISSUE_NOTES='[human] $HUMAN
+[up-bot] $BIG
+[up-bot] $BIG'; source '$TMPF'; build_prompt_within_budget worker" 2> /dev/null
+  assert_success
+  # The whole human amendment, not a truncated head of it.
+  assert_output --partial "$HUMAN"
+  # Bot notes were squeezed instead.
+  assert_output --partial "elided by boucle"
+  rm -f "$TMPF"
+}
+
+@test "prompt budget: no note disappears under an aggressive ceiling" {
+  TMPF=$(mktemp)
+  extract_budget_funcs "$TMPF"
+  BIG=$(printf 'z%.0s' $(seq 1 6000))
+  run bash -c "ISSUE=42; BOUCLE_BOT_USERNAME=up-bot; BOUCLE_MAX_PROMPT_CHARS=500; BOUCLE_ISSUE_BODY='Build it'; BOUCLE_ISSUE_NOTES='[human] OLDEST-INSTRUCTION
+[up-bot] FIRST-BOT-NOTE $BIG
+[up-bot] SECOND-BOT-NOTE $BIG'; source '$TMPF'; build_prompt_within_budget worker" 2> /dev/null
+  assert_success
+  assert_output --partial "OLDEST-INSTRUCTION"
+  assert_output --partial "FIRST-BOT-NOTE"
+  assert_output --partial "SECOND-BOT-NOTE"
+  rm -f "$TMPF"
+}
+
+@test "prompt budget: bot cap tightens bot notes only, humans keep the global cap" {
+  TMPF=$(mktemp)
+  extract_func_body trim_notes "$TMPF"
+  BIG=$(printf 'h%.0s' $(seq 1 600))
+  run bash -c "source '$TMPF'; BOUCLE_BOT_USERNAME=up-bot; BOUCLE_MAX_NOTE_CHARS=1000; BOUCLE_BOT_NOTE_CHARS=50 trim_notes t '[human] $BIG
+[up-bot] $BIG'" 2> /dev/null
+  assert_success
+  # The 600-char human note is under the 1000 global cap → untouched.
+  assert_output --partial "$BIG"
+  # The bot note is over the 50-char bot cap → elided.
+  assert_output --partial "elided by boucle (cap=50)"
+  rm -f "$TMPF"
+}
+
+@test "report_prompt_size: emits a total line with size and estimated tokens" {
+  TMPF=$(mktemp)
+  extract_budget_funcs "$TMPF"
+  run bash -c "ITERATION=2; source '$TMPF'; report_prompt_size worker 'hello world' 2>&1"
+  assert_success
+  assert_output --partial "[boucle:prompt] total"
+  assert_output --partial "role=worker"
+  assert_output --partial "total_chars=11"
+  assert_output --partial "est_tokens="
+  rm -f "$TMPF"
+}
+
+@test "report_prompt_size: warns above BOUCLE_PROMPT_WARN_CHARS without altering anything" {
+  TMPF=$(mktemp)
+  extract_budget_funcs "$TMPF"
+  run bash -c "ITERATION=1; BOUCLE_PROMPT_WARN_CHARS=5; source '$TMPF'; report_prompt_size worker 'well over five chars' 2>&1"
+  assert_success
+  assert_output --partial "WARN: assembled prompt is"
+  rm -f "$TMPF"
+}
+
 # ── Empty-output guard (silent-failure detection) ─────────────────────
 # bin/jc exits 3 when the agent produced NO posted comment AND NO drafted
 # comment in its log. This breaks the doctor re-trigger loop (issue #27).
@@ -807,4 +904,295 @@ EOF
   assert_success
   assert_output --partial "AGENT_EXIT=1"
   rm -f "$TMPF"
+}
+
+# ── Agent log secret scrub (#33) ──────────────────────────────────────
+# The log leaves the runner as a CI artifact. Section 2 of bin/jc removes
+# CLOUDFLARE_API_TOKEN from the agent's ENVIRONMENT — a different
+# guarantee that does not cover log CONTENT. The LLM key cannot be unset
+# at all (jcode reads it via api_key_env), so this redaction is the only
+# barrier between it and the artifact.
+
+extract_scrub() {
+  extract_func_body scrub_agent_log "$1"
+}
+
+@test "scrub: the LLM API key value never survives in the log" {
+  TMPF=$(mktemp); LOG=$(mktemp)
+  extract_scrub "$TMPF"
+  printf 'calling provider with key supersecretvalue123 now\n' > "$LOG"
+  run bash -c "BOUCLE_LLM_API_KEY=supersecretvalue123 SCRUBBED_CF_TOKEN='' bash -c \"source '$TMPF'; scrub_agent_log '$LOG'\"; cat '$LOG'"
+  assert_success
+  refute_output --partial "supersecretvalue123"
+  assert_output --partial "[REDACTED:BOUCLE_LLM_API_KEY]"
+  rm -f "$TMPF" "$LOG"
+}
+
+@test "scrub: forge token shapes are redacted whatever their source" {
+  TMPF=$(mktemp); LOG=$(mktemp)
+  extract_scrub "$TMPF"
+  printf 'glpat-AbCdEf1234567890 ghp_ZZZZ1111YYYY2222 sk-abc123DEF456ghi\n' > "$LOG"
+  run bash -c "SCRUBBED_CF_TOKEN='' bash -c \"source '$TMPF'; scrub_agent_log '$LOG'\"; cat '$LOG'"
+  assert_success
+  refute_output --partial "glpat-AbCdEf1234567890"
+  refute_output --partial "ghp_ZZZZ1111YYYY2222"
+  refute_output --partial "sk-abc123DEF456ghi"
+  rm -f "$TMPF" "$LOG"
+}
+
+@test "scrub: a key containing regex metacharacters is still redacted" {
+  # Literal replacement, not regex — a key like 'a+b.c*d' must not be
+  # treated as a pattern, or it silently fails to match itself.
+  TMPF=$(mktemp); LOG=$(mktemp)
+  extract_scrub "$TMPF"
+  printf 'key=a+b.c*d[ef]g here\n' > "$LOG"
+  run bash -c "BOUCLE_LLM_API_KEY='a+b.c*d[ef]g' SCRUBBED_CF_TOKEN='' bash -c \"source '$TMPF'; scrub_agent_log '$LOG'\"; cat '$LOG'"
+  assert_success
+  refute_output --partial "a+b.c*d[ef]g"
+  rm -f "$TMPF" "$LOG"
+}
+
+@test "scrub: ordinary agent output is left intact" {
+  TMPF=$(mktemp); LOG=$(mktemp)
+  extract_scrub "$TMPF"
+  printf 'wrote src/pages/index.astro and ran npm run build\n' > "$LOG"
+  run bash -c "BOUCLE_LLM_API_KEY=supersecretvalue123 SCRUBBED_CF_TOKEN='' bash -c \"source '$TMPF'; scrub_agent_log '$LOG'\"; cat '$LOG'"
+  assert_success
+  assert_output --partial "wrote src/pages/index.astro and ran npm run build"
+  rm -f "$TMPF" "$LOG"
+}
+
+@test "scrub: a short secret value is not redacted (would shred the log)" {
+  TMPF=$(mktemp); LOG=$(mktemp)
+  extract_scrub "$TMPF"
+  printf 'the build is ok and the value is ok\n' > "$LOG"
+  run bash -c "BOUCLE_LLM_API_KEY=ok SCRUBBED_CF_TOKEN='' bash -c \"source '$TMPF'; scrub_agent_log '$LOG'\"; cat '$LOG'"
+  assert_success
+  assert_output --partial "the build is ok and the value is ok"
+  rm -f "$TMPF" "$LOG"
+}
+
+@test "scrub: a missing log file is a no-op, never an error" {
+  TMPF=$(mktemp)
+  extract_scrub "$TMPF"
+  run bash -c "SCRUBBED_CF_TOKEN='' bash -c \"source '$TMPF'; scrub_agent_log /nonexistent/path.log\""
+  assert_success
+  rm -f "$TMPF"
+}
+
+@test "scrub: runs before every exit path, not only on success" {
+  # A failed run is exactly the one whose transcript gets read. If the
+  # scrub sat after the exit-3/exit-4 guards it would protect nothing.
+  scrub_line=$(grep -n '^scrub_agent_log "\$AGENT_LOG"' bin/jc | cut -d: -f1)
+  guard_line=$(grep -n '5a. Empty-output guard' bin/jc | cut -d: -f1)
+  [ -n "$scrub_line" ]
+  [ -n "$guard_line" ]
+  [ "$scrub_line" -lt "$guard_line" ]
+}
+
+# ── Anti-anchored re-review (#43) ─────────────────────────────────────
+# On iteration N the reviewer reads its own N-1 verdict, which invites
+# ratification (re-endorsing the prior reasoning, missing a regression the
+# fix introduced) and tunnel vision (re-checking only what failed before).
+
+extract_anchor() {
+  extract_func_body filter_mr_discussion "$1"
+}
+
+# A realistic MR thread: a human amendment, a bot verdict, a bot status note.
+anchor_fixture() {
+  printf '%s' '[human] AMENDMENT-KEEP-ME use https://example.org/v — do not substitute
+[up-bot] <!-- boucle:verdict v=1 role=reviewer sha=abc -->
+VERDICT: FAIL
+- [x] Header renders — verified via curl
+- [ ] Footer link present — RATIONALE-ANCHOR relative path 404s
+[up-bot] Master advanced since this branch was created.'
+}
+
+@test "anchoring: full is the default and changes nothing" {
+  TMPF=$(mktemp)
+  extract_anchor "$TMPF"
+  run bash -c "unset BOUCLE_REVIEW_ANCHORING; BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$(cat)\"" <<< "$(anchor_fixture)"
+  assert_success
+  assert_output --partial "RATIONALE-ANCHOR"
+  assert_output --partial "- [x] Header renders"
+  rm -f "$TMPF"
+}
+
+@test "anchoring: criteria-only keeps unmet criteria and drops the reasoning" {
+  TMPF=$(mktemp)
+  extract_anchor "$TMPF"
+  run bash -c "BOUCLE_REVIEW_ANCHORING=criteria-only BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$(cat)\"" <<< "$(anchor_fixture)"
+  assert_success
+  assert_output --partial "VERDICT: FAIL"
+  assert_output --partial "- [ ] Footer link present"
+  # The anchor itself is gone.
+  refute_output --partial "RATIONALE-ANCHOR"
+  # Met criteria are not re-listed either — the reviewer re-checks all of
+  # them from state.md, it is not handed a shortlist.
+  refute_output --partial "- [x] Header renders"
+  rm -f "$TMPF"
+}
+
+@test "anchoring: none withholds the verdict entirely" {
+  TMPF=$(mktemp)
+  extract_anchor "$TMPF"
+  run bash -c "BOUCLE_REVIEW_ANCHORING=none BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$(cat)\"" <<< "$(anchor_fixture)"
+  assert_success
+  refute_output --partial "VERDICT: FAIL"
+  refute_output --partial "RATIONALE-ANCHOR"
+  assert_output --partial "withheld"
+  rm -f "$TMPF"
+}
+
+@test "anchoring: human comments reach the reviewer in full under EVERY mode" {
+  # Human comments amend the spec and outrank the frozen criteria in
+  # state.md. Filtering one would be a spec regression, not a saving.
+  TMPF=$(mktemp)
+  extract_anchor "$TMPF"
+  for mode in full criteria-only none; do
+    out=$(BOUCLE_REVIEW_ANCHORING="$mode" BOUCLE_BOT_USERNAME=up-bot bash -c "source '$TMPF'; filter_mr_discussion \"\$1\"" _ "$(anchor_fixture)")
+    echo "$out" | grep -q "AMENDMENT-KEEP-ME use https://example.org/v — do not substitute" \
+      || { echo "mode=$mode lost the human amendment"; false; }
+  done
+  rm -f "$TMPF"
+}
+
+@test "anchoring: bot notes that are not verdicts pass through untouched" {
+  TMPF=$(mktemp)
+  extract_anchor "$TMPF"
+  run bash -c "BOUCLE_REVIEW_ANCHORING=none BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$(cat)\"" <<< "$(anchor_fixture)"
+  assert_success
+  assert_output --partial "Master advanced since this branch was created."
+  rm -f "$TMPF"
+}
+
+@test "anchoring: an unknown mode falls back to full instead of filtering blind" {
+  TMPF=$(mktemp)
+  extract_anchor "$TMPF"
+  run bash -c "BOUCLE_REVIEW_ANCHORING=typo BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$1\" 2>&1" _ "$(anchor_fixture)"
+  assert_success
+  assert_output --partial "WARN: unknown BOUCLE_REVIEW_ANCHORING"
+  assert_output --partial "RATIONALE-ANCHOR"
+  rm -f "$TMPF"
+}
+
+@test "anchoring: the worker still receives full verdict reasoning" {
+  # The worker must act on a FAIL, so it needs the why. Only the reviewer
+  # branch of build_prompt is filtered.
+  run bash -c "awk '/^    worker\\)/,/^    reviewer\\)/' bin/jc | grep -c filter_mr_discussion || true"
+  assert_output "0"
+}
+
+@test "anchoring: the reviewer prompt requires re-checking every criterion" {
+  run grep -q "Re-check EVERY acceptance criterion on every iteration" .jcode/agents/reviewer.md
+  assert_success
+}
+
+# ── Pre-flight provider probe (#42) ───────────────────────────────────
+# The reactive path (section 5b) discovers an exhausted quota only after
+# provisioning a runner, cloning, building the prompt and burning the retry
+# budget. With BOUCLE_MAX_PARALLEL_ISSUES=5 that waste is multiplied by five.
+# The probe asks first. It never replaces 5b — a quota can die mid-run.
+
+extract_probe() {
+  extract_func_body probe_provider "$1"
+}
+
+# Shadow curl so classification is tested hermetically, with no server.
+probe_with_code() {
+  local code="$1" tmpf="$2"
+  bash -c "
+    source '$tmpf'
+    curl() { echo '$code'; }
+    probe_provider 'https://api.example.com/v1' 'key123'
+  "
+}
+
+@test "probe: 429 and 402 are quota exhaustion" {
+  TMPF=$(mktemp); extract_probe "$TMPF"
+  [ "$(probe_with_code 429 "$TMPF")" = "quota" ]
+  [ "$(probe_with_code 402 "$TMPF")" = "quota" ]
+  rm -f "$TMPF"
+}
+
+@test "probe: 5xx is provider-down" {
+  TMPF=$(mktemp); extract_probe "$TMPF"
+  [ "$(probe_with_code 500 "$TMPF")" = "down" ]
+  [ "$(probe_with_code 503 "$TMPF")" = "down" ]
+  rm -f "$TMPF"
+}
+
+@test "probe: 401 and 403 are an auth problem, not a quota one" {
+  TMPF=$(mktemp); extract_probe "$TMPF"
+  [ "$(probe_with_code 401 "$TMPF")" = "auth" ]
+  [ "$(probe_with_code 403 "$TMPF")" = "auth" ]
+  rm -f "$TMPF"
+}
+
+@test "probe: 200 is ok" {
+  TMPF=$(mktemp); extract_probe "$TMPF"
+  [ "$(probe_with_code 200 "$TMPF")" = "ok" ]
+  rm -f "$TMPF"
+}
+
+@test "probe: an unreachable endpoint is ok, not down (fail-open)" {
+  # A runner with flaky egress must not stop the loop. The probe is an
+  # optimisation; it must never become a new failure mode.
+  TMPF=$(mktemp); extract_probe "$TMPF"
+  [ "$(probe_with_code 000 "$TMPF")" = "ok" ]
+  run bash -c "source '$TMPF'; probe_provider 'http://127.0.0.1:9/v1' 'key123'"
+  assert_success
+  assert_output "ok"
+  rm -f "$TMPF"
+}
+
+@test "probe: no base URL or no key configured is ok (nothing to probe)" {
+  TMPF=$(mktemp); extract_probe "$TMPF"
+  run bash -c "source '$TMPF'; probe_provider '' 'key123'"
+  assert_output "ok"
+  run bash -c "source '$TMPF'; probe_provider 'https://api.example.com/v1' ''"
+  assert_output "ok"
+  rm -f "$TMPF"
+}
+
+@test "probe: results are cached within the TTL so parallel jobs probe once" {
+  TMPF=$(mktemp)
+  extract_func_body probe_provider "$TMPF"
+  extract_func_body probe_cached "$TMPF.c"
+  cat "$TMPF.c" >> "$TMPF"
+  CACHEDIR=$(mktemp -d)
+  # First call records 429; a second call with a would-be-200 curl must
+  # still read the cached value.
+  run bash -c "
+    export TMPDIR='$CACHEDIR'
+    source '$TMPF'
+    curl() { echo 429; }
+    probe_cached testprov 'https://api.example.com/v1' 'key123'
+    curl() { echo 200; }
+    probe_cached testprov 'https://api.example.com/v1' 'key123'
+  "
+  assert_success
+  assert_line --index 0 "quota"
+  assert_line --index 1 "quota"
+  rm -rf "$TMPF" "$TMPF.c" "$CACHEDIR"
+}
+
+@test "probe: BOUCLE_QUOTA_PROBE=false removes the probe entirely" {
+  run grep -q 'if \[ "${BOUCLE_QUOTA_PROBE:-true}" = "true" \]' bin/jc
+  assert_success
+}
+
+@test "probe: exits 4 (provider-down contract) rather than starting the agent" {
+  # Starting the agent when no provider can answer burns a runner to
+  # produce nothing. Exit 4 is the established contract: CI posts a
+  # diagnostic and escalates instead of blaming the step budget.
+  run bash -c "awk '/4c. Pre-flight provider probe/,/^fi$/' bin/jc | grep -cE '^ +exit 4$'"
+  assert_output "1"
+}
+
+@test "probe: the reactive fallback path is still present" {
+  # A quota can be exhausted mid-run; only section 5b catches that.
+  run grep -q "5b. Provider fallback" bin/jc
+  assert_success
 }

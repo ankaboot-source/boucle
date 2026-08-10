@@ -25,6 +25,86 @@ boucle_ci_doctor() {
   # Must mirror the dispatch job's constant — each CI job runs its own shell.
   BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup"
 
+  # ── Adaptive cadence (#38) ─────────────────────────────────────────────
+  # The doctor runs on a fixed schedule and always performs the full sweep.
+  # On an idle repository that is a runner provisioned to confirm nothing
+  # changed. This adds a cheap MONITOR pass: fingerprint the board, and when
+  # nothing has moved since the last pass, skip the sweep.
+  #
+  # A backstop forces a full sweep every BOUCLE_DOCTOR_BACKSTOP regardless,
+  # so a fingerprint that goes stale for the wrong reason cannot strand the
+  # board forever.
+  #
+  # Persistence is the state cache, which survives on a shell-executor
+  # runner. On an ephemeral runner (GitHub-hosted) the snapshot is never
+  # found, so every run is a full sweep — the old behaviour exactly. No
+  # regression, no saving. That is a deliberate degradation, not a bug.
+  DOCTOR_STATE_DIR="${BOUCLE_STATE_CACHE:-${HOME}/.boucle-state-cache}/doctor"
+  DOCTOR_FINGERPRINT_FILE="$DOCTOR_STATE_DIR/board-fingerprint"
+  DOCTOR_SWEEP_STAMP="$DOCTOR_STATE_DIR/last-full-sweep"
+
+  # Fingerprint = every boucle-labelled open issue and when it last moved.
+  # Cheaper than the sweep: no per-issue pipeline checks, no note fetches.
+  doctor_board_fingerprint() {
+    local label out=""
+    for label in boucle:triage boucle:working boucle:review boucle:todo \
+      boucle:blocked boucle:human boucle:approval boucle:spec-review \
+      boucle:needs-info boucle:split; do
+      out="${out}$(forge_issue_list_by_label "$label" opened 2> /dev/null \
+        | jq -r --arg l "$label" '.[] | "\($l):\(.iid // .number):\(.updated_at // "")"' 2> /dev/null || true)
+"
+    done
+    printf '%s' "$out" | sort | cksum | awk '{ print $1 }'
+  }
+
+  DOCTOR_PASS="sweep"
+  if [ "${BOUCLE_DOCTOR_ADAPTIVE:-true}" = "true" ]; then
+    CURRENT_FINGERPRINT=$(doctor_board_fingerprint 2> /dev/null || echo "")
+    BACKSTOP="${BOUCLE_DOCTOR_BACKSTOP:-21600}"
+    case "$BACKSTOP" in
+      '' | *[!0-9]*) BACKSTOP=21600 ;;
+    esac
+    SWEEP_AGE=999999
+    if [ -f "$DOCTOR_SWEEP_STAMP" ]; then
+      SWEEP_AGE=$(($(date +%s) - $(stat -c %Y "$DOCTOR_SWEEP_STAMP" 2> /dev/null || echo 0)))
+    fi
+    # An empty fingerprint means the listing failed. Degrade to a full
+    # sweep — the doctor exists to unstick things, so a probe that cannot
+    # see the board must never be the reason it stops.
+    if [ -n "$CURRENT_FINGERPRINT" ] \
+      && [ -f "$DOCTOR_FINGERPRINT_FILE" ] \
+      && [ "$CURRENT_FINGERPRINT" = "$(cat "$DOCTOR_FINGERPRINT_FILE" 2> /dev/null || echo "")" ] \
+      && [ "$SWEEP_AGE" -lt "$BACKSTOP" ]; then
+      DOCTOR_PASS="monitor"
+    fi
+    if [ "$DOCTOR_PASS" = "monitor" ]; then
+      echo "Doctor monitor pass — board unchanged since the last check (last full sweep ${SWEEP_AGE}s ago, backstop ${BACKSTOP}s). Nothing to sweep."
+      return 0
+    fi
+    mkdir -p "$DOCTOR_STATE_DIR" 2> /dev/null || true
+    [ -n "$CURRENT_FINGERPRINT" ] && echo "$CURRENT_FINGERPRINT" > "$DOCTOR_FINGERPRINT_FILE" 2> /dev/null || true
+    touch "$DOCTOR_SWEEP_STAMP" 2> /dev/null || true
+  fi
+
+  # Idle boards get a longer staleness threshold: re-triggering costs a
+  # runner, and nothing is in flight to be stuck. The busy value is
+  # unchanged and must keep exceeding the max job timeout.
+  if [ "${BOUCLE_DOCTOR_ADAPTIVE:-true}" = "true" ]; then
+    IN_FLIGHT=$(forge_issue_count_by_label "boucle:working" opened 2> /dev/null || echo 1)
+    case "$IN_FLIGHT" in
+      '' | *[!0-9]*) IN_FLIGHT=1 ;;
+    esac
+    if [ "$IN_FLIGHT" -eq 0 ]; then
+      IDLE_FACTOR="${BOUCLE_STALENESS_IDLE_FACTOR:-3}"
+      case "$IDLE_FACTOR" in
+        '' | *[!0-9]*) IDLE_FACTOR=3 ;;
+      esac
+      BOUCLE_STALENESS_THRESHOLD=$((${BOUCLE_STALENESS_THRESHOLD:-2400} * IDLE_FACTOR))
+      export BOUCLE_STALENESS_THRESHOLD
+      echo "Doctor: board idle — staleness threshold relaxed to ${BOUCLE_STALENESS_THRESHOLD}s"
+    fi
+  fi
+
   # ── Local helpers ──────────────────────────────────────────────────────
   # set_boucle_label / chain_to_role / close_issue / get_work_item_children
   # come from lib/boucle.sh (sourced by the lib/boucle-ci.sh bootstrap) —
@@ -671,6 +751,16 @@ boucle_ci_doctor() {
       echo "  → #$IID: open sub-issue(s) #$OPEN_IIDS — parent stays open"
     fi
   done
+
+  # ── Scheduled maintenance issues (#39) ─────────────────────────────────
+  # Opt-in. Turns the doctor from purely inward-facing (healing state) into
+  # an entry point that can also produce work.
+  boucle_schedules_run || true
+
+  # ── Status board (#36) ─────────────────────────────────────────────────
+  # The sweep already holds the data; rendering it costs one read and, when
+  # nothing moved, zero writes.
+  boucle_board_upsert || true
 
   echo "Doctor complete. Recovered $RECOVERED orphaned issue(s)."
 }

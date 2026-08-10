@@ -6,6 +6,7 @@
 set -euo pipefail
 
 FORGE="${BOUCLE_FORGE:-gitlab}"
+AUDIT_MODE=0
 
 # Parse arguments
 while [ $# -gt 0 ]; do
@@ -14,6 +15,10 @@ while [ $# -gt 0 ]; do
       FORGE="$2"
       shift 2
       ;;
+    --audit)
+      AUDIT_MODE=1
+      shift
+      ;;
     *)
       echo "Unknown argument: $1" >&2
       exit 1
@@ -21,7 +26,13 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-PROJECT_ID="${BOUCLE_PROJECT_ID:?BOUCLE_PROJECT_ID must be set}"
+# The config audit is read-only and forge-independent: it must run before a
+# project is even reachable, which is exactly when it is most useful.
+if [ "$AUDIT_MODE" -eq 1 ]; then
+  PROJECT_ID="${BOUCLE_PROJECT_ID:-}"
+else
+  PROJECT_ID="${BOUCLE_PROJECT_ID:?BOUCLE_PROJECT_ID must be set}"
+fi
 HOST="${BOUCLE_FORGE_HOST:-gitlab.example.com}"
 
 pass() { echo "  ✓ $1"; }
@@ -32,7 +43,7 @@ fail() {
 }
 FAILURES=0
 
-echo "boucle doctor — checking prerequisites..."
+[ "$AUDIT_MODE" -eq 1 ] || echo "boucle doctor — checking prerequisites..."
 
 # Resolve BOUCLE_HOME early (needed for forge source + agents check)
 BOUCLE_HOME="${BOUCLE_HOME:-}"
@@ -42,6 +53,154 @@ if [ -z "$BOUCLE_HOME" ]; then
   elif [ -d "$(dirname "$0")/../.boucle" ]; then
     BOUCLE_HOME="$(cd "$(dirname "$0")/.." && pwd)/.boucle"
   fi
+fi
+
+# ── Config audit (--audit, #41) ───────────────────────────────────────
+# bin/doctor's default mode checks that the forge is reachable and wired.
+# This checks that the CONFIGURATION is coherent — the class of problem a
+# consumer otherwise discovers mid-loop, one failed run at a time.
+#
+# Strictly read-only: no label writes, no comments, no issue creation.
+#
+# Severities are weighted so blockers dominate: a repo that cannot complete
+# a loop must not score well because everything else is tidy.
+AUDIT_BLOCKERS=0
+AUDIT_DEGRADED=0
+AUDIT_ADVISORIES=0
+
+audit_blocker() {
+  echo "  ✗ BLOCKER  $1" >&2
+  echo "             → $2" >&2
+  AUDIT_BLOCKERS=$((AUDIT_BLOCKERS + 1))
+}
+audit_degraded() {
+  echo "  ⚠ DEGRADED $1" >&2
+  echo "             → $2" >&2
+  AUDIT_DEGRADED=$((AUDIT_DEGRADED + 1))
+}
+audit_advisory() {
+  echo "  · ADVISORY $1"
+  echo "             → $2"
+  AUDIT_ADVISORIES=$((AUDIT_ADVISORIES + 1))
+}
+
+run_config_audit() {
+  echo "boucle doctor --audit — configuration readiness"
+  echo ""
+
+  local vars_url="https://${HOST}/${PROJECT_ID:-<project>}/-/settings/ci_cd"
+  [ "$FORGE" = "github" ] && vars_url="https://github.com/${PROJECT_ID:-<owner/repo>}/settings/secrets/actions"
+
+  # The loop cannot run at all without a key.
+  if [ -z "${BOUCLE_LLM_API_KEY:-}" ]; then
+    audit_blocker "BOUCLE_LLM_API_KEY is not set" \
+      "Add it as a MASKED variable: $vars_url"
+  else
+    pass "BOUCLE_LLM_API_KEY is set"
+  fi
+
+  # external mode has nowhere to point e2e without a live URL.
+  local deploy_mode="${BOUCLE_DEPLOY_MODE:-self}"
+  if [ "$deploy_mode" = "external" ] && [ -z "${BOUCLE_LIVE_URL:-}" ]; then
+    audit_blocker "BOUCLE_DEPLOY_MODE=external without BOUCLE_LIVE_URL" \
+      "external mode never deploys, so e2e has no target. Set BOUCLE_LIVE_URL at $vars_url"
+  else
+    pass "deploy mode '$deploy_mode' is coherent"
+  fi
+
+  # Configured but inert: looks like a safety net, is not one.
+  if [ -n "${BOUCLE_FALLBACK_PROVIDER:-}" ]; then
+    if [ -z "${BOUCLE_FALLBACK_BASE_URL:-}" ] || [ -z "${BOUCLE_FALLBACK_API_KEY:-}" ]; then
+      audit_degraded "BOUCLE_FALLBACK_PROVIDER is set but inert" \
+        "It needs BOUCLE_FALLBACK_BASE_URL and BOUCLE_FALLBACK_API_KEY. Provider outages will escalate to a human instead of failing over."
+    else
+      pass "provider fallback is fully configured"
+    fi
+  fi
+
+  # A relaxed re-trigger fires while the job is still running.
+  local staleness="${BOUCLE_STALENESS_THRESHOLD:-2400}"
+  case "$staleness" in
+    '' | *[!0-9]*) audit_degraded "BOUCLE_STALENESS_THRESHOLD is not a number ('$staleness')" "Falling back to 2400. Set an integer number of seconds." ;;
+    *)
+      if [ "$staleness" -le 1800 ]; then
+        audit_degraded "BOUCLE_STALENESS_THRESHOLD=$staleness is below the max job timeout" \
+          "It must exceed 1800s (30 min) or the doctor re-triggers issues whose job is still running."
+      else
+        pass "staleness threshold (${staleness}s) exceeds the max job timeout"
+      fi
+      ;;
+  esac
+
+  # Silently wrong: the quiet window applies at the wrong hours.
+  if [ "${BOUCLE_DND_ENABLED:-true}" = "true" ] && [ "${BOUCLE_DND_TZ:-UTC}" = "UTC" ]; then
+    audit_advisory "BOUCLE_DND_TZ is UTC" \
+      "If you are not in UTC, the quiet window applies at the wrong hours. Set an IANA name, e.g. Europe/Paris."
+  fi
+
+  # preview review mode with the renderer disabled.
+  if [ "${BOUCLE_REVIEW_MODE:-preview}" = "preview" ] && [ "${BOUCLE_PREVIEW_DISABLE:-false}" = "true" ]; then
+    audit_advisory "BOUCLE_PREVIEW_DISABLE=true with BOUCLE_REVIEW_MODE=preview" \
+      "The spec gate loses its visual mockup. Intentional on a non-UI repo; otherwise unset it."
+  fi
+
+  # Unknown enum values silently fall back.
+  case "${BOUCLE_SPEC_PROFILE:-product}" in
+    product | strict | off) pass "spec profile '${BOUCLE_SPEC_PROFILE:-product}' is valid" ;;
+    *) audit_advisory "BOUCLE_SPEC_PROFILE='${BOUCLE_SPEC_PROFILE}' is unknown" "Falling back to 'product'. Valid: product, strict, off." ;;
+  esac
+  case "${BOUCLE_REVIEW_ANCHORING:-full}" in
+    full | criteria-only | none) : ;;
+    *) audit_advisory "BOUCLE_REVIEW_ANCHORING='${BOUCLE_REVIEW_ANCHORING}' is unknown" "Falling back to 'full'. Valid: full, criteria-only, none." ;;
+  esac
+  case "${BOUCLE_RETRY_STRATEGY:-adaptive}" in
+    adaptive | preserve | reset) : ;;
+    *) audit_advisory "BOUCLE_RETRY_STRATEGY='${BOUCLE_RETRY_STRATEGY}' is unknown" "Falling back to 'preserve'. Valid: adaptive, preserve, reset." ;;
+  esac
+  if [ -n "${BOUCLE_NOTIFY_URL:-}" ]; then
+    case "${BOUCLE_NOTIFY_FORMAT:-slack}" in
+      slack | telegram | ntfy | raw) pass "notification format '${BOUCLE_NOTIFY_FORMAT:-slack}' is valid" ;;
+      *) audit_advisory "BOUCLE_NOTIFY_FORMAT='${BOUCLE_NOTIFY_FORMAT}' is unknown" "Falling back to 'slack'. Valid: slack, telegram, ntfy, raw." ;;
+    esac
+  fi
+
+  # A malformed price table silently yields no dollar figures.
+  if [ -n "${BOUCLE_PRICING_JSON:-}" ]; then
+    if echo "${BOUCLE_PRICING_JSON}" | jq -e . > /dev/null 2>&1; then
+      pass "BOUCLE_PRICING_JSON parses"
+    else
+      audit_degraded "BOUCLE_PRICING_JSON is not valid JSON" \
+        "Cost reporting will show tokens with no dollar figures. Expected: {\"model\":{\"in\":0.1,\"out\":0.3}}"
+    fi
+  fi
+
+  # The worker reads the charter before any UI work.
+  if [ -x "${BOUCLE_HOME}/bin/check-design-charter" ]; then
+    if "${BOUCLE_HOME}/bin/check-design-charter" > /dev/null 2>&1; then
+      pass "visual charter is valid"
+    else
+      audit_advisory "the visual charter is missing or incomplete" \
+        "Run ${BOUCLE_HOME}/bin/check-design-charter for details. UI work will fall back to generic design defaults."
+    fi
+  fi
+
+  # Weighted so blockers dominate: a repo that cannot complete a loop must
+  # not score well because everything else is tidy.
+  local score=$((100 - AUDIT_BLOCKERS * 40 - AUDIT_DEGRADED * 15 - AUDIT_ADVISORIES * 3))
+  [ "$score" -lt 0 ] && score=0
+
+  echo ""
+  echo "Readiness: ${score}/100  (${AUDIT_BLOCKERS} blocker(s), ${AUDIT_DEGRADED} degraded, ${AUDIT_ADVISORIES} advisory)"
+  if [ "$AUDIT_BLOCKERS" -gt 0 ]; then
+    echo "The loop cannot complete in this configuration." >&2
+    return 1
+  fi
+  return 0
+}
+
+if [ "$AUDIT_MODE" -eq 1 ]; then
+  run_config_audit
+  exit $?
 fi
 
 # Source forge backend
