@@ -110,6 +110,28 @@ variables:
   # the repo has no submodule (dogfood).
   GIT_SUBMODULE_STRATEGY: recursive
 
+# ── Agent transcript artifact (#33) ─────────────────────────────────────
+# The agent log is the only record of WHAT the agent actually did. Without
+# it, every escalation comment ("agent likely exhausted its step budget",
+# "produced no code changes") is unactionable — the human is told the loop
+# stopped, not why.
+#
+# when: always is the point. A failed run is exactly the one whose
+# transcript gets read; uploading only on success would protect nothing.
+#
+# Safe to upload: bin/jc scrub_agent_log redacts known secret values and
+# token shapes from the log before any exit path. The LLM key cannot be
+# unset from the agent's environment (jcode reads it via api_key_env), so
+# that redaction is the only barrier between it and this artifact.
+#
+# Short expiry: transcripts are for debugging, not archival.
+.agent_artifacts: &agent_artifacts
+  when: always
+  expire_in: 1 week
+  paths:
+    - .boucle/**/agent-output.log
+    - .boucle-state/**/agent-output.log
+
 # ── Default: use node:22-slim (has node, npm, curl — much smaller than node:22) ─
 # The shared runner is a docker executor. node:22-slim is ~250MB vs ~1GB.
 # before_script installs glab + jcode + wrangler (not in the image).
@@ -1031,6 +1053,7 @@ triage:
   retry:
     max: 2
     when: runner_system_failure
+  artifacts: *agent_artifacts
   # resource_group omitted — BOUCLE_ISSUE not available at pipeline eval time for triage
   needs:
     - job: dispatch
@@ -1815,6 +1838,7 @@ worker:
   retry:
     max: 2
     when: runner_system_failure
+  artifacts: *agent_artifacts
   resource_group: boucle-issue-$BOUCLE_ISSUE
   cache:
     key:
@@ -2572,6 +2596,7 @@ reviewer:
   retry:
     max: 2
     when: runner_system_failure
+  artifacts: *agent_artifacts
   resource_group: boucle-issue-$BOUCLE_ISSUE
   needs:
     - job: dispatch
@@ -3828,6 +3853,7 @@ e2e:
   retry:
     max: 2
     when: runner_system_failure
+  artifacts: *agent_artifacts
   resource_group: boucle-issue-$BOUCLE_ISSUE
   needs:
     - job: dispatch

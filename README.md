@@ -250,6 +250,7 @@ all have sane defaults — override them only when you need to:
 | `BOUCLE_DEPLOY_MODE` | `self` | Deploy handling: `self` (default — boucle runs `BOUCLE_DEPLOY_CMD`) or `external` (consumer's own CI/CD deploys; `BOUCLE_LIVE_URL` required). |
 | `BOUCLE_REVIEW_MODE` | `preview` | Reviewer gate: `preview` (default — tests deployed preview) or `diff` (reviews PR diff + check suites). |
 | `BOUCLE_LIVE_URL` | *(unset)* | Canonical e2e target URL — **required** in `external` mode; optional override in `self` mode. |
+| `BOUCLE_NOTIFY_URL` | *(unset)* | Send-only webhook (Slack, Discord, ntfy, Telegram) pinged when the loop needs you — spec gate, MR gate, escalation. Silent during DND, fail-open. |
 
 Deploy targets: Cloudflare Pages (default), GitHub Pages, GitLab Pages, or the
 consumer's own pipeline (`external` mode). Per-provider
