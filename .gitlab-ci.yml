@@ -3936,11 +3936,14 @@ deploy:
     - if: $BOUCLE_ENABLED != "true"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+  needs:
+    - job: build-site
   script:
     - |
       # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
       set +o pipefail
-      eval "$BOUCLE_BUILD_CMD"
+      # Site content comes from build-site's artifact (public/) — no rebuild
+      # here (WASM OOM on shell executors, framagit 2026-08).
       # Deploy to production (configurable via BOUCLE_DEPLOY_CMD, force $CI_DEFAULT_BRANCH branch)
       BRANCH=$CI_DEFAULT_BRANCH
       DEPLOY_URL=$(eval "$BOUCLE_DEPLOY_CMD" 2>&1 | grep -oE "$BOUCLE_DEPLOY_URL_REGEX" | head -1)
@@ -4998,6 +5001,26 @@ doctor:
       echo "Doctor complete. Recovered $RECOVERED orphaned issue(s)."
   timeout: 5m
 
+# ── build-site: one build, many publishers (W1.7 + memory fix) ───────────
+# The site is built ONCE here on a docker runner (node:22-slim, tags: []) and
+# published via artifact. Both `pages` (GitLab Pages) and `deploy` (CF/other)
+# consume public/ instead of re-building — this fixes the WASM Out-of-memory
+# failures seen when the build ran on small shell executors (framagit 2026-08).
+build-site:
+  stage: deploy
+  image: node:22-slim
+  tags: []
+  rules:
+    - if: $BOUCLE_ENABLED != "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+  script:
+    - eval "$BOUCLE_BUILD_CMD"
+  artifacts:
+    paths:
+      - public
+    expire_in: 4h
+
 # ── GitLab Pages (W1.7) ───────────────────────────────────────────────────
 # Declarative GitLab Pages publish — the only token-less deploy path: the
 # pipeline builds $BOUCLE_BUILD_OUTPUT (default: public/) and GitLab serves
@@ -5014,14 +5037,10 @@ pages:
     - if: $BOUCLE_DEPLOY_PROVIDER != "gitlab-pages"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+  needs:
+    - job: build-site
   script:
-    # NOTE: no `$` expansion may appear OUTSIDE the eval line here —
-    # framagit's linter rejects any script mixing a second expansion
-    # ($CI_PAGES_URL, $CI_COMMIT_BRANCH, ...) with the $BOUCLE_BUILD_CMD eval
-    # ("script config should be a string or a nested array", 2026-08). The
-    # Pages URL is visible in the UI / via the Pages API.
     - echo "Publishing the site to GitLab Pages"
-    - eval "$BOUCLE_BUILD_CMD"
   artifacts:
     paths:
       - public
