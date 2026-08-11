@@ -1960,15 +1960,16 @@ worker:
       # into an infinite escalation loop. reset --hard is allowed ONLY for a
       # true clean slate (branch exists but has NO worker commits).
       BRANCH="boucle/$BOUCLE_ISSUE"
-      if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-        git checkout "$BRANCH"
-      elif git fetch origin "$BRANCH" 2>/dev/null; then
-        # Local ref gone (wiped executor) but the remote still has prior
-        # worker commits — restore the branch from origin instead of
-        # starting from a clean slate and losing the pushed work.
-        git checkout -b "$BRANCH" "origin/$BRANCH"
+      # Force-sync the local branch from origin: the executor REUSES the repo
+      # between jobs, so a stale local branch (e.g. a crashed job's safety-net
+      # commit that staged .npm/) can collide with the runner-restored cache
+      # and fail `git checkout` with "untracked working tree files would be
+      # overwritten" — looping the doctor forever. -B resets the local branch
+      # to the remote tip; -f discards the colliding untracked files.
+      if git fetch origin "$BRANCH" 2>/dev/null; then
+        git checkout -f -B "$BRANCH" "origin/$BRANCH"
       else
-        git checkout -b "$BRANCH"
+        git checkout -f -b "$BRANCH"
       fi
       if git log --oneline origin/$CI_DEFAULT_BRANCH.."$BRANCH" 2>/dev/null | grep -q .; then
         echo "[boucle] Branch has prior worker commits — rebasing onto origin/$CI_DEFAULT_BRANCH to preserve work."
@@ -2238,20 +2239,33 @@ worker:
       # agent-output.log), not source code. Some repos have .boucle/ tracked
       # from a past `git add -A` (gitignore doesn't untrack); staging it here
       # re-commits stale state and causes checkout conflicts on the next run.
+      # NEVER stage .npm/ either — it is the npm cache (npm_config_cache),
+      # restored by the runner BEFORE the script; a safety-net commit that
+      # stages it leaves a local branch whose tree collides with the restored
+      # cache on the next job (same executor), failing `git checkout` with
+      # "untracked working tree files would be overwritten" and looping the
+      # doctor forever (observed on a consumer repo, 2026-08).
       if ! git diff --quiet || ! git diff --cached --quiet; then
         # || true: git exits 1 when the excluded pathspec matches a gitignored
         # entry (.boucle/), even though non-ignored files ARE staged correctly.
         # Under set -e that aborts before the commit — defeating the safety-net.
-        git add -A -- ':!.boucle' || true
+        git add -A -- ':!.boucle' ':!.npm' || true
         git commit -m "feat: worker changes for #$BOUCLE_ISSUE [skip ci]" --no-verify
       fi
 
-      # Ensure wrangler cache isn't committed. Commit this change immediately
-      # so the index is clean before the rebase (rebase fails on a dirty index).
+      # Ensure wrangler + npm caches aren't committed. Commit this change
+      # immediately so the index is clean before the rebase (rebase fails on
+      # a dirty index). .npm/ is the npm cache dir (npm_config_cache) — the
+      # runner restores it before the script, so it must never be tracked.
       if ! grep -q '.wrangler/' .gitignore 2>/dev/null; then
         echo '.wrangler/' >> .gitignore
         git add .gitignore
         git commit -m "chore: ignore .wrangler/ cache [skip ci]" --no-verify
+      fi
+      if ! grep -q '^.npm/$' .gitignore 2>/dev/null; then
+        echo '.npm/' >> .gitignore
+        git add .gitignore
+        git commit -m "chore: ignore .npm/ cache [skip ci]" --no-verify
       fi
 
       # Guard: if the agent produced no changes vs $CI_DEFAULT_BRANCH (only .gitignore
