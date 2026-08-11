@@ -379,6 +379,41 @@ less:
   every run is a full sweep — the old behaviour exactly. No regression, and
   no saving either.
 
+## Skills
+
+Boucle ships ~62 skills in `.jcode/skills/`. Two mechanisms make them real
+rather than decorative.
+
+**A generated catalogue.** `bin/skills-index` builds the list injected into
+the triage, worker and reviewer prompts from each skill's frontmatter. It
+publishes **every** skill — 41 of 62 used to be named in no prompt at all,
+so they shipped in every clone, were re-synced on every engine update, and
+could never fire. There is deliberately **no ranking**: the full catalogue
+costs ~9% of an assembled prompt, and selecting a subset by keyword would
+buy that back at the price of a miss rate — and a miss means the agent never
+learns the skill exists, which is the bug being fixed.
+
+The catalogue is a **display, never a filter**. Nothing moves, hides or
+restricts `.jcode/skills/`; every skill stays loadable at any point in a
+run, including mid-task. It **augments** the curated lists in the agent
+files rather than replacing them, because those carry per-skill operating
+instructions a generated index cannot reproduce.
+
+Entries are keyed by **directory name**, which is what loads. A skill whose
+frontmatter `name:` disagrees with its directory would silently fail to load
+under the name it advertises — `bin/doctor --audit` reports any mismatch.
+
+**Usage evidence.** Every agent run extracts the skills actually loaded from
+the transcript, reports them on the `[boucle:metrics]` channel and
+accumulates them in `.boucle/<issue>/skills-used.json`. A name is only
+recorded if it matches a skill on disk, so prose mentions do not count as
+loads.
+
+This is **measurement only** — nothing fails or blocks on skill usage. And a
+transcript that cannot be read is recorded as `observable=no`, never as "no
+skills used": a missing measurement is not a finding of absence, and that
+distinction is what would make a gate built on this data safe.
+
 ## Cost accounting
 
 Every agent invocation appends one entry to `.boucle-state/<issue>/cost.json`

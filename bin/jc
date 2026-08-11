@@ -1205,6 +1205,33 @@ Draft file hygiene: if you write your draft verdict to a file, use \`\$BOUCLE_VE
   # Apply forge-aware MR/PR terminology so the agent writes "PR" on GitHub.
   forge_aware_prompt "$prompt"
 
+  # Append the generated skill catalogue (#50). 41 of 62 skills were named in
+  # no prompt: shipped in every clone, re-synced on every update, and unable
+  # to fire because no agent was ever told they existed.
+  #
+  # AUGMENTS the curated lists in the agent files, does not replace them:
+  # those carry per-skill operating instructions (how to invoke
+  # ui-ux-pro-max's search script, the .impeccable.md caveat on
+  # frontend-design) that a generated index cannot reproduce.
+  #
+  # Not injected for e2e: its job is to verify a URL, and it runs on a 30-step
+  # budget where a 62-entry catalogue is pure overhead.
+  case "$role" in
+    triage | worker | reviewer)
+      local catalogue=""
+      if [ -x "${BOUCLE_HOME:-}/bin/skills-index" ]; then
+        catalogue=$("${BOUCLE_HOME}/bin/skills-index" 2> /dev/null || echo "")
+      fi
+      if [ -n "$catalogue" ]; then
+        echo ""
+        echo "Complete skill catalogue (load any of these with the \`skill\` tool, by the name shown):"
+        echo "$catalogue"
+        echo ""
+        echo "This list is exhaustive and every entry is loadable at any point during your run — including mid-task, once you discover you need one. The curated guidance above highlights the skills most often needed for your role; it does not restrict what you may load."
+      fi
+      ;;
+  esac
+
   # Append attachment paths (if any) so the agent knows how to handle them.
   # bin/fetch-issue-attachments downloads issue uploads to
   # .boucle-state/$ISSUE/attachments/ (images, PDFs, archives, etc.).
@@ -1796,6 +1823,71 @@ boucle_health_record "$ISSUE" "$ROLE" "$ITERATION" "$AGENT_EXIT" \
   "${prompt_total_chars:-0}" "${h_pt:-}" "${h_cost:-}" "$h_model" "$h_provider" || true
 
 record_cost || true
+
+# ── 7c. Skill usage evidence (#49) ────────────────────────────────────
+# Boucle ships 62 skills and asks agents to load them. Until now nothing
+# checked that they did: the engine mentioned "skill" exactly once, in a
+# comment, and the agent prompts repeat "You are NOT excused from loading
+# skills" four times — a rule is not repeated four times across four files
+# when it lands.
+#
+# better-harness names the distinction this closes: *configured asset
+# detection* (the mechanism exists) versus *linked task evidence validation*
+# (it was actually exercised). Boucle had only the first and asserted the
+# second.
+#
+# MEASUREMENT ONLY. Nothing fails, warns or blocks on skill usage here — a
+# gate needs evidence it can trust, and that is what this collects.
+extract_skills_used() {
+  local log="$1"
+  [ -f "$log" ] || return 0
+  # The transcript format is jcode's, not ours, so match on several plausible
+  # shapes rather than one. Names are the on-disk directory names.
+  grep -oiE '(skill[^a-z0-9]{0,3}(tool|call|load)?[^a-z0-9]{0,3}|\bskill\(|loading skill |\.jcode/skills/)[a-z0-9_-]+' "$log" 2> /dev/null \
+    | grep -oE '[a-z0-9_-]+$' \
+    | sort -u \
+    | while read -r candidate; do
+      # Only report a name that is an actual skill on disk. Anything else is
+      # a false positive from prose, and a false positive here would later
+      # become a gate passing on a skill that was never loaded.
+      if [ -d "$BOUCLE_WORKSPACE/.jcode/skills/$candidate" ]; then
+        echo "$candidate"
+      fi
+    done
+  return 0
+}
+
+record_skills_used() {
+  local used observable="yes"
+  used=$(extract_skills_used "$AGENT_LOG" | paste -sd, - 2> /dev/null || echo "")
+  # A transcript we cannot read is NOT a finding of "no skills used".
+  # Missing evidence stays explicit — that distinction is what makes a gate
+  # built on this data safe.
+  if [ ! -s "$AGENT_LOG" ]; then
+    observable="no"
+    used=""
+  fi
+
+  echo "[boucle:metrics] role=$ROLE iteration=$ITERATION skills_used=${used:-none} observable=$observable" >&2
+
+  local file="$STATE_DIR/skills-used.json"
+  [ -s "$file" ] || echo '{"entries":[]}' > "$file" 2> /dev/null || return 0
+  local tmp="${file}.tmp"
+  if jq --arg role "$ROLE" --arg iter "$ITERATION" --arg used "$used" \
+    --arg observable "$observable" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '.entries += [{
+       timestamp: $ts, role: $role, iteration: ($iter | tonumber? // $iter),
+       observable: ($observable == "yes"),
+       skills: ($used | if . == "" then [] else split(",") end)
+     }]' "$file" > "$tmp" 2> /dev/null; then
+    mv "$tmp" "$file"
+  else
+    rm -f "$tmp" 2> /dev/null || true
+    echo "[boucle] WARN: could not append to $file — skill accounting skipped for this run" >&2
+  fi
+}
+
+record_skills_used || true
 
 # ── 8. Assert declared side effect ────────────────────────────────────
 # The job (not bin/jc) asserts the side effect after this script exits.
