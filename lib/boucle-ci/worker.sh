@@ -188,8 +188,10 @@ EOF
   "$BOUCLE_HOME/bin/fetch-mr-attachments" || echo "[boucle] WARN: MR attachment fetch failed — continuing without MR attachments"
   "$BOUCLE_HOME/bin/fetch-issue-attachments" || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
 
-  # ── Detect image attachments and route to vision model ───────────
-  eval "$("$BOUCLE_HOME/bin/detect-vision-need" worker)"
+  # ── Describe image attachments (vision model → text) ─────────────
+  # Replaces detect-vision-need: the worker stays on deepseek-v4-flash
+  # (code model) and gets image context as text descriptions.
+  "$BOUCLE_HOME/bin/describe-images worker" || echo "[boucle] WARN: image description failed — continuing without descriptions"
 
   # ── Export issue body + notes for the agent prompt ───────────────
   export BOUCLE_ISSUE_BODY
