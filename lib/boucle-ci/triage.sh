@@ -200,6 +200,21 @@ boucle_ci_triage() {
     fi
   fi
 
+  # ── Persist triage Deliverables as obligations.md ─────────────────
+  # The triage comment may carry an optional `## Deliverables` section
+  # (one `- O1 — type: … — … — condition: …` line per obligation). The
+  # reviewer's obligations gate + prompt injection depend on this file;
+  # a missing file simply disables the gate, so this is best-effort.
+  OBLIGATIONS_TEXT=$(printf '%s\n' "$COMMENT" | awk '/^## Deliverables/{f=1;next}/^## /{f=0} f' 2>/dev/null || true)
+  if [ -n "$OBLIGATIONS_TEXT" ]; then
+    BOUCLE_STATE_CACHE="${BOUCLE_STATE_CACHE:-${HOME}/.boucle-state-cache}"
+    mkdir -p "$BOUCLE_STATE_CACHE/${BOUCLE_ISSUE}"
+    {
+      printf '<!-- boucle:obligations v=1 -->\n'
+      printf '%s\n' "$OBLIGATIONS_TEXT"
+    } > "$BOUCLE_STATE_CACHE/${BOUCLE_ISSUE}/obligations.md" 2>/dev/null || true
+  fi
+
   # If no NEW triage comment was posted by this run (agent crashed, hit
   # step limit, or decided no new triage was needed), leave the issue at
   # boucle:triage and exit without changing labels. Re-applying the OLD
