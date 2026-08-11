@@ -4013,6 +4013,11 @@ deploy:
     - |
       # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
       set +o pipefail
+      # No deploy command (e.g. GitLab Pages mode / external): skip cleanly.
+      if [ -z "${BOUCLE_DEPLOY_CMD:-}" ]; then
+        echo "deploy: BOUCLE_DEPLOY_CMD is empty (Pages/external mode) — skipping"
+        exit 0
+      fi
       # Site content comes from build-site's artifact (public/) — no rebuild
       # here (WASM OOM on shell executors, framagit 2026-08).
       # Deploy to production (configurable via BOUCLE_DEPLOY_CMD, force $CI_DEFAULT_BRANCH branch)
