@@ -134,8 +134,12 @@ boucle_ci_dispatch() {
   # Bot-originated events are filtered by the ACTOR guard above, except
   # merge actions (which trigger catchup to close the issue).
   if [ "$OBJECT_KIND" = "merge_request" ]; then
-    SOURCE_BRANCH=$(jq -r '.object_attributes.source_branch // empty' "$BOUCLE_TRIGGER_PAYLOAD")
-    MR_IID=$(jq -r '.object_attributes.iid // empty' "$BOUCLE_TRIGGER_PAYLOAD")
+    # Late payload reads: the trigger payload file can vanish mid-job (jq
+    # exit 5 "system error" — same failure as pipeline #1433434 on a
+    # consumer repo). Deferred with a fallback so a vanished file degrades
+    # to an empty value instead of killing dispatch silently under set -e.
+    SOURCE_BRANCH=$(jq -r '.object_attributes.source_branch // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
+    MR_IID=$(jq -r '.object_attributes.iid // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
     # Extract issue IID from branch name boucle/<iid>
     MR_ISSUE_IID=$(printf '%s' "$SOURCE_BRANCH" | sed -n 's/^boucle\/\([0-9]\+\)$/\1/p')
     if [ -z "$MR_ISSUE_IID" ]; then
@@ -307,7 +311,7 @@ boucle_ci_dispatch() {
     # update webhook, so the system note is pure redundancy. Emoji
     # events have no `system` field and are unaffected.
     if [ "$OBJECT_KIND" = "note" ]; then
-      NOTE_SYSTEM=$(jq -r '.object_attributes.system // false' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+      NOTE_SYSTEM=$(jq -r '.object_attributes.system // false' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "false")
       if [ "$NOTE_SYSTEM" = "true" ]; then
         echo "System note (non-human) — skipping"
         exit 0
@@ -317,9 +321,9 @@ boucle_ci_dispatch() {
     # When a human comments on a boucle MR, they're reviewing it and
     # providing feedback. Re-trigger the worker so it re-runs and can
     # address the comments. Bot notes are filtered by the ACTOR guard.
-    MR_NOTE_IID=$(jq -r '.merge_request.iid // empty' "$BOUCLE_TRIGGER_PAYLOAD")
+    MR_NOTE_IID=$(jq -r '.merge_request.iid // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
     if [ -n "$MR_NOTE_IID" ] && [ "$OBJECT_KIND" = "note" ]; then
-      MR_NOTE_SOURCE_BRANCH=$(jq -r '.merge_request.source_branch // empty' "$BOUCLE_TRIGGER_PAYLOAD")
+      MR_NOTE_SOURCE_BRANCH=$(jq -r '.merge_request.source_branch // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
       MR_NOTE_ISSUE_IID=$(printf '%s' "$MR_NOTE_SOURCE_BRANCH" | sed -n 's/^boucle\/\([0-9]\+\)$/\1/p')
       if [ -z "$MR_NOTE_ISSUE_IID" ]; then
         echo "Note on MR !${MR_NOTE_IID} but source_branch '$MR_NOTE_SOURCE_BRANCH' is not a boucle branch, skipping"
@@ -377,15 +381,18 @@ boucle_ci_dispatch() {
     if [ "$ISSUE_STATE_FOR_GUARD" = "closed" ]; then
       # Check if this is a BOT_JUST_ASSIGNED event — if so, let it through
       # (the human explicitly assigned the bot to reopen the issue).
-      GUARD_ACTION=$(jq -r '.object_attributes.action // empty' "$BOUCLE_TRIGGER_PAYLOAD")
+      GUARD_ACTION=$(jq -r '.object_attributes.action // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
       GUARD_BOT_ASSIGNED=false
       if [ "$OBJECT_KIND" = "issue" ] && [ "$GUARD_ACTION" = "update" ]; then
         if [ -n "${BOUCLE_BOT_ID:-}" ] && [[ "$BOUCLE_BOT_ID" =~ ^[0-9]+$ ]]; then
-          GUARD_BOT_IN_CURRENT=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.current // [] | map(.id | tostring) | index($bid) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
-          GUARD_BOT_IN_PREVIOUS=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.previous // [] | map(.id | tostring) | index($bid) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+          # Late payload reads — same vanished-file guard as the inline
+          # dispatch copy (jq exit 5, pipeline #1433434): degrade to
+          # "no assignee change" instead of dying under set -e.
+          GUARD_BOT_IN_CURRENT=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.current // [] | map(.id | tostring) | index($bid) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || GUARD_BOT_IN_CURRENT=false
+          GUARD_BOT_IN_PREVIOUS=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.previous // [] | map(.id | tostring) | index($bid) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || GUARD_BOT_IN_PREVIOUS=false
         else
-          GUARD_BOT_IN_CURRENT=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.current // [] | map(.username) | index($bname) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
-          GUARD_BOT_IN_PREVIOUS=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.previous // [] | map(.username) | index($bname) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+          GUARD_BOT_IN_CURRENT=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.current // [] | map(.username) | index($bname) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || GUARD_BOT_IN_CURRENT=false
+          GUARD_BOT_IN_PREVIOUS=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.previous // [] | map(.username) | index($bname) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || GUARD_BOT_IN_PREVIOUS=false
         fi
         if [ "$GUARD_BOT_IN_CURRENT" = "true" ] && [ "$GUARD_BOT_IN_PREVIOUS" != "true" ]; then
           GUARD_BOT_ASSIGNED=true
