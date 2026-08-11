@@ -22,10 +22,17 @@ on:
     types: [opened, edited, closed, reopened, ready_for_review, review_requested]
   pull_request_review:
     types: [submitted, dismissed]
+  # No `edited`: boucle rewrites its own comments in place — triage via
+  # forge_issue_note_update, and bin/collapse-duplicate-notes on every
+  # triage/reviewer/e2e run — so each edit fired a dispatch run that had
+  # nothing to do. dispatch never reads the comment action anyway, so an
+  # edit was indistinguishable from a creation and routed on the same
+  # rules. Trade-off: editing a reply on a paused issue no longer
+  # re-triggers the loop; post a new comment instead.
   issue_comment:
-    types: [created, edited]
+    types: [created]
   pull_request_review_comment:
-    types: [created, edited]
+    types: [created]
   push:
     branches: [$BOUCLE_DEFAULT_BRANCH]
   schedule:
@@ -77,7 +84,12 @@ env:
   BOUCLE_PIPELINE_SOURCE: ${{ github.event_name }}
   BOUCLE_JOB_ID: ${{ github.run_id }}
   BOUCLE_JOB_URL: ${{ github.run_url }}
-  BOUCLE_TRIGGER_PAYLOAD: ${{ toJSON(github.event) }}
+  # A PATH, not the JSON itself: every consumer (dispatch, the stage libs)
+  # passes this to `jq -r '...' "$BOUCLE_TRIGGER_PAYLOAD"`, which reads it as
+  # a filename. Passing toJSON(github.event) made jq treat the whole payload
+  # as a path, fail to open it, and abort dispatch on every GitHub webhook.
+  # github.event_path is the file Actions already writes for exactly this.
+  BOUCLE_TRIGGER_PAYLOAD: ${{ github.event_path }}
   BOUCLE_TOKEN: ${{ secrets.BOUCLE_TOKEN }}
   BOUCLE_BOT_USERNAME: ${{ vars.BOUCLE_BOT_USERNAME || 'up-bot' }}
   BOUCLE_BOT_ID: ${{ vars.BOUCLE_BOT_ID || '' }}

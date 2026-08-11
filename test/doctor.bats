@@ -115,3 +115,102 @@ setup() {
   '
   assert_success
 }
+
+# ── Bot identity vs token owner (#32) ─────────────────────────────────
+# The section is extracted on its own (bounded by the next section header)
+# so these tests never execute the deploy-mode checks that follow it.
+# `glab` is stubbed rather than mocked away entirely: the check must work
+# off what the forge returns, not off the absence of a binary.
+
+bot_identity_section() {
+  sed -n "/^# ── Bot identity vs token owner/,/^# ── Mode-specific checks/p" bin/doctor
+}
+
+@test "doctor passes when the bot identity is distinct from the token owner" {
+  run bash -c '
+    FAILURES=0
+    pass() { echo "  ✓ $1"; }
+    warn() { echo "  ⚠ $1" >&2; }
+    fail() { echo "  ✗ $1" >&2; FAILURES=$((FAILURES + 1)); }
+    FORGE=gitlab
+    HOST="gitlab.example.com"
+    BOUCLE_BOT_USERNAME="up-bot"
+    glab() { echo "{\"username\":\"alice\"}"; }
+    source <(sed -n "/^# ── Bot identity vs token owner/,/^# ── Mode-specific checks/p" bin/doctor)
+    [ "$FAILURES" -eq 0 ]
+  '
+  assert_success
+  assert_output --partial "distinct from the token owner"
+}
+
+@test "doctor fails when the bot identity IS the token owner and BOUCLE_MONO_USER is unset" {
+  run bash -c '
+    FAILURES=0
+    pass() { echo "  ✓ $1"; }
+    warn() { echo "  ⚠ $1" >&2; }
+    fail() { echo "  ✗ $1" >&2; FAILURES=$((FAILURES + 1)); }
+    FORGE=gitlab
+    HOST="gitlab.example.com"
+    BOUCLE_BOT_USERNAME="alice"
+    unset BOUCLE_MONO_USER
+    glab() { echo "{\"username\":\"alice\"}"; }
+    source <(sed -n "/^# ── Bot identity vs token owner/,/^# ── Mode-specific checks/p" bin/doctor)
+    [ "$FAILURES" -eq 1 ]
+  '
+  assert_success
+  assert_output --partial "the loop will never fire for you"
+}
+
+@test "doctor passes when the bot identity IS the token owner but BOUCLE_MONO_USER is set" {
+  run bash -c '
+    FAILURES=0
+    pass() { echo "  ✓ $1"; }
+    warn() { echo "  ⚠ $1" >&2; }
+    fail() { echo "  ✗ $1" >&2; FAILURES=$((FAILURES + 1)); }
+    FORGE=gitlab
+    HOST="gitlab.example.com"
+    BOUCLE_BOT_USERNAME="alice"
+    BOUCLE_MONO_USER=true
+    glab() { echo "{\"username\":\"alice\"}"; }
+    source <(sed -n "/^# ── Bot identity vs token owner/,/^# ── Mode-specific checks/p" bin/doctor)
+    [ "$FAILURES" -eq 0 ]
+  '
+  assert_success
+  assert_output --partial "mono-user mode"
+}
+
+@test "doctor warns (not fails) when the token owner cannot be resolved" {
+  run bash -c '
+    FAILURES=0
+    pass() { echo "  ✓ $1"; }
+    warn() { echo "  ⚠ $1" >&2; }
+    fail() { echo "  ✗ $1" >&2; FAILURES=$((FAILURES + 1)); }
+    FORGE=gitlab
+    HOST="gitlab.example.com"
+    BOUCLE_BOT_USERNAME="alice"
+    # Expired token / unreachable API: empty body, non-zero exit.
+    glab() { return 1; }
+    source <(sed -n "/^# ── Bot identity vs token owner/,/^# ── Mode-specific checks/p" bin/doctor)
+    [ "$FAILURES" -eq 0 ]
+  '
+  assert_success
+  assert_output --partial "could not resolve the BOUCLE_TOKEN owner"
+}
+
+@test "doctor resolves the token owner through the forge layer on GitHub" {
+  run bash -c '
+    FAILURES=0
+    pass() { echo "  ✓ $1"; }
+    warn() { echo "  ⚠ $1" >&2; }
+    fail() { echo "  ✗ $1" >&2; FAILURES=$((FAILURES + 1)); }
+    FORGE=github
+    HOST="github.com"
+    BOUCLE_BOT_USERNAME="alice"
+    unset BOUCLE_MONO_USER
+    forge_current_user_login() { echo "alice"; }
+    source <(sed -n "/^# ── Bot identity vs token owner/,/^# ── Mode-specific checks/p" bin/doctor)
+    [ "$FAILURES" -eq 1 ]
+  '
+  assert_success
+  assert_output --partial "the loop will never fire for you"
+}
