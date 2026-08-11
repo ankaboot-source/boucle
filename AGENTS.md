@@ -1319,12 +1319,28 @@ atomic.
       foreign file, MUST re-post directly with `--message` — an
       incomplete own verdict beats a foreign verdict (post-early rule,
       lesson #1).
-    - Admission: class — fixed shared temp paths for agent drafts on
-      shared executors; recurrence — agents pick `/tmp/<name>.md`
-      paths routinely and each new prompt could reintroduce the habit
-      without the doc; stable — no line numbers, no transient values;
-      distinct — lesson #27 handles stale verdict SHA parsing, this
-      lesson prevents the foreign-content post at the source.
+    - ❌ DO NOT limit this rule to agent drafts — ENGINE SCRIPTS and
+      operator commands fall in the same class. A fixed `/tmp` path in
+      `.gitlab-ci.yml`/`lib/boucle-ci/*` shared across jobs
+      (`/tmp/subissues.parsed`, `/tmp/node.tar.xz`, `/tmp/glab.tar.gz`,
+      `/tmp/jcode.tar.gz`, `/tmp/node_modules`) lets two concurrent
+      jobs overwrite or `rm -f` each other's in-flight file; a fixed
+      worktree path (`git worktree add /tmp/boucle-push`) collides with
+      any other session that picks the same name, and a
+      `worktree remove --force` on a reused path deletes a foreign
+      session's work.
+    - ✅ DO: use `mktemp -d`/`mktemp` (unique per invocation) or a
+      `CI_JOB_ID`-scoped path in every script and every ad-hoc command
+      that stages a temp file or worktree — the same rule
+      `bin/jc`'s `BOUCLE_VERDICT_FILE` follows.
+    - Admission: class — fixed shared temp paths on shared executors,
+      whether chosen by an agent prompt, an engine script, or an
+      operator command; recurrence — agents, scripts and operators all
+      pick `/tmp/<name>` paths routinely and each new script/prompt
+      could reintroduce the habit without the doc; stable — no line
+      numbers, no transient values; distinct — lesson #27 handles stale
+      verdict SHA parsing, this lesson prevents the foreign-content
+      post at the source.
 
 59. **Notes of terminal transitions MUST be verified before the label**
     - ❌ DO NOT post an escalation/catchup note with a
