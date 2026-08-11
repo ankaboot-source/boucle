@@ -488,7 +488,7 @@ boucle_escalation_diagnostic() {
     echo ""
   fi
   echo "---"
-  echo "*Diagnostic posté par boucle (toubib — #52).*"
+  echo "*Diagnostic posted by boucle (doctor — #52).*"
 }
 
 # ── Outbound notification (send-only) ───────────────────────────────────

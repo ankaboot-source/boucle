@@ -420,15 +420,6 @@ if [ "$FORGE" = "gitlab" ]; then
   # BOUCLE_LLM_API_KEY
   EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_LLM_API_KEY" 2> /dev/null | jq -r '.key // empty' || true)
 
-  # BOUCLE_DND_ENABLED
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_DND_ENABLED" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
-  if [ -n "$EXISTING" ]; then
-    log_skip "BOUCLE_DND_ENABLED already exists"
-  else
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_DND_ENABLED -f value=true -f masked=false -f protected=false >/dev/null"
-    log_pass "BOUCLE_DND_ENABLED set (true — good default)"
-  fi
-
   # BOUCLE_DND_TZ
   EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_DND_TZ" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
   if [ -n "$EXISTING" ]; then
@@ -675,10 +666,6 @@ else
   log_pass "BOUCLE_LLM_BASE_URL set to ${BOUCLE_LLM_BASE_URL:-default: https://ollama.com/v1} (vars)"
 
   # ── GitHub: DND variables ────────────────────────────────────────────
-
-  # BOUCLE_DND_ENABLED
-  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_DND_ENABLED --repo \"$PROJECT_ID\" --body true 2>/dev/null"
-  log_pass "BOUCLE_DND_ENABLED set to true (vars)"
 
   # BOUCLE_DND_TZ
   DND_TZ_VALUE="${BOUCLE_DND_TZ:-$(detect_iana_tz)}"
