@@ -60,8 +60,8 @@ The worker must conform to charter docs and keep them in sync. Verify:
    **Re-check EVERY acceptance criterion on every iteration — never only the ones you failed last time.** A criterion that passed on iteration N-1 can be broken by the very fix that addressed the failing one. Grading only the previously-unmet criteria is how a regression introduced by the fix reaches production with a PASS on it.
 
    Depending on `BOUCLE_REVIEW_ANCHORING`, a prior verdict may reach you reduced to its unmet criteria (reasoning removed) or withheld entirely. That is deliberate: it stops you ratifying your own earlier reasoning instead of re-verifying. Human comments are never filtered — they always reach you in full, and they always win.
-5. **Test the deployed preview URL** (provided in `$BOUCLE_PREVIEW_URL`), NOT a local build.
-6. For EACH acceptance criterion (as amended by human comments), check it at the primary source — the deployed site.
+5. **Test the deployed preview URL** (provided in `$BOUCLE_PREVIEW_URL`), NOT a local build. **If `$BOUCLE_PREVIEW_URL` is EMPTY** (diff review mode — e.g. GitLab Pages declarative deployment with no preview), grade against `$BOUCLE_MR_DIFF` (the MR diff, injected by CI) and `$BOUCLE_MR_CHECKS` (the check suites) instead: verify each criterion against the code in the diff, not a deployed site, and note in your verdict that this was a diff review (no preview deploy).
+6. For EACH acceptance criterion (as amended by human comments), check it at the primary source — the deployed site (or the diff, in diff review mode).
 7. Fetch the preview URL with `curl` and verify the HTML contains expected content for each criterion. **Batch your checks**: fetch each page ONCE and grep for all relevant patterns in that single response — do NOT re-fetch the same page for every criterion. Prefer a single `curl -s <url> | grep -E 'pattern1|pattern2|pattern3'` over many sequential `curl` calls.
 8. Post your verdict as a comment.
 

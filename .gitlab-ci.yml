@@ -2495,6 +2495,10 @@ worker:
 
       # Deploy to preview (configurable via BOUCLE_DEPLOY_CMD).
       # Happens AFTER push so the code is saved even if this step is slow or fails.
+      # An EMPTY BOUCLE_DEPLOY_CMD (e.g. GitLab Pages declarative mode) skips
+      # the preview deploy entirely: the reviewer falls back to diff review
+      # when no preview URL could be extracted, so a skipped preview is a
+      # valid, complete loop — never a worker failure.
       # Capture wrangler's exit code separately from the URL extraction: the
       # `$(...) | grep | head` pipeline swallows wrangler failures because the
       # script runs with `set +o pipefail` (line 1255), so the pipeline's exit
@@ -2502,20 +2506,25 @@ worker:
       # full stdout+stderr to a file, then grep the URL out of the file. This
       # way a wrangler auth failure or upload error is detected instead of
       # silently treated as success. See AGENTS.md lesson #21.
-      DEPLOY_LOG=$(mktemp)
-      (eval "$BOUCLE_DEPLOY_CMD") > "$DEPLOY_LOG" 2>&1
-      DEPLOY_RC=$?
-      PREVIEW_URL=$(grep -oE "$BOUCLE_DEPLOY_URL_REGEX" "$DEPLOY_LOG" | head -1)
-      if [ "$DEPLOY_RC" -ne 0 ] && [ -n "$PREVIEW_URL" ]; then
-        echo "WARN: wrangler exited non-zero ($DEPLOY_RC) but emitted a preview URL — proceeding (may be a partial deploy)" >&2
-      fi
-      if [ "$DEPLOY_RC" -ne 0 ] && [ -z "$PREVIEW_URL" ]; then
-        echo "FAIL: deploy exited $DEPLOY_RC with no preview URL" >&2
-        cat "$DEPLOY_LOG" >&2
+      PREVIEW_URL=""
+      if [ -n "${BOUCLE_DEPLOY_CMD:-}" ]; then
+        DEPLOY_LOG=$(mktemp)
+        (eval "$BOUCLE_DEPLOY_CMD") > "$DEPLOY_LOG" 2>&1
+        DEPLOY_RC=$?
+        PREVIEW_URL=$(grep -oE "$BOUCLE_DEPLOY_URL_REGEX" "$DEPLOY_LOG" | head -1)
+        if [ "$DEPLOY_RC" -ne 0 ] && [ -n "$PREVIEW_URL" ]; then
+          echo "WARN: wrangler exited non-zero ($DEPLOY_RC) but emitted a preview URL — proceeding (may be a partial deploy)" >&2
+        fi
+        if [ "$DEPLOY_RC" -ne 0 ] && [ -z "$PREVIEW_URL" ]; then
+          echo "FAIL: deploy exited $DEPLOY_RC with no preview URL" >&2
+          cat "$DEPLOY_LOG" >&2
+          rm -f "$DEPLOY_LOG"
+          exit 1
+        fi
         rm -f "$DEPLOY_LOG"
-        exit 1
+      else
+        echo "[boucle] BOUCLE_DEPLOY_CMD empty — skipping preview deploy (reviewer will use diff review)"
       fi
-      rm -f "$DEPLOY_LOG"
 
       # ── Preview URL deep-link ───────────────────────────────────────────
       # Append the impacted page path to the preview URL so reviewers land
@@ -2593,8 +2602,17 @@ worker:
         MR_TITLE="boucle: issue #$BOUCLE_ISSUE"
       fi
 
-      MR_DESCRIPTION=$(printf '## Issue #%s — iteration %s\n\nPreview: %s\n\n### What changed\n%s\n\n### Approach\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s_' \
-        "$BOUCLE_ISSUE" "$ITERATION" "$PREVIEW_URL" "${COMMIT_SUMMARY:-(no commits)}" "${APPROACH:-(not recorded)}" "$BOUCLE_ISSUE" "$COMMIT_COUNT" "$ITERATION")
+      # Preview line: explicit when a URL exists; in diff-review mode (no
+      # deploy command — e.g. GitLab Pages) state it plainly so the MR does
+      # not look like a broken duplicate (blank Preview: line reads as an
+      # unfinished deploy to a human scanning the MR list).
+      if [ -n "$PREVIEW_URL" ]; then
+        PREVIEW_LINE="Preview: $PREVIEW_URL"
+      else
+        PREVIEW_LINE="Diff review (no preview deploy — BOUCLE_DEPLOY_CMD empty)"
+      fi
+      MR_DESCRIPTION=$(printf '## Issue #%s — iteration %s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s_' \
+        "$BOUCLE_ISSUE" "$ITERATION" "$PREVIEW_LINE" "${COMMIT_SUMMARY:-(no commits)}" "${APPROACH:-(not recorded)}" "$BOUCLE_ISSUE" "$COMMIT_COUNT" "$ITERATION")
 
       # Check if a MR already exists for this branch (worker re-run / iteration 2+).
       # If so, reuse it instead of failing on a 409 from glab mr create.
@@ -2637,56 +2655,66 @@ worker:
       # Without this, a stale preview passes the old HTTP-200-only assertion
       # and the reviewer FAILs on "preview doesn't match the commit". See
       # AGENTS.md lesson #21.
-      if [ -z "$PREVIEW_URL" ]; then
+      # An empty PREVIEW_URL is only valid when no deploy command is configured
+      # (GitLab Pages declarative / diff-review mode): the reviewer then falls
+      # back to diff review. With a deploy command configured, a missing
+      # preview URL is a hard worker failure.
+      if [ -z "$PREVIEW_URL" ] && [ -n "${BOUCLE_DEPLOY_CMD:-}" ]; then
         echo "FAIL: no preview URL" >&2; exit 1
       fi
-      # Cloudflare Pages deployments take time to propagate after the
-      # deploy command returns the URL. Retry with exponential backoff
-      # so we don't fail the worker (and stall the loop) while the edge
-      # is still warming up. Total budget ~5 min, well within the 30m
-      # worker timeout.
-      # -L follows redirects (e.g. Cloudflare Pages 308 adding a trailing
-      # slash to directory routes); the final response code must be 200.
-      PREVIEW_OK=false
-      attempt=0
-      delay=5
-      while [ "$attempt" -lt 6 ]; do
-        attempt=$((attempt + 1))
-        HTTP_CODE=$(curl -sL -o /dev/null -w "%{http_code}" "$PREVIEW_URL" 2>/dev/null || echo "000")
-        if [ "$HTTP_CODE" = "200" ]; then
-          echo "Preview URL 200 OK (attempt $attempt/6)"
-          PREVIEW_OK=true
-          break
+      # The freshness assertion only runs when a preview URL exists (deploy
+      # mode). Without one, the MR is reviewed in diff mode — nothing to probe.
+      if [ -n "$PREVIEW_URL" ]; then
+        # Cloudflare Pages deployments take time to propagate after the
+        # deploy command returns the URL. Retry with exponential backoff
+        # so we don't fail the worker (and stall the loop) while the edge
+        # is still warming up. Total budget ~5 min, well within the 30m
+        # worker timeout.
+        # -L follows redirects (e.g. Cloudflare Pages 308 adding a trailing
+        # slash to directory routes); the final response code must be 200.
+        PREVIEW_OK=false
+        attempt=0
+        delay=5
+        while [ "$attempt" -lt 6 ]; do
+          attempt=$((attempt + 1))
+          HTTP_CODE=$(curl -sL -o /dev/null -w "%{http_code}" "$PREVIEW_URL" 2>/dev/null || echo "000")
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "Preview URL 200 OK (attempt $attempt/6)"
+            PREVIEW_OK=true
+            break
+          fi
+          if [ "$attempt" -lt 6 ]; then
+            echo "Preview URL returned $HTTP_CODE (attempt $attempt/6) — retrying in ${delay}s..." >&2
+            sleep "$delay"
+            delay=$((delay * 2))
+          fi
+        done
+        if [ "$PREVIEW_OK" != "true" ]; then
+          echo "FAIL: preview URL not 200 after $attempt attempts (last code: $HTTP_CODE)" >&2; exit 1
         fi
-        if [ "$attempt" -lt 6 ]; then
-          echo "Preview URL returned $HTTP_CODE (attempt $attempt/6) — retrying in ${delay}s..." >&2
-          sleep "$delay"
-          delay=$((delay * 2))
+        PROPAGATION_WAIT="${BOUCLE_PREVIEW_PROPAGATION_WAIT:-60}"
+        PROPAGATION_STEP=5
+        ELAPSED=0
+        DEPLOYED_SHA=""
+        while [ "$ELAPSED" -lt "$PROPAGATION_WAIT" ]; do
+          DEPLOYED_SHA=$(curl -s "${PREVIEW_URL%/}/__boucle_commit__.txt" 2>/dev/null \
+            | grep -oE 'sha=[a-f0-9]{7,40}' | head -1 | sed 's/sha=//')
+          if [ "$DEPLOYED_SHA" = "$HEAD_SHA" ]; then
+            echo "Preview fresh: deployed SHA ${DEPLOYED_SHA:0:12} matches head ${HEAD_SHA:0:12} (after ${ELAPSED}s)"
+            break
+          fi
+          echo "Preview not fresh yet (got '${DEPLOYED_SHA:-none}', want '${HEAD_SHA:0:12}') — retrying in ${PROPAGATION_STEP}s (${ELAPSED}/${PROPAGATION_WAIT}s)"
+          sleep "$PROPAGATION_STEP"
+          ELAPSED=$((ELAPSED + PROPAGATION_STEP))
+        done
+        if [ "$DEPLOYED_SHA" != "$HEAD_SHA" ]; then
+          echo "FAIL: preview stale after ${PROPAGATION_WAIT}s — deployed SHA '${DEPLOYED_SHA:-none}' != head '${HEAD_SHA:0:12}'" >&2
+          echo "The preview URL is serving content that does not match the head commit." >&2
+          echo "Likely causes: CDN cache, wrangler no-op on identical build output, or a failed redeploy." >&2
+          exit 1
         fi
-      done
-      if [ "$PREVIEW_OK" != "true" ]; then
-        echo "FAIL: preview URL not 200 after $attempt attempts (last code: $HTTP_CODE)" >&2; exit 1
-      fi
-      PROPAGATION_WAIT="${BOUCLE_PREVIEW_PROPAGATION_WAIT:-60}"
-      PROPAGATION_STEP=5
-      ELAPSED=0
-      DEPLOYED_SHA=""
-      while [ "$ELAPSED" -lt "$PROPAGATION_WAIT" ]; do
-        DEPLOYED_SHA=$(curl -s "${PREVIEW_URL%/}/__boucle_commit__.txt" 2>/dev/null \
-          | grep -oE 'sha=[a-f0-9]{7,40}' | head -1 | sed 's/sha=//')
-        if [ "$DEPLOYED_SHA" = "$HEAD_SHA" ]; then
-          echo "Preview fresh: deployed SHA ${DEPLOYED_SHA:0:12} matches head ${HEAD_SHA:0:12} (after ${ELAPSED}s)"
-          break
-        fi
-        echo "Preview not fresh yet (got '${DEPLOYED_SHA:-none}', want '${HEAD_SHA:0:12}') — retrying in ${PROPAGATION_STEP}s (${ELAPSED}/${PROPAGATION_WAIT}s)"
-        sleep "$PROPAGATION_STEP"
-        ELAPSED=$((ELAPSED + PROPAGATION_STEP))
-      done
-      if [ "$DEPLOYED_SHA" != "$HEAD_SHA" ]; then
-        echo "FAIL: preview stale after ${PROPAGATION_WAIT}s — deployed SHA '${DEPLOYED_SHA:-none}' != head '${HEAD_SHA:0:12}'" >&2
-        echo "The preview URL is serving content that does not match the head commit." >&2
-        echo "Likely causes: CDN cache, wrangler no-op on identical build output, or a failed redeploy." >&2
-        exit 1
+      else
+        echo "[boucle] No preview URL — skipping freshness assertion (diff review mode)"
       fi
 
       # Set review label
@@ -2853,6 +2881,45 @@ reviewer:
       $BOUCLE_HOME/bin/describe-images reviewer || echo "[boucle] WARN: image description failed — continuing without descriptions"
 
       export BOUCLE_PREVIEW_URL="$PREVIEW_URL"
+
+      # ── Diff review mode ─────────────────────────────────────────────
+      # When BOUCLE_REVIEW_MODE=diff (or no preview URL could be extracted,
+      # e.g. GitLab Pages declarative mode with an empty BOUCLE_DEPLOY_CMD),
+      # run code-review mode: review the MR diff, wait for check suites.
+      # Mirrors lib/boucle-ci/reviewer.sh.
+      export BOUCLE_MR_DIFF=""
+      export BOUCLE_MR_CHECKS=""
+      if [ "${BOUCLE_REVIEW_MODE:-preview}" = "diff" ] || [ -z "$PREVIEW_URL" ]; then
+        echo "[boucle] Diff review mode — gathering PR diff and check suites..."
+        BOUCLE_MR_DIFF=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/changes" 2>/dev/null \
+          | jq -r '.changes[] | "### \(.old_path) → \(.new_path)\n\(.diff | .[0:2000])"' 2>/dev/null | head -c 5000 || echo "")
+        CHECKS_WAIT="${BOUCLE_REVIEW_CHECKS_WAIT:-900}"
+        CHECKS_WAIT=$(echo "$CHECKS_WAIT" | tr -cd '0-9')
+        [ -z "$CHECKS_WAIT" ] || [ "$CHECKS_WAIT" -eq 0 ] 2> /dev/null && CHECKS_WAIT=900
+        CHECKS_MAX=$((CHECKS_WAIT / 10))
+        [ "$CHECKS_MAX" -lt 1 ] && CHECKS_MAX=1
+        CHECKS_ATTEMPT=0
+        CHECK_DATA="[]"
+        while [ "$CHECKS_ATTEMPT" -lt "$CHECKS_MAX" ]; do
+          CHECKS_ATTEMPT=$((CHECKS_ATTEMPT + 1))
+          CHECK_DATA=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/statuses" 2>/dev/null | jq -c '.' 2>/dev/null || echo "[]")
+          PENDING_COUNT=$(echo "$CHECK_DATA" | jq -r '[.[] | select(.status == "pending" or .status == "running" or .status == "created")] | length' 2>/dev/null || echo 0)
+          if [ "$PENDING_COUNT" -eq 0 ]; then
+            echo "All MR check suites concluded for MR !${MR_IID} (after ~$((CHECKS_ATTEMPT * 10))s)"
+            break
+          fi
+          echo "MR check suites: $PENDING_COUNT still pending (attempt $CHECKS_ATTEMPT/$CHECKS_MAX)"
+          sleep 10
+        done
+        BOUCLE_MR_CHECKS=$(echo "$CHECK_DATA" | jq -c '.' 2>/dev/null || echo "[]")
+        FAILED_COUNT=$(echo "$CHECK_DATA" | jq -r '[.[] | select(.status == "failed" or .status == "canceled" or .status == "error")] | length' 2>/dev/null || echo 0)
+        if [ "$PENDING_COUNT" -gt 0 ] && [ "$CHECKS_ATTEMPT" -ge "$CHECKS_MAX" ]; then
+          echo "[boucle] WARN: MR check suites timed out after ${CHECKS_WAIT}s (${FAILED_COUNT} failed) — proceeding without full CI results"
+        elif [ "$FAILED_COUNT" -gt 0 ]; then
+          echo "[boucle] INFO: ${FAILED_COUNT} MR check suite(s) had failure conclusions — reviewer will judge"
+        fi
+        echo "[boucle] Diff review mode ready: diff=${#BOUCLE_MR_DIFF}chars, checks=$(echo "$BOUCLE_MR_CHECKS" | jq 'length' 2>/dev/null || echo 0)"
+      fi
 
       # Fetch the issue body and export it so the reviewer agent can verify
       # that the MR content (texts, video URLs, citations) matches what the
@@ -3588,6 +3655,12 @@ post-merge:
 
       # Get the production URL (from the deploy's e2e trigger or fallback)
       LIVE_URL="${BOUCLE_PRODUCTION_URL:-}"
+      if [ -z "$LIVE_URL" ] && [ -n "${CI_PAGES_URL:-}" ]; then
+        # Declarative GitLab Pages (BOUCLE_DEPLOY_PROVIDER=gitlab-pages):
+        # the forge serves the site at $CI_PAGES_URL — never the pages.dev
+        # fallback below, which would point at a nonexistent CF project.
+        LIVE_URL="$CI_PAGES_URL"
+      fi
       if [ -z "$LIVE_URL" ]; then
         # Fetch the deploy pipeline's e2e job variables (best-effort)
         LIVE_URL="https://${BOUCLE_DEPLOY_PROJECT}.pages.dev"
