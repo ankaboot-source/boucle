@@ -1249,6 +1249,46 @@ atomic.
       user-facing notes (the nearest, #36, is about markdown formatting
       of the Approach section, not variable expansion).
 
+57. **A closed non-merged MR is NEVER a completion signal**
+    - ❌ DO NOT transition an issue to `boucle:done` + close it just
+      because a CLOSED (but NOT merged) MR exists on its branch. The
+      reviewer "no open MR" guard treats any closed MR as "work done" —
+      but a human closes MRs for RECOVERY too: a zombie/empty MR (0
+      commits, rebase-conflicted branch, worker drowned in a destructive
+      reset) is closed so the loop can start fresh. On a consumer repo,
+      the human closed such a zombie MR, the issue was re-queued
+      (`boucle:todo`), and 2 minutes later the reviewer guard fired —
+      "no open MR found, but a closed MR exists" → `boucle:done` +
+      issue closed. The recovery was undone, the loop was killed, and
+      only a manual reopen + re-queue (again) restored it.
+    - ❌ DO NOT assume a closed MR implies the human rejected the work
+      and wants the issue archived. "Closed" is ambiguous between
+      "reviewed and discarded" and "stale garbage in the way of a fresh
+      start" — only a MERGE or a review-state issue (boucle:review /
+      boucle:approval) legitimizes the done-transition.
+    - ✅ DO: in the reviewer "no open MR" guard, distinguish three
+      cases: (1) a MERGED MR exists → `boucle:done` + close (unchanged);
+      (2) a CLOSED (not merged) MR exists AND the issue carries
+      `boucle:review` or `boucle:approval` → `boucle:done` + close
+      (unchanged — this is the original issue-#34 loop-breaker); (3) a
+      CLOSED (not merged) MR exists while the issue is queued for work
+      (`boucle:todo`/`boucle:working`) → post an informational note and
+      exit 0 WITHOUT touching the issue — the worker will create a fresh
+      MR on its next run.
+    - ✅ DO: keep the guard IDENTICAL in every engine copy
+      (`lib/boucle-ci/reviewer.sh` + the inline reviewer job in
+      `.gitlab-ci.yml`) — a fix in one copy alone leaves the bug live on
+      the other (a consumer runs whichever copy its engine uses).
+    - Admission: class — any auto-"done" transition triggered by a
+      closed-but-not-merged MR while the issue is queued for work;
+      recurrence — the done-transition pattern exists in the reviewer
+      guard on both engine copies, and a future port or new guard could
+      reintroduce the naive "any closed MR = done" check without the
+      doc; stable — no line numbers, no transient values; distinct —
+      lesson #44 covers running roles on CLOSED issues, #53 covers
+      grading human amendments; neither covers treating a recovery
+      artifact as a completion signal.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
