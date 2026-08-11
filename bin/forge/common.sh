@@ -57,6 +57,45 @@ forge_init() {
   source "$backend"
 }
 
+# ── Agent marker (#8) ────────────────────────────────────────────────────
+#
+# Every comment the pipeline posts carries an invisible HTML marker. It lets
+# dispatch recognise boucle's own writes WITHOUT asking who the actor was —
+# which is what makes mono-user mode possible: when one account owns both
+# the issues and the loop, identity discriminates nothing.
+#
+# It is also defense-in-depth in bot mode. Forges do not guarantee webhook
+# delivery order, so a label-change webhook can overtake the note webhook
+# that preceded it; the note then lands on the NEW (possibly paused) state
+# and would route. The marker closes that race regardless of ordering.
+#
+# Kept deliberately dumb: a fixed, stable, invisible token. We test for its
+# presence, never parse the body for intent.
+BOUCLE_AGENT_MARKER='<!-- boucle:agent -->'
+
+# stamp_agent_marker <body>
+#   Emit <body> with the agent marker appended. Idempotent — agents re-post
+#   and bin/collapse-duplicate-notes rewrites bodies onto existing notes, so
+#   a body may already carry it; stamping twice would be noise in the DOM
+#   and would break nothing, but exactness is cheap here.
+stamp_agent_marker() {
+  local body="$1"
+  case "$body" in
+    *"$BOUCLE_AGENT_MARKER"*) printf '%s' "$body" ;;
+    *) printf '%s\n\n%s' "$body" "$BOUCLE_AGENT_MARKER" ;;
+  esac
+}
+
+# has_agent_marker <body>
+#   Return 0 when the body was written by the pipeline. Used by dispatch to
+#   skip boucle's own comments in mono-user mode.
+has_agent_marker() {
+  case "$1" in
+    *"$BOUCLE_AGENT_MARKER"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # ── Contract: reaction name normalization ────────────────────────────────
 #
 # forge_reaction_canonical <name>
@@ -232,6 +271,14 @@ forge_reaction_canonical() {
 #   Walk up the parent-issue chain until a non-bot author is found.
 #   Returns the user ID of the original human reporter.
 #   (Shared logic in lib/boucle.sh, calls forge_issue_get + parent parsing.)
+#
+# forge_current_user_login
+#   Resolve the login of the account that owns $BOUCLE_TOKEN — "who is boucle
+#   acting as?". Returns empty on failure (invalid/expired token, network
+#   error); callers MUST treat empty as "unknown", never as a mismatch.
+#   Used to detect the mono-user configuration, where the token owner and
+#   BOUCLE_BOT_USERNAME are the same account.
+#   (GitLab: /user; GitHub: /user.)
 
 # ── Contract: webhook payload parsing ────────────────────────────────────
 #

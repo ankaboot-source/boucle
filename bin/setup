@@ -15,6 +15,7 @@ HOST="${BOUCLE_HOST:-}"
 BOT_ID="${BOUCLE_BOT_ID:-}"
 BOT_USERNAME="${BOUCLE_BOT_USERNAME:-up-bot}"
 BOT_TOKEN="${BOUCLE_BOT_TOKEN:-}"
+MONO_USER="${BOUCLE_MONO_USER:-}"
 CF_TOKEN="${BOUCLE_CF_TOKEN:-}"
 RUNNER_TAG="${BOUCLE_RUNNER_TAG:-}"
 SKIP_CF=false
@@ -54,6 +55,10 @@ while [[ $# -gt 0 ]]; do
       BOT_TOKEN="$2"
       shift 2
       ;;
+    --mono-user)
+      MONO_USER=true
+      shift
+      ;;
     --cf-token)
       CF_TOKEN="$2"
       shift 2
@@ -90,6 +95,10 @@ while [[ $# -gt 0 ]]; do
       echo "                           https://github.com/settings/tokens/new — see"
       echo "                           https://docs.github.com/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps"
       echo "                           An invalid/expired PAT fails setup with instructions."
+      echo "  --mono-user              Run without a separate bot account: your own PAT drives the"
+      echo "                           loop. Swaps the actor-based anti-loop guard for the"
+      echo "                           label-state + agent-marker guard. Degrades notifications"
+      echo "                           — see README. Prefer a bot/service account when you can."
       echo "  --cf-token <token>       Cloudflare API token (for Pages project)"
       echo "  --runner-tag <tag>       Runner tag baked into the root CI shim (default: boucle)"
       echo "  --skip-cf                Skip Cloudflare Pages project creation"
@@ -629,6 +638,12 @@ else
   run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FORGE --repo \"$PROJECT_ID\" --body github 2>/dev/null"
   log_pass "BOUCLE_FORGE set to github (vars)"
 
+  # BOUCLE_MONO_USER — one account owns both the issues and the loop.
+  if [ "$MONO_USER" = "true" ]; then
+    run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_MONO_USER --repo \"$PROJECT_ID\" --body true 2>/dev/null"
+    log_pass "BOUCLE_MONO_USER set to true (vars)"
+  fi
+
   # BOUCLE_RUNS_ON — forge-agnostic runner selection (default GitHub-hosted).
   # GitHub: 'ubuntu-latest' (hosted) or '["self-hosted", "<label>"]' (self-hosted).
   # GitLab: maps to tags: [$BOUCLE_RUNS_ON].
@@ -752,7 +767,14 @@ else
     GH_ME=$(GH_TOKEN="$BOT_TOKEN" gh api user 2> /dev/null || true)
     GH_LOGIN=$(echo "$GH_ME" | jq -r '.login // empty' 2> /dev/null || true)
     if [ -n "$GH_LOGIN" ] && [ "$GH_LOGIN" != "null" ]; then
-      if [ "$BOT_USERNAME" != "$GH_LOGIN" ] && [ "$BOT_USERNAME" != "up-bot" ]; then
+      if [ "$MONO_USER" = "true" ]; then
+        # Seeding the human's own login here is exactly what makes the loop
+        # deaf: dispatch's actor guard would then discard every action the
+        # human takes. Mono-user mode filters boucle's own writes by the
+        # agent marker instead, so the name must stay unset.
+        log_skip "BOUCLE_BOT_USERNAME not seeded (--mono-user) — boucle acts as @$GH_LOGIN and"
+        log_skip "  recognises its own comments by the <!-- boucle:agent --> marker, not by identity."
+      elif [ "$BOT_USERNAME" != "$GH_LOGIN" ] && [ "$BOT_USERNAME" != "up-bot" ]; then
         log_skip "BOUCLE_BOT_USERNAME stays '$BOT_USERNAME' (--bot-username) — resolved PAT login is '@$GH_LOGIN'"
       else
         BOT_USERNAME="$GH_LOGIN"
@@ -1030,6 +1052,12 @@ if [ "$FORGE" = "gitlab" ]; then
     log_pass "BOUCLE_BOT_USERNAME CI variable set to $BOT_USERNAME"
   fi
 
+  # BOUCLE_MONO_USER — one account owns both the issues and the loop.
+  if [ "$MONO_USER" = "true" ]; then
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_MONO_USER -f value=true -f masked=false -f protected=false >/dev/null"
+    log_pass "BOUCLE_MONO_USER CI variable set to true"
+  fi
+
   # BOUCLE_TOKEN — from --bot-token (section 1) or from the service-account
   # PAT created above.
   if [ -n "$BOT_TOKEN" ]; then
@@ -1174,6 +1202,28 @@ fi
 
 echo "Day 0 setup complete."
 echo ""
+
+if [ "$MONO_USER" = "true" ]; then
+  echo "Mono-user mode is on — one account owns the issues and the loop."
+  echo ""
+  echo "  Notifications are degraded, and this is the one thing setup cannot fix for you."
+  echo "  The forge signals 'it's your turn' by changing an issue's assignee, but the issue"
+  echo "  is already yours, so nothing is emitted. Worse, every action the loop takes runs"
+  echo "  under your own token, and forges do not notify you about your own activity."
+  echo ""
+  echo "  To be notified at all, turn on own-activity notifications, once:"
+  if [ "$FORGE" = "github" ]; then
+    echo "    GitHub → Settings → Notifications → check 'Include your own updates'"
+    echo "             https://github.com/settings/notifications"
+  else
+    echo "    GitLab → Preferences → Notifications → check"
+    echo "             'Receive notifications about your own activity'"
+  fi
+  echo "  It is account-wide, so expect noise from the loop's routine comments."
+  echo ""
+  echo "  Prefer a dedicated bot identity when you can — re-run without --mono-user."
+  echo ""
+fi
 
 if [ "$FORGE" = "gitlab" ]; then
   echo "Next steps:"

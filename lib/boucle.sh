@@ -485,6 +485,17 @@ ${issue_url}"
 
 # ── Label management ────────────────────────────────────────────────────
 
+# boucle_mono_user
+#
+# True when a single account owns both the issues and the loop, i.e. there
+# is no separate bot identity. Set by bin/setup --mono-user.
+#
+# "false" is treated as unset so the variable can be pinned off explicitly
+# without having to unset it — CI variable UIs make deletion awkward.
+boucle_mono_user() {
+  [ -n "${BOUCLE_MONO_USER:-}" ] && [ "${BOUCLE_MONO_USER}" != "false" ]
+}
+
 # set_boucle_label <iid> <new_detail_label> <gross_status_label>
 #
 # Preserve non-boucle: labels, strip old boucle: detail + boucle::status::*
@@ -497,13 +508,25 @@ ${issue_url}"
 #   - boucle::status::bot  → assign to the bot (BOUCLE_BOT_ID, best-effort).
 #   - boucle::status::human → assign to the human reporter (walks up the
 #     parent chain via resolve_reporter_id to skip bot-authored sub-issues).
+#
+# In mono-user mode <gross> is not written at all and neither reassignment
+# runs: "whose side is this on?" has no answer when there is one actor, and
+# re-assigning the sole human to their own issue emits nothing anyway.
 set_boucle_label() {
   local iid="$1" new="$2" gross="$3"
   local current_all current_non_boucle
   current_all=$(forge_issue_labels_get "$iid")
   # Preserve non-boucle: labels
   current_non_boucle=$(echo "$current_all" | tr ',' '\n' | grep -v '^boucle:' | tr '\n' ',' | sed 's/,$//')
-  local merged="${current_non_boucle:+$current_non_boucle,}$new,$gross"
+  # The gross axis answers "whose side is this on?", which has no meaning
+  # when there is only one actor. In mono-user mode we write the detail
+  # axis alone; the idempotence checks that test the pair collapse to it.
+  local merged
+  if boucle_mono_user; then
+    merged="${current_non_boucle:+$current_non_boucle,}$new"
+  else
+    merged="${current_non_boucle:+$current_non_boucle,}$new,$gross"
+  fi
   forge_issue_labels_set "$iid" "$merged"
   # Notify on the TRANSITION, never on the state. The doctor sweep re-applies
   # labels that are already set (CONTEXT.md §8: the forge records an event on
@@ -512,6 +535,14 @@ set_boucle_label() {
   # transitions are covered by construction. Fail-open: never blocks the loop.
   if ! echo "$current_all" | tr ',' '\n' | grep -qx "$new"; then
     boucle_notify "$iid" "$new" || true
+  fi
+  # Both reassignments are no-ops in mono-user mode: the issue already
+  # belongs to the only human, and forges emit nothing when the assignee
+  # set does not actually change. Skipping them avoids two pointless API
+  # calls per transition, and avoids feeding the assignment-based trigger
+  # in dispatch with self-assignment events.
+  if boucle_mono_user; then
+    return 0
   fi
   # When the issue moves to the bot side, assign it to the bot user so
   # the board reflects who owns the next action. Best-effort: skip
