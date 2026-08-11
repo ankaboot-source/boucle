@@ -569,6 +569,10 @@ set_boucle_label() {
 # Returns the forge user ID of the original human reporter.
 # Bot-authored sub-issues (created by up-bot) are skipped by matching
 # BOUCLE_BOT_USERNAME (default "up-bot"). Max depth 10 to prevent loops.
+# E2E-fail follow-ups (bot-authored, no parent section) are followed via
+# their qualified origin marker (`<!-- boucle:e2e-origin v=1 iid=N -->`)
+# so the original human reporter is found — otherwise the reviewer assigns
+# the MR to the bot instead of the human.
 resolve_reporter_id() {
   local iid="$1" data parent_iid parent_data reporter_id author_username
   local bot_user="${BOUCLE_BOT_USERNAME:-up-bot}"
@@ -582,6 +586,13 @@ resolve_reporter_id() {
   # Walk up the parent chain until we find a non-bot author.
   while [ "$author_username" = "$bot_user" ] && [ "$depth" -lt "$max_depth" ]; do
     parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+    # E2E-fail follow-ups are bot-authored with NO parent section; their
+    # qualified origin marker carries the ORIGINAL issue's IID. Walk from
+    # there so the MR is assigned to the human reporter, not the bot
+    # (consumer regression: MR assigned to up-bot after reviewer PASS).
+    if [ -z "$parent_iid" ]; then
+      parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | sed -nE 's/.*<!-- boucle:e2e-origin v=1 iid=([0-9]+) -->.*/\1/p' | head -1)
+    fi
     [ -z "$parent_iid" ] && break
     parent_data=$(forge_issue_get "$parent_iid") || break
     reporter_id=$(printf '%s' "$parent_data" | jq -r '.author.id // empty')

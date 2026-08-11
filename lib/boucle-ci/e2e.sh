@@ -232,6 +232,10 @@ boucle_ci_e2e() {
       # walks one level up: issue → parent → parent.author.id). Without this,
       # the follow-up's author is the bot and the reviewer PASS branch
       # assigns the MR to the bot instead of the human.
+      # Top-level issues have no parent to inherit: the follow-up ALWAYS
+      # carries a QUALIFIED origin section (`<!-- boucle:e2e-origin v=1 iid=N -->`)
+      # so resolve_reporter_id can still find the original human reporter
+      # (consumer regression: MR assigned to up-bot after reviewer PASS).
       E2E_PARENT_IID=$(printf '%s' "$E2E_ORIG_DATA" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
       # shfmt off  # preserve exact string content (matches the original YAML block-scalar value)
       E2E_PARENT_SECTION=""
@@ -242,6 +246,10 @@ boucle_ci_e2e() {
       E2E_NEW_TITLE="fix: ${E2E_ORIG_TITLE:-issue} — E2E failure (#$BOUCLE_ISSUE)"
       # shfmt off  # preserve exact string content (matches the original YAML block-scalar value)
       E2E_NEW_DESC="E2E verification failed for issue #$BOUCLE_ISSUE.
+
+## Origin — E2E regression
+<!-- boucle:e2e-origin v=1 iid=$BOUCLE_ISSUE -->
+Follow-up of #$BOUCLE_ISSUE: production E2E verification failed after its MR was merged (see Trace below). This is a qualified follow-up link — NOT a parent/child relationship.
 
 ## Trace
 $(echo "$COMMENT")
