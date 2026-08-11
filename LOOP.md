@@ -104,6 +104,7 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_REVIEW_CHECKS_WAIT` | `900` | Max seconds to wait for PR check suites in diff mode. |
 | `BOUCLE_BUILD_CMD` | `npm ci && npm run build` | Build command. |
 | `BOUCLE_BUILD_OUTPUT` | `public` | Build output directory. |
+| `BOUCLE_BUILD_FEEDBACK` | *(empty)* | Build error tail from the previous failed `BOUCLE_BUILD_CMD` run, injected into the next worker iteration's prompt. Auto-managed — do not set manually. |
 | `BOUCLE_RUNNER_TAG` | `boucle` | Runner tag for agent jobs (GitLab; `bin/setup --runner-tag`). |
 | `BOUCLE_RUNS_ON` | `ubuntu-latest` | Runs-on expression (GitHub; forge-agnostic — maps to tags on GitLab). |
 | `BOUCLE_MAX_PARALLEL_ISSUES` | `5` | Max concurrent boucle:working issues (`0` = unlimited). |
