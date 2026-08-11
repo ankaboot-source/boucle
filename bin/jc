@@ -863,6 +863,15 @@ ${BOUCLE_SIBLINGS}
 
 Verify content fidelity: the issue body below is the original spec. Check that the MR preserves the instructed content (URLs, citations, texts) verbatim — no placeholders, no rewrites, no substitutions. A MR that degrades instructed content is a FAIL even if it satisfies the latest amendments.
 "
+      # Diff review mode (no preview URL — e.g. GitLab Pages declarative
+      # mode with an empty BOUCLE_DEPLOY_CMD): the CI injected the MR diff
+      # and check suites into BOUCLE_MR_DIFF / BOUCLE_MR_CHECKS. The
+      # reviewer must grade against those instead of a deployed preview.
+      if [ -z "${BOUCLE_PREVIEW_URL:-}" ]; then
+        prompt="${prompt}
+NO preview URL is available (diff review mode). Grade the MR against \$BOUCLE_MR_DIFF (the MR diff, injected by CI) and \$BOUCLE_MR_CHECKS (the check suites). Verify each criterion against the code in the diff, not a deployed site. Note in your verdict that this was a diff review (no preview deploy).
+"
+      fi
       if [ -n "$body" ]; then
         prompt="${prompt}
 Issue body (original spec — verify the MR matches it):

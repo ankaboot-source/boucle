@@ -7,6 +7,15 @@
 boucle_ci_deploy() {
   set +o pipefail
 
+  # No deploy command (e.g. GitLab Pages mode / external): skip cleanly.
+  # The site is served by the forge's own Pages (the pages job builds
+  # and publishes it), so there is no URL to extract and no e2e chain
+  # here — the post-merge job hands $CI_PAGES_URL to e2e instead.
+  if [ -z "${BOUCLE_DEPLOY_CMD:-}" ]; then
+    echo "deploy: BOUCLE_DEPLOY_CMD is empty (Pages/external mode) — skipping"
+    return 0
+  fi
+
   # Build
   eval "$BOUCLE_BUILD_CMD"
 
