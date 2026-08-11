@@ -27,10 +27,14 @@ forge_issue_get() {
 }
 
 forge_issue_note() {
-  local iid="$1" message="$2"
+  local iid="$1" message="$2" rc=0
   message=$(stamp_agent_marker "$message")
   glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$BOUCLE_PROJECT_ID/issues/$iid/notes" \
-    -f body="$message" > /dev/null 2>&1 || true
+    -f body="$message" > /dev/null 2>&1 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "WARN: forge_issue_note failed (rc=$rc) for issue #$iid — the human was NOT notified of this message" >&2
+  fi
+  return "$rc"
 }
 
 forge_issue_notes() {
@@ -173,17 +177,25 @@ forge_issue_note_get() {
 }
 
 forge_issue_note_update() {
-  local iid="$1" note_id="$2" new_body="$3"
+  local iid="$1" note_id="$2" new_body="$3" rc=0
   new_body=$(stamp_agent_marker "$new_body")
   glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$BOUCLE_PROJECT_ID/issues/$iid/notes/$note_id" \
-    -f body="$new_body" > /dev/null 2>&1 || true
+    -f body="$new_body" > /dev/null 2>&1 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "WARN: forge_issue_note_update failed (rc=$rc) for issue #$iid note $note_id" >&2
+  fi
+  return "$rc"
 }
 
 forge_mr_note_update() {
-  local mr_iid="$1" note_id="$2" new_body="$3"
+  local mr_iid="$1" note_id="$2" new_body="$3" rc=0
   new_body=$(stamp_agent_marker "$new_body")
   glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/notes/$note_id" \
-    -f body="$new_body" > /dev/null 2>&1 || true
+    -f body="$new_body" > /dev/null 2>&1 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "WARN: forge_mr_note_update failed (rc=$rc) for MR !$mr_iid note $note_id" >&2
+  fi
+  return "$rc"
 }
 
 forge_note_delete() {
@@ -290,10 +302,14 @@ forge_mr_get() {
 }
 
 forge_mr_note() {
-  local mr_iid="$1" message="$2"
+  local mr_iid="$1" message="$2" rc=0
   message=$(stamp_agent_marker "$message")
   glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/notes" \
-    -f body="$message" > /dev/null 2>&1 || true
+    -f body="$message" > /dev/null 2>&1 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "WARN: forge_mr_note failed (rc=$rc) for MR !$mr_iid — the human was NOT notified of this message" >&2
+  fi
+  return "$rc"
 }
 
 forge_mr_notes() {

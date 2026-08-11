@@ -30,6 +30,24 @@ boucle_ci_reviewer() {
   set +o pipefail
   export BOUCLE_ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
 
+  # Evidence pack: charter excerpts at base + diff brief, read by
+  # bin/jc and injected into the reviewer prompt. Best-effort: never
+  # fails the job.
+  "${BOUCLE_HOME}"/bin/build-evidence-pack >/dev/null 2>&1 || true
+
+  # ── Restore the triage's obligations.md into the workspace ──────
+  # The triage job writes obligations.md (the `## Livrables` obligations)
+  # to the state cache. The reviewer's obligations gate reads it from
+  # $BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE/obligations.md, so restore it
+  # here (mirrors the worker's state-cache restore). Best-effort: a missing
+  # file simply disables the gate.
+  BOUCLE_STATE_CACHE="${BOUCLE_STATE_CACHE:-${HOME}/.boucle-state-cache}"
+  ISSUE_STATE_CACHE="${BOUCLE_STATE_CACHE}/${BOUCLE_ISSUE}"
+  if [ -f "$ISSUE_STATE_CACHE/obligations.md" ]; then
+    mkdir -p "$BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE"
+    cp -a "$ISSUE_STATE_CACHE/obligations.md" "$BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE/obligations.md" 2> /dev/null || true
+  fi
+
   # Label helper: preserve non-boucle labels when writing a boucle label.
   # The jq filter uses startswith("boucle:") which catches BOTH the detail
   # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
@@ -80,7 +98,7 @@ boucle_ci_reviewer() {
       # on the issue's current detail label.
       ISSUE_LABELS=$(forge_issue_labels_get "$BOUCLE_ISSUE" 2> /dev/null || echo "")
       case ",$ISSUE_LABELS," in
-        *",boucle:review,"*|*",boucle:approval,"*)
+        *",boucle:review,"* | *",boucle:approval,"*)
           echo "boucle: a closed MR exists while issue #$BOUCLE_ISSUE is at review/approval — transitioning to boucle:done"
           set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
           close_issue "$BOUCLE_ISSUE"
@@ -94,8 +112,12 @@ boucle_ci_reviewer() {
       esac
     else
       echo "boucle: no MR at all for issue #$BOUCLE_ISSUE — escalating to boucle:human"
+      # Note BEFORE the terminal label — never a muted boucle:human.
+      if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Reviewer: no MR found for branch boucle/$BOUCLE_ISSUE (no opened, closed, or merged MR). Escalated to **boucle:human**.$(job_link)"; then
+        echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+        exit 1
+      fi
       set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-      forge_issue_note "$BOUCLE_ISSUE" "⚠️ Reviewer: no MR found for branch boucle/$BOUCLE_ISSUE (no opened, closed, or merged MR). Escalated to **boucle:human**.$(job_link)"
     fi
     exit 1
   fi
@@ -128,12 +150,16 @@ boucle_ci_reviewer() {
     MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
     echo "FAIL: worker shipped zero commits (MR !${MR_IID} empty — base_sha == head_sha). Re-triggering worker (iteration $((ITERATION + 1))/$MAX_ITER)." >&2
     set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-    forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker shipped zero commits (MR !${MR_IID} has empty diff). Re-running the worker (iteration $((ITERATION + 1))/$MAX_ITER).$(job_link)"
+    forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker shipped zero commits (MR !${MR_IID} has empty diff). Re-running the worker (iteration $((ITERATION + 1))/$MAX_ITER).$(job_link)" || true
     if [ "$ITERATION" -lt "$MAX_ITER" ]; then
       chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=$((ITERATION + 1))
     else
+      # Note BEFORE the terminal label — never a muted boucle:human.
+      if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker shipped zero commits after $MAX_ITER attempts. Human intervention needed.$(job_link)"; then
+        echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+        exit 1
+      fi
       set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-      forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker shipped zero commits after $MAX_ITER attempts. Human intervention needed.$(job_link)"
     fi
     exit 1
   fi
@@ -277,18 +303,25 @@ boucle_ci_reviewer() {
   VERDICT_SHA_MATCHED=true
 
   # SHA-filter fallback: if the SHA-anchored parse found nothing, accept
-  # the newest reviewer verdict regardless of SHA. Better to act on a
-  # verdict for a slightly-stale SHA than to strand the issue at human.
+  # the newest reviewer verdict ONLY when it carries no sha at all
+  # (malformed marker tolerance). A verdict whose marker sha exists but
+  # differs from the MR head is FOREIGN (previous iteration, another MR,
+  # or copied from an old verdict — AGENTS.md P4) and MUST be rejected:
+  # acting on it validates content that was never reviewed.
   if [ -z "$VERDICT" ]; then
     COMMENT=$(forge_mr_notes "$MR_IID" \
       | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer"))] | first | .body // empty')
-    VERDICT=$(echo "$COMMENT" | grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
-    # SHA-unanchored fallback → the verdict may be stale (different SHA).
-    # Flag it so the log-scraping fallback below gets a chance to find the
-    # current run's drafted verdict in stdout, which is fresher.
-    VERDICT_SHA_MATCHED=false
-    if [ -n "$VERDICT" ]; then
-      echo "[boucle] WARN: SHA-anchored verdict parse empty — accepted newest reviewer verdict (SHA-unanchored fallback, may be stale)."
+    FOUND_SHA=$(printf '%s' "$COMMENT" | grep -oE 'sha=[a-f0-9]+' | head -1 | cut -d= -f2 || true)
+    if [ -n "$FOUND_SHA" ] && [ "$FOUND_SHA" != "$MR_HEAD_SHORT" ]; then
+      echo "[boucle] REJECTED foreign-SHA verdict: marker sha=$FOUND_SHA != MR head $MR_HEAD_SHORT. Not accepting."
+      VERDICT=""
+      VERDICT_SHA_MATCHED=false
+    else
+      VERDICT=$(echo "$COMMENT" | grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+      VERDICT_SHA_MATCHED=false
+      if [ -n "$VERDICT" ]; then
+        echo "[boucle] WARN: SHA-anchored verdict parse empty — accepted newest reviewer verdict (SHA-unanchored fallback, may be stale)."
+      fi
     fi
   fi
 
@@ -368,6 +401,13 @@ boucle_ci_reviewer() {
         if [ -z "$NEW_VERDICT" ]; then
           NEW_COMMENT=$(forge_mr_notes "$MR_IID" \
             | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer"))] | first | .body // empty')
+          # Reject a foreign-SHA re-fetch: a marker whose sha exists but
+          # differs from the MR head is not this run's verdict (AGENTS.md P4).
+          NEW_FOUND_SHA=$(printf '%s' "$NEW_COMMENT" | grep -oE 'sha=[a-f0-9]+' | head -1 | cut -d= -f2 || true)
+          if [ -n "$NEW_FOUND_SHA" ] && [ "$NEW_FOUND_SHA" != "$MR_HEAD_SHORT" ]; then
+            echo "[boucle] REJECTED foreign-SHA re-fetch: marker sha=$NEW_FOUND_SHA != MR head $MR_HEAD_SHORT. Not adopting."
+            NEW_COMMENT=""
+          fi
           NEW_VERDICT=$(echo "$NEW_COMMENT" | grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
         fi
         if [ -n "$NEW_VERDICT" ]; then
@@ -387,6 +427,38 @@ boucle_ci_reviewer() {
 
   # Collapse duplicate reviewer verdicts (agent may post a v2; CI replaces the first).
   "$BOUCLE_HOME"/bin/collapse-duplicate-notes reviewer "$BOUCLE_PROJECT_ID" "$MR_IID" "$PRE_RUN_VERDICT_ID" "$BOUCLE_FORGE_HOST" "$MR_HEAD"
+
+  # ── Obligations gate (mechanical, no LLM) ─────────────────────────
+  # .boucle/<issue>/obligations.md holds the triage's `## Livrables`
+  # obligations (one `- On — type: … — … — condition: …` line each).
+  # The reviewer must adjudicate EVERY obligation in the verdict. A PASS
+  # that skips an obligation, or a PASS contradicting non-adressé /
+  # non-vérifiable adjudications, is mechanically overridden below.
+  OBLIGATIONS_FILE="$BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE/obligations.md"
+  if [ -f "$OBLIGATIONS_FILE" ]; then
+    OBLIGATION_IDS=$(grep -oE '^- O[0-9]+' "$OBLIGATIONS_FILE" | tr -d '-' | tr '\n' ' ' || true)
+    for oid in $OBLIGATION_IDS; do
+      if ! printf '%s' "$COMMENT" | grep -qE "^\- $oid \[(adressé|non-adressé|non-vérifiable)\]"; then
+        echo "[boucle] Obligations gate: $oid has NO adjudication in the verdict — verdict invalid."
+        if [ "$VERDICT" = "PASS" ]; then
+          VERDICT=""
+          VERDICT_SHA_MATCHED=false
+        fi
+      fi
+    done
+    if [ "$VERDICT" = "PASS" ]; then
+      if printf '%s' "$COMMENT" | grep -qE '^- O[0-9]+ \[non-adressé\]'; then
+        echo "[boucle] Obligations gate: PASS contradicts a [non-adressé] adjudication — overriding to FAIL."
+        VERDICT="FAIL"
+      elif printf '%s' "$COMMENT" | grep -qE '^- O[0-9]+ \[non-vérifiable\]'; then
+        echo "[boucle] Obligations gate: PASS contradicts a [non-vérifiable] adjudication — overriding to UNCERTAIN."
+        VERDICT="UNCERTAIN"
+      fi
+    fi
+    if [ -n "$VERDICT" ]; then
+      echo "[boucle] Obligations gate: verdict after gate = $VERDICT"
+    fi
+  fi
 
   # Resolve the reporter id once, before the verdict case, so every branch
   # (PASS, FAIL, UNCERTAIN) can assign the MR to the author when their
@@ -443,6 +515,12 @@ boucle_ci_reviewer() {
       else
         # Final reviewer FAIL after $MAX_ITER attempts: fused into boucle:human
         # (was boucle:blocked, deleted). Configurable via BOUCLE_MAX_ITERATIONS.
+        # Note BEFORE the terminal label — never a muted boucle:human.
+        ESCALATION_MSG=$(printf '⚠️ Reviewer verdict: **FAIL** after %s iterations. The loop could not satisfy the acceptance criteria automatically.\n\nThe MR has been assigned to you for manual review. Inspect [MR !%s](%s) and the reviewer verdicts, then either:\n- **Approve** the MR if the work is acceptable (the merger will rebase + merge), or\n- **Comment** with guidance and re-assign to the bot to re-trigger the worker.' "$MAX_ITER" "$MR_IID" "$MR_URL")
+        if ! forge_issue_note "$BOUCLE_ISSUE" "$ESCALATION_MSG"; then
+          echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+          exit 1
+        fi
         set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
         # Assign the MR to the issue author so they're notified that human
         # intervention is required. Without this, the user never gets a
@@ -450,8 +528,6 @@ boucle_ci_reviewer() {
         # a consumer repo: MR stayed assigned to the bot after 3
         # reviewer FAILs, the user saw no notification).
         assign_mr_to_author
-        ESCALATION_MSG=$(printf '⚠️ Reviewer verdict: **FAIL** after %s iterations. The loop could not satisfy the acceptance criteria automatically.\n\nThe MR has been assigned to you for manual review. Inspect [MR !%s](%s) and the reviewer verdicts, then either:\n- **Approve** the MR if the work is acceptable (the merger will rebase + merge), or\n- **Comment** with guidance and re-assign to the bot to re-trigger the worker.' "$MAX_ITER" "$MR_IID" "$MR_URL")
-        forge_issue_note "$BOUCLE_ISSUE" "$ESCALATION_MSG"
       fi
       ;;
     UNCERTAIN)
@@ -466,11 +542,15 @@ boucle_ci_reviewer() {
       # boucle:human BEFORE the re-triggered reviewer could finish —
       # creating the appearance of "assigned mid-review" and 3 duplicate
       # "unparsable" notes. See AGENTS.md lesson #43.
+      # Note BEFORE the terminal label — never a muted boucle:human.
+      if ! forge_issue_note "$BOUCLE_ISSUE" "Verdict unparsable or uncertain. Human review needed. The MR has been assigned to you.$(job_link)"; then
+        echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+        exit 1
+      fi
       set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
       # Assign the MR to the issue author on escalation (same rationale as
       # the FAIL-after-max branch above).
       assign_mr_to_author
-      forge_issue_note "$BOUCLE_ISSUE" "Verdict unparsable or uncertain. Human review needed. The MR has been assigned to you.$(job_link)"
       ;;
   esac
 
@@ -492,9 +572,13 @@ boucle_ci_reviewer() {
       chain_to_role "$BOUCLE_ISSUE" "reviewer" BOUCLE_ITERATION=$((ITERATION + 1))
     else
       echo "Max iterations reached — escalating to human."
+      # Note BEFORE the terminal label — never a muted boucle:human.
+      if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Reviewer agent failed to post a verdict after $MAX_ITER attempts. Human review needed. The MR has been assigned to you."; then
+        echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+        exit 1
+      fi
       set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
       assign_mr_to_author
-      forge_issue_note "$BOUCLE_ISSUE" "⚠️ Reviewer agent failed to post a verdict after $MAX_ITER attempts. Human review needed. The MR has been assigned to you."
     fi
     exit 1
   fi

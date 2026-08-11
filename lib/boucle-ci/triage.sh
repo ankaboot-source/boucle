@@ -218,8 +218,12 @@ boucle_ci_triage() {
     # label for traceability but moves to boucle::status::human.
     if [ "$rc" -eq 3 ]; then
       echo "[boucle] Silent triage failure (bin/jc exit 3) — escalating issue #$IID to human to break doctor re-trigger loop."
+      # Note BEFORE the terminal label — never a muted boucle:human.
+      if ! forge_issue_note "$IID" ":rotating_light: Triage a échoué en silence (l'agent n'a produit aucun commentaire). Passage en revue humaine pour casser la boucle de re-déclenchement. Voir les logs du job $BOUCLE_JOB_URL."; then
+        echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
+        exit 1
+      fi
       set_boucle_label "$IID" "boucle:human" "boucle::status::human"
-      forge_issue_note "$IID" ":rotating_light: Triage a échoué en silence (l'agent n'a produit aucun commentaire). Passage en revue humaine pour casser la boucle de re-déclenchement. Voir les logs du job $BOUCLE_JOB_URL."
       exit 1
     fi
     echo "[boucle] No new triage comment posted by this run — leaving issue #$IID at boucle:triage, no label change."
@@ -520,8 +524,12 @@ boucle_ci_triage() {
       # Skip if still no parseable sub-issues after searching all comments
       if [ -z "$SUBISSUES_SECTION" ] || ! echo "$SUBISSUES_SECTION" | grep -qE '^### Sub-issue [0-9]+[[:space:]]*:'; then
         echo "NEEDS-SPLIT but no parseable sub-issues — falling back to boucle:human"
+        # Note BEFORE the terminal label — never a muted boucle:human.
+        if ! forge_issue_note "$IID" "Triage requested NEEDS-SPLIT but no parseable sub-issues were found in the triage comment. Please split this issue manually."; then
+          echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
+          exit 1
+        fi
         set_boucle_label "$IID" "boucle:human" "boucle::status::human"
-        forge_issue_note "$IID" "Triage requested NEEDS-SPLIT but no parseable sub-issues were found in the triage comment. Please split this issue manually."
         exit 0
       fi
 
@@ -696,8 +704,12 @@ boucle_ci_triage() {
 
         if detect_cycle "$GRAPH_STR"; then
           echo "FAIL: dependency cycle detected involving sub-issues ($CREATED_IIDS)"
+          # Note BEFORE the terminal label — never a muted boucle:human.
+          if ! forge_issue_note "$IID" "⚠️ Triage declared a dependency cycle between sub-issues ($CREATED_IIDS). The sub-issues were created but their dependencies could not be resolved. Please fix the dependencies manually."; then
+            echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
+            exit 1
+          fi
           set_boucle_label "$IID" "boucle:human" "boucle::status::human"
-          forge_issue_note "$IID" "⚠️ Triage declared a dependency cycle between sub-issues ($CREATED_IIDS). The sub-issues were created but their dependencies could not be resolved. Please fix the dependencies manually."
           # Still mark split so dispatch doesn't re-triage the parent.
           set_boucle_label "$IID" "boucle:split" "boucle::status::bot"
           exit 0
@@ -733,8 +745,12 @@ boucle_ci_triage() {
 
       if [ "$SUBISSUE_COUNT" -eq 0 ]; then
         echo "NEEDS-SPLIT but zero sub-issues created — falling back to boucle:human"
+        # Note BEFORE the terminal label — never a muted boucle:human.
+        if ! forge_issue_note "$IID" "Triage requested NEEDS-SPLIT but no sub-issues could be created from the triage comment. Please split this issue manually."; then
+          echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
+          exit 1
+        fi
         set_boucle_label "$IID" "boucle:human" "boucle::status::human"
-        forge_issue_note "$IID" "Triage requested NEEDS-SPLIT but no sub-issues could be created from the triage comment. Please split this issue manually."
       else
         # Mark the parent boucle:split FIRST so dispatch and doctor stop
         # re-triaging it even if the comment POST below fails. The parent
@@ -759,6 +775,11 @@ boucle_ci_triage() {
       ;;
     *)
       echo "Unparsable disposition: $DISPOSITION → routing to human"
+      # Note BEFORE the terminal label — never a muted boucle:human.
+      if ! forge_issue_note "$IID" "⚠️ Triage disposition was not parsable — the issue could not be routed automatically. Human intervention needed."; then
+        echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
+        exit 1
+      fi
       set_boucle_label "$IID" "boucle:human" "boucle::status::human"
       ;;
   esac
