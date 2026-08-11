@@ -200,26 +200,19 @@ over morning coffee; by lunch the worker has implemented, the reviewer has
 verified the preview, and the MR is waiting. A calmer workflow, driven by
 your agenda — not the agent's.
 
-At this intelligence tier, **how** you scaffold the agent matters more than
-**which** model you pick. Raw intelligence has diminishing returns — from
-DeepSeek V4 Flash ($0.03/task) to Opus 5 ($2.34/task), cost increases 78×
-while intelligence increases 21%
-([Artificial Analysis](https://artificialanalysis.ai), v4.1.1).
-
-What closes the gap is structure: Anthropic's
+boucle is built on gates rather than on model choice. Anthropic's
 ["Building Effective Agents"](https://www.anthropic.com/research/building-effective-agents)
 (Dec 2024) recommends "programmatic checks (gates) on any intermediate steps"
-and notes that "code solutions are verifiable through automated tests."
-[Terminal-Bench v2.1](https://artificialanalysis.ai/evaluations/terminalbench-v2-1)
-and [SWE-bench Verified](https://www.swebench.com/) confirm this — the gate,
-not the model, decides what passes.
+and notes that "code solutions are verifiable through automated tests." That
+is the design boucle implements: four roles, each with a focused prompt, and
+verdicts anchored to a commit SHA — an implementation is graded on the
+behaviour of a real deployment, not on the agent's own account of it.
 
-boucle's four roles each carry a focused prompt and a curated skill library
-(UI/UX, design, frontend, codebase graph) — a specialized agent with the
-right skill outperforms a generalist with higher raw intelligence.
-
-**The model decides what to *attempt*; the gates and skills decide what
-*ships*.**
+Whether this beats simply spending more on a stronger model is an **open
+question**, not a settled one. boucle records tokens and cost per issue, per
+role, per iteration (`.boucle/<issue>/cost.json`), so the trade-off is
+measurable on your own repository rather than argued from benchmarks that
+were not designed to answer it.
 
 ## 💰 Cost
 

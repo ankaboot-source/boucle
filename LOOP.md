@@ -214,7 +214,6 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_NOTIFY_URL` | *(empty)* | Send-only webhook for human gates and escalations. Empty = disabled. Set as a **masked** variable. |
 | `BOUCLE_NOTIFY_FORMAT` | `slack` | Payload envelope: `slack` (also Discord via a `/slack` endpoint), `ntfy`, `telegram`, `raw`. |
 | `BOUCLE_NOTIFY_EVENTS` | `spec-review,approval,human,blocked` | Which transitions fire a notification. |
-| `BOUCLE_REVIEW_ANCHORING` | `full` | How much of a prior reviewer verdict reaches the next review pass: `full`, `criteria-only`, `none`. See §Anti-anchored re-review. |
 | `BOUCLE_MAX_NOTE_CHARS` | `1500` | Per-note cap when a note thread is injected into a prompt. Every note survives — only its tail is elided. `0` disables trimming (escape hatch). |
 | `BOUCLE_MAX_PROMPT_CHARS` | `0` | Thread-level ceiling on the **assembled** prompt. `0` = disabled. See §Prompt budget. |
 | `BOUCLE_PROMPT_WARN_CHARS` | `0` | Log a warning above this assembled size without altering the prompt. `0` = never warn. |
@@ -518,13 +517,17 @@ invites two opposite failures:
   regression introduced *by* the fix slips through unexamined;
 - **tunnel vision** — only the previously failed criteria get re-checked.
 
-| `BOUCLE_REVIEW_ANCHORING` | What the reviewer sees of a prior verdict |
-|---|---|
-| `full` (default) | Everything — the verdict, met and unmet criteria, and the reasoning |
-| `criteria-only` | The `VERDICT:` line and the unmet `- [ ]` criteria, with the rationale stripped: what must still pass, not why it failed |
-| `none` | A placeholder; the verdict is withheld |
+So a prior verdict reaches the reviewer reduced to its `VERDICT:` line and
+its unmet `- [ ]` criteria, **with the rationale stripped**: what must still
+pass, not why it failed.
 
-Two things are never filtered, at any setting:
+**This is not configurable.** Both alternatives are worse, and offering them
+would only offer a way to degrade the loop — keeping the rationale
+re-anchors the reviewer on its own earlier reasoning, and withholding the
+criterion entirely lets the verdict flip-flop across iterations, so the
+worker chases a moving target and burns the iteration cap.
+
+Two things are never filtered:
 
 - **Human comments.** They amend the spec and outrank the frozen criteria in
   `state.md`. Withholding one is a spec regression, not a saving.
@@ -532,14 +535,7 @@ Two things are never filtered, at any setting:
   context, not review reasoning.
 
 The **worker** always receives full verdict reasoning — it has to act on a
-FAIL, so it needs the why. Only the reviewer's own view is filtered.
-
-**The default is `full` on purpose.** Withholding prior verdicts is not
-obviously correct: a reviewer that forgets what it already rejected can
-flip-flop across iterations, and the worker then chases a moving target and
-burns the iteration cap. Turn on `criteria-only`, compare verdict stability
-across iterations on real issues, and only then decide. An unknown value
-falls back to `full` rather than filtering blind.
+FAIL, so it needs the why. Only the reviewer's own view is reduced.
 
 ## File-impact gate
 

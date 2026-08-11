@@ -754,11 +754,15 @@ fi
 #     introduced BY the fix slips through unexamined;
 #   - tunnel vision: only the previously failed criteria are re-checked.
 #
-# BOUCLE_REVIEW_ANCHORING controls how much of a prior verdict survives:
-#   full          — everything (default, unchanged behaviour)
-#   criteria-only — the VERDICT line + unmet "- [ ]" criteria, reasoning
-#                   stripped: what still has to pass, not why it failed
-#   none          — verdicts replaced by a placeholder
+# A prior verdict reaches the next review pass reduced to its VERDICT line
+# and its unmet "- [ ]" criteria, with the rationale stripped: what still has
+# to pass, not why it failed last time.
+#
+# This is NOT configurable, deliberately. The alternatives are both worse and
+# offering them would just be offering a way to degrade the loop: keeping the
+# rationale re-anchors the reviewer on its own earlier reasoning, and
+# withholding the criterion entirely lets the verdict flip-flop across
+# iterations so the worker chases a moving target and burns the cap.
 #
 # Two things are NEVER filtered:
 #   - human comments: they AMEND the spec and outrank the frozen criteria in
@@ -770,20 +774,10 @@ fi
 # build_prompt applies this to the reviewer branch alone.
 filter_mr_discussion() {
   local text="$1"
-  local mode="${BOUCLE_REVIEW_ANCHORING:-full}"
-  if [ -z "$text" ] || [ "$mode" = "full" ]; then
-    printf '%s' "$text"
+  if [ -z "$text" ]; then
     return 0
   fi
-  case "$mode" in
-    criteria-only | none) ;;
-    *)
-      echo "WARN: unknown BOUCLE_REVIEW_ANCHORING='$mode' — falling back to 'full'." >&2
-      printf '%s' "$text"
-      return 0
-      ;;
-  esac
-  printf '%s\n' "$text" | awk -v mode="$mode" -v bot="${BOUCLE_BOT_USERNAME:-}" '
+  printf '%s\n' "$text" | awk -v bot="${BOUCLE_BOT_USERNAME:-}" '
     # A note is a verdict only if the boucle bot wrote it AND it carries a
     # verdict marker. Everything else passes through untouched.
     function is_verdict() { return (bot != "" && author == bot && seen_verdict) }
@@ -808,8 +802,6 @@ filter_mr_discussion() {
       if (n == 0) return
       if (!is_verdict()) {
         for (i = 1; i <= n; i++) print buf[i]
-      } else if (mode == "none") {
-        print header_only(buf[1]) " (previous reviewer verdict withheld — BOUCLE_REVIEW_ANCHORING=none)"
       } else {
         print header_only(buf[1])
         for (i = 1; i <= n; i++) {
@@ -1083,8 +1075,8 @@ ${LESSON_CANDIDATE_CONTENT}
       # Fail-loud guard for the MR feedback channel (LESSONS.yml lesson #54):
       # a port/sync can silently drop the CI-side lookup while leaving the
       # orphaned BOUCLE_MR_IID export. Check the RAW env, not the filtered
-      # value: anchoring (BOUCLE_REVIEW_ANCHORING) deliberately withholds
-      # verdicts downstream, but the raw channel must still be populated.
+      # value: the anchoring filter deliberately reduces verdicts downstream,
+      # but the raw channel must still be populated.
       # On a re-run an empty raw channel is a red flag — warn loudly and fall
       # back to self-fetch instructions instead of grading against the
       # frozen spec alone (which is exactly how unaddressed human amendments

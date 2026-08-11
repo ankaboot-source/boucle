@@ -149,10 +149,6 @@ run_config_audit() {
     product | strict | off) pass "spec profile '${BOUCLE_SPEC_PROFILE:-product}' is valid" ;;
     *) audit_advisory "BOUCLE_SPEC_PROFILE='${BOUCLE_SPEC_PROFILE}' is unknown" "Falling back to 'product'. Valid: product, strict, off." ;;
   esac
-  case "${BOUCLE_REVIEW_ANCHORING:-full}" in
-    full | criteria-only | none) : ;;
-    *) audit_advisory "BOUCLE_REVIEW_ANCHORING='${BOUCLE_REVIEW_ANCHORING}' is unknown" "Falling back to 'full'. Valid: full, criteria-only, none." ;;
-  esac
   case "${BOUCLE_RETRY_STRATEGY:-adaptive}" in
     adaptive | preserve | reset) : ;;
     *) audit_advisory "BOUCLE_RETRY_STRATEGY='${BOUCLE_RETRY_STRATEGY}' is unknown" "Falling back to 'preserve'. Valid: adaptive, preserve, reset." ;;
