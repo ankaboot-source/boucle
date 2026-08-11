@@ -661,8 +661,8 @@ boucle_ci_doctor() {
     # every run (10 min) for a conflicted MR at boucle:human, producing
     # an infinite loop of duplicate merge-conflict notes (framagit
     # 2026-08, issue #62: 100+ duplicate notes in ~15 hours).
-    ESCALATION_NOTES=$(forge_issue_notes "$IID" 2>/dev/null \
-      | jq -r '[.[] | select(.body | test("Merge conflict — human intervention required"))] | length' 2>/dev/null || echo 0)
+    ESCALATION_NOTES=$(forge_issue_notes "$IID" 2> /dev/null \
+      | jq -r '[.[] | select(.body | test("Merge conflict — human intervention required"))] | length' 2> /dev/null || echo 0)
     if [ "$ESCALATION_NOTES" -gt 0 ]; then
       echo "  → #$IID: merger already escalated a merge conflict ($ESCALATION_NOTES note(s)) — human must resolve, skipping"
       continue
