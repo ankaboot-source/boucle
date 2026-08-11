@@ -83,6 +83,7 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 |----------|---------|---------|
 | `BOUCLE_ENABLED` | `true` | Master switch: `true` or `false` (pause boucle). |
 | `BOUCLE_FORGE` | `gitlab` | Active forge: `gitlab` or `github`. |
+| `BOUCLE_MONO_USER` | *(empty)* | `true` when one account owns both the issues and the loop (`bin/setup --mono-user`). Swaps the actor-based anti-loop guard for the `<!-- boucle:agent -->` marker, drops the `boucle::status::*` gross label and both assignee side effects. `false` is treated as unset. Degrades notifications — see README. |
 | `BOUCLE_SPEC_PROFILE` | `product` | Spec validation profile: `product` (default, gates Size M only), `strict` (gates all sizes), `off` (never); unknown → `product`. |
 | `BOUCLE_DND_ENABLED` | `true` | Do-Not-Disturb master switch: `true` or `false`. |
 | `BOUCLE_DND_START` / `BOUCLE_DND_END` | `22:00` / `07:00` | Quiet-hours window: HH:MM 24h start/end. |

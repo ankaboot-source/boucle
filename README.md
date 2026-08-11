@@ -20,6 +20,7 @@ never touch the engine itself.
 - [💰 Cost](#cost)
 - [🛠️ Configuration](#️-configuration)
   - [The bot user](#the-bot-user)
+  - [Running without a bot account (`--mono-user`)](#running-without-a-bot-account---mono-user)
 - [🗺️ Roadmap](#️-roadmap)
 - [⚖️ License](#️-license)
 - [📚 Docs](#docs)
@@ -311,6 +312,43 @@ That page lets a project owner provision a bot without platform admin. Then:
 `bin/setup` then adds the bot to the project as a Developer, seeds the
 `BOUCLE_BOT_ID` / `BOUCLE_BOT_USERNAME` / `BOUCLE_TOKEN` CI/CD variables, and
 the loop reassigns issues to it automatically.
+
+### Running without a bot account (`--mono-user`)
+
+If you will not maintain a second account — the common case on GitHub, where
+nothing provisions one for you — run `bin/setup --mono-user`. Your own PAT
+drives the loop: one account carries the issues, the MRs, the approvals and
+boucle's own actions.
+
+**Why the mode has to exist.** boucle normally recognises its own writes by
+the actor: dispatch discards any webhook whose author is the bot. Point that
+at your own account and the guard discards *your* actions too — opening an
+issue, replying on `boucle:needs-info`, approving a spec. The loop goes
+quiet, with no error anywhere. `--mono-user` swaps the actor check for an
+invisible `<!-- boucle:agent -->` marker that boucle appends to every comment
+it posts, so it recognises its own writes without asking who acted.
+`bin/doctor` fails loudly if you land in the broken configuration by
+accident.
+
+**The cost: notifications degrade.** This is accepted, not fixed.
+
+- The forge signals "it's your turn" by *changing* an issue's assignee. The
+  issue is already yours, so nothing is emitted.
+- Every action the loop takes runs under your token, and forges do not
+  notify you about your own activity by default.
+
+So enable own-activity notifications once, or you will hear nothing:
+
+| Forge | Setting |
+| --- | --- |
+| GitHub | Settings → Notifications → **Include your own updates** |
+| GitLab | Preferences → Notifications → **Receive notifications about your own activity** |
+
+Both are account-wide, so expect noise from the loop's routine comments.
+GitHub's per-organization email routing and inbox `reason:` filters help
+contain it; repository Watch levels keep unrelated repos quiet. None of this
+is as clean as a dedicated identity — **prefer a bot or service account when
+you can**, and treat mono-user as the fallback.
 
 ## 🗺️ Roadmap
 
