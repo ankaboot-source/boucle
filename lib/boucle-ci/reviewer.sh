@@ -385,8 +385,7 @@ boucle_ci_reviewer() {
       assign_mr_to_author
       # Set boucle:approval (waits for author to approve the MR natively)
       set_boucle_label "$BOUCLE_ISSUE" "boucle:approval" "boucle::status::human"
-      # shellcheck disable=SC2016  # $BOUCLE_DEFAULT_BRANCH stays literal in the user-facing message (matches original $CI_DEFAULT_BRANCH text)
-      APPROVAL_MSG=$(printf '✅ Reviewer verdict: **PASS**. MR !%s is ready to merge.\n\nThe MR has been assigned to you for approval. To approve and merge, click the **Approve** button on [MR !%s](%s). The merger will then rebase the MR onto $BOUCLE_DEFAULT_BRANCH and merge it serially (avoiding conflicts with other approved MRs).' "$MR_IID" "$MR_IID" "$MR_URL")
+      APPROVAL_MSG=$(printf '✅ Reviewer verdict: **PASS**. MR !%s is ready to merge.\n\nThe MR has been assigned to you for approval. To approve and merge, click the **Approve** button on [MR !%s](%s). The merger will then rebase the MR onto %s and merge it serially (avoiding conflicts with other approved MRs).' "$MR_IID" "$MR_IID" "$MR_URL" "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}")
       forge_issue_note "$BOUCLE_ISSUE" "$APPROVAL_MSG"
       # Race condition recovery: the human may have approved the MR
       # BEFORE the reviewer finished (the dispatch `approved` handler
