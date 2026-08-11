@@ -221,6 +221,17 @@ extract_prompt_funcs() {
   rm -f "$TMPF"
 }
 
+@test "build_prompt: reviewer prompt includes issue notes when BOUCLE_ISSUE_NOTES is set" {
+  TMPF=$(mktemp)
+  extract_prompt_funcs "$TMPF"
+  run bash -c "ISSUE=7; BOUCLE_ISSUE_NOTES='[tahrir] embed Instagram 3 latest posts'; source '$TMPF'; build_prompt reviewer"
+  assert_success
+  assert_output --partial "Prior issue discussion"
+  assert_output --partial "human comments here AMEND the spec"
+  assert_output --partial "[tahrir] embed Instagram 3 latest posts"
+  rm -f "$TMPF"
+}
+
 @test "build_prompt: e2e role references BOUCLE_LIVE_URL" {
   TMPF=$(mktemp)
   extract_prompt_funcs "$TMPF"

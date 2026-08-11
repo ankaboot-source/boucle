@@ -193,6 +193,21 @@ boucle_ci_reviewer() {
     echo "[boucle] WARN: could not fetch issue #$BOUCLE_ISSUE body — reviewer will grade without the original spec."
   fi
 
+  # Issue notes (human amendments posted as issue comments, not MR comments).
+  # Without these, the reviewer grades against MR notes + issue body alone and
+  # misses amendments the human posted on the ISSUE (not the MR). The worker
+  # already receives BOUCLE_ISSUE_NOTES; the reviewer MUST too, so it can
+  # verify those amendments are addressed (framagit 2026-08, MR !61: the
+  # human posted "embed Instagram + related articles" as an ISSUE note; the
+  # worker marked them SUPPRIMÉE and the reviewer PASSed because it never saw
+  # the issue note — only the MR notes and issue body).
+  export BOUCLE_ISSUE_NOTES
+  BOUCLE_ISSUE_NOTES=$(forge_issue_notes "$BOUCLE_ISSUE" \
+    | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | reverse | .[]' 2> /dev/null || echo "")
+  if [ -z "$BOUCLE_ISSUE_NOTES" ]; then
+    echo "[boucle] INFO: no prior notes for issue #$BOUCLE_ISSUE."
+  fi
+
   # Detect image attachments (issue + MR comments) and route to a
   # vision-capable model if needed.
   # Forge controls: BOUCLE_VISION_ROUTING, BOUCLE_VISION_MODEL, BOUCLE_VISION_ROLES.
