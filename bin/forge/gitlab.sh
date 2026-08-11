@@ -117,6 +117,10 @@ forge_issue_add_reaction() {
 
 forge_issue_list_by_label() {
   local label_csv="$1" state="${2:-opened}"
+  # URL-encode ':' → %3A: boucle:* labels contain a colon, and a raw ':' in the
+  # labels= query param makes GitLab return [] (doctor never found spec-review
+  # / todo issues — approvals stranded at boucle:spec-review, framagit 2026-08).
+  label_csv=$(printf '%s' "$label_csv" | sed 's/:/%3A/g')
   glab api --hostname "$BOUCLE_FORGE_HOST" \
     "/projects/$BOUCLE_PROJECT_ID/issues?state=$state&labels=$label_csv&per_page=100" 2> /dev/null || echo "[]"
 }
