@@ -1326,6 +1326,46 @@ atomic.
       distinct — lesson #27 handles stale verdict SHA parsing, this
       lesson prevents the foreign-content post at the source.
 
+59. **Notes of terminal transitions MUST be verified before the label**
+    - ❌ DO NOT post an escalation/catchup note with a
+      `... > /dev/null 2>&1 || true` swallow (helpers) or a bare
+      `glab api ... notes ... > /dev/null` (inline jobs) and set the
+      terminal label (`boucle:human` / `boucle:done`) regardless of
+      whether the POST actually landed. Observed on a consumer work
+      item (2026-08): the labels flipped to `boucle:human` at 14:55:50
+      while the explanation note POST was silently dropped — the human
+      saw a state with no message, and had to reconstruct from the CI
+      logs WHY the issue landed on them. A terminal transition without
+      its note is a silent failure (lesson #2) wearing a success label.
+    - ❌ DO NOT assume the note POST internals are reliable: they can
+      fail transiently (network, token, rate limit) and the
+      `|| true` + `>/dev/null` pattern in `forge_issue_note` /
+      `forge_mr_note` (gitlab.sh, github.sh) historically swallowed
+      every failure code.
+    - ✅ DO: order the transition **note FIRST, label SECOND**: post
+      the explanation, and only after a verified successful POST —
+      `if ! forge_issue_note "$BOUCLE_ISSUE" "..."; then ... exit 1; fi`
+      — apply `set_boucle_label ... boucle:human ...`. If the note
+      cannot be posted, exit non-zero WITHOUT the label: the issue
+      stays in a retryable state and the job fails loudly (CI red +
+      stderr) instead of stranding a mute escalation.
+    - ✅ DO: keep `forge_issue_note` / `forge_mr_note` fail-loud by
+      contract: they return the real POST exit code and WARN on stderr
+      on failure (never `|| true`-swallowed). Callers that genuinely
+      want a best-effort note (progress notes like "🔄 re-running")
+      must append `|| true` EXPLICITLY — never rely on the helper
+      swallowing for them.
+    - ✅ DO: apply the same pattern to the INLINE copies (`.gitlab-ci.yml`
+      jobs) and the extracted copies (`lib/boucle-ci/*.sh`) — the two
+      copies must stay in sync (lesson #56 greps ALL copies).
+    - Admission: class — any terminal state transition whose
+      explanation note is treated as optional; recurrence — new
+      escalation sites are added routinely and the natural instinct is
+      to post-then-label with a swallowed POST; stable — no line
+      numbers, no transient values; distinct — lesson #2 detects
+      silent agents, lesson #55 covers the marker stamping, this
+      lesson covers the POST-result contract of the note helpers.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.

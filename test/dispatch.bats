@@ -23,6 +23,7 @@ setup() {
   source lib/boucle.sh
   # shellcheck disable=SC1091
   source lib/boucle-ci/dispatch.sh
+  # shellcheck disable=SC2154 # BATS_TEST_TMPDIR is provided by bats
   PAYLOAD="$BATS_TEST_TMPDIR/payload.json"
 }
 
@@ -265,4 +266,76 @@ guard_decision() {
   assert_success
   assert_output --partial 'github.event_path'
   refute_output --partial 'toJSON'
+}
+
+# ── Escalation note contract (lesson #59) ────────────────────────────────
+# A terminal transition (boucle:human / boucle:done) without its explanation
+# note is a silent failure: the human sees a state, no message. The note
+# helpers MUST fail loud (real exit code, stderr WARN) and every escalation
+# site MUST post the note BEFORE the label and abort if the POST fails.
+
+@test "forge_issue_note returns the real POST exit code, not 0" {
+  # Contract (bin/forge/common.sh): "Returns 0 on success." The GitLab
+  # helper used to swallow failures with `|| true` — the label flipped to
+  # boucle:human while the explanation note was silently dropped (observed
+  # on a consumer work item, 2026-08). gitlab.sh must propagate the rc.
+  run sed -n "/^forge_issue_note() {/,/^}/p" bin/forge/gitlab.sh
+  assert_success
+  assert_output --partial 'rc=$?'
+  refute_output --partial '|| true'
+  # Same for the MR variant.
+  run sed -n "/^forge_mr_note() {/,/^}/p" bin/forge/gitlab.sh
+  assert_success
+  refute_output --partial '|| true'
+  # GitHub backend: the silent wrapper must no longer swallow failures.
+  run sed -n "/^_gh_api_silent() {/,/^}/p" bin/forge/github.sh
+  assert_success
+  assert_output --partial 'rc=$?'
+  refute_output --partial '|| true'
+}
+
+@test "escalation sites post the note BEFORE the terminal label, in both copies" {
+  # Worker + reviewer + merger + e2e + catchup + triage + dispatch.
+  # Pattern: `if ! forge_issue_note ...; then FAIL; exit 1; fi`
+  # BEFORE `set_boucle_label ... boucle:human`. A label-then-swallowed-note
+  # ordering is the exact bug from lesson #59.
+  local files=(
+    lib/boucle-ci/worker.sh
+    lib/boucle-ci/reviewer.sh
+    lib/boucle-ci/merger.sh
+    lib/boucle-ci/e2e.sh
+    lib/boucle-ci/catchup.sh
+    lib/boucle-ci/dispatch.sh
+    lib/boucle-ci/triage.sh
+    lib/boucle.sh
+  )
+  local f line
+  for f in "${files[@]}"; do
+    # Every set_boucle_label ... boucle:human must be preceded (within the
+    # same block) by a checked forge_issue_note. Extract each label site and
+    # look backwards for `if ! forge_issue_note` before it.
+    while read -r line; do
+      ln=${line%%:*}
+      # Look at the 12 lines before the label write for a checked note.
+      prev=$(sed -n "$((ln - 12)),$((ln - 1))p" "$f")
+      if ! echo "$prev" | grep -q 'if ! forge_issue_note'; then
+        # Legitimate exceptions: labels already terminal-skip elsewhere, or
+        # the label is part of the doc-comment list. Allow explicit markers.
+        if echo "$prev" | grep -q 'retry instead of muting'; then
+          continue
+        fi
+        echo "$f:$ln: set_boucle_label boucle:human WITHOUT a checked forge_issue_note in the preceding 12 lines"
+        return 1
+      fi
+    done < <(grep -n '"boucle:human" "boucle::status::human"' "$f")
+  done
+  # The inline .gitlab-ci.yml copy must follow the same ordering.
+  while read -r line; do
+    ln=${line%%:*}
+    prev=$(sed -n "$((ln - 12)),$((ln - 1))p" .gitlab-ci.yml)
+    if ! echo "$prev" | grep -q 'if ! forge_issue_note'; then
+      echo ".gitlab-ci.yml:$ln: set_boucle_label boucle:human WITHOUT a checked forge_issue_note in the preceding 12 lines"
+      return 1
+    fi
+  done < <(grep -n '"boucle:human" "boucle::status::human"' .gitlab-ci.yml)
 }

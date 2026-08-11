@@ -407,8 +407,14 @@ EOF
         chain_to_role "$BOUCLE_ISSUE" "worker" "BOUCLE_ITERATION=$((ITERATION + 1))"
       else
         echo "Escalating to human — build failed after $max_iter attempts." >&2
+        # Note BEFORE the terminal label — never a muted boucle:human.
+        if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Build failed after $max_iter attempts (\`$BOUCLE_BUILD_CMD\` exited $build_rc). The worker could not produce a buildable tree. Human intervention needed.$(job_link)"; then
+          echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+          boucle_health_outcome "$BOUCLE_ISSUE" "worker" "build-fail" "iteration $ITERATION (cap reached, note FAILED)" || true
+          exit 1
+        fi
+        boucle_health_outcome "$BOUCLE_ISSUE" "worker" "build-fail" "iteration $ITERATION (cap reached)" || true
         set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-        forge_issue_note "$BOUCLE_ISSUE" "⚠️ Build failed after $max_iter attempts (\`$BOUCLE_BUILD_CMD\` exited $build_rc). The worker could not produce a buildable tree. Human intervention needed.$(job_link)"
       fi
       exit 1
     fi
