@@ -593,6 +593,13 @@ resolve_reporter_id() {
     if [ -z "$parent_iid" ]; then
       parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | sed -nE 's/.*<!-- boucle:e2e-origin v=1 iid=([0-9]+) -->.*/\1/p' | head -1)
     fi
+    # Legacy E2E-fail follow-ups (created before the origin marker existed)
+    # still carry the prose line "E2E verification failed for issue #N."
+    # — parse it as a last-resort fallback so pre-marker issues also reach
+    # their human reporter.
+    if [ -z "$parent_iid" ]; then
+      parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | sed -nE 's/.*issue #([0-9]+)\.$/\1/p' | head -1)
+    fi
     [ -z "$parent_iid" ] && break
     parent_data=$(forge_issue_get "$parent_iid") || break
     reporter_id=$(printf '%s' "$parent_data" | jq -r '.author.id // empty')
