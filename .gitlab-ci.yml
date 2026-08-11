@@ -1995,7 +1995,10 @@ worker:
       if git fetch origin "$BRANCH" 2>/dev/null; then
         git checkout -f -B "$BRANCH" "origin/$BRANCH"
       else
-        git checkout -f -b "$BRANCH"
+        # -B (not -b): the executor reuses the repo, so a stale local branch
+        # from a previous job may already exist. -b fails with "a branch named
+        # 'X' already exists"; -B resets it to HEAD (or creates it if absent).
+        git checkout -f -B "$BRANCH"
       fi
       if git log --oneline origin/$CI_DEFAULT_BRANCH.."$BRANCH" 2>/dev/null | grep -q .; then
         echo "[boucle] Branch has prior worker commits — rebasing onto origin/$CI_DEFAULT_BRANCH to preserve work."
