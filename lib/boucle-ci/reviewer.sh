@@ -62,11 +62,36 @@ boucle_ci_reviewer() {
         CLOSED_MR_STATE=$(printf '%s' "$CLOSED_MR_DATA" | jq -r '.state // empty' 2> /dev/null || echo "")
       fi
     fi
-    if [ -n "$MERGED_MR_STATE" ] || [ -n "$CLOSED_MR_STATE" ]; then
-      echo "boucle: a $MERGED_MR_STATE$CLOSED_MR_STATE MR exists for issue #$BOUCLE_ISSUE — transitioning to boucle:done"
+    if [ -n "$MERGED_MR_STATE" ]; then
+      echo "boucle: a merged MR exists for issue #$BOUCLE_ISSUE — transitioning to boucle:done"
       set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
       close_issue "$BOUCLE_ISSUE"
-      forge_issue_note "$BOUCLE_ISSUE" "✅ Reviewer: no open MR found, but a $MERGED_MR_STATE$CLOSED_MR_STATE MR exists for this issue. Marked boucle:done and closed."
+      forge_issue_note "$BOUCLE_ISSUE" "✅ Reviewer: no open MR found, but a merged MR exists for this issue. Marked boucle:done and closed."
+    elif [ -n "$CLOSED_MR_STATE" ]; then
+      # Closed WITHOUT a merge is ambiguous: it may be (a) the human
+      # closed the MR mid-review (issue pinned at boucle:review — closing
+      # the issue breaks the reviewer re-trigger loop), or (b) a recovery
+      # artifact — the human closed a zombie/empty MR while the issue is
+      # queued for work (boucle:todo/boucle:working). In case (b),
+      # boucle:done is WRONG: the work is not finished, and closing the
+      # issue kills the loop (consumer MR !59: the human closed a
+      # 0-commit zombie MR, the reviewer marked the issue boucle:done and
+      # closed it 2 minutes after the recovery). Gate the done-transition
+      # on the issue's current detail label.
+      ISSUE_LABELS=$(forge_issue_labels_get "$BOUCLE_ISSUE" 2> /dev/null || echo "")
+      case ",$ISSUE_LABELS," in
+        *",boucle:review,"*|*",boucle:approval,"*)
+          echo "boucle: a closed MR exists while issue #$BOUCLE_ISSUE is at review/approval — transitioning to boucle:done"
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
+          close_issue "$BOUCLE_ISSUE"
+          forge_issue_note "$BOUCLE_ISSUE" "✅ Reviewer: no open MR found, but a closed MR exists for this issue. Marked boucle:done and closed."
+          ;;
+        *)
+          echo "boucle: closed MR for issue #$BOUCLE_ISSUE is stale (not merged, issue queued for work) — leaving the issue open"
+          forge_issue_note "$BOUCLE_ISSUE" "ℹ️ Reviewer: the only MR on branch boucle/$BOUCLE_ISSUE is closed and NOT merged, while the issue is queued for work. Treating it as a stale MR — the issue stays open and a fresh MR will be created on the next worker run."
+          exit 0
+          ;;
+      esac
     else
       echo "boucle: no MR at all for issue #$BOUCLE_ISSUE — escalating to boucle:human"
       set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
