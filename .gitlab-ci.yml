@@ -703,8 +703,11 @@ dispatch:
                   glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID" \
                     -f "labels=$HUMAN_LABELS" >/dev/null 2>&1 || true
                 fi
-                glab api --hostname $BOUCLE_FORGE_HOST --method POST "/projects/$CI_PROJECT_ID/issues/$MR_ISSUE_IID/notes" \
-                  -f "body=:warning: MR !${MR_IID} was closed while awaiting approval. Escalated to **boucle:human** (user decision, not auto-redo)." >/dev/null 2>&1 || true
+                # Note BEFORE the terminal label — never a muted boucle:human.
+                if ! forge_issue_note "$MR_ISSUE_IID" ":warning: MR !${MR_IID} was closed while awaiting approval. Escalated to **boucle:human** (user decision, not auto-redo)."; then
+                  echo "FAIL: escalation note could not be posted on issue #$MR_ISSUE_IID — issue already at human labels, flagging loudly (note missing)." >&2
+                  exit 1
+                fi
                 exit 0
                 ;;
             esac
@@ -1304,12 +1307,18 @@ triage:
         if [ "$rc" -eq 3 ] || [ "$rc" -eq 4 ]; then
           if [ "$rc" -eq 4 ]; then
             echo "[boucle] Triage provider-down failure (bin/jc exit 4) — escalating issue #$IID to human to break doctor re-trigger loop."
-            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-              -f body=":rotating_light: Triage — fournisseur d'IA indisponible ou quota épuisé (429/402) : l'agent n'a rien produit. Passage en revue humaine pour casser la boucle de re-déclenchement. Vérifiez le statut du fournisseur et les crédits. Voir les logs du job $CI_JOB_URL." > /dev/null 2>&1 || true
+            # Note BEFORE the terminal label — never a muted boucle:human.
+            if ! forge_issue_note "$IID" ":rotating_light: Triage — fournisseur d'IA indisponible ou quota épuisé (429/402) : l'agent n'a rien produit. Passage en revue humaine pour casser la boucle de re-déclenchement. Vérifiez le statut du fournisseur et les crédits. Voir les logs du job $CI_JOB_URL."; then
+              echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
+              exit 1
+            fi
           else
             echo "[boucle] Silent triage failure (bin/jc exit 3) — escalating issue #$IID to human to break doctor re-trigger loop."
-            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-              -f body=":rotating_light: Triage a échoué en silence (l'agent n'a produit aucun commentaire). Passage en revue humaine pour casser la boucle de re-déclenchement. Voir les logs du job $CI_JOB_URL." > /dev/null 2>&1 || true
+            # Note BEFORE the terminal label — never a muted boucle:human.
+            if ! forge_issue_note "$IID" ":rotating_light: Triage a échoué en silence (l'agent n'a produit aucun commentaire). Passage en revue humaine pour casser la boucle de re-déclenchement. Voir les logs du job $CI_JOB_URL."; then
+              echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
+              exit 1
+            fi
           fi
           set_boucle_label "$IID" "boucle:human" "boucle::status::human"
           exit 1
@@ -1597,9 +1606,12 @@ triage:
           # Skip if still no parseable sub-issues after searching all comments
           if [ -z "$SUBISSUES_SECTION" ] || ! echo "$SUBISSUES_SECTION" | grep -qE '^### Sub-issue [0-9]+[[:space:]]*:'; then
             echo "NEEDS-SPLIT but no parseable sub-issues — falling back to boucle:human"
+            # Note BEFORE the terminal label — never a muted boucle:human.
+            if ! forge_issue_note "$IID" "Triage requested NEEDS-SPLIT but no parseable sub-issues were found in the triage comment. Please split this issue manually."; then
+              echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
+              exit 1
+            fi
             set_boucle_label "$IID" "boucle:human" "boucle::status::human"
-            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-              -f body="Triage requested NEEDS-SPLIT but no parseable sub-issues were found in the triage comment. Please split this issue manually." > /dev/null
             exit 0
           fi
 
@@ -1792,9 +1804,12 @@ triage:
 
             if detect_cycle "$GRAPH_STR"; then
               echo "FAIL: dependency cycle detected involving sub-issues ($CREATED_IIDS)"
+              # Note BEFORE the terminal label — never a muted boucle:human.
+              if ! forge_issue_note "$IID" "⚠️ Triage declared a dependency cycle between sub-issues ($CREATED_IIDS). The sub-issues were created but their dependencies could not be resolved. Please fix the dependencies manually."; then
+                echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
+                exit 1
+              fi
               set_boucle_label "$IID" "boucle:human" "boucle::status::human"
-              glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-                -f body="⚠️ Triage declared a dependency cycle between sub-issues ($CREATED_IIDS). The sub-issues were created but their dependencies could not be resolved. Please fix the dependencies manually." > /dev/null
               # Still mark split so dispatch doesn't re-triage the parent.
               set_boucle_label "$IID" "boucle:split" "boucle::status::bot"
               exit 0
@@ -1831,9 +1846,12 @@ triage:
 
           if [ "$SUBISSUE_COUNT" -eq 0 ]; then
             echo "NEEDS-SPLIT but zero sub-issues created — falling back to boucle:human"
+            # Note BEFORE the terminal label — never a muted boucle:human.
+            if ! forge_issue_note "$IID" "Triage requested NEEDS-SPLIT but no sub-issues could be created from the triage comment. Please split this issue manually."; then
+              echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
+              exit 1
+            fi
             set_boucle_label "$IID" "boucle:human" "boucle::status::human"
-            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-              -f body="Triage requested NEEDS-SPLIT but no sub-issues could be created from the triage comment. Please split this issue manually." > /dev/null
           else
             # Mark the parent boucle:split FIRST so dispatch and doctor stop
             # re-triaging it even if the comment POST below fails. The parent
@@ -1849,8 +1867,7 @@ triage:
             # hierarchy API is unavailable (feature flag disabled on
             # self-managed GitLab).
             SPLIT_MSG=$(printf 'Split into: #%s.\n\nParent stays open until all sub-issues close. The loop closes this parent automatically when the last sub-issue completes.\n\n<!-- boucle:split-parent iids=%s -->' "$(echo "$CREATED_IIDS" | sed 's/,/, #/g')" "$CREATED_IIDS")
-            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-              -f body="$SPLIT_MSG" > /dev/null
+            forge_issue_note "$IID" "$SPLIT_MSG" > /dev/null 2>&1 || true
             echo "Split parent #$IID into $SUBISSUE_COUNT sub-issue(s): $CREATED_IIDS (parent marked boucle:split)"
             if [ "$PARSE_FAILURES" -gt 0 ]; then
               echo "WARN: $PARSE_FAILURES sub-issue(s) failed to create"
@@ -1860,6 +1877,11 @@ triage:
           ;;
         *)
           echo "Unparsable disposition: $DISPOSITION → routing to human"
+          # Note BEFORE the terminal label — never a muted boucle:human.
+          if ! forge_issue_note "$IID" "⚠️ Triage disposition was not parsable — the issue could not be routed automatically. Human intervention needed."; then
+            echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
+            exit 1
+          fi
           set_boucle_label "$IID" "boucle:human" "boucle::status::human"
           ;;
       esac
@@ -2036,14 +2058,18 @@ worker:
             fi
             echo "Re-triggering worker (iteration $((ITERATION+1))/$MAX_ITER) — the next run preserves prior worker commits and re-bases again." >&2
             set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-              -f body="🔄 Rebase conflict on the preserved worker branch. Re-running the worker (iteration $((ITERATION+1))/$MAX_ITER) — prior commits are kept." > /dev/null
+            forge_issue_note "$BOUCLE_ISSUE" "🔄 Rebase conflict on the preserved worker branch. Re-running the worker (iteration $((ITERATION+1))/$MAX_ITER) — prior commits are kept." > /dev/null 2>&1 || true
             chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=$((ITERATION+1))
           else
             echo "Escalating to human (boucle:human) — iteration cap ($MAX_ITER) reached after repeated rebase conflicts." >&2
+            # Note BEFORE the terminal label — never a muted boucle:human.
+            # Observed 2026-08 on a consumer: label flipped at 14:55:50, the
+            # note POST swallowed silently; the human saw a state, no message.
+            if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker could not rebase onto $CI_DEFAULT_BRANCH (conflict) after $MAX_ITER attempts. Master keeps advancing. Human intervention needed."; then
+              echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+              exit 1
+            fi
             set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-              -f body="⚠️ Worker could not rebase onto $CI_DEFAULT_BRANCH (conflict) after $MAX_ITER attempts. Master keeps advancing. Human intervention needed." > /dev/null
           fi
           exit 1
         fi
@@ -2266,8 +2292,11 @@ worker:
           "" \
           "---" \
           "*Diagnostic posté par boucle (exit 4 — model/API failure).*")
-        glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-          -f body="$DIAGNOSTIC_BODY" > /dev/null 2>&1 || true
+        # Note BEFORE the terminal label — never a muted boucle:human.
+        if ! forge_issue_note "$BOUCLE_ISSUE" "$DIAGNOSTIC_BODY"; then
+          echo "FAIL: diagnostic note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+          exit 1
+        fi
         set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
         echo "FAIL: worker model/API failure (exit 4) — diagnostic posted on issue #$BOUCLE_ISSUE, escalated to human." >&2
         exit 1
@@ -2335,17 +2364,19 @@ worker:
         if [ "$ITERATION" -lt "$MAX_ITER" ]; then
           echo "WARN: worker produced no changes (agent exhausted step budget?) — re-triggering (iteration $((ITERATION+1))/$MAX_ITER)." >&2
           set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-            -f body="🔄 Worker produced no code changes on iteration $ITERATION (agent likely exhausted its step budget). Re-running (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null
+          forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker produced no code changes on iteration $ITERATION (agent likely exhausted its step budget). Re-running (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null 2>&1 || true
           curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
             -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=$CI_DEFAULT_BRANCH" \
             -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=worker" \
             -F "variables[BOUCLE_ITERATION]=$((ITERATION+1))" > /dev/null
         else
           echo "Escalating to human (boucle:human) — worker produced no changes after $MAX_ITER attempts." >&2
+          # Note BEFORE the terminal label — never a muted boucle:human.
+          if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker produced no code changes after $MAX_ITER attempts. The agent may be unable to implement this issue within its step budget. Human intervention needed."; then
+            echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+            exit 1
+          fi
           set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-            -f body="⚠️ Worker produced no code changes after $MAX_ITER attempts. The agent may be unable to implement this issue within its step budget. Human intervention needed." > /dev/null
         fi
         exit 1
       fi
@@ -2376,14 +2407,16 @@ worker:
           fi
           echo "Re-triggering worker (iteration $((ITERATION+1))/$MAX_ITER) — the next run preserves prior worker commits and re-bases again." >&2
           set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-            -f body="🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh $CI_DEFAULT_BRANCH (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null
+          forge_issue_note "$BOUCLE_ISSUE" "🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh $CI_DEFAULT_BRANCH (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null 2>&1 || true
           chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=$((ITERATION+1))
         else
           echo "Escalating to human (boucle:human) — iteration cap ($MAX_ITER) reached after repeated rebase conflicts." >&2
+          # Note BEFORE the terminal label — never a muted boucle:human.
+          if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker could not rebase onto $CI_DEFAULT_BRANCH (conflict) after $MAX_ITER attempts. Master keeps advancing. Human intervention needed."; then
+            echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+            exit 1
+          fi
           set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-            -f body="⚠️ Worker could not rebase onto $CI_DEFAULT_BRANCH (conflict) after $MAX_ITER attempts. Master keeps advancing. Human intervention needed." > /dev/null
         fi
         exit 1
       fi
@@ -2400,14 +2433,16 @@ worker:
         if [ "$ITERATION" -lt "$MAX_ITER" ]; then
           echo "WARN: rebase dropped all worker commits (changes already in $CI_DEFAULT_BRANCH) — re-triggering worker (iteration $((ITERATION+1))/$MAX_ITER)." >&2
           set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-            -f body="🔄 Worker commits were dropped during rebase (changes already in $CI_DEFAULT_BRANCH). Re-running the worker (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null
+          forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker commits were dropped during rebase (changes already in $CI_DEFAULT_BRANCH). Re-running the worker (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null 2>&1 || true
           chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=$((ITERATION+1))
         else
           echo "Escalating to human (boucle:human) — worker commits dropped by rebase after $MAX_ITER attempts." >&2
+          # Note BEFORE the terminal label — never a muted boucle:human.
+          if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker commits were dropped during rebase (changes already in $CI_DEFAULT_BRANCH) after $MAX_ITER attempts. Human intervention needed."; then
+            echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+            exit 1
+          fi
           set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-            -f body="⚠️ Worker commits were dropped during rebase (changes already in $CI_DEFAULT_BRANCH) after $MAX_ITER attempts. Human intervention needed." > /dev/null
         fi
         exit 1
       fi
@@ -2727,7 +2762,7 @@ reviewer:
               set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
               glab api --hostname $BOUCLE_FORGE_HOST -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" -f state_event=close > /dev/null 2>&1 || true
               glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-                -f body="✅ Reviewer: no open MR found, but a closed MR exists for this issue. Marked boucle:done and closed." > /dev/null
+                -f body="✅ Reviewer: no open MR found, but a closed MR exists for this issue. Marked boucle:done and closed." > /dev/null 2>&1 || true
               ;;
             *)
               echo "boucle: closed MR for issue #$BOUCLE_ISSUE is stale (not merged, issue queued for work) — leaving the issue open"
@@ -2738,9 +2773,12 @@ reviewer:
           esac
         else
           echo "boucle: no MR at all for issue #$BOUCLE_ISSUE — escalating to boucle:human"
+          # Note BEFORE the terminal label — never a muted boucle:human.
+          if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Reviewer: no MR found for branch boucle/$BOUCLE_ISSUE (no opened, closed, or merged MR). Escalated to **boucle:human**."; then
+            echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+            exit 1
+          fi
           set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-            -f body="⚠️ Reviewer: no MR found for branch boucle/$BOUCLE_ISSUE (no opened, closed, or merged MR). Escalated to **boucle:human**." > /dev/null
         fi
         exit 1
       fi
@@ -2779,14 +2817,16 @@ reviewer:
         MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
         echo "FAIL: worker shipped zero commits (MR !${MR_IID} empty — base_sha == head_sha). Re-triggering worker (iteration $((ITERATION+1))/$MAX_ITER)." >&2
         set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-        glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-          -f body="🔄 Worker shipped zero commits (MR !${MR_IID} has empty diff). Re-running the worker (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null
+        forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker shipped zero commits (MR !${MR_IID} has empty diff). Re-running the worker (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null 2>&1 || true
         if [ "$ITERATION" -lt "$MAX_ITER" ]; then
           chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=$((ITERATION+1))
         else
+          # Note BEFORE the terminal label — never a muted boucle:human.
+          if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker shipped zero commits after $MAX_ITER attempts. Human intervention needed."; then
+            echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+            exit 1
+          fi
           set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-            -f body="⚠️ Worker shipped zero commits after $MAX_ITER attempts. Human intervention needed." > /dev/null
         fi
         exit 1
       fi
@@ -3072,6 +3112,12 @@ reviewer:
           else
             # Final reviewer FAIL after $MAX_ITER attempts: fused into boucle:human
             # (was boucle:blocked, deleted). Configurable via BOUCLE_MAX_ITERATIONS.
+            # Note BEFORE the terminal label — never a muted boucle:human.
+            ESCALATION_MSG=$(printf '⚠️ Reviewer verdict: **FAIL** after %s iterations. The loop could not satisfy the acceptance criteria automatically.\n\nThe MR has been assigned to you for manual review. Inspect [MR !%s](%s) and the reviewer verdicts, then either:\n- **Approve** the MR if the work is acceptable (the merger will rebase + merge), or\n- **Comment** with guidance and re-assign to the bot to re-trigger the worker.' "$MAX_ITER" "$MR_IID" "$MR_URL")
+            if ! forge_issue_note "$BOUCLE_ISSUE" "$ESCALATION_MSG"; then
+              echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+              exit 1
+            fi
             set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
             # Assign the MR to the issue author so they're notified that human
             # intervention is required. Without this, the user never gets a
@@ -3079,9 +3125,6 @@ reviewer:
             # a consumer repo: MR stayed assigned to the bot after 3
             # reviewer FAILs, the user saw no notification).
             assign_mr_to_author
-            ESCALATION_MSG=$(printf '⚠️ Reviewer verdict: **FAIL** after %s iterations. The loop could not satisfy the acceptance criteria automatically.\n\nThe MR has been assigned to you for manual review. Inspect [MR !%s](%s) and the reviewer verdicts, then either:\n- **Approve** the MR if the work is acceptable (the merger will rebase + merge), or\n- **Comment** with guidance and re-assign to the bot to re-trigger the worker.' "$MAX_ITER" "$MR_IID" "$MR_URL")
-            glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-              -f body="$ESCALATION_MSG" > /dev/null
           fi
           ;;
         UNCERTAIN)
@@ -3096,12 +3139,15 @@ reviewer:
           # boucle:human BEFORE the re-triggered reviewer could finish —
           # creating the appearance of "assigned mid-review" and 3 duplicate
           # "unparsable" notes. See AGENTS.md lesson #43.
+          # Note BEFORE the terminal label — never a muted boucle:human.
+          if ! forge_issue_note "$BOUCLE_ISSUE" "Verdict unparsable or uncertain. Human review needed. The MR has been assigned to you."; then
+            echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+            exit 1
+          fi
           set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
           # Assign the MR to the issue author on escalation (same rationale as
           # the FAIL-after-max branch above).
           assign_mr_to_author
-          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-            -f body="Verdict unparsable or uncertain. Human review needed. The MR has been assigned to you." > /dev/null
           ;;
       esac
 
@@ -3123,10 +3169,13 @@ reviewer:
           chain_to_role "$BOUCLE_ISSUE" "reviewer" BOUCLE_ITERATION=$((ITERATION+1))
         else
           echo "Max iterations reached — escalating to human."
+          # Note BEFORE the terminal label — never a muted boucle:human.
+          if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Reviewer agent failed to post a verdict after $MAX_ITER attempts. Human review needed. The MR has been assigned to you."; then
+            echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+            exit 1
+          fi
           set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
           assign_mr_to_author
-          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-            -f body="⚠️ Reviewer agent failed to post a verdict after $MAX_ITER attempts. Human review needed. The MR has been assigned to you." > /dev/null
         fi
         exit 1
       fi
@@ -3258,9 +3307,12 @@ merger:
 
       if [ -z "$MR_IID" ]; then
         echo "FAIL: no open MR found for issue #$BOUCLE_ISSUE (branch boucle/$BOUCLE_ISSUE)" >&2
+        # Note BEFORE the terminal label — never a muted boucle:human.
+        if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Merger could not find an open MR for branch boucle/$BOUCLE_ISSUE. Human intervention needed."; then
+          echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+          exit 1
+        fi
         set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-        glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-          -f body="⚠️ Merger could not find an open MR for branch boucle/$BOUCLE_ISSUE. Human intervention needed." > /dev/null
         exit 1
       fi
 
@@ -3361,9 +3413,12 @@ merger:
         exit 1
       elif [ "$MERGE_STATUS" != "mergeable" ]; then
         echo "FAIL: MR !${MR_IID} not mergeable after rebase (status: $MERGE_STATUS)" >&2
+        # Note BEFORE the terminal label — never a muted boucle:human.
+        if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ MR !${MR_IID} is not mergeable after rebase (status: $MERGE_STATUS). Human intervention needed."; then
+          echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+          exit 1
+        fi
         set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-        glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-          -f body="⚠️ MR !${MR_IID} is not mergeable after rebase (status: $MERGE_STATUS). Human intervention needed." > /dev/null
         exit 1
       fi
 
@@ -3392,6 +3447,11 @@ merger:
 
       if [ -z "$MERGE_SHA" ]; then
         echo "FAIL: merge API call failed: $MERGE_RESULT" >&2
+        # Note BEFORE the terminal label — never a muted boucle:human.
+        if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Merger: the merge API call failed for MR !${MR_IID}. Human intervention needed."; then
+          echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+          exit 1
+        fi
         set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
         exit 1
       fi
@@ -3855,14 +3915,12 @@ catchup:
         approval)
           # Happy path: the issue was waiting for approval and the human
           # merged directly. Trust the judgment → mark done.
-          set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
           TARGET="done"
           ;;
         triage|needs-info|spec-review|todo|working|review|merging)
           # Merged before the loop finished its review. Honest signal: the
           # bot did not validate completion → mark human. Still close +
           # cascade so the issue doesn't stay stuck.
-          set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
           TARGET="human"
           ;;
         done|human|split|blocked)
@@ -3896,8 +3954,21 @@ catchup:
       # The MR IID isn't passed as a variable (dispatch only forwards
       # BOUCLE_ISSUE + BOUCLE_ROLE); reference the issue + branch instead.
       AUDIT_BODY="<!-- boucle:catchup v=1 iid=$BOUCLE_ISSUE state=$CURRENT_BOUCLE target=$TARGET -->"$'\n'"🤖 Rattrapage automatique — la MR sur la branche \`boucle/$BOUCLE_ISSUE\` a été fusionnée directement sans passer par le circuit d'approbation."$'\n\n'"État de l'issue au moment de la fusion : \`boucle:$CURRENT_BOUCLE\`."$'\n'"Issue marquée \`boucle:$TARGET\` et fermée."
-      glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-        -f body="$AUDIT_BODY" > /dev/null 2>&1 || true
+      # The audit note is the only explanation for the transition — if it cannot
+      # be posted, do NOT proceed: a transition with no note is a mute state
+      # change. Abort BEFORE the label + close, keeping the issue in its
+      # prior state so the loop can retry.
+      if ! forge_issue_note "$BOUCLE_ISSUE" "$AUDIT_BODY"; then
+        echo "FAIL: catchup audit note could not be posted on issue #$BOUCLE_ISSUE — aborting the transition (no mute state change)." >&2
+        exit 1
+      fi
+
+      # Apply the terminal state ONLY after the audit note is confirmed posted.
+      if [ "$TARGET" = "done" ]; then
+        set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
+      else
+        set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
+      fi
 
       # Close the issue (boucle:done is a board label, not a GitLab close state).
       close_issue "$BOUCLE_ISSUE"
@@ -4296,10 +4367,10 @@ e2e:
           # NOT a catch-all for empty VERDICT — see reviewer job + AGENTS.md
           # lesson #43. Empty VERDICT is handled by the post-case assertion
           # below (re-trigger e2e or escalate to human).
-          set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
           # Post a human-facing explanation so the human knows why the issue
           # landed at boucle:human. Without this, the human sees only the label
-          # change with no context.
+          # change with no context. Note BEFORE the terminal label — never a
+          # muted boucle:human.
           E2E_TRACE=$(printf '%s' "${COMMENT:-}" | head -c 4000)
           E2E_ESCALATION_BODY="<!-- boucle:e2e-escalation v=1 iid=$BOUCLE_ISSUE verdict=uncertain -->
       E2E verification could not reach a confident verdict. Human review needed.
@@ -4311,8 +4382,11 @@ e2e:
       \`\`\`
       ${E2E_TRACE:-no verdict comment was posted by the agent}
       \`\`\`"
-          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-            -f body="$E2E_ESCALATION_BODY" > /dev/null 2>&1 || true
+          if ! forge_issue_note "$BOUCLE_ISSUE" "$E2E_ESCALATION_BODY"; then
+            echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+            exit 1
+          fi
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
           ;;
       esac
 
@@ -4334,7 +4408,7 @@ e2e:
             -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=e2e" \
             -F "variables[BOUCLE_ITERATION]=$((ITERATION+1))" > /dev/null
         else
-          set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
+          # Note BEFORE the terminal label — never a muted boucle:human.
           E2E_ESCALATION_BODY="<!-- boucle:e2e-escalation v=1 iid=$BOUCLE_ISSUE verdict=empty -->
       E2E agent did not post a parsable verdict after $MAX_ITER attempts. Human review needed.
 
@@ -4347,8 +4421,11 @@ e2e:
       \`\`\`
       ${E2E_LOG_TAIL:-no agent log was captured}
       \`\`\`"
-          glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
-            -f body="$E2E_ESCALATION_BODY" > /dev/null 2>&1 || true
+          if ! forge_issue_note "$BOUCLE_ISSUE" "$E2E_ESCALATION_BODY"; then
+            echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+            exit 1
+          fi
+          set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
         fi
         echo "FAIL: e2e verdict not parsable" >&2; exit 1
       fi

@@ -135,14 +135,12 @@ boucle_ci_catchup() {
     approval)
       # Happy path: the issue was waiting for approval and the human
       # merged directly. Trust the judgment → mark done.
-      set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
       TARGET="done"
       ;;
     triage | needs-info | spec-review | todo | working | review | merging)
       # Merged before the loop finished its review. Honest signal: the
       # bot did not validate completion → mark human. Still close +
       # cascade so the issue doesn't stay stuck.
-      set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
       TARGET="human"
       ;;
     done | human | split | blocked)
@@ -180,7 +178,21 @@ boucle_ci_catchup() {
   # The MR IID isn't passed as a variable (dispatch only forwards
   # BOUCLE_ISSUE + BOUCLE_ROLE); reference the issue + branch instead.
   AUDIT_BODY="<!-- boucle:catchup v=1 iid=$BOUCLE_ISSUE state=$CURRENT_BOUCLE target=$TARGET -->"$'\n'"🤖 Rattrapage automatique — la MR sur la branche \`boucle/$BOUCLE_ISSUE\` a été fusionnée directement sans passer par le circuit d'approbation."$'\n\n'"État de l'issue au moment de la fusion : \`boucle:$CURRENT_BOUCLE\`."$'\n'"Issue marquée \`boucle:$TARGET\` et fermée."
-  forge_issue_note "$BOUCLE_ISSUE" "$AUDIT_BODY"
+  # The audit note is the only explanation for the transition — if it cannot
+  # be posted, do NOT proceed: a boucle:human/done transition with no note is
+  # a mute state change. Abort BEFORE the label + close, keeping the issue
+  # in its prior state so the loop can retry.
+  if ! forge_issue_note "$BOUCLE_ISSUE" "$AUDIT_BODY"; then
+    echo "FAIL: catchup audit note could not be posted on issue #$BOUCLE_ISSUE — aborting the transition (no mute state change)." >&2
+    exit 1
+  fi
+
+  # Apply the terminal state ONLY after the audit note is confirmed posted.
+  if [ "$TARGET" = "done" ]; then
+    set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
+  else
+    set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
+  fi
 
   # Close the issue (boucle:done is a board label, not a close state).
   close_issue "$BOUCLE_ISSUE"
