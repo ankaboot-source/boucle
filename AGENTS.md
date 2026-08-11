@@ -1289,6 +1289,43 @@ atomic.
       grading human amendments; neither covers treating a recovery
       artifact as a completion signal.
 
+58. **Never draft verdicts in fixed shared temp paths**
+    - ❌ DO NOT let agents draft their verdict/triage comment to a
+      fixed path like `/tmp/verdict.md`. Shell executors are shared
+      between jobs AND issues: a leftover file from a previous job
+      survives, and the next agent that posts
+      `forge-note --message-file /tmp/verdict.md` ships the PREVIOUS
+      job's verdict as its own. Observed on a consumer MR: the
+      reviewer's own draft write (`cat > /tmp/verdict.md`) was blocked
+      by the runtime guard (command substitution), the file still held
+      a keffiyeh PASS from another issue (anchored to an orphaned SHA),
+      and the reviewer posted that foreign verdict TWICE before
+      noticing and re-posting its real one. The SHA-anchor guard
+      (lesson #27) stopped the loop from acting on the phantom PASSes,
+      but the MR shows three "PASS" verdicts to the human, two of them
+      for content that was never reviewed.
+    - ❌ DO NOT rely on the agent checking a file's content before
+      posting it — the incident shows a stale file posted without being
+      read, twice.
+    - ✅ DO: `bin/jc` exports `BOUCLE_VERDICT_FILE` — a per-job unique
+      path (`mktemp`, with a job/issue-scoped fallback) — and the
+      reviewer/e2e/triage prompts (`.jcode/agents/*.md` + the
+      `build_prompt` reminder) instruct agents to write drafts there
+      with their Write tool (bash redirection to a variable target is
+      blocked by the runtime guard) and to read the file back
+      immediately before posting. Posting directly with
+      `--message`/`--message-stdin` is preferred over any file.
+    - ✅ DO: any agent whose file post fails, or who finds a missing or
+      foreign file, MUST re-post directly with `--message` — an
+      incomplete own verdict beats a foreign verdict (post-early rule,
+      lesson #1).
+    - Admission: class — fixed shared temp paths for agent drafts on
+      shared executors; recurrence — agents pick `/tmp/<name>.md`
+      paths routinely and each new prompt could reintroduce the habit
+      without the doc; stable — no line numbers, no transient values;
+      distinct — lesson #27 handles stale verdict SHA parsing, this
+      lesson prevents the foreign-content post at the source.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.

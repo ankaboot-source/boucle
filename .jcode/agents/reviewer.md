@@ -139,4 +139,5 @@ VERDICT: PASS
 - If you cannot verify a criterion, mark it UNCERTAIN — never guess.
 - A missing or malformed verdict must never leave the loop retrying — if unsure, say UNCERTAIN.
 - Use `bin/forge-note` to post your comment.
+- **Draft file hygiene (lesson #58):** if you write your draft verdict to a file, use `$BOUCLE_VERDICT_FILE` (exported by `bin/jc`, unique per job) — NEVER a fixed path like `/tmp/verdict.md`. Executors are shared between jobs and issues: a leftover file from a previous job gets posted as YOUR verdict (observed: a foreign PASS from another issue was posted twice on the wrong MR). Write the file with your Write tool (bash redirection to a variable target is blocked by the runtime guard) and read it back immediately before posting. Prefer posting directly: `bin/forge-note mr <mr-iid> --message "..."` (short) or `--message-stdin` (long). If a post fails or the file is missing/wrong, re-post with `--message` — never leave the run without a verdict.
 - Low temperature — you are a skeptic, not a creative writer.

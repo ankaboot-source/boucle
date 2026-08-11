@@ -231,6 +231,21 @@ CI_PROJECT_DIR="$BOUCLE_WORKSPACE" # backward-compat alias for existing refs
 STATE_DIR="$BOUCLE_WORKSPACE/.boucle/$ISSUE"
 STATE_FILE="$STATE_DIR/state.md"
 ITERATIONS_FILE="$STATE_DIR/iterations.md"
+
+# Verdict draft file — per-job UNIQUE (AGENTS.md lesson #58). Agents MUST
+# NOT draft to a fixed path like /tmp/verdict.md: shell executors are
+# shared between jobs AND issues, so a leftover draft from a previous job
+# survives and gets posted as the next agent's verdict (observed on a
+# consumer MR: a foreign keffiyeh PASS was posted twice on the wrong MR).
+# mktemp guarantees uniqueness; fall back to a job/issue-scoped path.
+if command -v mktemp >/dev/null 2>&1; then
+  BOUCLE_VERDICT_FILE="$(mktemp "${TMPDIR:-/tmp}/boucle-verdict.XXXXXX.md" 2>/dev/null || true)"
+fi
+if [ -z "${BOUCLE_VERDICT_FILE:-}" ]; then
+  BOUCLE_VERDICT_FILE="${STATE_DIR}/verdict-${CI_JOB_ID:-local}.md"
+  mkdir -p "$(dirname "$BOUCLE_VERDICT_FILE")"
+fi
+export BOUCLE_VERDICT_FILE
 # jcode has no SQLite DB (run mode is ephemeral), so no DB isolation needed.
 
 # ── Generate jcode config from env vars (no runner-host config file) ──
@@ -901,6 +916,15 @@ ${BOUCLE_IMAGE_DESCRIPTIONS}
       exit 1
       ;;
   esac
+
+  # Verdict draft hygiene (AGENTS.md lesson #58): a fixed /tmp path on a
+  # shared executor serves a PREVIOUS job's leftover draft, which the
+  # agent posts as its own verdict. Remind the verdict roles of the
+  # per-job unique path exported above and of the direct-post fallback.
+  if [ "$role" = "reviewer" ] || [ "$role" = "e2e" ]; then
+    prompt="${prompt}
+Draft file hygiene: if you write your draft verdict to a file, use \`\$BOUCLE_VERDICT_FILE\` (exported by bin/jc — unique per job). NEVER use a fixed path like /tmp/verdict.md: executors are shared and a leftover file from a previous job gets posted as YOUR verdict. Write the file with your Write tool (bash redirection to a variable target is blocked by the runtime guard) and read it back immediately before posting. Prefer posting directly: bin/forge-note with --message (short) or --message-stdin (long). If a post fails or the file is missing/wrong, re-post with --message — never leave the run without a verdict."
+  fi
 
   echo "$prompt"
 
