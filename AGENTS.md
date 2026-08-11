@@ -1007,17 +1007,26 @@ atomic.
       comments contain images — 3x cost for roles that never touch images.
     - ❌ DO NOT run all agents on a text-only model and accept that they
       crash (jcode #755) or fabricate image content when images are present.
-    - ✅ DO: detect image attachments via `bin/detect-vision-need <role>`
+    - ❌ DO NOT swap the worker's entire model to a vision model
+      (minimax-m3) when images are present — the vision model is worse at
+      code and prone to WASM OOM crashes (`RangeError:
+      WebAssembly.instantiate(): Out of memory`). The worker needs image
+      CONTEXT, not vision capability during code generation.
+    - ✅ DO: describe image attachments via `bin/describe-images <role>`
       (called after `fetch-issue-attachments`/`fetch-mr-attachments`, before
-      `bin/jc <role>`). When images are found, it emits
-      `export BOUCLE_MODEL_<ROLE>=<vision_model>` to stdout; the caller
-      `eval`s it so `bin/jc`'s existing per-role override (line 144-149)
-      routes to a vision-capable model for that run only. Forge controls:
-      `BOUCLE_VISION_ROUTING` (enabled/disabled), `BOUCLE_VISION_MODEL`
-      (default minimax-m3), `BOUCLE_VISION_ROLES` (default
-      triage,worker,reviewer). This is a workaround for jcode issues #683
-      (per-role model) and #819 (capability-based routing) — remove when
-      jcode implements native capability-based routing.
+      `bin/jc <role>`). It runs the vision model (minimax-m3) SEPARATELY to
+      describe each image as text, writes the descriptions to
+      `.boucle-state/$ISSUE/.image-descriptions.md`, and `bin/jc` injects
+      them into the agent prompt as text. The worker/reviewer/triage stay on
+      their default models (deepseek-v4-flash, glm-5.2) and get image context
+      as text, not as raw binaries. Forge controls: `BOUCLE_VISION_ROUTING`
+      (enabled/disabled), `BOUCLE_VISION_MODEL` (default minimax-m3),
+      `BOUCLE_VISION_ROLES` (default triage,worker,reviewer),
+      `BOUCLE_VISION_TIMEOUT` (per-image, default 120s). This is a workaround
+      for jcode issues #683 (per-role model) and #819 (capability-based
+      routing) — remove when jcode implements native capability-based
+      routing. The old `bin/detect-vision-need` (which swapped the entire
+      model) has been removed.
 
 49. **Sub-issue dependencies must be gated, not hinted**
     - ❌ DO NOT trigger a sub-issue's worker in parallel with its siblings
