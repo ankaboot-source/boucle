@@ -800,7 +800,6 @@ ${BOUCLE_SIBLINGS}
       # trimming a already-reduced note keeps the per-note cap meaningful.
       # Human comments pass through both stages untouched.
       local feedback
-      local feedback
       feedback="$(filter_mr_discussion "${BOUCLE_REVIEWER_FEEDBACK:-}")"
       feedback="$(trim_notes reviewer_feedback "$feedback")"
       # Fail-loud guard for the MR feedback channel (AGENTS.md lesson #54):
@@ -815,7 +814,8 @@ ${BOUCLE_SIBLINGS}
       if [ -z "${BOUCLE_REVIEWER_FEEDBACK:-}" ] && [ "${BOUCLE_ITERATION:-1}" -gt 1 ]; then
         echo "[boucle:jc] WARNING: reviewer re-run (iteration ${BOUCLE_ITERATION}) with EMPTY MR feedback — the feedback channel may be broken. The reviewer will be told to fetch the MR discussion itself." >&2
         feedback="[boucle:guard] No MR feedback was injected on this re-run, but prior runs exist (iteration ${BOUCLE_ITERATION}). Do NOT assume there is no feedback: fetch the MR notes for source branch boucle/${ISSUE} yourself (glab mr note list -R \${CI_PROJECT_PATH} -n 100 or bin/forge-note) and verify EVERY human amendment is addressed before PASS."
-      fi      prompt="Review the MR for issue #${ISSUE}. Test the deployed preview at \$BOUCLE_PREVIEW_URL. Post your verdict with the boucle:verdict marker.
+      fi
+      prompt="Review the MR for issue #${ISSUE}. Test the deployed preview at \$BOUCLE_PREVIEW_URL. Post your verdict with the boucle:verdict marker.
 
 Verify content fidelity: the issue body below is the original spec. Check that the MR preserves the instructed content (URLs, citations, texts) verbatim — no placeholders, no rewrites, no substitutions. A MR that degrades instructed content is a FAIL even if it satisfies the latest amendments.
 "
