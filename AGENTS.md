@@ -1175,6 +1175,39 @@ atomic.
       the design) — this lesson covers regression-by-port and the fail-loud
       guard.
 
+55. **Recognise boucle's own writes by a stamp, never by the actor's
+    identity**
+    - ❌ DO NOT post a comment with a direct API call. Every posting path
+      MUST go through the forge note helpers (`forge_issue_note`,
+      `forge_mr_note`, and their `_update` variants), which stamp the
+      invisible `<!-- boucle:agent -->` marker. A comment posted around
+      them carries no marker, so dispatch cannot tell it from a human
+      reply: on a paused state it routes, and the loop re-triggers itself.
+    - ❌ DO NOT add a new anti-loop guard that asks "who did this?". The
+      actor only discriminates while boucle owns a separate account. It
+      discriminates nothing when one account owns both the issues and the
+      loop, and pointing the guard at that account makes it discard the
+      human's own triggers — the loop then goes silent with no error
+      anywhere, which is worse than a crash.
+    - ❌ DO NOT rely on ordering alone ("post the comment before changing
+      the label") to keep a comment from routing. Forges do not guarantee
+      webhook delivery order, so the label webhook can overtake the note
+      and the note lands on the new, possibly paused, state.
+    - ✅ DO: ask "did we write this?" instead of "who wrote this?". Testing
+      for a fixed, invisible token is stable, forge-agnostic, and immune to
+      both delivery reordering and single-account setups.
+    - ✅ DO: keep the guard identical in every copy of the routing while
+      the CI paths remain unconverged. A guard that lands in one copy and
+      not the other breaks that path silently.
+    - Admission: class — it covers any self-recognition guard in an
+      event-driven loop, not one incident; recurrence — new comment paths
+      and new guards are added routinely, and the natural instinct is to
+      filter on the author, so an agent would repeat this without the doc;
+      stable — no line numbers, no transient values, true regardless of
+      which forge or mode is active; distinct — no existing lesson covers
+      anti-loop self-recognition (the nearest, #54, is about a feedback
+      channel dropped by a port).
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.

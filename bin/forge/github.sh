@@ -41,6 +41,7 @@ forge_issue_get() {
 
 forge_issue_note() {
   local iid="$1" message="$2"
+  message=$(stamp_agent_marker "$message")
   _gh_api_silent -X POST "/repos/$BOUCLE_PROJECT_ID/issues/$iid/comments" \
     -f body="$message"
 }
@@ -214,12 +215,14 @@ forge_issue_note_get() {
 
 forge_issue_note_update() {
   local iid="$1" note_id="$2" new_body="$3"
+  new_body=$(stamp_agent_marker "$new_body")
   _gh_api_silent -X PATCH "/repos/$BOUCLE_PROJECT_ID/issues/comments/$note_id" \
     -f body="$new_body"
 }
 
 forge_mr_note_update() {
   local mr_iid="$1" note_id="$2" new_body="$3"
+  new_body=$(stamp_agent_marker "$new_body")
   # GitHub PR issue-style comments use the same endpoint as issue comments
   _gh_api_silent -X PATCH "/repos/$BOUCLE_PROJECT_ID/issues/comments/$note_id" \
     -f body="$new_body"
@@ -315,6 +318,7 @@ forge_mr_get() {
 
 forge_mr_note() {
   local mr_iid="$1" message="$2"
+  message=$(stamp_agent_marker "$message")
   # PR comments use the same issues/{n}/comments endpoint
   _gh_api_silent -X POST "/repos/$BOUCLE_PROJECT_ID/issues/$mr_iid/comments" \
     -f body="$message"
@@ -549,6 +553,12 @@ forge_pipeline_status_for_ref() {
 forge_resolve_user_id() {
   local username="$1"
   _gh_api "/users/$username" | jq -r '.id // empty' || true
+}
+
+forge_current_user_login() {
+  # No --paginate: /user is a single object, and gh api --paginate on a
+  # non-array response is a no-op but adds a round trip.
+  GH_TOKEN="$BOUCLE_TOKEN" gh api /user 2> /dev/null | jq -r '.login // empty' 2> /dev/null || true
 }
 
 # ── Webhook payload parsing ──────────────────────────────────────────────
