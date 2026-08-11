@@ -24,8 +24,7 @@ boucle_ci_doctor() {
   # "thumbsup" can appear here.
   # Must mirror the dispatch job's constant — each CI job runs its own shell.
   BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup"
-source "$BOUCLE_HOME/bin/lib/depends-on.sh" 2> /dev/null || true
-
+  source "$BOUCLE_HOME/bin/lib/depends-on.sh" 2> /dev/null || true
 
   # ── Adaptive cadence (#38) ─────────────────────────────────────────────
   # The doctor runs on a fixed schedule and always performs the full sweep.
@@ -266,10 +265,11 @@ source "$BOUCLE_HOME/bin/lib/depends-on.sh" 2> /dev/null || true
       DEP_IIDS=$(parse_depends_on "$(forge_issue_get "$IID" | jq -r '.description // ""' 2> /dev/null)" 2> /dev/null)
       if [ -n "$DEP_IIDS" ]; then
         OPEN_DEPS=""
-        for D in ${DEP_IIDS//,/ }; do
+        while IFS= read -r D; do
+          [ -z "$D" ] && continue
           DSTATE=$(forge_issue_get "$D" 2> /dev/null | jq -r '.state // "unknown"' 2> /dev/null)
           [ "$DSTATE" = "opened" ] && OPEN_DEPS="${OPEN_DEPS:+$OPEN_DEPS,}$D"
-        done
+        done <<< "$(printf '%s' "$DEP_IIDS" | tr ',' '\n')"
         if [ -n "$OPEN_DEPS" ]; then
           echo "  → #$IID: dependency on open #$OPEN_DEPS — parking at boucle:blocked (no worker trigger)"
           set_boucle_label "$IID" "boucle:blocked" "boucle::status::bot"
