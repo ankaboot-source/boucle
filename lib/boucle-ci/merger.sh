@@ -17,8 +17,12 @@ boucle_ci_merger() {
 
   if [ -z "$MR_IID" ]; then
     echo "FAIL: no open MR found for issue #$BOUCLE_ISSUE (branch boucle/$BOUCLE_ISSUE)" >&2
+    # Note BEFORE the terminal label — never a muted boucle:human.
+    if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Merger could not find an open MR for branch boucle/$BOUCLE_ISSUE. Human intervention needed.$(job_link)"; then
+      echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+      exit 1
+    fi
     set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-    forge_issue_note "$BOUCLE_ISSUE" "⚠️ Merger could not find an open MR for branch boucle/$BOUCLE_ISSUE. Human intervention needed.$(job_link)"
     exit 1
   fi
 
@@ -92,8 +96,14 @@ boucle_ci_merger() {
     MWPS=true
   elif [ "$MERGE_STATUS" != "mergeable" ]; then
     echo "FAIL: MR !${MR_IID} not mergeable after rebase (status: $MERGE_STATUS)" >&2
+    # Note BEFORE the terminal label — never a muted boucle:human.
+    if ! forge_issue_note "$BOUCLE_ISSUE" "$(boucle_escalation_diagnostic "$BOUCLE_ISSUE" "not-mergeable")$(job_link)"; then
+      echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+      boucle_health_outcome "$BOUCLE_ISSUE" "merger" "not-mergeable" "MR !${MR_IID} status $MERGE_STATUS (note FAILED)" || true
+      exit 1
+    fi
+    boucle_health_outcome "$BOUCLE_ISSUE" "merger" "not-mergeable" "MR !${MR_IID} status $MERGE_STATUS" || true
     set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-    forge_issue_note "$BOUCLE_ISSUE" "⚠️ MR !${MR_IID} is not mergeable after rebase (status: $MERGE_STATUS). Human intervention needed.$(job_link)"
     exit 1
   fi
 
@@ -116,6 +126,11 @@ boucle_ci_merger() {
 
   if [ -z "$MERGE_SHA" ]; then
     echo "FAIL: merge API call failed" >&2
+    # Note BEFORE the terminal label — never a muted boucle:human.
+    if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Merger: the merge API call failed for MR !${MR_IID}. Human intervention needed.$(job_link)"; then
+      echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+      exit 1
+    fi
     set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
     exit 1
   fi

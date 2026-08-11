@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# shellcheck shell=bash
+# bin/health — read-only per-issue loop-health summary (#52).
+#
+# Reads .boucle/<issue>/health.jsonl (one JSONL line per agent run + one per
+# stage outcome) and .boucle/<issue>/cost.json, and prints a text table:
+# iterations, outcomes by role, cost total, last verdict, failure class if
+# escalated. Purely read-only — never writes, always exits 0.
+#
+# Usage:
+#   bin/health            — summarize every issue that has a health.jsonl
+#   bin/health <issue>    — summarize one issue
+#
+# Model it on bin/doctor --audit: read-only, forge-independent, exit 0.
+
+set -uo pipefail
+
+BOUCLE_WORKSPACE="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-$(pwd)}}"
+STATE_ROOT="$BOUCLE_WORKSPACE/.boucle"
+
+# resolve_issue <arg> — the argument is either a bare IID or already a path.
+# Returns the state dir for an issue. Empty when no health record exists.
+resolve_state_dir() {
+  local arg="$1"
+  local dir
+  if [[ "$arg" =~ ^[0-9]+$ ]]; then
+    dir="$STATE_ROOT/$arg"
+  else
+    dir="${arg%/}"
+  fi
+  if [ -f "$dir/health.jsonl" ] || [ -f "$dir/cost.json" ]; then
+    printf '%s\n' "$dir"
+  fi
+}
+
+# count_field <dir> <json-field> <json-value> — count JSONL lines where the
+# field equals the value. health.jsonl is one object per line, so a plain
+# grep on the serialized field is exact (jq pretty-print would inflate the
+# count by emitting multiple lines per object).
+count_field() {
+  local dir="$1" field="$2" value="$3"
+  local file="$dir/health.jsonl"
+  [ -f "$file" ] || {
+    echo 0
+    return
+  }
+  local n
+  n=$(grep -c "\"$field\":\"$value\"" "$file" 2> /dev/null)
+  printf '%s\n' "${n:-0}"
+}
+
+# cost_total <dir> — total cost_usd from cost.json (empty when no cost data).
+cost_total() {
+  local dir="$1"
+  local file="$dir/cost.json"
+  [ -s "$file" ] || {
+    echo ""
+    return
+  }
+  if has_jq; then
+    jq -r '[.entries[] | .cost_usd // 0] | add' "$file" 2> /dev/null || echo ""
+  fi
+}
+
+# last_outcome <dir> — the last outcome line (role:outcome), else "none".
+last_outcome() {
+  local dir="$1"
+  local file="$dir/health.jsonl"
+  [ -f "$file" ] || {
+    echo "none"
+    return
+  }
+  grep '"outcome"' "$file" 2> /dev/null | tail -n 1 | sed 's/.*"role":"\([^"]*\)".*"outcome":"\([^"]*\)".*/\1:\2/'
+}
+
+# diagnostic_class <dir> — the failure class from the last escalation
+# diagnostic marker in health.jsonl, else "none".
+diagnostic_class() {
+  local dir="$1"
+  local file="$dir/health.jsonl"
+  [ -f "$file" ] || {
+    echo "none"
+    return
+  }
+  grep '"class"' "$file" 2> /dev/null | sed 's/.*"class":"\([^"]*\)".*/\1/' | tail -n 1
+}
+
+# has_jq — 0 if jq is available.
+has_jq() {
+  command -v jq > /dev/null 2>&1
+}
+
+# summarize_one <state-dir> <iid> — print the summary table for one issue.
+summarize_one() {
+  local dir="$1" iid="$2"
+  local file="$dir/health.jsonl"
+  local runs outcomes w_nc w_bf w_c r_fail r_pass cost cls last
+  runs=$(grep -c '"iteration"' "$file" 2> /dev/null)
+  outcomes=$(grep -c '"outcome"' "$file" 2> /dev/null)
+  runs="${runs:-0}"
+  outcomes="${outcomes:-0}"
+  w_nc=$(count_field "$dir" outcome no-changes)
+  w_bf=$(count_field "$dir" outcome build-fail)
+  w_c=$(count_field "$dir" outcome committed)
+  r_fail=$(count_field "$dir" outcome FAIL)
+  r_pass=$(count_field "$dir" outcome PASS)
+  cost=$(cost_total "$dir")
+  cls=$(diagnostic_class "$dir")
+  last=$(last_outcome "$dir")
+
+  printf 'Issue #%s\n' "$iid"
+  printf '  runs: %s   outcomes: %s\n' "${runs:-0}" "${outcomes:-0}"
+  printf '  worker: %s committed, %s no-changes, %s build-fail\n' "${w_c:-0}" "${w_nc:-0}" "${w_bf:-0}"
+  printf '  reviewer: %s PASS, %s FAIL\n' "${r_pass:-0}" "${r_fail:-0}"
+  printf '  cost (usd): %s\n' "${cost:-n/a}"
+  printf '  last outcome: %s\n' "${last:-none}"
+  printf '  failure class: %s\n' "${cls:-none}"
+  echo ""
+}
+
+# ── Resolve which issues to summarize ────────────────────────────────
+# main <args...> — the whole body is a function so it may use `local`.
+main() {
+  if [ $# -eq 0 ]; then
+    # All issues with a health record
+    local found=0 dir iid
+    if [ -d "$STATE_ROOT" ]; then
+      for dir in "$STATE_ROOT"/*/; do
+        [ -d "$dir" ] || continue
+        iid=$(basename "$dir")
+        [ -f "$dir/health.jsonl" ] || continue
+        summarize_one "${dir%/}" "$iid"
+        found=1
+      done
+    fi
+    [ "$found" -eq 1 ] || echo "No loop-health records found under $STATE_ROOT — nothing measured yet."
+  else
+    # One or more explicit issues (IID or path)
+    local arg dir
+    for arg in "$@"; do
+      dir=$(resolve_state_dir "$arg")
+      if [ -z "$dir" ]; then
+        echo "No health record for '$arg' (looked under $STATE_ROOT)."
+      else
+        summarize_one "$dir" "$(basename "$dir")"
+      fi
+    done
+  fi
+}
+
+main "$@"
+
+exit 0
