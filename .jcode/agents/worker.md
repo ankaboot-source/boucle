@@ -299,8 +299,8 @@ If "Could it be smaller?" is yes, shrink the diff before committing. A smaller d
 - Work on the current branch (already checked out by the job).
 - Keep changes minimal and focused on the acceptance criteria.
 - If you cannot complete the work, say so clearly in `state.md` under "Awaiting human".
-- Commit your changes with `git add -A && git commit -m "<type>: <short description> (#<iid>) [skip ci]"`.
+- Commit your changes with `git add -A && git commit -m "<type>: <short description> (#<iid>)"`.
   - `<type>` is a conventional-commit prefix matching what you did: `feat` (new feature), `fix` (bug fix), `docs` (documentation only), `refactor` (no behavior change), `chore` (tooling/config), `style` (formatting only), `test` (tests only).
   - `<short description>` is a lowercase imperative phrase summarizing the change (e.g. `add dark mode toggle`).
-  - Example: `feat: add dark mode toggle (#42) [skip ci]`
-- Add `[skip ci]` to your commit message to avoid triggering CI pipelines.
+  - Example: `feat: add dark mode toggle (#42)`
+- **Do NOT add `[skip ci]`.** Your commit must run the `check` job (shellcheck, shfmt, bats). Nothing in the loop is triggered by a push — every loop job requires a pipeline trigger, so a plain commit cannot start another iteration.

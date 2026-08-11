@@ -134,7 +134,19 @@ Contributions to boucle must align with this line.
   `master` produces conflicts and race conditions.
 - **Anti-feedback-loop**: auto-update must skip push-source pipelines
   (`CI_PIPELINE_SOURCE == "push"`), otherwise the system enters an
-  `update → commit → update → commit…` loop.
+  `update → commit → update → commit…` loop. **The guard lives in
+  `bin/update` itself** (`BOUCLE_PIPELINE_SOURCE = push` → skip self-update),
+  backed by the job rules: every loop job requires
+  `CI_PIPELINE_SOURCE == "trigger"`, so a push can never start one. It is
+  **not** provided by `[skip ci]` in commit messages — that marker was
+  redundant for the loop while silently disabling the `check` job, which let
+  37 of 40 consecutive commits reach the default branch unlinted and
+  untested (issue #51). Do not reintroduce it "to be safe": the safety is
+  elsewhere, and the marker only removes the quality gate.
+- **The loop's own commits meet the same bar**: boucle writes almost all of
+  its own code, so a worker commit must pass `check` (shellcheck, shfmt,
+  bats) exactly like a human's. A rule that exempts the agent from the gate
+  the project is built on is not a shortcut, it is the gate not existing.
 - **SHA-anchored verdict**: `reviewer` and `e2e` verdicts must include the
   SHA in raw hex, with no quotes, no whitespace, no angle brackets. Exact
   format: `<!-- boucle:verdict v=1 role=reviewer sha=abc123def456 -->`. The

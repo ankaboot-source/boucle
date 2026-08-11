@@ -187,13 +187,17 @@ extract_prompt_funcs() {
   rm -f "$TMPF"
 }
 
-@test "build_prompt: worker role mentions [skip ci] commit" {
+@test "build_prompt: worker role asks for a commit, WITHOUT [skip ci]" {
+  # Inverted by issue #51. The marker disabled the check job, so 37 of 40
+  # consecutive commits reached the default branch unlinted and untested.
+  # The anti-feedback guard was never this marker — it lives in bin/update.
   TMPF=$(mktemp)
   extract_prompt_funcs "$TMPF"
   run bash -c "ISSUE=99; source '$TMPF'; build_prompt worker"
   assert_success
   assert_output --partial "issue #99"
-  assert_output --partial "[skip ci]"
+  assert_output --partial "Commit your changes."
+  refute_output --partial "[skip ci]"
   rm -f "$TMPF"
 }
 

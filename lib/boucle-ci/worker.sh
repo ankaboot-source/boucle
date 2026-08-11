@@ -366,14 +366,14 @@ EOF
     # local branch (consumer 2026-08: worker ran fine, job died at the
     # safety-net, MR never updated). The safety-net is best-effort by
     # design — never fail the job because there was nothing to commit.
-    git commit -m "feat: worker changes for #$BOUCLE_ISSUE [skip ci]" --no-verify || true
+    git commit -m "feat: worker changes for #$BOUCLE_ISSUE" --no-verify || true
   fi
 
   # Ensure wrangler cache isn't committed
   if ! grep -q '.wrangler/' .gitignore 2> /dev/null; then
     echo '.wrangler/' >> .gitignore
     git add .gitignore
-    git commit -m "chore: ignore .wrangler/ cache [skip ci]" --no-verify
+    git commit -m "chore: ignore .wrangler/ cache" --no-verify
   fi
 
   # ── Empty-MR guard ───────────────────────────────────────────────

@@ -411,6 +411,12 @@ check:
     # below for the target-branch case instead.
     - if: $CI_COMMIT_BRANCH == "$CI_DEFAULT_BRANCH"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    # Worker branches (issue #51). Worker commits no longer carry [skip ci],
+    # so their code must meet the same bar as anything a human pushes — the
+    # loop writes almost all of it. Without this rule a push to boucle/<iid>
+    # matches NO job at all (every loop job requires a trigger pipeline), so
+    # this is also what stops GitLab creating an empty pipeline.
+    - if: $CI_COMMIT_BRANCH =~ /^boucle\//
   before_script:
     - export PATH="$HOME/.local/bin:$PATH"
     # Resolve BOUCLE_HOME so check-bootstrap.sh is on PATH in consumer
