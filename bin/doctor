@@ -133,7 +133,7 @@ run_config_audit() {
   esac
 
   # Silently wrong: the quiet window applies at the wrong hours.
-  if [ "${BOUCLE_DND_ENABLED:-true}" = "true" ] && [ "${BOUCLE_DND_TZ:-UTC}" = "UTC" ]; then
+  if [ "${BOUCLE_DND_ENABLED:-false}" = "true" ] && [ "${BOUCLE_DND_TZ:-UTC}" = "UTC" ]; then
     audit_advisory "BOUCLE_DND_TZ is UTC" \
       "If you are not in UTC, the quiet window applies at the wrong hours. Set an IANA name, e.g. Europe/Paris."
   fi
