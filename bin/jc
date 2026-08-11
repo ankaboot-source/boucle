@@ -831,6 +831,22 @@ ${body}
 Issue body: NOT available — fetch it via \`bin/forge-note issue ${ISSUE}\` or the forge CLI if you need to verify content fidelity.
 "
       fi
+      # Inject issue notes (human amendments posted as ISSUE comments, not MR
+      # comments). Without these, the reviewer misses amendments the human
+      # posted on the issue and PASSes a MR that ignores them (framagit
+      # 2026-08, MR !61: "embed Instagram" was an issue note; the worker
+      # marked it SUPPRIMÉE and the reviewer PASSed because it never saw the
+      # issue note). Mirrors the worker's issue-notes injection.
+      local issue_notes
+      issue_notes="$(trim_notes issue_notes "${BOUCLE_ISSUE_NOTES:-}")"
+      if [ -n "$issue_notes" ]; then
+        prompt="${prompt}
+Prior issue discussion (issue notes, oldest first — human comments here AMEND the spec just like MR comments. You MUST verify every human amendment in BOTH this section AND the MR discussion below is addressed in the deployed code):
+---
+${issue_notes}
+---
+"
+      fi
       if [ -n "$feedback" ]; then
         prompt="${prompt}
 Prior MR discussion (reviewer verdicts + human comments, oldest first — human comments AMEND the spec and take precedence over the frozen acceptance criteria in state.md). You MUST enumerate every human amendment below and verify it is addressed in the deployed code; any human amendment NOT addressed is a FAIL, even if the original criteria are satisfied:
