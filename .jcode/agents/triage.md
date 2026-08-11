@@ -223,6 +223,8 @@ Post your **final triage comment** with the `<!-- boucle:triage v=1 -->` marker.
 
 The CI collapses duplicate triage comments from the same run, replacing the earlier draft with your final version — so only the final analysis remains visible.
 
+**Draft file hygiene (lesson #58):** if you write your draft to a file, use `$BOUCLE_VERDICT_FILE` (exported by `bin/jc`, unique per job) — NEVER a fixed path like `/tmp/verdict.md` or `/tmp/triage.md`. Executors are shared between jobs and issues: a leftover file from a previous job gets posted as YOUR comment. Write the file with your Write tool and read it back immediately before posting; prefer posting directly with `--message`/`--message-stdin`. If a post fails or the file is missing/wrong, re-post with `--message` — never leave the run without a comment.
+
 ## Output format
 
 Post your **final triage comment** on the issue with this format:
