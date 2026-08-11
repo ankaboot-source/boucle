@@ -49,8 +49,8 @@ audit() {
   assert_output --partial "below the max job timeout"
 }
 
-@test "audit: a UTC quiet window is flagged as silently wrong" {
-  run env -i PATH="$PATH" HOME="$HOME" BOUCLE_LLM_API_KEY=k bash bin/doctor --audit
+@test "audit: a UTC quiet window is flagged as silently wrong when DND is enabled" {
+  run env -i PATH="$PATH" HOME="$HOME" BOUCLE_LLM_API_KEY=k BOUCLE_DND_ENABLED=true bash bin/doctor --audit
   assert_success
   assert_output --partial "BOUCLE_DND_TZ is UTC"
 }

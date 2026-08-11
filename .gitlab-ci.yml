@@ -1295,8 +1295,8 @@ triage:
       # step limit, or decided no new triage was needed), leave the issue at
       # boucle:triage and exit without changing labels. Re-applying the OLD
       # disposition would bounce the label (e.g. triage→needs-info) with no
-      # new question asked — the exact "retour à une review humaine alors
-      # qu'aucune question n'est posée" symptom.
+      # new question asked — the exact "back to a human review although
+      # no question was asked" symptom.
       if [ -z "$DISPOSITION" ]; then
         # ── Circuit breaker (silent-failure / provider-down escalation) ─
         # bin/jc exits 3 when the agent produced NO posted comment AND NO
@@ -1315,14 +1315,14 @@ triage:
           if [ "$rc" -eq 4 ]; then
             echo "[boucle] Triage provider-down failure (bin/jc exit 4) — escalating issue #$IID to human to break doctor re-trigger loop."
             # Note BEFORE the terminal label — never a muted boucle:human.
-            if ! forge_issue_note "$IID" ":rotating_light: Triage — fournisseur d'IA indisponible ou quota épuisé (429/402) : l'agent n'a rien produit. Passage en revue humaine pour casser la boucle de re-déclenchement. Vérifiez le statut du fournisseur et les crédits. Voir les logs du job $CI_JOB_URL."; then
+            if ! forge_issue_note "$IID" ":rotating_light: Triage — provider API unavailable or quota exhausted (429/402): the agent produced nothing. Escalating to human review to break the re-trigger loop. Check the provider status and credits. See the job logs at $CI_JOB_URL."; then
               echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
               exit 1
             fi
           else
             echo "[boucle] Silent triage failure (bin/jc exit 3) — escalating issue #$IID to human to break doctor re-trigger loop."
             # Note BEFORE the terminal label — never a muted boucle:human.
-            if ! forge_issue_note "$IID" ":rotating_light: Triage a échoué en silence (l'agent n'a produit aucun commentaire). Passage en revue humaine pour casser la boucle de re-déclenchement. Voir les logs du job $CI_JOB_URL."; then
+            if ! forge_issue_note "$IID" ":rotating_light: Triage failed silently (the agent produced no comment). Escalating to human review to break the re-trigger loop. See the job logs at $CI_JOB_URL."; then
               echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
               exit 1
             fi
@@ -1371,7 +1371,7 @@ triage:
               echo "[boucle] 🤖 Issue flagged autonomous — auto-validating spec gate for #$IID"
               SHOULD_GATE=false
               GATE_SKIP_LABELS="boucle:autonomous"
-              AUTONOMOUS_NOTE=$(printf "🤖 **Spec gate auto-validée — issue flaguée autonome**\n\nLa validation humaine du spec a été automatiquement validée car cette issue porte le label \`boucle:autonomous\`. La boucle continue donc jusqu'à la MR sans contact humain.\n\nLe label \`boucle:autonomous\` reste visible sur l'issue (tableau de bord) jusqu'à la prochaine transition d'état.\n\nVous pourrez valider la MR quand elle sera prête. Pour ne plus auto-valider le spec sur cette issue, retirez le label \`boucle:autonomous\`.")
+              AUTONOMOUS_NOTE=$(printf "🤖 **Spec gate auto-approved — issue flagged autonomous**\n\nThe human spec validation was automatically approved because this issue carries the \`boucle:autonomous\` label. The loop therefore continues up to the MR without human contact.\n\nThe \`boucle:autonomous\` label remains visible on the issue (board) until the next state transition.\n\nYou can validate the MR when it is ready. To stop auto-approving the spec for this issue, remove the \`boucle:autonomous\` label.")
               glab api --hostname $BOUCLE_FORGE_HOST -X POST \
                 "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
                 -f body="$AUTONOMOUS_NOTE" \
@@ -1384,7 +1384,7 @@ triage:
               echo "[boucle] 🌙 DND active — auto-validating spec gate for #$IID"
               SHOULD_GATE=false
               GATE_SKIP_LABELS="${GATE_SKIP_LABELS:+$GATE_SKIP_LABELS,}boucle:dnd"
-              DND_NOTE=$(printf "🌙 **Spec gate auto-validée — mode Do-Not-Disturb actif**\n\nLa validation humaine du spec a été automatiquement validée car la fenêtre DND est active (%s–%s %s). La boucle continue donc jusqu'à la MR sans contact humain.\n\nLe label \`boucle:dnd\` a été appliqué à l'issue (visible sur le tableau de bord) pour signaler cette auto-validation ; il sera retiré à la prochaine transition d'état.\n\nVous pourrez valider la MR quand elle sera prête. Pour désactiver le DND : mettez \`BOUCLE_DND_ENABLED=false\` dans les variables CI du projet." "$DND_START" "$DND_END" "$DND_TZ")
+              DND_NOTE=$(printf "🌙 **Spec gate auto-approved — Do-Not-Disturb active**\n\nThe human spec validation was automatically approved because the DND window is active (%s–%s %s). The loop therefore continues up to the MR without human contact.\n\nThe \`boucle:dnd\` label was applied to the issue (visible on the board) to flag this auto-approval; it will be removed at the next state transition.\n\nYou can validate the MR when it is ready. DND is disabled by default: this auto-approval only happens when \`BOUCLE_DND_ENABLED=true\` is explicitly set in the project CI variables — set the variable to \`false\` (or remove it) to disable it." "$DND_START" "$DND_END" "$DND_TZ")
               glab api --hostname $BOUCLE_FORGE_HOST -X POST \
                 "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
                 -f body="$DND_NOTE" \
@@ -1466,7 +1466,7 @@ triage:
             fi
           fi
 
-          # ── Aperçu visuel (systematic for UI/UX issues) ────────────────
+          # ── Visual preview (systematic for UI/UX issues) ────────────────
           # Fires for ALL READY dispositions (Size S/M/L, gated or not).
           # The triage agent writes RENDER_REQUEST + preview.html for
           # UI/UX issues (mandatory per triage.md). Non-UI/UX issues have
@@ -1505,7 +1505,7 @@ triage:
                   IMG_URL=$(echo "$UPLOAD_RESP" | jq -r '.markdown // empty' 2>/dev/null)
 
                   if [ -n "$IMG_URL" ]; then
-                    # 5. Fetch the existing comment, insert Aperçu right after
+                    # 5. Fetch the existing comment, insert Preview right after
                     #    the TL;DR section (first thing the human sees), PUT.
                     #    Guard: if EXISTING_BODY is empty (fetch failed), do NOT
                     #    PUT — otherwise we overwrite the entire triage comment
@@ -1517,10 +1517,10 @@ triage:
                       NEW_BODY=$(printf '%s\n' "$EXISTING_BODY" | awk -v img="$IMG_URL" '
                         /^## TL;DR/ { in_tldr=1; print; next }
                         in_tldr && /^## / && !inserted {
-                          print "## Aperçu"; print img; print ""; inserted=1; in_tldr=0
+                          print "## Preview"; print img; print ""; inserted=1; in_tldr=0
                         }
                         { print }
-                        END { if (!inserted) { print ""; print "## Aperçu"; print img } }
+                        END { if (!inserted) { print ""; print "## Preview"; print img } }
                       ')
                       if glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT \
                         "/projects/$CI_PROJECT_ID/issues/$IID/notes/$TRIAGE_NOTE_ID" \
@@ -1535,25 +1535,25 @@ triage:
                       echo "[boucle] WARN: existing comment body empty — posting fallback note"
                       glab api --hostname "$BOUCLE_FORGE_HOST" -X POST \
                         "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-                        -f body="Aperçu indisponible (échec lecture commentaire) — validez sur le TL;DR." >/dev/null 2>&1
+                        -f body="Preview unavailable (comment read failed) — validate from the TL;DR." >/dev/null 2>&1
                     fi
                   else
                     echo "[boucle] WARN: PNG upload failed — posting fallback note"
                     glab api --hostname "$BOUCLE_FORGE_HOST" -X POST \
                       "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-                      -f body="Aperçu indisponible (échec upload) — validez sur le TL;DR." >/dev/null 2>&1
+                      -f body="Preview unavailable (upload failed) — validate from the TL;DR." >/dev/null 2>&1
                   fi
                 else
                   echo "[boucle] WARN: Chromium render failed — posting fallback note"
                   glab api --hostname "$BOUCLE_FORGE_HOST" -X POST \
                     "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-                    -f body="Aperçu indisponible (échec rendu) — validez sur le TL;DR." >/dev/null 2>&1
+                    -f body="Preview unavailable (render failed) — validate from the TL;DR." >/dev/null 2>&1
                 fi
               else
                 echo "[boucle] WARN: Chromium install failed — posting fallback note"
                 glab api --hostname "$BOUCLE_FORGE_HOST" -X POST \
                   "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
-                  -f body="Aperçu indisponible (Chromium indisponible) — validez sur le TL;DR." >/dev/null 2>&1
+                  -f body="Preview unavailable (Chromium unavailable) — validate from the TL;DR." >/dev/null 2>&1
                 # Chain to worker (cap disabled)
                 chain_to_role "$IID" "worker"
               fi
@@ -1705,7 +1705,7 @@ triage:
                       --data-urlencode "assignee_ids[]=$BOUCLE_BOT_ID" 2>/dev/null || { if [ -n "${BOUCLE_BOT_ID:-}" ]; then echo "ERROR: bot reassign failed for issue (BOUCLE_BOT_ID=$BOUCLE_BOT_ID set but API call failed)" >&2; exit 1; fi; }
                   fi
                   # Set the parent via the work-items hierarchy API (child-items).
-                  # This creates the real "Éléments enfants" relationship visible
+                  # This creates the real "Child items" relationship visible
                   # in the GitLab UI. Requires the parent's GLOBAL work-item ID
                   # (not its project-scoped IID). If the hierarchy API is
                   # unavailable (work_item_rest_api feature flag disabled on
@@ -2204,7 +2204,7 @@ worker:
 
       # Fetch the issue notes (comments) and export them so the worker sees
       # the FULL discussion history — including early preservation instructions
-      # (e.g. "garder les textes/visuels/vidéos déjà partagés") that the latest
+      # (e.g. "keep the texts/visuals/videos already shared") that the latest
       # amendments must NOT override. Without this, the worker only sees the
       # latest amendments via BOUCLE_REVIEWER_FEEDBACK and applies them
       # literally, degrading validated layouts (issue #42 iteration 7: the brand pattern
@@ -2282,9 +2282,9 @@ worker:
           LOG_SNIPPET=$(tail -c 2000 "$AGENT_LOG_FILE" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' || echo "(log read failed)")
         fi
         DIAGNOSTIC_BODY=$(printf '%s\n' \
-          "## ⚠️ Worker — échec du modèle (API indisponible ou crédits épuisés)" \
+          "## ⚠️ Worker — model failure (API unavailable or credits exhausted)" \
           "" \
-          "Le worker n'a produit **aucune sortie** — le log agent est vide ou ne montre aucune activité. Cela indique que l'API du modèle est probablement **indisponible** ou **à court de crédits**." \
+          "The worker produced **no output** — the agent log is empty or shows no activity. This indicates the model API is probably **unavailable** or **out of credits**." \
           "" \
           "### Logs" \
           "" \
@@ -2292,14 +2292,14 @@ worker:
           "$LOG_SNIPPET" \
           '```' \
           "" \
-          "### Action requise" \
+          "### Action required" \
           "" \
-          "- Vérifiez le statut de l'API du modèle." \
-          "- Vérifiez les crédits/quota restants." \
-          "- Une fois le modèle disponible, re-déclenchez le worker en remettant le label \`boucle:todo\` et en assignant l'issue au bot." \
+          "- Check the model API status." \
+          "- Check the remaining credits/quota." \
+          "- Once the model is available, re-trigger the worker by re-applying the \`boucle:todo\` label and assigning the issue to the bot." \
           "" \
           "---" \
-          "*Diagnostic posté par boucle (exit 4 — model/API failure).*")
+          "*Diagnostic posted by boucle (exit 4 — model/API failure).*")
         # Note BEFORE the terminal label — never a muted boucle:human.
         if ! forge_issue_note "$BOUCLE_ISSUE" "$DIAGNOSTIC_BODY"; then
           echo "FAIL: diagnostic note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
@@ -3967,7 +3967,7 @@ catchup:
       # Post an audit comment (with hidden tag for idempotence/audit).
       # The MR IID isn't passed as a variable (dispatch only forwards
       # BOUCLE_ISSUE + BOUCLE_ROLE); reference the issue + branch instead.
-      AUDIT_BODY="<!-- boucle:catchup v=1 iid=$BOUCLE_ISSUE state=$CURRENT_BOUCLE target=$TARGET -->"$'\n'"🤖 Rattrapage automatique — la MR sur la branche \`boucle/$BOUCLE_ISSUE\` a été fusionnée directement sans passer par le circuit d'approbation."$'\n\n'"État de l'issue au moment de la fusion : \`boucle:$CURRENT_BOUCLE\`."$'\n'"Issue marquée \`boucle:$TARGET\` et fermée."
+      AUDIT_BODY="<!-- boucle:catchup v=1 iid=$BOUCLE_ISSUE state=$CURRENT_BOUCLE target=$TARGET -->"$'\n'"🤖 Automatic catch-up — the MR on branch \`boucle/$BOUCLE_ISSUE\` was merged directly without going through the approval flow."$'\n\n'"Issue state at merge time: \`boucle:$CURRENT_BOUCLE\`."$'\n'"Issue marked \`boucle:$TARGET\` and closed."
       # The audit note is the only explanation for the transition — if it cannot
       # be posted, do NOT proceed: a transition with no note is a mute state
       # change. Abort BEFORE the label + close, keeping the issue in its
