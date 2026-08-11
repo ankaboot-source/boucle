@@ -433,10 +433,11 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       shared upstream for context — otherwise it stays private.
     - ✅ DO: keep the origin benchmark documented. Boucle was extracted
       from a real product — a static Astro site (GitLab, Cloudflare Pages).
-      This is a deliberate, owner-approved exception to the rules above:
-      the origin benchmark is part of boucle's identity and MUST NOT be
-      re-anonymized. The rules above protect *third-party consumers*, not
-      the origin benchmark.
+      The origin-era history has been ANONYMIZED (owner decision, 2026-08):
+      all pre-extraction author/committer identities and forge references
+      were rewritten to the maintainer's identity in a history rewrite.
+      The rules above protect *third-party consumers* — never re-introduce
+      consumer-identifying content in upstream contributions.
 
 40. **Split bookkeeping MUST be atomic and label-first**
     - ❌ DO NOT post the human "Split into" comment, the
