@@ -287,6 +287,56 @@ source_with_mock_forge() {
   assert_success
 }
 
+@test "resolve_reporter_id follows e2e-origin marker when bot follow-up has no parent" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    BOUCLE_BOT_USERNAME=up-bot
+    # Mock forge_issue_get: an E2E-fail follow-up (bot-authored, no parent
+    # section, but with the qualified origin marker pointing to the
+    # original issue whose author is the human).
+    forge_issue_get() {
+      case "$1" in
+        42)
+          printf "%s" "{\"author\":{\"id\":1,\"username\":\"up-bot\"},\"description\":\"E2E verification failed for issue #49.\n\n## Origin — E2E regression\n<!-- boucle:e2e-origin v=1 iid=49 -->\nFollow-up of #49: production E2E verification failed after its MR was merged (see Trace below). This is a qualified follow-up link — NOT a parent/child relationship.\n\n## Trace\n...\"}"
+          ;;
+        49)
+          printf "%s" "{\"author\":{\"id\":999,\"username\":\"human\"}}"
+          ;;
+        *) printf "%s" "{}" ;;
+      esac
+    }
+    source lib/boucle.sh
+    result=$(resolve_reporter_id 42)
+    [ "$result" = "999" ]
+  '
+  assert_success
+}
+
+@test "resolve_reporter_id prefers parent chain over e2e-origin marker" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    BOUCLE_BOT_USERNAME=up-bot
+    # Mock forge_issue_get: bot-authored issue carrying BOTH a parent
+    # section and an e2e-origin marker — the parent chain must win
+    # (the origin marker is only a fallback when no parent exists).
+    forge_issue_get() {
+      case "$1" in
+        42)
+          printf "%s" "{\"author\":{\"id\":1,\"username\":\"up-bot\"},\"description\":\"## Parent issue\n\n#10\n\n## Origin — E2E regression\n<!-- boucle:e2e-origin v=1 iid=49 -->\"}"
+          ;;
+        10)
+          printf "%s" "{\"author\":{\"id\":777,\"username\":\"human\"}}"
+          ;;
+        *) printf "%s" "{}" ;;
+      esac
+    }
+    source lib/boucle.sh
+    result=$(resolve_reporter_id 42)
+    [ "$result" = "777" ]
+  '
+  assert_success
+}
+
 @test "resolve_reporter_id walks multiple levels up parent chain" {
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1

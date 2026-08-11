@@ -2953,16 +2953,28 @@ reviewer:
       # Resolve the reporter id once, before the verdict case, so every branch
       # (PASS, FAIL, UNCERTAIN) can assign the MR to the author when their
       # action is required. Handles sub-issues: uses the parent issue's author.
+      # E2E-fail follow-ups (bot-authored, no parent) are followed via their
+      # qualified origin marker (`<!-- boucle:e2e-origin v=1 iid=N -->`) so
+      # the MR is assigned to the human reporter, not the bot.
       resolve_reporter_id() {
-        local iid="$1" data parent_iid parent_data reporter_id
+        local iid="$1" data parent_iid parent_data reporter_id author_username
+        local bot_user="${BOUCLE_BOT_USERNAME:-up-bot}"
+        local depth=0 max_depth=10
         data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null) || { echo ""; return; }
-        parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
-        if [ -n "$parent_iid" ]; then
-          parent_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid" 2>/dev/null) || { echo ""; return; }
+        reporter_id=$(printf '%s' "$data" | jq -r '.author.id // empty')
+        author_username=$(printf '%s' "$data" | jq -r '.author.username // empty')
+        while [ "$author_username" = "$bot_user" ] && [ "$depth" -lt "$max_depth" ]; do
+          parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+          if [ -z "$parent_iid" ]; then
+            parent_iid=$(printf '%s' "$data" | jq -r '.description // empty' | sed -nE 's/.*<!-- boucle:e2e-origin v=1 iid=([0-9]+) -->.*/\1/p' | head -1)
+          fi
+          [ -z "$parent_iid" ] && break
+          parent_data=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/issues/$parent_iid" 2>/dev/null) || break
           reporter_id=$(printf '%s' "$parent_data" | jq -r '.author.id // empty')
-        else
-          reporter_id=$(printf '%s' "$data" | jq -r '.author.id // empty')
-        fi
+          author_username=$(printf '%s' "$parent_data" | jq -r '.author.username // empty')
+          data="$parent_data"
+          depth=$((depth + 1))
+        done
         echo "$reporter_id"
       }
       AUTHOR_ID=$(resolve_reporter_id "$BOUCLE_ISSUE")
@@ -4182,6 +4194,10 @@ e2e:
           # walks one level up: issue → parent → parent.author.id). Without this,
           # the follow-up's author is the bot and the reviewer PASS branch
           # assigns the MR to the bot instead of the human.
+          # Top-level issues have no parent to inherit: the follow-up ALWAYS
+          # carries a QUALIFIED origin section (`<!-- boucle:e2e-origin v=1 iid=N -->`)
+          # so resolve_reporter_id can still find the original human reporter
+          # (consumer regression: MR assigned to up-bot after reviewer PASS).
           E2E_PARENT_IID=$(printf '%s' "$E2E_ORIG_DATA" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
           E2E_PARENT_SECTION=""
           if [ -n "$E2E_PARENT_IID" ]; then
@@ -4194,6 +4210,10 @@ e2e:
           E2E_NEW_JSON=$(glab api --hostname $BOUCLE_FORGE_HOST -X POST "/projects/$CI_PROJECT_ID/issues" \
             -f title="$E2E_NEW_TITLE" \
             -f description="E2E verification failed for issue #$BOUCLE_ISSUE.
+
+      ## Origin — E2E regression
+      <!-- boucle:e2e-origin v=1 iid=$BOUCLE_ISSUE -->
+      Follow-up of #$BOUCLE_ISSUE: production E2E verification failed after its MR was merged (see Trace below). This is a qualified follow-up link — NOT a parent/child relationship.
 
       ## Trace
       $(echo "$COMMENT")
