@@ -5013,7 +5013,7 @@ pages:
       when: never
     - if: $BOUCLE_DEPLOY_PROVIDER != "gitlab-pages"
       when: never
-    - if: $CI_COMMIT_BRANCH == "$CI_DEFAULT_BRANCH"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
   script:
     # NOTE: no `$` expansion may appear OUTSIDE the eval line here —
     # framagit's linter rejects any script mixing a second expansion
