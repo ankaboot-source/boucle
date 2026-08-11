@@ -1009,6 +1009,7 @@ build_prompt_within_budget() {
 
 # ── 5. Run the agent ──────────────────────────────────────────────────
 PROMPT=$(build_prompt_within_budget "$ROLE")
+prompt_total_chars=${#PROMPT}
 report_prompt_size "$ROLE" "$PROMPT"
 
 # Write the role-specific system prompt to .jcode/prompt-overlay.md
@@ -1402,6 +1403,29 @@ record_cost() {
     echo "[boucle] WARN: could not append to $file — cost accounting skipped for this run" >&2
   fi
 }
+
+# ── 7b. Loop-health record (#52) ──────────────────────────────────────
+# One JSONL line per agent run, derived from what we already emit. Read by
+# bin/health and by boucle_escalation_diagnostic. Survives across iterations
+# via the state cache (like cost.json).
+h_model="$MODEL"
+h_provider="$PROVIDER_PROFILE"
+if [ -n "${FALLBACK_USED:-}" ]; then
+  h_model="${FALLBACK_MODEL:-$MODEL}"
+  h_provider="${FALLBACK_PROVIDER:-$PROVIDER_PROFILE}"
+fi
+h_pt=$(extract_token_usage "$AGENT_LOG" "prompt_tokens")
+[ -z "$h_pt" ] && h_pt=$(extract_token_usage "$AGENT_LOG" "input_tokens")
+h_cost=""
+if [ -n "${BOUCLE_PRICING_JSON:-}" ] && [ -n "$h_pt" ]; then
+  h_cost=$(echo "${BOUCLE_PRICING_JSON}" \
+    | jq -r --arg m "$h_model" --argjson p "${h_pt:-0}" \
+      '(.[$m] // empty) as $x | if $x then (($p / 1000000) * ($x.in // 0)) else "" end' \
+      2> /dev/null || echo "")
+  [ "$h_cost" = "null" ] && h_cost=""
+fi
+boucle_health_record "$ISSUE" "$ROLE" "$ITERATION" "$AGENT_EXIT" \
+  "${prompt_total_chars:-0}" "${h_pt:-}" "${h_cost:-}" "$h_model" "$h_provider" || true
 
 record_cost || true
 
