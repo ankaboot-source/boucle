@@ -277,6 +277,26 @@ runs are priced, the total is flagged as a lower bound.
 This is the prerequisite for a real budget cap (§Caps below still reads
 "not set at MVP"): measure first, cap second.
 
+## Loop-health measurement
+
+Every agent run appends one JSONL line to `.boucle/<issue>/health.jsonl`
+(role, iteration, exit_code, prompt_chars, tokens, cost, model, provider),
+and every stage outcome appends another (worker: committed/no-changes/
+build-fail; reviewer/e2e: PASS/FAIL/UNCERTAIN; merger: merged/conflict).
+The file survives across iterations like `cost.json` and feeds two consumers:
+
+- `bin/health <issue>` — a read-only per-issue health summary (iterations,
+  outcomes by role, cost total, last verdict, failure class if escalated).
+- **Structured escalation diagnostics** — when the loop escalates to
+  `boucle:human`, the generic "human intervention needed" comment is
+  replaced by `boucle_escalation_diagnostic`, which classifies the failure
+  (provider/quota, build-fail, no-changes, rebase-conflict,
+  not-mergeable, unknown) from the health record and posts a structured
+  diagnostic: failure class + evidence + recommended next action.
+
+This is the "look at the data" principle applied to the loop itself, and
+the prerequisite for the upstream engine-defect flywheel (#54).
+
 ## Retry strategy
 
 Boucle already gets most of a Ralph-style recovery cycle for free: every
