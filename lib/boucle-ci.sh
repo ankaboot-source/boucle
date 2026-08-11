@@ -62,7 +62,13 @@ forge_init
 if [ -z "$BOUCLE_JOB_URL" ] && [ -n "${GITHUB_RUN_ID:-}" ]; then
   BOUCLE_JOB_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-}/actions/runs/${GITHUB_RUN_ID}"
 fi
-: "${BOUCLE_TRIGGER_PAYLOAD:=${TRIGGER_PAYLOAD:-}}"
+# Same failure mode as BOUCLE_JOB_URL above: the workflow sets this from
+# `${{ github.event_path }}`, which is not exposed to workflow expressions and
+# resolves to an empty string — so dispatch aborted with "BOUCLE_TRIGGER_PAYLOAD
+# is unset" on every GitHub webhook. GITHUB_EVENT_PATH is a default runner
+# variable naming the very same file, so fall back to it. It is unset on GitLab,
+# where TRIGGER_PAYLOAD/BOUCLE_TRIGGER_PAYLOAD are passed in directly.
+: "${BOUCLE_TRIGGER_PAYLOAD:=${TRIGGER_PAYLOAD:-${GITHUB_EVENT_PATH:-}}}"
 : "${BOUCLE_BOT_USERNAME:=up-bot}"
 
 export BOUCLE_WORKSPACE BOUCLE_PROJECT_ID BOUCLE_PROJECT_PATH BOUCLE_FORGE_HOST \
