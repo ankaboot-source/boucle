@@ -19,6 +19,22 @@
 # The before_script bootstrap (tool install, BOUCLE_BOT_ID resolution,
 # BOUCLE_HOME detection) is NOT part of this function.
 
+# dispatch_note_body
+#
+# The comment body from the trigger payload, or empty when the event is not
+# a comment. Forge-agnostic by trying both shapes rather than branching on
+# $BOUCLE_FORGE: GitLab puts the body at .object_attributes.note, GitHub at
+# .comment.body. The keys are disjoint, so a single filter is unambiguous.
+#
+# Silent on a missing or non-file payload — callers treat empty as "not a
+# comment", which is the safe reading: it means "do not skip on the marker",
+# and the routing below still applies its own guards.
+dispatch_note_body() {
+  [ -n "${BOUCLE_TRIGGER_PAYLOAD:-}" ] || return 0
+  [ -f "$BOUCLE_TRIGGER_PAYLOAD" ] || return 0
+  jq -r '.object_attributes.note // .comment.body // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || true
+}
+
 boucle_ci_dispatch() {
   # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
   set +o pipefail
@@ -72,14 +88,37 @@ boucle_ci_dispatch() {
   fi
   OBJECT_KIND=$(jq -r '.object_kind // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
   MR_ACTION=$(jq -r '.object_attributes.action // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
-  # Bot-originated events are filtered to prevent loops — EXCEPT for MR
-  # merge webhooks. When the merger job (running as up-bot) merges a MR,
-  # the merge webhook fires with ACTOR=up-bot. Without this exception,
-  # the catchup is never triggered and the issue stays stuck at
-  # boucle:merging forever (the merger job's e2e close path is unreliable
-  # — it can fail, leaving no fallback close path).
-  if [ "$ACTOR" = "${BOUCLE_BOT_USERNAME:-up-bot}" ] && [ "$MR_ACTION" != "merge" ]; then
+  # ── Anti-loop: boucle's own comments ──────────────────────────────
+  # Applies in BOTH modes. Forges do not guarantee webhook delivery order,
+  # so the label-change webhook of a transition can overtake the comment
+  # that preceded it; the comment then lands on the NEW (possibly paused)
+  # state and would route — starting the worker before the human approved
+  # the spec, or re-triggering triage in a loop. The marker identifies
+  # boucle's own writes regardless of ordering, which the actor check
+  # cannot do once the ordering assumption breaks.
+  NOTE_BODY=$(dispatch_note_body)
+  if [ -n "$NOTE_BODY" ] && has_agent_marker "$NOTE_BODY"; then
+    echo "dispatch: comment carries the boucle:agent marker — boucle's own write, skipping"
     exit 0
+  fi
+
+  # ── Anti-loop: bot-originated events, by identity ─────────────────
+  # Only meaningful when boucle has an account of its own. In mono-user
+  # mode ACTOR is the human on EVERY event — the loop's and the human's
+  # alike — so this guard would discard the human's legitimate triggers
+  # (opening an issue, replying on needs-info, approving the spec) and the
+  # loop would never fire. The marker above replaces it; the other event
+  # classes need no identity filter, since label changes are already
+  # guarded by PREV_LABELS below and MR routing is action-based.
+  #
+  # The merge exception must survive: when the merger job merges a MR the
+  # webhook fires with ACTOR=<bot>, and without letting it through the
+  # catchup never runs and the issue stays stuck at boucle:merging (the
+  # merger's e2e close path can fail, leaving no fallback).
+  if ! boucle_mono_user; then
+    if [ "$ACTOR" = "${BOUCLE_BOT_USERNAME:-up-bot}" ] && [ "$MR_ACTION" != "merge" ]; then
+      exit 0
+    fi
   fi
 
   # ── Merge request events ──────────────────────────────────────────

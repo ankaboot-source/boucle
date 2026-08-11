@@ -412,6 +412,40 @@ else
   warn "CLOUDFLARE_API_TOKEN not set — CF Pages checks skipped (set CLOUDFLARE_API_TOKEN for Cloudflare deploy)"
 fi
 
+# ── Bot identity vs token owner (#32) ────────────────────────────────────
+# The anti-loop guard in dispatch discards every webhook whose actor equals
+# BOUCLE_BOT_USERNAME. When that name is the account owning BOUCLE_TOKEN,
+# the guard discards the human's OWN actions too: opening an issue, replying
+# on boucle:needs-info, approving the spec. The loop then never fires for
+# that account and nothing reports it — a silently inert install.
+#
+# This is the default outcome of a GitHub install, where bin/setup cannot
+# provision a bot identity and seeds BOUCLE_BOT_USERNAME with the PAT
+# owner's login. BOUCLE_MONO_USER=true is the supported way to say "yes,
+# one account runs everything" — it swaps the actor guard for the
+# label-state + agent-marker guard, which does not depend on identity.
+BOT_USERNAME_EXPECTED="${BOUCLE_BOT_USERNAME:-up-bot}"
+TOKEN_OWNER_LOGIN=""
+if [ "$FORGE" = "github" ]; then
+  TOKEN_OWNER_LOGIN=$(forge_current_user_login)
+else
+  TOKEN_OWNER_LOGIN=$(glab api --hostname "$HOST" /user 2> /dev/null | jq -r '.username // empty' 2> /dev/null || true)
+fi
+
+if [ -z "$TOKEN_OWNER_LOGIN" ]; then
+  # Never turn a transient API failure into a red doctor: an expired token
+  # or a network blip must not be reported as a misconfiguration.
+  warn "could not resolve the BOUCLE_TOKEN owner — skipping the bot-identity check (expired token or API unreachable?)"
+elif [ "$TOKEN_OWNER_LOGIN" != "$BOT_USERNAME_EXPECTED" ]; then
+  pass "bot identity @$BOT_USERNAME_EXPECTED is distinct from the token owner @$TOKEN_OWNER_LOGIN"
+elif [ -n "${BOUCLE_MONO_USER:-}" ] && [ "${BOUCLE_MONO_USER}" != "false" ]; then
+  pass "mono-user mode: boucle acts as @$TOKEN_OWNER_LOGIN (label-state guard, no actor filtering)"
+else
+  fail "BOUCLE_BOT_USERNAME is the BOUCLE_TOKEN owner (@$TOKEN_OWNER_LOGIN) — the anti-loop guard will
+      discard every action you take and the loop will never fire for you. Either give boucle a
+      distinct identity (a bot/service account), or set BOUCLE_MONO_USER=true to run single-account."
+fi
+
 # ── Mode-specific checks ─────────────────────────────────────────────────
 DEPLOY_MODE="${BOUCLE_DEPLOY_MODE:-self}"
 if [ "$DEPLOY_MODE" = "external" ]; then
