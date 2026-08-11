@@ -4997,3 +4997,32 @@ doctor:
 
       echo "Doctor complete. Recovered $RECOVERED orphaned issue(s)."
   timeout: 5m
+
+# ── GitLab Pages (W1.7) ───────────────────────────────────────────────────
+# Declarative GitLab Pages publish — the only token-less deploy path: the
+# pipeline builds $BOUCLE_BUILD_OUTPUT (default: public/) and GitLab serves
+# it at $CI_PAGES_URL. Opt-in: BOUCLE_DEPLOY_PROVIDER=gitlab-pages.
+# Runs on the default branch (Pages = production site) incl. manual/API
+# pipelines on it (CI_COMMIT_BRANCH is set there; merge_request pipelines
+# fail the CI_COMMIT_BRANCH rule, so this never touches MR previews).
+pages:
+  stage: deploy
+  tags: []
+  rules:
+    - if: $BOUCLE_ENABLED != "true"
+      when: never
+    - if: $BOUCLE_DEPLOY_PROVIDER != "gitlab-pages"
+      when: never
+    - if: $CI_COMMIT_BRANCH == "$CI_DEFAULT_BRANCH"
+  script:
+    # NOTE: no `$` expansion may appear OUTSIDE the eval line here —
+    # framagit's linter rejects any script mixing a second expansion
+    # ($CI_PAGES_URL, $CI_COMMIT_BRANCH, ...) with the $BOUCLE_BUILD_CMD eval
+    # ("script config should be a string or a nested array", 2026-08). The
+    # Pages URL is visible in the UI / via the Pages API.
+    - echo "Publishing the site to GitLab Pages"
+    - eval "$BOUCLE_BUILD_CMD"
+  artifacts:
+    paths:
+      - public
+  pages: true
