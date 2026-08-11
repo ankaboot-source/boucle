@@ -249,9 +249,16 @@ default:
       # Asset names follow the pattern jcode-<os>-<arch>.tar.gz (e.g.
       # jcode-linux-x86_64.tar.gz). The tarball contains a single binary
       # named jcode-linux-x86_64.bin at its root.
-      if ! command -v jcode &>/dev/null; then
-        echo "Installing jcode coding agent (standalone binary)..."
-        JCODE_VER="${JCODE_VERSION:-v0.73.0}"
+      #
+      # Version check: the runner REUSES the repo between jobs, so a stale
+      # jcode binary from a previous run persists. The old `if ! command -v`
+      # guard skipped the install when ANY jcode was present — leaving the
+      # runner pinned to an old version indefinitely (observed: consumer
+      # ran v0.68.0 for days despite JCODE_VER=v0.73.0 in the config). Now
+      # we check the installed version matches JCODE_VER and reinstall if not.
+      JCODE_VER="${JCODE_VERSION:-v0.75.3}"
+      if ! command -v jcode &>/dev/null || ! jcode --version 2>/dev/null | grep -q "$JCODE_VER"; then
+        echo "Installing jcode coding agent (standalone binary, $JCODE_VER)..."
         mkdir -p "$HOME/.local/bin"
         curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x86_64.tar.gz" -o /tmp/jcode.tar.gz
         tar xzf /tmp/jcode.tar.gz -C /tmp
@@ -1156,7 +1163,7 @@ triage:
 
       # Detect image attachments and route to a vision-capable model if needed.
       # Forge controls: BOUCLE_VISION_ROUTING, BOUCLE_VISION_MODEL, BOUCLE_VISION_ROLES.
-      eval "$($BOUCLE_HOME/bin/detect-vision-need triage)"
+      $BOUCLE_HOME/bin/describe-images triage || echo "[boucle] WARN: image description failed — continuing without descriptions"
 
       # Fetch the issue body and export it so the triage agent does not
       # waste steps calling glab issue view / gh issue view (minimax-m3
@@ -2141,7 +2148,7 @@ worker:
       # Detect image attachments (issue + MR comments) and route to a
       # vision-capable model if needed.
       # Forge controls: BOUCLE_VISION_ROUTING, BOUCLE_VISION_MODEL, BOUCLE_VISION_ROLES.
-      eval "$($BOUCLE_HOME/bin/detect-vision-need worker)"
+      $BOUCLE_HOME/bin/describe-images worker || echo "[boucle] WARN: image description failed — continuing without descriptions"
 
       # Fetch the issue body and export it so the worker agent does not waste
       # steps calling glab issue view, and — more importantly — so it has the
@@ -2793,7 +2800,7 @@ reviewer:
       # Detect image attachments (issue + MR comments) and route to a
       # vision-capable model if needed.
       # Forge controls: BOUCLE_VISION_ROUTING, BOUCLE_VISION_MODEL, BOUCLE_VISION_ROLES.
-      eval "$(./bin/detect-vision-need reviewer)"
+      ./bin/describe-images reviewer || echo "[boucle] WARN: image description failed — continuing without descriptions"
 
       # Run the agent against the preview.
       # Use `|| rc=$?` to suppress set -e so the script continues to
