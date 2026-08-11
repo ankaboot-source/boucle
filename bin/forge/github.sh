@@ -29,7 +29,9 @@ _gh_api() {
 }
 
 _gh_api_silent() {
-  GH_TOKEN="$BOUCLE_TOKEN" gh api "$@" > /dev/null 2>&1 || true
+  local rc=0
+  GH_TOKEN="$BOUCLE_TOKEN" gh api "$@" > /dev/null 2>&1 || rc=$?
+  return "$rc"
 }
 
 # ── Issue operations ─────────────────────────────────────────────────────
@@ -40,10 +42,14 @@ forge_issue_get() {
 }
 
 forge_issue_note() {
-  local iid="$1" message="$2"
+  local iid="$1" message="$2" rc=0
   message=$(stamp_agent_marker "$message")
   _gh_api_silent -X POST "/repos/$BOUCLE_PROJECT_ID/issues/$iid/comments" \
-    -f body="$message"
+    -f body="$message" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "WARN: forge_issue_note failed (rc=$rc) for issue #$iid — the human was NOT notified of this message" >&2
+  fi
+  return "$rc"
 }
 
 forge_issue_notes() {
@@ -214,18 +220,26 @@ forge_issue_note_get() {
 }
 
 forge_issue_note_update() {
-  local iid="$1" note_id="$2" new_body="$3"
+  local iid="$1" note_id="$2" new_body="$3" rc=0
   new_body=$(stamp_agent_marker "$new_body")
   _gh_api_silent -X PATCH "/repos/$BOUCLE_PROJECT_ID/issues/comments/$note_id" \
-    -f body="$new_body"
+    -f body="$new_body" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "WARN: forge_issue_note_update failed (rc=$rc) for issue #$iid note $note_id" >&2
+  fi
+  return "$rc"
 }
 
 forge_mr_note_update() {
-  local mr_iid="$1" note_id="$2" new_body="$3"
+  local mr_iid="$1" note_id="$2" new_body="$3" rc=0
   new_body=$(stamp_agent_marker "$new_body")
   # GitHub PR issue-style comments use the same endpoint as issue comments
   _gh_api_silent -X PATCH "/repos/$BOUCLE_PROJECT_ID/issues/comments/$note_id" \
-    -f body="$new_body"
+    -f body="$new_body" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "WARN: forge_mr_note_update failed (rc=$rc) for PR #$mr_iid note $note_id" >&2
+  fi
+  return "$rc"
 }
 
 forge_note_delete() {
@@ -317,11 +331,15 @@ forge_mr_get() {
 }
 
 forge_mr_note() {
-  local mr_iid="$1" message="$2"
+  local mr_iid="$1" message="$2" rc=0
   message=$(stamp_agent_marker "$message")
   # PR comments use the same issues/{n}/comments endpoint
   _gh_api_silent -X POST "/repos/$BOUCLE_PROJECT_ID/issues/$mr_iid/comments" \
-    -f body="$message"
+    -f body="$message" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "WARN: forge_mr_note failed (rc=$rc) for PR #$mr_iid — the human was NOT notified of this message" >&2
+  fi
+  return "$rc"
 }
 
 forge_mr_notes() {
