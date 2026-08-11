@@ -2086,6 +2086,16 @@ worker:
       if [ -n "$MR_FOR_FEEDBACK" ]; then
         BOUCLE_REVIEWER_FEEDBACK=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_FOR_FEEDBACK/notes?per_page=100&order_by=created_at&sort=asc" 2>/dev/null \
           | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | .[]' 2>/dev/null || echo "")
+      elif [ "${BOUCLE_ITERATION:-1}" -gt 1 ]; then
+        # Fail-loud guard for the MR feedback channel (AGENTS.md lesson #54):
+        # a port/sync can silently drop this lookup while leaving the
+        # BOUCLE_MR_IID export below — workers then re-run blind to human MR
+        # comments (observed: jcode port f830644, MR !59 on a consumer repo).
+        # On a re-run, an empty MR_FOR_FEEDBACK is suspicious: warn loudly and
+        # inject a self-fetch fallback so the worker is not blind.
+        echo "[boucle] WARNING: worker re-run (iteration $BOUCLE_ITERATION) but MR lookup for boucle/$BOUCLE_ISSUE returned empty — feedback channel may be broken. Injecting self-fetch fallback."
+        BOUCLE_REVIEWER_FEEDBACK="[boucle:guard] No MR feedback was injected on this re-run, but prior runs exist. Fetch the MR notes for source branch boucle/$BOUCLE_ISSUE yourself and address every actionable human comment and reviewer verdict before claiming done."
+        export BOUCLE_REVIEWER_FEEDBACK
       fi
 
       # Download attachments uploaded to MR comments (reviewer screenshots,
@@ -2670,6 +2680,13 @@ reviewer:
       export BOUCLE_REVIEWER_FEEDBACK
       BOUCLE_REVIEWER_FEEDBACK=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/notes?per_page=100&order_by=created_at&sort=asc" 2>/dev/null \
         | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | .[]' 2>/dev/null || echo "")
+      if [ -z "$BOUCLE_REVIEWER_FEEDBACK" ] && [ "${BOUCLE_ITERATION:-1}" -gt 1 ]; then
+        # Fail-loud guard (AGENTS.md lesson #54): on a re-run, an empty
+        # feedback channel is suspicious (note-fetch failure, regression).
+        # The reviewer MUST verify human amendments — tell it to self-fetch.
+        echo "[boucle] WARNING: reviewer re-run (iteration $BOUCLE_ITERATION) with EMPTY MR feedback — injecting self-fetch fallback."
+        BOUCLE_REVIEWER_FEEDBACK="[boucle:guard] No MR feedback was injected on this re-run, but prior runs exist. Fetch the MR notes for MR !$MR_IID yourself and verify EVERY human amendment is addressed before PASS."
+      fi
 
       # Detect empty MR (worker shipped zero commits — base_sha == head_sha).
       # Re-trigger the worker instead of running the reviewer uselessly.

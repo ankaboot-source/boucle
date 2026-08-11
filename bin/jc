@@ -733,6 +733,17 @@ Post your analysis as a comment with the boucle:triage marker. Use: bin/forge-no
       # MR comment actually address the feedback. Empty on the first run.
       local feedback
       feedback="$(trim_notes reviewer_feedback "${BOUCLE_REVIEWER_FEEDBACK:-}")"
+      # Fail-loud guard for the MR feedback channel (AGENTS.md lesson #54):
+      # a port/sync can silently drop the CI-side lookup while leaving the
+      # orphaned BOUCLE_MR_IID export (observed: jcode port f830644 — workers
+      # re-ran blind to human MR comments for 3 days). On any RE-RUN
+      # (iteration > 1) an empty raw feedback channel is suspicious: warn
+      # loudly and fall back to self-fetch instructions instead of letting
+      # the agent assume there is no feedback.
+      if [ -z "${BOUCLE_REVIEWER_FEEDBACK:-}" ] && [ "${BOUCLE_ITERATION:-1}" -gt 1 ]; then
+        echo "[boucle:jc] WARNING: worker re-run (iteration ${BOUCLE_ITERATION}) with EMPTY MR feedback — the feedback channel may be broken. The worker will be told to fetch the MR discussion itself." >&2
+        feedback="[boucle:guard] No MR feedback was injected on this re-run, but prior runs exist (iteration ${BOUCLE_ITERATION}). Do NOT assume there is no feedback: fetch the MR notes for source branch boucle/${ISSUE} yourself (glab mr note list -R \${CI_PROJECT_PATH} -n 100 or bin/forge-note) and address every actionable human comment and reviewer verdict before claiming done."
+      fi
       prompt="Implement issue #${ISSUE}. Read state.md first. Commit your changes with [skip ci].
 
 Preserve instructed content: the issue body below contains the EXACT content the human instructed (URLs, citations, texts, images). You MUST use them verbatim. DO NOT generate placeholders, DO NOT rewrite the instructed texts, DO NOT substitute URLs. If a field is missing from the issue, fetch the issue body via \`bin/forge-note issue ${ISSUE}\` or the forge CLI rather than inventing. Recent amendments (in the feedback section below) AMEND the spec — they do NOT replace earlier preservation instructions. Conciliate them.
@@ -789,9 +800,22 @@ ${BOUCLE_SIBLINGS}
       # trimming a already-reduced note keeps the per-note cap meaningful.
       # Human comments pass through both stages untouched.
       local feedback
+      local feedback
       feedback="$(filter_mr_discussion "${BOUCLE_REVIEWER_FEEDBACK:-}")"
       feedback="$(trim_notes reviewer_feedback "$feedback")"
-      prompt="Review the MR for issue #${ISSUE}. Test the deployed preview at \$BOUCLE_PREVIEW_URL. Post your verdict with the boucle:verdict marker.
+      # Fail-loud guard for the MR feedback channel (AGENTS.md lesson #54):
+      # a port/sync can silently drop the CI-side lookup while leaving the
+      # orphaned BOUCLE_MR_IID export. Check the RAW env, not the filtered
+      # value: anchoring (BOUCLE_REVIEW_ANCHORING) deliberately withholds
+      # verdicts downstream, but the raw channel must still be populated.
+      # On a re-run an empty raw channel is a red flag — warn loudly and fall
+      # back to self-fetch instructions instead of grading against the
+      # frozen spec alone (which is exactly how unaddressed human amendments
+      # slip a PASS).
+      if [ -z "${BOUCLE_REVIEWER_FEEDBACK:-}" ] && [ "${BOUCLE_ITERATION:-1}" -gt 1 ]; then
+        echo "[boucle:jc] WARNING: reviewer re-run (iteration ${BOUCLE_ITERATION}) with EMPTY MR feedback — the feedback channel may be broken. The reviewer will be told to fetch the MR discussion itself." >&2
+        feedback="[boucle:guard] No MR feedback was injected on this re-run, but prior runs exist (iteration ${BOUCLE_ITERATION}). Do NOT assume there is no feedback: fetch the MR notes for source branch boucle/${ISSUE} yourself (glab mr note list -R \${CI_PROJECT_PATH} -n 100 or bin/forge-note) and verify EVERY human amendment is addressed before PASS."
+      fi      prompt="Review the MR for issue #${ISSUE}. Test the deployed preview at \$BOUCLE_PREVIEW_URL. Post your verdict with the boucle:verdict marker.
 
 Verify content fidelity: the issue body below is the original spec. Check that the MR preserves the instructed content (URLs, citations, texts) verbatim — no placeholders, no rewrites, no substitutions. A MR that degrades instructed content is a FAIL even if it satisfies the latest amendments.
 "

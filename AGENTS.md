@@ -1134,6 +1134,47 @@ atomic.
       distinct from lesson #16 (feeding reviewer feedback FORWARD to the
       worker) — this is the reviewer's own obligation to APPLY amendments.
 
+54. **The MR feedback channel MUST fail loud on re-runs — a port/sync can
+    silently drop it**
+    - ❌ DO NOT let a port/rewrite of the CI engine remove the MR feedback
+      lookup (`MR_FOR_FEEDBACK` + `BOUCLE_REVIEWER_FEEDBACK` in the worker
+      and reviewer jobs) while leaving the orphaned
+      `export BOUCLE_MR_IID="$MR_FOR_FEEDBACK"` + `fetch-mr-attachments` call
+      behind. The failure is indistinguishable from a first run: every
+      worker iteration logs "BOUCLE_MR_IID is empty (no MR on first run)"
+      while an MR is open and accumulating human comments. MR !59 on a
+      consumer repo: after the jcode port (`.boucle-version 13316ff`, synced
+      2026-08-06) all 6+ worker iterations re-ran blind — the human's
+      "il faut un exemple d'article" and 3 mockup images never reached the
+      worker, which re-implemented the same component ~20 times without
+      ever creating the requested example article. The reviewer (which kept
+      its own channel) FAILed repeatedly citing the human request, one PASS
+      validated the unaddressed amendment, the iteration cap escalated to
+      `boucle:human`, and the old engine's per-run `git reset --hard` left
+      the MR empty (`commits_status`) for the merger/doctor to loop on.
+    - ❌ DO NOT rely on the lookup living in only one place. `.gitlab-ci.yml`
+      is replaced wholesale by engine syncs (`chore: sync boucle engine to
+      <sha>` = `cp -r`), so a guard embedded only in that file dies with the
+      regression it guards.
+    - ✅ DO: treat an EMPTY `BOUCLE_REVIEWER_FEEDBACK` on any RE-RUN
+      (iteration > 1) as a red flag, not a first run. The worker and reviewer
+      before_script WARN loudly and inject a `[boucle:guard]` self-fetch
+      fallback into the feedback; `bin/jc` `build_prompt` repeats the same
+      guard (it survives CI-file rewrites). The agent then fetches the MR
+      notes itself instead of assuming no feedback exists.
+    - ✅ DO: verify the feedback channel after every engine port/sync — a
+      sync that rewrites the jobs must preserve the `MR_FOR_FEEDBACK`
+      lookup, or the guard must fire.
+    - Admission: class — an engine port/sync silently drops an integration
+      channel while leaving a half-wired remnant, so worker/reviewer re-runs
+      go blind to human feedback; recurrence — engine ports and `cp -r`
+      syncs are recurring operations and the symptom is designed to be
+      silent (the "no MR on first run" message is exactly what a working
+      first run prints); stable — no line numbers, no transient values;
+      distinct from lesson #16 (which mandates the channel's existence in
+      the design) — this lesson covers regression-by-port and the fail-loud
+      guard.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
