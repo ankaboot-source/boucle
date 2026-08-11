@@ -861,15 +861,20 @@ dispatch:
         if [ "$ISSUE_STATE_FOR_GUARD" = "closed" ]; then
           # Check if this is a BOT_JUST_ASSIGNED event — if so, let it through
           # (the human explicitly assigned the bot to reopen the issue).
-          GUARD_ACTION=$(jq -r '.object_attributes.action // empty' "$TRIGGER_PAYLOAD")
+          GUARD_ACTION=$(jq -r '.object_attributes.action // empty' "$TRIGGER_PAYLOAD" 2>/dev/null || echo "")
           GUARD_BOT_ASSIGNED=false
           if [ "$OBJECT_KIND" = "issue" ] && [ "$GUARD_ACTION" = "update" ]; then
             if [ -n "${BOUCLE_BOT_ID:-}" ] && [[ "$BOUCLE_BOT_ID" =~ ^[0-9]+$ ]]; then
-              GUARD_BOT_IN_CURRENT=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.current // [] | map(.id | tostring) | index($bid) != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
-              GUARD_BOT_IN_PREVIOUS=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.previous // [] | map(.id | tostring) | index($bid) != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
+              # Late payload reads: the trigger payload file can vanish
+              # mid-job (jq exit 5 "system error" — same failure as
+              # pipeline #1433434). Deferred with `|| var=false` (never
+              # under set -e) so a vanished file degrades to "no assignee
+              # change" instead of killing dispatch silently.
+              GUARD_BOT_IN_CURRENT=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.current // [] | map(.id | tostring) | index($bid) != null' "$TRIGGER_PAYLOAD" 2>/dev/null) || GUARD_BOT_IN_CURRENT=false
+              GUARD_BOT_IN_PREVIOUS=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.previous // [] | map(.id | tostring) | index($bid) != null' "$TRIGGER_PAYLOAD" 2>/dev/null) || GUARD_BOT_IN_PREVIOUS=false
             else
-              GUARD_BOT_IN_CURRENT=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.current // [] | map(.username) | index($bname) != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
-              GUARD_BOT_IN_PREVIOUS=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.previous // [] | map(.username) | index($bname) != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
+              GUARD_BOT_IN_CURRENT=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.current // [] | map(.username) | index($bname) != null' "$TRIGGER_PAYLOAD" 2>/dev/null) || GUARD_BOT_IN_CURRENT=false
+              GUARD_BOT_IN_PREVIOUS=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.previous // [] | map(.username) | index($bname) != null' "$TRIGGER_PAYLOAD" 2>/dev/null) || GUARD_BOT_IN_PREVIOUS=false
             fi
             if [ "$GUARD_BOT_IN_CURRENT" = "true" ] && [ "$GUARD_BOT_IN_PREVIOUS" != "true" ]; then
               GUARD_BOT_ASSIGNED=true
@@ -976,12 +981,12 @@ dispatch:
       BOT_JUST_ASSIGNED=false
       if [ "$OBJECT_KIND" = "issue" ] && [ "$ACTION" = "update" ]; then
         if [ -n "${BOUCLE_BOT_ID:-}" ] && [[ "$BOUCLE_BOT_ID" =~ ^[0-9]+$ ]]; then
-          BOT_IN_CURRENT=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.current // [] | map(.id | tostring) | index($bid) != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
-          BOT_IN_PREVIOUS=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.previous // [] | map(.id | tostring) | index($bid) != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
+          BOT_IN_CURRENT=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.current // [] | map(.id | tostring) | index($bid) != null' "$TRIGGER_PAYLOAD" 2>/dev/null) || BOT_IN_CURRENT=false
+          BOT_IN_PREVIOUS=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.previous // [] | map(.id | tostring) | index($bid) != null' "$TRIGGER_PAYLOAD" 2>/dev/null) || BOT_IN_PREVIOUS=false
         else
           # Fallback: detect by bot username "up-bot" when BOUCLE_BOT_ID is unset
-          BOT_IN_CURRENT=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.current // [] | map(.username) | index($bname) != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
-          BOT_IN_PREVIOUS=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.previous // [] | map(.username) | index($bname) != null' "$TRIGGER_PAYLOAD" 2>/dev/null)
+          BOT_IN_CURRENT=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.current // [] | map(.username) | index($bname) != null' "$TRIGGER_PAYLOAD" 2>/dev/null) || BOT_IN_CURRENT=false
+          BOT_IN_PREVIOUS=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.previous // [] | map(.username) | index($bname) != null' "$TRIGGER_PAYLOAD" 2>/dev/null) || BOT_IN_PREVIOUS=false
         fi
         if [ "$BOT_IN_CURRENT" = "true" ] && [ "$BOT_IN_PREVIOUS" != "true" ]; then
           BOT_JUST_ASSIGNED=true
