@@ -941,8 +941,10 @@ boucle_is_diff_review() {
 #   Resolve the production/live URL in priority order:
 #     1. BOUCLE_LIVE_URL (explicit override)
 #     2. BOUCLE_PRODUCTION_URL (fallback)
-#     3. Regex-extract from deploy_log (self mode only)
-#     4. Last-resort: https://${BOUCLE_DEPLOY_PROJECT}.pages.dev (self mode only)
+#     3. $CI_PAGES_URL when BOUCLE_DEPLOY_PROVIDER=gitlab-pages (declarative
+#        GitLab Pages — the forge serves the site itself, no deploy command)
+#     4. Regex-extract from deploy_log (self mode only)
+#     5. Last-resort: https://${BOUCLE_DEPLOY_PROJECT}.pages.dev (self mode only)
 #   Echoes the resolved URL on stdout.
 boucle_resolve_live_url() {
   local deploy_log="$1"
@@ -960,7 +962,15 @@ boucle_resolve_live_url() {
     return
   fi
 
-  # Priority 3-4: self mode only — extract from deploy log or fallback
+  # Priority 3: declarative GitLab Pages — the forge serves the site at
+  # $CI_PAGES_URL (only defined in CI jobs, never locally). The pages.dev
+  # last-resort below would point at a nonexistent Cloudflare project.
+  if [ "${BOUCLE_DEPLOY_PROVIDER:-}" = "gitlab-pages" ] && [ -n "${CI_PAGES_URL:-}" ]; then
+    echo "$CI_PAGES_URL"
+    return
+  fi
+
+  # Priority 4-5: self mode only — extract from deploy log or fallback
   if boucle_is_self_deploy; then
     if [ -n "$deploy_log" ] && [ -f "$deploy_log" ]; then
       url=$(grep -oE "$BOUCLE_DEPLOY_URL_REGEX" "$deploy_log" | head -1)
@@ -975,8 +985,18 @@ boucle_resolve_live_url() {
 
 # boucle_worker_should_deploy
 #   Returns 0 if the worker should run the preview deploy step,
-#   1 if it should skip it (external mode or diff review mode).
+#   1 if it should skip it (external mode, diff review mode, or no
+#   deploy command — e.g. GitLab Pages declarative mode where
+#   BOUCLE_DEPLOY_CMD is empty and the forge serves the site itself).
 boucle_worker_should_deploy() {
+  # Skip deploy when no deploy command is configured (GitLab Pages
+  # declarative / token-less mode, or a provider without a CLI). An empty
+  # BOUCLE_DEPLOY_CMD must SKIP the preview deploy, never fail the worker:
+  # the reviewer already falls back to diff review when no preview URL
+  # could be extracted, so a skipped preview is a valid, complete loop.
+  if [ -z "${BOUCLE_DEPLOY_CMD:-}" ]; then
+    return 1
+  fi
   # Skip deploy in external mode (consumer's own CI handles it)
   if boucle_is_external_deploy; then
     return 1

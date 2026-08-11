@@ -58,6 +58,28 @@ Boucle supports two deploy modes and two review modes, orthogonal and composable
 | `self` (default) | Boucle runs `BOUCLE_DEPLOY_CMD` to deploy a preview (worker) and production (post-merge). URL is derived from deploy output via `BOUCLE_DEPLOY_URL_REGEX`, then falls back to `https://${BOUCLE_DEPLOY_PROJECT}.pages.dev`. |
 | `external` | Boucle does NOT deploy. Post-merge waits for the consumer's own CI/CD on the merged commit (via `forge_commit_check_suites`), then hands `BOUCLE_LIVE_URL` to e2e. `BOUCLE_LIVE_URL` is **required**. |
 
+### GitLab Pages declarative mode (`BOUCLE_DEPLOY_PROVIDER=gitlab-pages`)
+
+Opt-in token-less deploy path: set `BOUCLE_DEPLOY_PROVIDER=gitlab-pages` and
+leave `BOUCLE_DEPLOY_CMD` **empty** (a project variable with an empty value
+overrides the YAML default). The forge's own `pages` job builds
+`$BOUCLE_BUILD_OUTPUT` and serves it at `$CI_PAGES_URL` — no deploy command,
+no preview URLs.
+
+The loop adapts automatically to an empty `BOUCLE_DEPLOY_CMD`:
+
+- **Worker** — skips the preview deploy (no `FAIL: no preview URL`); the MR
+  description carries no `Preview:` line.
+- **Reviewer** — sees no preview URL and falls back to **diff review** (code
+  review of the MR diff + check suites), same as `BOUCLE_REVIEW_MODE=diff`.
+- **Deploy job** — skips cleanly (`deploy: BOUCLE_DEPLOY_CMD is empty`).
+- **Post-merge/e2e** — resolves the live URL to `$CI_PAGES_URL` instead of
+  the `pages.dev` fallback (which would point at a nonexistent Cloudflare
+  project).
+
+An empty `BOUCLE_DEPLOY_CMD` must NEVER fail a job — it is a valid,
+complete loop, not a misconfiguration.
+
 ### Review modes (`BOUCLE_REVIEW_MODE`)
 
 | Mode | Behavior |
@@ -90,7 +112,8 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_DND_TZ` | `UTC` | Quiet-hours timezone (IANA name, e.g. `Europe/Paris`); seeded by `bin/setup` from the machine's timezone. |
 | `BOUCLE_DND_EXCLUDE_DAYS` | *(empty)* | Comma-separated weekday names never in DND (e.g. `Fri,Sat`). |
 | `BOUCLE_DEPLOY_MODE` | `self` | Deploy mode: `self` (boucle runs `BOUCLE_DEPLOY_CMD`) or `external` (consumer's own CI/CD deploys). |
-| `BOUCLE_REVIEW_MODE` | `preview` | Review mode: `preview` (tests deployed preview) or `diff` (reviews PR diff + check suites). |
+| `BOUCLE_REVIEW_MODE` | `preview` | Review mode: `preview` (tests deployed preview) or `diff` (reviews PR diff + check suites). Auto-falls back to `diff` when no preview URL could be extracted (e.g. GitLab Pages declarative mode). |
+| `BOUCLE_DEPLOY_PROVIDER` | *(empty)* | Deploy provider profile: `gitlab-pages` (declarative, token-less — leave `BOUCLE_DEPLOY_CMD` empty, live URL = `$CI_PAGES_URL`). Empty = deploy via `BOUCLE_DEPLOY_CMD`. |
 | `BOUCLE_DEPLOY_CMD` | `npx wrangler pages deploy ...` | Deploy command (self mode). |
 | `BOUCLE_DEPLOY_URL_REGEX` | `https://[a-z0-9.-]+\.pages\.dev` | Regex to extract URL from deploy output. |
 | `BOUCLE_DEPLOY_PROJECT` | `""` | Cloudflare Pages project name (self mode). |
