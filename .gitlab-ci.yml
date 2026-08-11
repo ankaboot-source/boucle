@@ -177,9 +177,10 @@ default:
         echo "Installing Node.js (shell executor has no image support)..."
         NODE_VER="v22.19.0"
         mkdir -p "$HOME/.local"
-        curl -sL "https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-linux-x64.tar.xz" -o /tmp/node.tar.xz
-        tar xf /tmp/node.tar.xz -C "$HOME/.local" --strip-components=1
-        rm -f /tmp/node.tar.xz
+        NODE_TMP="/tmp/node-${CI_JOB_ID:-local}.tar.xz"
+        curl -sL "https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-linux-x64.tar.xz" -o "$NODE_TMP"
+        tar xf "$NODE_TMP" -C "$HOME/.local" --strip-components=1
+        rm -f "$NODE_TMP"
       fi
       unset _NEED_NODE
 
@@ -192,11 +193,13 @@ default:
       if [ -z "$_GLAB_INSTALLED" ] || [ "$_GLAB_INSTALLED" != "$GLAB_VER" ]; then
         echo "Installing glab v${GLAB_VER} (was: ${_GLAB_INSTALLED:-MISSING})..."
         mkdir -p "$HOME/.local/bin"
-        curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VER}/downloads/glab_${GLAB_VER}_linux_amd64.tar.gz" -o /tmp/glab.tar.gz
-        tar xzf /tmp/glab.tar.gz -C /tmp
-        cp /tmp/bin/glab "$HOME/.local/bin/glab" 2>/dev/null || cp /tmp/glab "$HOME/.local/bin/glab"
+        GLAB_TMP="/tmp/glab-${CI_JOB_ID:-local}"
+        curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VER}/downloads/glab_${GLAB_VER}_linux_amd64.tar.gz" -o "$GLAB_TMP.tar.gz"
+        mkdir -p "$GLAB_TMP"
+        tar xzf "$GLAB_TMP.tar.gz" -C "$GLAB_TMP"
+        cp "$GLAB_TMP/bin/glab" "$HOME/.local/bin/glab" 2>/dev/null || cp "$GLAB_TMP/glab" "$HOME/.local/bin/glab"
         chmod +x "$HOME/.local/bin/glab"
-        rm -f /tmp/glab.tar.gz /tmp/bin/glab
+        rm -rf "$GLAB_TMP" "$GLAB_TMP.tar.gz"
       fi
       unset _GLAB_INSTALLED
 
@@ -260,12 +263,14 @@ default:
       if ! command -v jcode &>/dev/null || ! jcode --version 2>/dev/null | grep -q "$JCODE_VER"; then
         echo "Installing jcode coding agent (standalone binary, $JCODE_VER)..."
         mkdir -p "$HOME/.local/bin"
-        curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x86_64.tar.gz" -o /tmp/jcode.tar.gz
-        tar xzf /tmp/jcode.tar.gz -C /tmp
+        JCODE_TMP="/tmp/jcode-${CI_JOB_ID:-local}"
+        curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x86_64.tar.gz" -o "$JCODE_TMP.tar.gz"
+        mkdir -p "$JCODE_TMP"
+        tar xzf "$JCODE_TMP.tar.gz" -C "$JCODE_TMP"
         # The tarball contains jcode-linux-x86_64.bin at its root.
-        mv /tmp/jcode-linux-x86_64.bin "$HOME/.local/bin/jcode"
+        mv "$JCODE_TMP/jcode-linux-x86_64.bin" "$HOME/.local/bin/jcode"
         chmod +x "$HOME/.local/bin/jcode"
-        rm -rf /tmp/jcode-linux-x86_64* /tmp/jcode.tar.gz
+        rm -rf "$JCODE_TMP" "$JCODE_TMP.tar.gz"
       fi
 
       # ── codebase-memory-mcp (codebase knowledge graph) ──
@@ -457,10 +462,12 @@ dispatch:
         echo "Installing glab..."
         mkdir -p "$HOME/.local/bin"
         GLAB_VER="1.50.0"
-        curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VER}/downloads/glab_${GLAB_VER}_linux_amd64.tar.gz" -o /tmp/glab.tar.gz
-        tar xzf /tmp/glab.tar.gz -C /tmp
-        cp /tmp/bin/glab "$HOME/.local/bin/glab" 2>/dev/null || cp /tmp/glab "$HOME/.local/bin/glab"
+        curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VER}/downloads/glab_${GLAB_VER}_linux_amd64.tar.gz" -o "/tmp/glab-${CI_JOB_ID:-local}.tar.gz"
+        mkdir -p "/tmp/glab-${CI_JOB_ID:-local}"
+        tar xzf "/tmp/glab-${CI_JOB_ID:-local}.tar.gz" -C "/tmp/glab-${CI_JOB_ID:-local}"
+        cp "/tmp/glab-${CI_JOB_ID:-local}/bin/glab" "$HOME/.local/bin/glab" 2>/dev/null || cp "/tmp/glab-${CI_JOB_ID:-local}/glab" "$HOME/.local/bin/glab"
         chmod +x "$HOME/.local/bin/glab"
+        rm -rf "/tmp/glab-${CI_JOB_ID:-local}" "/tmp/glab-${CI_JOB_ID:-local}.tar.gz"
       fi
 
       # ── BOUCLE_BOT_ID resolution (set_boucle_label reassigns to the
@@ -1482,13 +1489,14 @@ triage:
             if [ -z "$TRIAGE_NOTE_ID" ]; then
               echo "[boucle] WARN: triage comment not found — cannot embed preview"
             else
-              # 2. Install Chromium + puppeteer-core (only now, in /tmp).
-              if npm install --prefix /tmp puppeteer-core @sparticuz/chromium >/dev/null 2>&1; then
+              # 2. Install Chromium + puppeteer-core (only now, in a per-job dir).
+              NPM_TMP="/tmp/npm-${CI_JOB_ID:-local}"
+              if npm install --prefix "$NPM_TMP" puppeteer-core @sparticuz/chromium >/dev/null 2>&1; then
                 # 3. Render preview.html → preview.png (1280x800, fullPage).
-                #    NODE_PATH=/tmp/node_modules so the script (bin/) resolves
-                #    the modules installed in /tmp.
+                #    NODE_PATH=$NPM_TMP/node_modules so the script (bin/) resolves
+                #    the modules installed in the per-job dir.
                 PREVIEW_PNG="$CI_PROJECT_DIR/.boucle/$IID/preview.png"
-                if NODE_PATH=/tmp/node_modules node "$CI_PROJECT_DIR/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2>/dev/null; then
+                if NODE_PATH="$NPM_TMP/node_modules" node "$CI_PROJECT_DIR/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2>/dev/null; then
                   # 4. Upload the PNG via the GitLab uploads API.
                   UPLOAD_RESP=$(curl -s --request POST \
                     --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
@@ -1651,7 +1659,7 @@ triage:
             }
             { print }
             END { if (rec > 0) print "---END---" }
-          ' > /tmp/subissues.parsed
+          ' > "/tmp/subissues-${CI_JOB_ID:-local}.parsed"
 
           while IFS= read -r line; do
             if [ "$line" = "---END---" ]; then
@@ -1758,7 +1766,7 @@ triage:
                 CUR_SIZE_RAW="${BASH_REMATCH[1]}"
               fi
             fi
-          done < /tmp/subissues.parsed
+          done < "/tmp/subissues-${CI_JOB_ID:-local}.parsed"
 
           # ── Resolve dependencies (index → IID) and update sub-issue bodies ──
           # CUR_DEPS holds 1-based sibling indices (e.g. "2"). Map them to
@@ -1773,7 +1781,7 @@ triage:
             source "$BOUCLE_HOME/bin/lib/depends-on.sh"
 
             # Re-parse to get per-sub-issue deps (we lost CUR_DEPS across the
-            # loop boundary, so re-derive from /tmp/subissues.parsed).
+            # loop boundary, so re-derive from the per-job subissues file).
             declare -a DEPS_BY_INDEX=()
             CUR_IDX=0
             while IFS= read -r line; do
@@ -1782,7 +1790,7 @@ triage:
               elif [[ "$line" == DEPS:* ]]; then
                 DEPS_BY_INDEX[$CUR_IDX]="${line#DEPS:}"
               fi
-            done < /tmp/subissues.parsed
+            done < "/tmp/subissues-${CI_JOB_ID:-local}.parsed"
 
             # Build graph string for detect_cycle: "0:1;1:0" where nodes are
             # 0-based array indices and deps are 0-based space-separated.
@@ -1873,7 +1881,7 @@ triage:
               echo "WARN: $PARSE_FAILURES sub-issue(s) failed to create"
             fi
           fi
-          rm -f /tmp/subissues.parsed
+          rm -f "/tmp/subissues-${CI_JOB_ID:-local}.parsed"
           ;;
         *)
           echo "Unparsable disposition: $DISPOSITION → routing to human"
@@ -3230,10 +3238,12 @@ merger:
         echo "Installing glab..."
         mkdir -p "$HOME/.local/bin"
         GLAB_VER="1.50.0"
-        curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VER}/downloads/glab_${GLAB_VER}_linux_amd64.tar.gz" -o /tmp/glab.tar.gz
-        tar xzf /tmp/glab.tar.gz -C /tmp
-        cp /tmp/bin/glab "$HOME/.local/bin/glab" 2>/dev/null || cp /tmp/glab "$HOME/.local/bin/glab"
+        curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VER}/downloads/glab_${GLAB_VER}_linux_amd64.tar.gz" -o "/tmp/glab-${CI_JOB_ID:-local}.tar.gz"
+        mkdir -p "/tmp/glab-${CI_JOB_ID:-local}"
+        tar xzf "/tmp/glab-${CI_JOB_ID:-local}.tar.gz" -C "/tmp/glab-${CI_JOB_ID:-local}"
+        cp "/tmp/glab-${CI_JOB_ID:-local}/bin/glab" "$HOME/.local/bin/glab" 2>/dev/null || cp "/tmp/glab-${CI_JOB_ID:-local}/glab" "$HOME/.local/bin/glab"
         chmod +x "$HOME/.local/bin/glab"
+        rm -rf "/tmp/glab-${CI_JOB_ID:-local}" "/tmp/glab-${CI_JOB_ID:-local}.tar.gz"
       fi
 
       # ── BOUCLE_BOT_ID resolution (set_boucle_label needs it for the bot
@@ -3502,10 +3512,12 @@ post-merge:
         echo "Installing glab..."
         mkdir -p "$HOME/.local/bin"
         GLAB_VER="1.50.0"
-        curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VER}/downloads/glab_${GLAB_VER}_linux_amd64.tar.gz" -o /tmp/glab.tar.gz
-        tar xzf /tmp/glab.tar.gz -C /tmp
-        cp /tmp/bin/glab "$HOME/.local/bin/glab" 2>/dev/null || cp /tmp/glab "$HOME/.local/bin/glab"
+        curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VER}/downloads/glab_${GLAB_VER}_linux_amd64.tar.gz" -o "/tmp/glab-${CI_JOB_ID:-local}.tar.gz"
+        mkdir -p "/tmp/glab-${CI_JOB_ID:-local}"
+        tar xzf "/tmp/glab-${CI_JOB_ID:-local}.tar.gz" -C "/tmp/glab-${CI_JOB_ID:-local}"
+        cp "/tmp/glab-${CI_JOB_ID:-local}/bin/glab" "$HOME/.local/bin/glab" 2>/dev/null || cp "/tmp/glab-${CI_JOB_ID:-local}/glab" "$HOME/.local/bin/glab"
         chmod +x "$HOME/.local/bin/glab"
+        rm -rf "/tmp/glab-${CI_JOB_ID:-local}" "/tmp/glab-${CI_JOB_ID:-local}.tar.gz"
       fi
 
       # ── BOUCLE_BOT_ID resolution ──
@@ -3630,10 +3642,12 @@ catchup:
         echo "Installing glab..."
         mkdir -p "$HOME/.local/bin"
         GLAB_VER="1.50.0"
-        curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VER}/downloads/glab_${GLAB_VER}_linux_amd64.tar.gz" -o /tmp/glab.tar.gz
-        tar xzf /tmp/glab.tar.gz -C /tmp
-        cp /tmp/bin/glab "$HOME/.local/bin/glab" 2>/dev/null || cp /tmp/glab "$HOME/.local/bin/glab"
+        curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VER}/downloads/glab_${GLAB_VER}_linux_amd64.tar.gz" -o "/tmp/glab-${CI_JOB_ID:-local}.tar.gz"
+        mkdir -p "/tmp/glab-${CI_JOB_ID:-local}"
+        tar xzf "/tmp/glab-${CI_JOB_ID:-local}.tar.gz" -C "/tmp/glab-${CI_JOB_ID:-local}"
+        cp "/tmp/glab-${CI_JOB_ID:-local}/bin/glab" "$HOME/.local/bin/glab" 2>/dev/null || cp "/tmp/glab-${CI_JOB_ID:-local}/glab" "$HOME/.local/bin/glab"
         chmod +x "$HOME/.local/bin/glab"
+        rm -rf "/tmp/glab-${CI_JOB_ID:-local}" "/tmp/glab-${CI_JOB_ID:-local}.tar.gz"
       fi
 
       # ── BOUCLE_BOT_ID resolution ──

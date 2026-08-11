@@ -375,18 +375,19 @@ boucle_ci_triage() {
         if [ -z "$TRIAGE_NOTE_ID" ]; then
           echo "[boucle] WARN: triage comment not found — cannot embed preview"
         else
-          # 2. Install Chromium + puppeteer-core (only now, in /tmp).
-          if npm install --prefix /tmp puppeteer-core @sparticuz/chromium > /dev/null 2>&1; then
+          # 2. Install Chromium + puppeteer-core (only now, in a per-job dir).
+          NPM_TMP="/tmp/npm-${CI_JOB_ID:-$$}"
+          if npm install --prefix "$NPM_TMP" puppeteer-core @sparticuz/chromium > /dev/null 2>&1; then
             # 3. Render preview.html → preview.png (1280x800, fullPage).
-            #    NODE_PATH=/tmp/node_modules so the script (bin/) resolves
-            #    the modules installed in /tmp.
+            #    NODE_PATH=$NPM_TMP/node_modules so the script (bin/) resolves
+            #    the modules installed in the per-job dir.
             PREVIEW_PNG="$BOUCLE_WORKSPACE/.boucle/$IID/preview.png"
             #    The renderer emits one PNG per BOUCLE_PREVIEW_VIEWPORTS
             #    entry (default: one phone, one desktop) and prints each
             #    path on stdout. A spec approved on a desktop-only shot
             #    hides exactly the class of regression this audience
             #    cannot read from a diff.
-            RENDERED_PNGS=$(NODE_PATH=/tmp/node_modules node "$BOUCLE_WORKSPACE/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2> /dev/null || true)
+            RENDERED_PNGS=$(NODE_PATH="$NPM_TMP/node_modules" node "$BOUCLE_WORKSPACE/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2> /dev/null || true)
             if [ -n "$RENDERED_PNGS" ]; then
               # 4. Upload each PNG via the forge contract. The backend
               #    returns the embeddable path (GitLab: /uploads/...;
@@ -569,7 +570,7 @@ boucle_ci_triage() {
                 }
                 { print }
                 END { if (rec > 0) print "---END---" }
-            ' > /tmp/subissues.parsed
+            ' > "/tmp/subissues-${CI_JOB_ID:-$$}.parsed"
 
       while IFS= read -r line; do
         if [ "$line" = "---END---" ]; then
@@ -658,7 +659,7 @@ boucle_ci_triage() {
             CUR_SIZE_RAW="${BASH_REMATCH[1]}"
           fi
         fi
-      done < /tmp/subissues.parsed
+      done < "/tmp/subissues-${CI_JOB_ID:-$$}.parsed"
 
       # ── Resolve dependencies (index → IID) and update sub-issue bodies ──
       # CUR_DEPS holds 1-based sibling indices (e.g. "2"). Map them to
@@ -673,7 +674,7 @@ boucle_ci_triage() {
         source "$BOUCLE_HOME/bin/lib/depends-on.sh"
 
         # Re-parse to get per-sub-issue deps (we lost CUR_DEPS across the
-        # loop boundary, so re-derive from /tmp/subissues.parsed).
+        # loop boundary, so re-derive from the per-job subissues file).
         declare -a DEPS_BY_INDEX=()
         CUR_IDX=0
         while IFS= read -r line; do
@@ -682,7 +683,7 @@ boucle_ci_triage() {
           elif [[ "$line" == DEPS:* ]]; then
             DEPS_BY_INDEX[$CUR_IDX]="${line#DEPS:}"
           fi
-        done < /tmp/subissues.parsed
+        done < "/tmp/subissues-${CI_JOB_ID:-$$}.parsed"
 
         # Build graph string for detect_cycle: "0:1;1:0" where nodes are
         # 0-based array indices and deps are 0-based space-separated.
@@ -771,7 +772,7 @@ boucle_ci_triage() {
           echo "WARN: $PARSE_FAILURES sub-issue(s) failed to create"
         fi
       fi
-      rm -f /tmp/subissues.parsed
+      rm -f "/tmp/subissues-${CI_JOB_ID:-$$}.parsed"
       ;;
     *)
       echo "Unparsable disposition: $DISPOSITION → routing to human"
