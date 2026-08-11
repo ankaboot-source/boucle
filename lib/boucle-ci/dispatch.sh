@@ -233,7 +233,11 @@ boucle_ci_dispatch() {
             if ! (echo "$MR_LABELS" | tr ',' '\n' | grep -qx "boucle:human" && echo "$MR_LABELS" | tr ',' '\n' | grep -qx "boucle::status::human"); then
               forge_issue_labels_set "$MR_ISSUE_IID" "$HUMAN_LABELS"
             fi
-            forge_issue_note "$MR_ISSUE_IID" ":warning: MR !${MR_IID} was closed while awaiting approval. Escalated to **boucle:human** (user decision, not auto-redo)."
+            # Note BEFORE the terminal label — never a muted boucle:human.
+            if ! forge_issue_note "$MR_ISSUE_IID" ":warning: MR !${MR_IID} was closed while awaiting approval. Escalated to **boucle:human** (user decision, not auto-redo)."; then
+              echo "FAIL: escalation note could not be posted on issue #$MR_ISSUE_IID — issue already at human labels, flagging loudly (note missing)." >&2
+              exit 1
+            fi
             exit 0
             ;;
         esac

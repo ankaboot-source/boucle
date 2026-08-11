@@ -155,6 +155,15 @@ boucle_ci_e2e() {
   # → UNCERTAIN branch, which is safe.
   COMMENT=$(forge_issue_notes "$BOUCLE_ISSUE" 2> /dev/null \
     | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | first | .body // empty' 2> /dev/null)
+  # Reject a foreign-SHA verdict: a marker whose sha exists but differs from
+  # the e2e head is not this run's verdict (AGENTS.md P4). Accept only when
+  # the marker carries no sha at all (malformed marker tolerance).
+  MR_HEAD_SHORT="${MR_HEAD:0:7}"
+  FOUND_SHA=$(printf '%s' "$COMMENT" | grep -oE 'sha=[a-f0-9]+' | head -1 | cut -d= -f2 || true)
+  if [ -n "$FOUND_SHA" ] && [ -n "$MR_HEAD_SHORT" ] && [ "$FOUND_SHA" != "$MR_HEAD_SHORT" ]; then
+    echo "[boucle] REJECTED foreign-SHA e2e verdict: marker sha=$FOUND_SHA != head $MR_HEAD_SHORT. Not accepting."
+    COMMENT=""
+  fi
   VERDICT=$(echo "$COMMENT" | grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
 
   # ── Log-scraping fallback (step-limit recovery) ──────────────────
@@ -196,6 +205,13 @@ boucle_ci_e2e() {
         forge_issue_note "$BOUCLE_ISSUE" "$DRAFTED_VERDICT"
         COMMENT=$(forge_issue_notes "$BOUCLE_ISSUE" 2> /dev/null \
           | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | first | .body // empty' 2> /dev/null)
+        # Reject a foreign-SHA re-fetch: a marker whose sha exists but differs
+        # from the e2e head is not this run's verdict (AGENTS.md P4).
+        NEW_FOUND_SHA=$(printf '%s' "$COMMENT" | grep -oE 'sha=[a-f0-9]+' | head -1 | cut -d= -f2 || true)
+        if [ -n "$NEW_FOUND_SHA" ] && [ -n "$MR_HEAD_SHORT" ] && [ "$NEW_FOUND_SHA" != "$MR_HEAD_SHORT" ]; then
+          echo "[boucle] REJECTED foreign-SHA e2e re-fetch: marker sha=$NEW_FOUND_SHA != head $MR_HEAD_SHORT. Not adopting."
+          COMMENT=""
+        fi
         VERDICT=$(echo "$COMMENT" | grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
         if [ -n "$VERDICT" ]; then
           echo "[boucle] Step-limit fallback succeeded: recovered e2e verdict=$VERDICT."
@@ -296,10 +312,10 @@ Closing this issue — work continues in #$E2E_NEW_IID."
       # NOT a catch-all for empty VERDICT — see reviewer job + AGENTS.md
       # lesson #43. Empty VERDICT is handled by the post-case assertion
       # below (re-trigger e2e or escalate to human).
-      set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
       # Post a human-facing explanation so the human knows why the issue
       # landed at boucle:human. Without this, the human sees only the label
-      # change with no context.
+      # change with no context. Note BEFORE the terminal label — never a
+      # muted boucle:human.
       E2E_TRACE=$(printf '%s' "${COMMENT:-}" | head -c 4000)
       # shfmt off  # preserve exact string content (matches the original YAML block-scalar value)
       E2E_ESCALATION_BODY="<!-- boucle:e2e-escalation v=1 iid=$BOUCLE_ISSUE verdict=uncertain -->
@@ -313,7 +329,11 @@ ${BOUCLE_LIVE_URL:-unknown}
 ${E2E_TRACE:-no verdict comment was posted by the agent}
 \`\`\`"
       # shfmt on
-      forge_issue_note "$BOUCLE_ISSUE" "$E2E_ESCALATION_BODY"
+      if ! forge_issue_note "$BOUCLE_ISSUE" "$E2E_ESCALATION_BODY"; then
+        echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+        exit 1
+      fi
+      set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
       ;;
   esac
 
@@ -332,7 +352,7 @@ ${E2E_TRACE:-no verdict comment was posted by the agent}
       echo "Re-triggering e2e (iteration $((ITERATION + 1))/$MAX_ITER)."
       chain_to_role "$BOUCLE_ISSUE" "e2e" BOUCLE_ITERATION=$((ITERATION + 1))
     else
-      set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
+      # Note BEFORE the terminal label — never a muted boucle:human.
       # shfmt off  # preserve exact string content (matches the original YAML block-scalar value)
       E2E_ESCALATION_BODY="<!-- boucle:e2e-escalation v=1 iid=$BOUCLE_ISSUE verdict=empty -->
 E2E agent did not post a parsable verdict after $MAX_ITER attempts. Human review needed.
@@ -347,7 +367,11 @@ ${BOUCLE_LIVE_URL:-unknown}
 ${E2E_LOG_TAIL:-no agent log was captured}
 \`\`\`"
       # shfmt on
-      forge_issue_note "$BOUCLE_ISSUE" "$E2E_ESCALATION_BODY"
+      if ! forge_issue_note "$BOUCLE_ISSUE" "$E2E_ESCALATION_BODY"; then
+        echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+        exit 1
+      fi
+      set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
     fi
     echo "FAIL: e2e verdict not parsable" >&2
     exit 1
