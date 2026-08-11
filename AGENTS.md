@@ -1217,6 +1217,38 @@ atomic.
       anti-loop self-recognition (the nearest, #54, is about a feedback
       channel dropped by a port).
 
+56. **User-facing notes MUST NOT contain literal env var names**
+    - ❌ DO NOT interpolate an env var inside a single-quoted `printf`
+      format string and expect it to expand. `printf '... onto
+      $CI_DEFAULT_BRANCH ...'` posts the literal text `$CI_DEFAULT_BRANCH`
+      to the issue/MR — the human sees a raw variable name in the note.
+      The reviewer PASS approval message did exactly this: "The merger
+      will then rebase the MR onto $CI_DEFAULT_BRANCH" appeared verbatim
+      on a consumer issue instead of the real branch name.
+    - ❌ DO NOT "preserve" such a literal with a
+      `shellcheck disable=SC2016` comment on the assumption that the
+      literal was intended. When the reviewer job was ported from
+      `.gitlab-ci.yml` into `lib/boucle-ci/reviewer.sh`, the literal
+      `$CI_DEFAULT_BRANCH` was copied as `$BOUCLE_DEFAULT_BRANCH` and
+      locked in with a SC2016 disable — cementing the bug in BOTH engine
+      copies instead of fixing it.
+    - ✅ DO: pass the value as a `printf` argument instead of embedding
+      the name in the format string:
+      `printf '... onto %s ...' ... "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}"`.
+      The note then shows the actual branch name (`master`, `main`, ...).
+    - ✅ DO: when a note/message is duplicated across engine copies
+      (`.gitlab-ci.yml` inline + `lib/boucle-ci/*.sh`), grep ALL copies
+      for the same message before fixing — a fix in one copy alone
+      leaves the bug live on the other path.
+    - Admission: class — any env var embedded in a single-quoted printf
+      format string posted to a user-facing note, in any engine copy;
+      recurrence — the bug already duplicated itself across both engine
+      copies, and a fresh agent writing a new note could repeat it
+      without the doc; stable — no line numbers, no transient values;
+      distinct — no existing lesson covers literal env vars in
+      user-facing notes (the nearest, #36, is about markdown formatting
+      of the Approach section, not variable expansion).
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
