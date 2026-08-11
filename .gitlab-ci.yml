@@ -458,7 +458,11 @@ dispatch:
 
       # ── BOUCLE_BOT_ID resolution (set_boucle_label reassigns to the
       # bot on boucle::status::bot, but only when BOUCLE_BOT_ID is set) ──
-      if [ -z "${BOUCLE_BOT_ID:-}" ] && [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ]; then
+      # Skipped in mono-user mode: resolving by username would land on the
+      # human's own account, silently re-enabling the bot auto-assignment
+      # that set_boucle_label is meant to skip when there is no bot.
+      if [ -z "${BOUCLE_BOT_ID:-}" ] && [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ] \
+         && { [ -z "${BOUCLE_MONO_USER:-}" ] || [ "${BOUCLE_MONO_USER}" = "false" ]; }; then
         BOUCLE_BOT_USERNAME="${BOUCLE_BOT_USERNAME:-up-bot}"
         RESOLVED_ID=$(curl -sf --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
           "https://$BOUCLE_FORGE_HOST/api/v4/users?username=$BOUCLE_BOT_USERNAME" \
@@ -550,14 +554,36 @@ dispatch:
       fi
       OBJECT_KIND=$(jq -r '.object_kind // empty' "$TRIGGER_PAYLOAD" 2>/dev/null) || true
       MR_ACTION=$(jq -r '.object_attributes.action // empty' "$TRIGGER_PAYLOAD" 2>/dev/null) || true
-      # Bot-originated events are filtered to prevent loops — EXCEPT for MR
-      # merge webhooks. When the merger job (running as up-bot) merges a MR,
-      # the merge webhook fires with ACTOR=up-bot. Without this exception,
-      # the catchup is never triggered and the issue stays stuck at
-      # boucle:merging forever (the merger job's e2e close path is unreliable
-      # — it can fail, leaving no fallback close path).
-      if [ "$ACTOR" = "${BOUCLE_BOT_USERNAME:-up-bot}" ] && [ "$MR_ACTION" != "merge" ]; then
+      # ── Anti-loop: boucle's own comments ──────────────────────────────
+      # Applies in BOTH modes. GitLab does not guarantee webhook delivery
+      # order, so the label-change webhook of a transition can overtake the
+      # comment that preceded it; the comment then lands on the NEW
+      # (possibly paused) state and would route — starting the worker
+      # before the human approved the spec, or re-triggering triage in a
+      # loop. The marker identifies boucle's own writes regardless of
+      # ordering, which the actor check cannot do once ordering breaks.
+      # Kept in sync with lib/boucle-ci/dispatch.sh (same guard, two copies).
+      NOTE_BODY=$(jq -r '.object_attributes.note // .comment.body // empty' "$TRIGGER_PAYLOAD" 2>/dev/null) || true
+      if [ -n "$NOTE_BODY" ] && has_agent_marker "$NOTE_BODY"; then
+        echo "dispatch: comment carries the boucle:agent marker — boucle's own write, skipping"
         exit 0
+      fi
+
+      # ── Anti-loop: bot-originated events, by identity ─────────────────
+      # Only meaningful when boucle has an account of its own. In mono-user
+      # mode ACTOR is the human on EVERY event, so this guard would discard
+      # the human's legitimate triggers and the loop would never fire; the
+      # marker above replaces it. Label changes stay guarded by PREV_LABELS
+      # below, and MR routing is action-based, so neither needs identity.
+      #
+      # The merge exception must survive: when the merger job merges a MR
+      # the webhook fires with ACTOR=up-bot, and without letting it through
+      # the catchup never runs and the issue stays stuck at boucle:merging
+      # (the merger's e2e close path can fail, leaving no fallback).
+      if ! boucle_mono_user; then
+        if [ "$ACTOR" = "${BOUCLE_BOT_USERNAME:-up-bot}" ] && [ "$MR_ACTION" != "merge" ]; then
+          exit 0
+        fi
       fi
 
       # ── Merge request events ──────────────────────────────────────────
@@ -3103,7 +3129,11 @@ merger:
 
       # ── BOUCLE_BOT_ID resolution (set_boucle_label needs it for the bot
       # reassignment on boucle::status::bot) ──
-      if [ -z "${BOUCLE_BOT_ID:-}" ] && [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ]; then
+      # Skipped in mono-user mode: resolving by username would land on the
+      # human's own account, silently re-enabling the bot auto-assignment
+      # that set_boucle_label is meant to skip when there is no bot.
+      if [ -z "${BOUCLE_BOT_ID:-}" ] && [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ] \
+         && { [ -z "${BOUCLE_MONO_USER:-}" ] || [ "${BOUCLE_MONO_USER}" = "false" ]; }; then
         BOUCLE_BOT_USERNAME="${BOUCLE_BOT_USERNAME:-up-bot}"
         RESOLVED_ID=$(curl -sf --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
           "https://$BOUCLE_FORGE_HOST/api/v4/users?username=$BOUCLE_BOT_USERNAME" \
@@ -3359,7 +3389,11 @@ post-merge:
       fi
 
       # ── BOUCLE_BOT_ID resolution ──
-      if [ -z "${BOUCLE_BOT_ID:-}" ] && [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ]; then
+      # Skipped in mono-user mode: resolving by username would land on the
+      # human's own account, silently re-enabling the bot auto-assignment
+      # that set_boucle_label is meant to skip when there is no bot.
+      if [ -z "${BOUCLE_BOT_ID:-}" ] && [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ] \
+         && { [ -z "${BOUCLE_MONO_USER:-}" ] || [ "${BOUCLE_MONO_USER}" = "false" ]; }; then
         BOUCLE_BOT_USERNAME="${BOUCLE_BOT_USERNAME:-up-bot}"
         RESOLVED_ID=$(curl -sf --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
           "https://$BOUCLE_FORGE_HOST/api/v4/users?username=$BOUCLE_BOT_USERNAME" \
@@ -3483,7 +3517,11 @@ catchup:
       fi
 
       # ── BOUCLE_BOT_ID resolution ──
-      if [ -z "${BOUCLE_BOT_ID:-}" ] && [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ]; then
+      # Skipped in mono-user mode: resolving by username would land on the
+      # human's own account, silently re-enabling the bot auto-assignment
+      # that set_boucle_label is meant to skip when there is no bot.
+      if [ -z "${BOUCLE_BOT_ID:-}" ] && [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ] \
+         && { [ -z "${BOUCLE_MONO_USER:-}" ] || [ "${BOUCLE_MONO_USER}" = "false" ]; }; then
         BOUCLE_BOT_USERNAME="${BOUCLE_BOT_USERNAME:-up-bot}"
         RESOLVED_ID=$(curl -sf --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
           "https://$BOUCLE_FORGE_HOST/api/v4/users?username=$BOUCLE_BOT_USERNAME" \

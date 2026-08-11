@@ -28,6 +28,7 @@ forge_issue_get() {
 
 forge_issue_note() {
   local iid="$1" message="$2"
+  message=$(stamp_agent_marker "$message")
   glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$BOUCLE_PROJECT_ID/issues/$iid/notes" \
     -f body="$message" > /dev/null 2>&1 || true
 }
@@ -169,12 +170,14 @@ forge_issue_note_get() {
 
 forge_issue_note_update() {
   local iid="$1" note_id="$2" new_body="$3"
+  new_body=$(stamp_agent_marker "$new_body")
   glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$BOUCLE_PROJECT_ID/issues/$iid/notes/$note_id" \
     -f body="$new_body" > /dev/null 2>&1 || true
 }
 
 forge_mr_note_update() {
   local mr_iid="$1" note_id="$2" new_body="$3"
+  new_body=$(stamp_agent_marker "$new_body")
   glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/notes/$note_id" \
     -f body="$new_body" > /dev/null 2>&1 || true
 }
@@ -284,6 +287,7 @@ forge_mr_get() {
 
 forge_mr_note() {
   local mr_iid="$1" message="$2"
+  message=$(stamp_agent_marker "$message")
   glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/notes" \
     -f body="$message" > /dev/null 2>&1 || true
 }
@@ -532,6 +536,11 @@ forge_resolve_user_id() {
   local username="$1"
   curl -s "https://$BOUCLE_FORGE_HOST/api/v4/users?username=$username" \
     --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" 2> /dev/null | jq -r '.[0].id // empty' || true
+}
+
+forge_current_user_login() {
+  curl -s "https://$BOUCLE_FORGE_HOST/api/v4/user" \
+    --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" 2> /dev/null | jq -r '.username // empty' 2> /dev/null || true
 }
 
 # ── Webhook payload parsing ──────────────────────────────────────────────
