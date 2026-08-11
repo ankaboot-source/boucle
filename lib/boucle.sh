@@ -377,7 +377,118 @@ boucle_cost_summary() {
       + (if $priced > 0 then " **$\($cost * 10000 | round / 10000)** |" else "" end)
       + (if $priced > 0 and $priced < (.entries | length) then "\n\n_Some runs have no price for their model — the total is a lower bound._" else "" end)
     end
-  ' "$file" 2> /dev/null || true
+   ' "$file" 2> /dev/null || true
+}
+
+# ── Loop-health measurement (#52) ─────────────────────────────────────
+# Append one JSONL line per agent run to .boucle/<issue>/health.jsonl.
+# Derived from what bin/jc already emits ([boucle:metrics], [boucle:prompt],
+# cost.json) plus the run exit code. Survives across iterations via the
+# state cache (like cost.json). Read by bin/health and by the escalation
+# diagnostic below.
+boucle_health_record() {
+  local iid="$1" role="$2" iteration="$3" exit_code="$4"
+  local prompt_chars="${5:-0}" tokens="${6:-}" cost="${7:-}"
+  local model="${8:-}" provider="${9:-}"
+  local file="${BOUCLE_WORKSPACE:-.}/.boucle/${iid}/health.jsonl"
+  mkdir -p "$(dirname "$file")" 2> /dev/null || true
+  local ts
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  printf '{"timestamp":"%s","role":"%s","iteration":%s,"exit_code":%s,"prompt_chars":%s,"tokens":"%s","cost_usd":"%s","model":"%s","provider":"%s"}\n' \
+    "$ts" "$role" "$iteration" "$exit_code" "$prompt_chars" "${tokens:-n/a}" "${cost:-n/a}" "$model" "$provider" \
+    >> "$file" 2> /dev/null || true
+}
+
+# Append a verdict/outcome line to health.jsonl. Called by the jobs
+# (worker: committed/no-changes/build-fail; reviewer/e2e: PASS/FAIL/UNCERTAIN;
+# merger: merged/conflict). One line per stage outcome.
+boucle_health_outcome() {
+  local iid="$1" role="$2" outcome="$3" detail="${4:-}"
+  local file="${BOUCLE_WORKSPACE:-.}/.boucle/${iid}/health.jsonl"
+  mkdir -p "$(dirname "$file")" 2> /dev/null || true
+  local ts
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  printf '{"timestamp":"%s","role":"%s","outcome":"%s","detail":"%s"}\n' \
+    "$ts" "$role" "$outcome" "$detail" \
+    >> "$file" 2> /dev/null || true
+}
+
+# Structured escalation diagnostic (#52). Reads health.jsonl + cost.json
+# and returns a markdown diagnostic body on stdout: failure class, evidence,
+# recommended next action. Consumer-facing only — never posts upstream (#54).
+#
+# Failure classes: provider/quota, build-fail, no-changes, rebase-conflict,
+# not-mergeable, spec-ambiguity, engine-defect, infra, unknown.
+boucle_escalation_diagnostic() {
+  local iid="$1" trigger="$2"
+  local health_file="${BOUCLE_WORKSPACE:-.}/.boucle/${iid}/health.jsonl"
+  local cost_file="${BOUCLE_WORKSPACE:-.}/.boucle/${iid}/cost.json"
+  local class="unknown" evidence="" action="Inspect the agent transcript (link below) and the health record."
+
+  # Count outcomes by role from health.jsonl
+  local worker_runs worker_no_changes worker_build_fails reviewer_fails
+  worker_runs=$(grep -c '"role":"worker"' "$health_file" 2> /dev/null || echo 0)
+  worker_no_changes=$(grep -c '"outcome":"no-changes"' "$health_file" 2> /dev/null || echo 0)
+  worker_build_fails=$(grep -c '"outcome":"build-fail"' "$health_file" 2> /dev/null || echo 0)
+  reviewer_fails=$(grep -c '"outcome":"FAIL"' "$health_file" 2> /dev/null || echo 0)
+
+  # Classify based on the trigger + the health record
+  case "$trigger" in
+    no-changes)
+      class="step-budget-exhaustion"
+      evidence="$worker_no_changes worker iteration(s) produced no code changes."
+      action="The agent exhausted its step budget before committing. Check the transcript for where it spent its steps. If the issue is too large for one iteration, consider splitting it (boucle supports parent-child splits). Re-queue with \`boucle:todo\` to retry."
+      ;;
+    build-fail)
+      class="build-failure"
+      evidence="$worker_build_fails worker iteration(s) failed the build."
+      action="The worker shipped code that does not build. Check the build error in the MR discussion. If the build command is wrong, verify \`BOUCLE_BUILD_CMD\` in the consumer CI variables."
+      ;;
+    rebase-conflict)
+      class="rebase-conflict"
+      evidence="Worker could not rebase onto $BOUCLE_DEFAULT_BRANCH (master keeps advancing)."
+      action="Master advanced faster than the worker could land the branch. Re-queue with \`boucle:todo\` to retry on a fresh base, or rebase the branch manually."
+      ;;
+    not-mergeable)
+      class="not-mergeable"
+      evidence="MR is not mergeable after rebase."
+      action="Check the MR conflict status. The merger already attempted a rebase. Resolve the conflict manually on the branch, or re-queue with \`boucle:todo\` for a fresh worker run."
+      ;;
+    exit-4)
+      class="provider/quota"
+      evidence="Worker exited 4 (model/API failure — provider down or quota exhausted)."
+      action="Check the model provider status and remaining credits/quota. If the provider is down, set \`BOUCLE_FALLBACK_PROVIDER\` to retry on a secondary. Once available, re-queue with \`boucle:todo\`."
+      ;;
+    *)
+      class="unknown"
+      evidence="Trigger: $trigger. $worker_runs worker run(s), $reviewer_fails reviewer FAIL(s)."
+      action="Inspect the agent transcript (link below) and the health record. If this looks like an engine defect, report it per the upstream workflow."
+      ;;
+  esac
+
+  # Cost summary if available
+  local cost_summary=""
+  if [ -f "$cost_file" ]; then
+    cost_summary=$(boucle_cost_summary "$iid" 2> /dev/null || echo "")
+  fi
+
+  echo "<!-- boucle:diagnostic v=1 iid=$iid class=$class trigger=$trigger -->"
+  echo "## 🔍 Diagnostic — issue #$iid"
+  echo ""
+  echo "**Failure class:** \`$class\`"
+  echo ""
+  echo "**Evidence:** $evidence"
+  echo ""
+  echo "**Recommended action:**"
+  echo ""
+  echo "$action"
+  echo ""
+  if [ -n "$cost_summary" ]; then
+    echo "$cost_summary"
+    echo ""
+  fi
+  echo "---"
+  echo "*Diagnostic posté par boucle (toubib — #52).*"
 }
 
 # ── Outbound notification (send-only) ───────────────────────────────────
@@ -942,8 +1053,16 @@ $conflicts
 3. **Close the issue** if obsolete or contradictory with changes already on $default_branch (MR !$mr_iid closes with it).
 
 The loop is paused on #$issue until you decide."
+  # Note BEFORE the terminal label — never a muted boucle:human. Observed on
+  # a consumer 2026-08: the label flipped to boucle:human while the note POST
+  # was silently swallowed; the human saw a state, no message. If the note
+  # cannot be posted, abort WITHOUT escalating — the loop retries instead of
+  # stranding a mute escalation.
+  if ! forge_issue_note "$issue" "$body"; then
+    echo "FAIL: merge-conflict escalation note could not be posted on issue #$issue — NOT escalating to boucle:human (retry instead of muting)." >&2
+    return 1
+  fi
   set_boucle_label "$issue" "boucle:human" "boucle::status::human"
-  forge_issue_note "$issue" "$body"
 }
 
 # ── Shallow-clone depth fix for rebases ─────────────────────────────────
