@@ -128,12 +128,16 @@ env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   PI_AUTH: ${{ secrets.PI_AUTH }}
 
+# `metadata: read` is a GitHub *App* permission, not a workflow one — the
+# workflow `permissions:` block only accepts the scopes listed at
+# docs.github.com/actions/reference/workflow-syntax#permissions, and any other
+# key fails the whole file with "Unexpected value". Repository metadata is
+# readable implicitly via `contents`, so nothing is lost by dropping it.
 permissions:
   contents: write
   issues: write
   pull-requests: write
   actions: write
-  metadata: read
 
 # ── Concurrency ─────────────────────────────────────────────────────────────────
 # Serial merge: only one merger job at a time (lesson #8, #10).
