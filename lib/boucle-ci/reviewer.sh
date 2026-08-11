@@ -208,10 +208,11 @@ boucle_ci_reviewer() {
     echo "[boucle] INFO: no prior notes for issue #$BOUCLE_ISSUE."
   fi
 
-  # Detect image attachments (issue + MR comments) and route to a
-  # vision-capable model if needed.
-  # Forge controls: BOUCLE_VISION_ROUTING, BOUCLE_VISION_MODEL, BOUCLE_VISION_ROLES.
-  eval "$("$BOUCLE_HOME"/bin/detect-vision-need reviewer)"
+  # Describe image attachments (issue + MR comments) using a vision model,
+  # then inject the text descriptions into the reviewer prompt. This replaces
+  # the old detect-vision-need approach which swapped the reviewer's model
+  # to minimax-m3 (worse at code review, prone to WASM OOM crashes).
+  "$BOUCLE_HOME/bin/describe-images reviewer" || echo "[boucle] WARN: image description failed — continuing without descriptions"
 
   # Run the agent against the preview.
   # Use `|| rc=$?` to suppress set -e so the script continues to

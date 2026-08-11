@@ -78,9 +78,12 @@ boucle_ci_triage() {
   # Makes them available to the triage agent via BOUCLE_ISSUE_ATTACHMENTS.
   $BOUCLE_HOME/bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
 
-  # Detect image attachments and route to a vision-capable model if needed.
-  # Forge controls: BOUCLE_VISION_ROUTING, BOUCLE_VISION_MODEL, BOUCLE_VISION_ROLES.
-  eval "$($BOUCLE_HOME/bin/detect-vision-need triage)"
+  # Describe image attachments using a vision model, then inject the text
+  # descriptions into the agent prompt. This replaces the old detect-vision-need
+  # approach which swapped the entire model to minimax-m3 (worse at code, prone
+  # to WASM OOM crashes). With describe-images, the agent stays on its default
+  # model and gets image context as text.
+  "$BOUCLE_HOME/bin/describe-images triage" || echo "[boucle] WARN: image description failed — continuing without descriptions"
 
   # Fetch the issue body and export it so the triage agent does not
   # waste steps calling forge issue view (minimax-m3
