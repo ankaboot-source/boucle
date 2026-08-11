@@ -45,9 +45,17 @@ extract_func_body() {
 # sourced snippet hits "command not found" and silently drops the notes.
 # Usage: extract_prompt_funcs <outfile>
 extract_prompt_funcs() {
-  local tmp
+  local tmp tmp2
   tmp=$(mktemp)
+  tmp2=$(mktemp)
   extract_func_body trim_notes "$1"
+  # filter_mr_discussion embeds a multi-line awk program whose { } braces
+  # break extract_func_body's brace counting — use the simple extractor
+  # (it stops at the first column-0 `}`; the awk body is indented).
+  # Each extractor TRUNCATES its target, so append via tmp + cat.
+  extract_func filter_mr_discussion "$tmp2"
+  cat "$tmp2" >> "$1"
+  rm -f "$tmp2"
   extract_func build_prompt "$tmp"
   cat "$tmp" >> "$1"
   rm -f "$tmp"
