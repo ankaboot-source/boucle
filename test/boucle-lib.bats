@@ -969,6 +969,34 @@ extract_job_link() {
   assert_output "https://github.com/ankaboot-source/boucle/actions/runs/987"
 }
 
+@test "trigger payload falls back to GITHUB_EVENT_PATH when the workflow expression is empty" {
+  # `${{ github.event_path }}` is not exposed to workflow expressions, so the
+  # job env arrives with BOUCLE_TRIGGER_PAYLOAD='' and dispatch aborted on every
+  # GitHub webhook. The runner variable names the same file.
+  run bash -c "
+    unset TRIGGER_PAYLOAD
+    BOUCLE_TRIGGER_PAYLOAD=''
+    GITHUB_EVENT_PATH='/home/runner/work/_temp/_github_workflow/event.json'
+    $(grep '^: "\${BOUCLE_TRIGGER_PAYLOAD' lib/boucle-ci.sh)
+    echo \"\$BOUCLE_TRIGGER_PAYLOAD\"
+  "
+  assert_success
+  assert_output "/home/runner/work/_temp/_github_workflow/event.json"
+}
+
+@test "trigger payload keeps an explicit value over the GitHub fallback" {
+  # GitLab passes the payload directly; the GitHub fallback must not clobber it.
+  run bash -c "
+    unset TRIGGER_PAYLOAD
+    BOUCLE_TRIGGER_PAYLOAD='/builds/payload.json'
+    GITHUB_EVENT_PATH='/home/runner/event.json'
+    $(grep '^: "\${BOUCLE_TRIGGER_PAYLOAD' lib/boucle-ci.sh)
+    echo \"\$BOUCLE_TRIGGER_PAYLOAD\"
+  "
+  assert_success
+  assert_output "/builds/payload.json"
+}
+
 @test "escalation comments carry the job link" {
   # Every note that asks a human to act, or announces a re-run, must point
   # at the transcript — otherwise the human is told the loop stopped with

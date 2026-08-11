@@ -83,12 +83,20 @@ env:
   BOUCLE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
   BOUCLE_PIPELINE_SOURCE: ${{ github.event_name }}
   BOUCLE_JOB_ID: ${{ github.run_id }}
-  BOUCLE_JOB_URL: ${{ github.run_url }}
+  # There is no `github.run_url` property — the expression resolved to an empty
+  # string on every run. lib/boucle-ci.sh rebuilds the URL from GITHUB_RUN_ID
+  # when this is empty, so the link survived, but spell it correctly here so the
+  # job env is not silently lying.
+  BOUCLE_JOB_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
   # A PATH, not the JSON itself: every consumer (dispatch, the stage libs)
   # passes this to `jq -r '...' "$BOUCLE_TRIGGER_PAYLOAD"`, which reads it as
   # a filename. Passing toJSON(github.event) made jq treat the whole payload
   # as a path, fail to open it, and abort dispatch on every GitHub webhook.
   # github.event_path is the file Actions already writes for exactly this.
+  # Caveat: `github.event_path` is not actually exposed to workflow expressions,
+  # so this resolves to an empty string. lib/boucle-ci.sh falls back to the
+  # GITHUB_EVENT_PATH runner variable, which names the same file — that fallback
+  # is what makes dispatch work; this line is kept as the declaration of intent.
   BOUCLE_TRIGGER_PAYLOAD: ${{ github.event_path }}
   BOUCLE_TOKEN: ${{ secrets.BOUCLE_TOKEN }}
   BOUCLE_BOT_USERNAME: ${{ vars.BOUCLE_BOT_USERNAME || 'up-bot' }}
@@ -155,10 +163,32 @@ jobs:
       (github.event_name == 'push' || github.event_name == 'pull_request')
       && !contains(github.event.head_commit.message, '[skip ci]')
     steps:
+      # test/*.bats load bats-support/bats-assert from test/test_helper/, which
+      # are git submodules. Without them every test aborts in setup() with
+      # "Could not find .../bats-support/load".
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      # `make check` = lint (shellcheck + shfmt) + test (bats). ubuntu-latest
+      # ships shellcheck but neither shfmt nor bats, and the Makefile guards
+      # abort the job on the first missing one — so install them here. Pinned:
+      # an shfmt minor bump can change formatting and would fail `shfmt -d` on
+      # untouched files.
+      - name: Install lint/test tooling
+        env:
+          SHFMT_VERSION: '3.10.0'
+          BATS_VERSION: '1.11.0'
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/shfmt" \
+            "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64"
+          chmod +x "$HOME/.local/bin/shfmt"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          npm install -g "bats@${BATS_VERSION}"
       - run: make check
 
   # ── engine-smoke: dogfood the REAL bootstrap chain (issue #29) ───────────────
