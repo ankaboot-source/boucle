@@ -20,9 +20,13 @@ mkdir -p "$PREFIX/bin"
 
 if ! command -v shellcheck > /dev/null 2>&1; then
   SC_VER="v0.11.0"
+  # Unique per-job extract dir (lesson #58): a fixed /tmp path on a shared
+  # executor collides when two jobs bootstrap the same version concurrently.
+  SC_DIR="$(mktemp -d "${TMPDIR:-/tmp}/shellcheck.XXXXXX")"
   curl -sSL "https://github.com/koalaman/shellcheck/releases/download/${SC_VER}/shellcheck-${SC_VER}.linux.x86_64.tar.xz" \
-    | tar -xJ -C /tmp
-  install -m 0755 "/tmp/shellcheck-${SC_VER}/shellcheck" "$PREFIX/bin/shellcheck"
+    | tar -xJ -C "$SC_DIR"
+  install -m 0755 "$SC_DIR/shellcheck-${SC_VER}/shellcheck" "$PREFIX/bin/shellcheck"
+  rm -rf "$SC_DIR"
 fi
 
 if ! command -v shfmt > /dev/null 2>&1; then
@@ -34,8 +38,11 @@ fi
 if ! command -v bats > /dev/null 2>&1; then
   # Tarball install — no git required (the check job runs on ANY runner via
   # tags: [], and shared docker runners may lack git in the job PATH).
-  curl -sSL "https://github.com/bats-core/bats-core/archive/refs/tags/v1.14.0.tar.gz" | tar -xz -C /tmp
-  /tmp/bats-core-1.14.0/install.sh "$PREFIX"
+  # Unique per-job extract dir (lesson #58) — see shellcheck above.
+  BATS_DIR="$(mktemp -d "${TMPDIR:-/tmp}/bats.XXXXXX")"
+  curl -sSL "https://github.com/bats-core/bats-core/archive/refs/tags/v1.14.0.tar.gz" | tar -xz -C "$BATS_DIR"
+  "$BATS_DIR/bats-core-1.14.0/install.sh" "$PREFIX"
+  rm -rf "$BATS_DIR"
 fi
 
 # System prerequisites that cannot be user-installed. Try sudo (shared docker
