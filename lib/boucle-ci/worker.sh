@@ -183,6 +183,18 @@ EOF
       | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | .[]' 2> /dev/null || echo "")
   fi
 
+  # ── Build feedback channel: inject previous iteration's build error ──
+  # Mirrors BOUCLE_REVIEWER_FEEDBACK. On a build failure the worker writes
+  # the build log tail to .boucle/<issue>/build-feedback.md (restored from
+  # the state cache on the next run) and exports it as BOUCLE_BUILD_FEEDBACK
+  # so bin/jc injects it into the worker prompt. Empty on the first run or
+  # after a successful build.
+  export BOUCLE_BUILD_FEEDBACK
+  BOUCLE_BUILD_FEEDBACK=""
+  if [ -f ".boucle/$BOUCLE_ISSUE/build-feedback.md" ]; then
+    BOUCLE_BUILD_FEEDBACK=$(cat ".boucle/$BOUCLE_ISSUE/build-feedback.md" 2> /dev/null || echo "")
+  fi
+
   # ── Download attachments ─────────────────────────────────────────
   export BOUCLE_MR_IID="$mr_for_feedback"
   "$BOUCLE_HOME/bin/fetch-mr-attachments" || echo "[boucle] WARN: MR attachment fetch failed — continuing without MR attachments"
@@ -272,7 +284,10 @@ EOF
       "" \
       "---" \
       "*Diagnostic posté par boucle (exit 4 — model/API failure).*")
-    forge_issue_note "$BOUCLE_ISSUE" "$diagnostic_body"
+    if ! forge_issue_note "$BOUCLE_ISSUE" "$diagnostic_body"; then
+      echo "FAIL: worker model/API failure (exit 4) — diagnostic note could NOT be posted on issue #$BOUCLE_ISSUE. NOT escalating to boucle:human (a silent escalation is worse than a retry)." >&2
+      exit 1
+    fi
     set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
     echo "FAIL: worker model/API failure (exit 4) — diagnostic posted on issue #$BOUCLE_ISSUE, escalated to human." >&2
     exit 1
@@ -313,18 +328,28 @@ EOF
     if [ "$ITERATION" -lt "$max_iter" ]; then
       echo "WARN: worker produced no changes — re-triggering (iteration $((ITERATION + 1))/$max_iter)." >&2
       set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-      forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker produced no code changes on iteration $ITERATION (agent likely exhausted its step budget). Re-running (iteration $((ITERATION + 1))/$max_iter).$(job_link)"
+      boucle_health_outcome "$BOUCLE_ISSUE" "worker" "no-changes" "iteration $ITERATION" || true
+      forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker produced no code changes on iteration $ITERATION (agent likely exhausted its step budget). Re-running (iteration $((ITERATION + 1))/$max_iter).$(job_link)" || true
       chain_to_role "$BOUCLE_ISSUE" "worker" "BOUCLE_ITERATION=$((ITERATION + 1))"
     else
       echo "Escalating to human — worker produced no changes after $max_iter attempts." >&2
+      # Note BEFORE the terminal label: an escalation whose note could not be
+      # posted must NOT land at boucle:human muted (label flipped at 14:55:50,
+      # note swallowed by a silent POST — the human saw a state, no message).
+      if ! forge_issue_note "$BOUCLE_ISSUE" "$(boucle_escalation_diagnostic "$BOUCLE_ISSUE" "no-changes")$(job_link)"; then
+        echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+        boucle_health_outcome "$BOUCLE_ISSUE" "worker" "no-changes" "iteration $ITERATION (cap reached, note FAILED)" || true
+        exit 1
+      fi
+      boucle_health_outcome "$BOUCLE_ISSUE" "worker" "no-changes" "iteration $ITERATION (cap reached)" || true
       set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-      forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker produced no code changes after $max_iter attempts. The agent may be unable to implement this issue within its step budget. Human intervention needed.$(job_link)"
     fi
     exit 1
   fi
 
   # The worker shipped code: the next iteration must PRESERVE this work.
   echo "committed" > ".boucle/$BOUCLE_ISSUE/last-outcome" 2> /dev/null || true
+  boucle_health_outcome "$BOUCLE_ISSUE" "worker" "committed" "iteration $ITERATION" || true
 
   # ── Rebase before build ──────────────────────────────────────────
   git fetch origin "$BOUCLE_DEFAULT_BRANCH"
@@ -344,18 +369,60 @@ EOF
       fi
       echo "Re-triggering worker (iteration $((ITERATION + 1))/$max_iter)." >&2
       set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-      forge_issue_note "$BOUCLE_ISSUE" "🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh $BOUCLE_DEFAULT_BRANCH (iteration $((ITERATION + 1))/$max_iter).$(job_link)"
+      forge_issue_note "$BOUCLE_ISSUE" "🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh $BOUCLE_DEFAULT_BRANCH (iteration $((ITERATION + 1))/$max_iter).$(job_link)" || true
       chain_to_role "$BOUCLE_ISSUE" "worker" "BOUCLE_ITERATION=$((ITERATION + 1))"
     else
       echo "Escalating to human — iteration cap ($max_iter) reached after repeated rebase conflicts." >&2
+      # Note BEFORE the terminal label — never a muted boucle:human.
+      if ! forge_issue_note "$BOUCLE_ISSUE" "$(boucle_escalation_diagnostic "$BOUCLE_ISSUE" "rebase-conflict")$(job_link)"; then
+        echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+        boucle_health_outcome "$BOUCLE_ISSUE" "worker" "rebase-conflict" "iteration $ITERATION (cap reached, note FAILED)" || true
+        exit 1
+      fi
+      boucle_health_outcome "$BOUCLE_ISSUE" "worker" "rebase-conflict" "iteration $ITERATION (cap reached)" || true
       set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-      forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker could not rebase onto $BOUCLE_DEFAULT_BRANCH (conflict) after $max_iter attempts. Master keeps advancing. Human intervention needed.$(job_link)"
     fi
     exit 1
   fi
 
-  # ── Build ────────────────────────────────────────────────────────
-  eval "$BOUCLE_BUILD_CMD"
+  # ── Build gate (#53): fail fast on build errors, feed back to next iter ──
+  # BOUCLE_BUILD_CMD is empty for projects without a build → skip entirely.
+  if [ -n "${BOUCLE_BUILD_CMD:-}" ]; then
+    local build_log build_rc
+    build_log=$(mktemp)
+    (eval "$BOUCLE_BUILD_CMD") > "$build_log" 2>&1
+    build_rc=$?
+    if [ "$build_rc" -ne 0 ]; then
+      echo "FAIL: BOUCLE_BUILD_CMD exited $build_rc — feeding build error to next iteration." >&2
+      tail -c 4000 "$build_log" 2> /dev/null | sed 's/\x1b\[[0-9;]*m//g' > ".boucle/$BOUCLE_ISSUE/build-feedback.md" 2> /dev/null || true
+      rm -f "$build_log"
+      # Clean the build output so it does not dirty the tree / block rebase.
+      [ -n "${BOUCLE_BUILD_OUTPUT:-}" ] && [ -d "$BOUCLE_BUILD_OUTPUT" ] && rm -rf "$BOUCLE_BUILD_OUTPUT" 2> /dev/null || true
+      ITERATION="${BOUCLE_ITERATION:-1}"
+      local max_iter="${BOUCLE_MAX_ITERATIONS:-3}"
+      if [ "$ITERATION" -lt "$max_iter" ]; then
+        echo "Re-triggering worker (iteration $((ITERATION + 1))/$max_iter) with build error in feedback." >&2
+        set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
+        forge_issue_note "$BOUCLE_ISSUE" "🔄 Build failed on iteration $ITERATION (\`$BOUCLE_BUILD_CMD\` exited $build_rc). Re-running with the build error in the feedback channel (iteration $((ITERATION + 1))/$max_iter).$(job_link)"
+        chain_to_role "$BOUCLE_ISSUE" "worker" "BOUCLE_ITERATION=$((ITERATION + 1))"
+      else
+        echo "Escalating to human — build failed after $max_iter attempts." >&2
+        set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
+        forge_issue_note "$BOUCLE_ISSUE" "⚠️ Build failed after $max_iter attempts (\`$BOUCLE_BUILD_CMD\` exited $build_rc). The worker could not produce a buildable tree. Human intervention needed.$(job_link)"
+      fi
+      exit 1
+    fi
+    rm -f "$build_log"
+    # Build succeeded: clear stale feedback. Keep the build output if a
+    # deploy follows (the marker + deploy need it); clean it only when no
+    # deploy is planned, so it does not dirty the tree on non-deploy runs.
+    rm -f ".boucle/$BOUCLE_ISSUE/build-feedback.md" 2> /dev/null || true
+    if ! boucle_worker_should_deploy; then
+      [ -n "${BOUCLE_BUILD_OUTPUT:-}" ] && [ -d "$BOUCLE_BUILD_OUTPUT" ] && rm -rf "$BOUCLE_BUILD_OUTPUT" 2> /dev/null || true
+    fi
+  else
+    echo "[boucle] Build gate skipped (BOUCLE_BUILD_CMD is empty)"
+  fi
 
   # ── Preview freshness marker ─────────────────────────────────────
   local head_sha marker_html marker_txt
