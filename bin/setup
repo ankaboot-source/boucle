@@ -100,7 +100,10 @@ while [[ $# -gt 0 ]]; do
       echo "                           label-state + agent-marker guard. Degrades notifications"
       echo "                           — see README. Prefer a bot/service account when you can."
       echo "  --cf-token <token>       Cloudflare API token (for Pages project)"
-      echo "  --runner-tag <tag>       Runner tag baked into the root CI shim (default: boucle)"
+      echo "  --runner-tag <tag>       Pin jobs to a runner carrying <tag>, by writing a"
+      echo "                           'default: tags:' block into the root CI shim. Omit it"
+      echo "                           (the default) to run untagged on the instance's shared"
+      echo "                           runners — no runner of your own required."
       echo "  --skip-cf                Skip Cloudflare Pages project creation"
       echo "  --dry-run                 Print what would be done, don't execute"
       echo "  --non-interactive        No prompts: read config from BOUCLE_* env vars only."
@@ -304,9 +307,19 @@ if [ "$FORGE" = "gitlab" ]; then
     ENGINE_REF="$(cd "$ENGINE_ROOT" && git rev-parse --short=12 HEAD)"
   fi
   ENGINE_INCLUDE="https://raw.githubusercontent.com/ankaboot-source/boucle/${ENGINE_REF}/.gitlab-ci.yml"
-  TAGS_BLOCK="default:
-  tags: [${RUNNER_TAG:-boucle}]
+  # Runner routing is OPT-IN. With no --runner-tag, the shim carries no
+  # `tags:` at all and the engine's untagged jobs land on the instance's
+  # shared runners — so a fresh install needs no runner of its own. When a tag
+  # IS given, the shim overrides `default:` key-by-key (GitLab deep-merges
+  # included configuration), so `image:` and `before_script:` from the engine
+  # are preserved and only routing changes.
+  TAGS_BLOCK=""
+  if [ -n "$RUNNER_TAG" ]; then
+    TAGS_BLOCK="default:
+  tags: [$RUNNER_TAG]
+
 "
+  fi
   if [ -f "$GITLAB_CI" ]; then
     if grep -q "boucle engine" "$GITLAB_CI"; then
       log_skip "root $GITLAB_CI already references the boucle engine"
@@ -315,8 +328,8 @@ if [ "$FORGE" = "gitlab" ]; then
       cat << SHIM
 include:
   - remote: '$ENGINE_INCLUDE'
-$TAGS_BLOCK
-variables:
+
+${TAGS_BLOCK}variables:
   BOUCLE_FORGE_HOST: "$HOST"
 SHIM
     fi
@@ -331,8 +344,7 @@ SHIM
 include:
   - remote: '$ENGINE_INCLUDE'
 
-$TAGS_BLOCK
-variables:
+${TAGS_BLOCK}variables:
   BOUCLE_FORGE_HOST: "$HOST"
 SHIM
     fi
@@ -1220,8 +1232,14 @@ if [ "$FORGE" = "gitlab" ]; then
   echo "     git add .gitmodules .boucle $GITLAB_CI"
   echo "     git commit -m \"chore: install boucle engine\""
   echo "     (Push the commit — the runner needs GIT_SUBMODULE_STRATEGY to fetch .boucle/.)"
-  echo "  3. Runner: make sure a GitLab runner with tag '${RUNNER_TAG:-boucle}' is available."
-  echo "     (The tag is baked into $GITLAB_CI. Re-run with --runner-tag <tag> to change it.)"
+  if [ -n "$RUNNER_TAG" ]; then
+    echo "  3. Runner: make sure a GitLab runner with tag '$RUNNER_TAG' is available."
+    echo "     (The tag is baked into $GITLAB_CI. Re-run with --runner-tag <tag> to change it,"
+    echo "     or remove the 'default: tags:' block from $GITLAB_CI to use shared runners.)"
+  else
+    echo "  3. Runner: nothing to do — jobs run untagged on this instance's shared runners."
+    echo "     (To pin them to your own runner instead, re-run with --runner-tag <tag>.)"
+  fi
   if [ -n "${CI_VARS_URL:-}" ]; then
     echo "  4. CI/CD variables: $CI_VARS_URL"
     echo "     - BOUCLE_LLM_API_KEY (masked) if bin/setup skipped it."

@@ -965,6 +965,11 @@ boucle_resolve_live_url() {
   # Priority 3: declarative GitLab Pages — the forge serves the site at
   # $CI_PAGES_URL (only defined in CI jobs, never locally). The pages.dev
   # last-resort below would point at a nonexistent Cloudflare project.
+  # NOTE: the inline GitLab post-merge job that `bin/boucle-ci post-merge`
+  # replaced consulted $CI_PAGES_URL unconditionally. This gate is the
+  # considered behaviour (see the test in test/boucle-lib.bats), so GitLab
+  # Pages consumers must set BOUCLE_DEPLOY_PROVIDER=gitlab-pages — which is
+  # what LOOP.md §"GitLab Pages declarative mode" already documents.
   if [ "${BOUCLE_DEPLOY_PROVIDER:-}" = "gitlab-pages" ] && [ -n "${CI_PAGES_URL:-}" ]; then
     echo "$CI_PAGES_URL"
     return

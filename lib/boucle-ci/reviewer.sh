@@ -33,7 +33,7 @@ boucle_ci_reviewer() {
   # Evidence pack: charter excerpts at base + diff brief, read by
   # bin/jc and injected into the reviewer prompt. Best-effort: never
   # fails the job.
-  "${BOUCLE_HOME}"/bin/build-evidence-pack >/dev/null 2>&1 || true
+  "${BOUCLE_HOME}"/bin/build-evidence-pack > /dev/null 2>&1 || true
 
   # ── Restore the triage's obligations.md into the workspace ──────
   # The triage job writes obligations.md (the `## Deliverables` obligations)
@@ -509,6 +509,14 @@ boucle_ci_reviewer() {
         exit 0
       fi
       if [ "$ITERATION" -lt "$MAX_ITER" ]; then
+        # Last-chance warning. Posted ONLY when the iteration being started is
+        # the final one, so an issue produces at most one of these — a note per
+        # iteration would be noise, and the escalation itself already speaks.
+        # Without it the human sees a FAIL identical to the previous ones and
+        # gets no warning that the next one escalates to boucle:human.
+        if [ "$((ITERATION + 1))" -eq "$MAX_ITER" ]; then
+          forge_mr_note "$MR_IID" "$(printf '⏳ **Final attempt** — starting worker iteration %s/%s.\n\nIf this iteration does not satisfy the acceptance criteria, the loop stops and hands the MR to you (`boucle:human`) instead of retrying. Commenting now — on this MR or on the issue — still amends the spec and reaches the worker.' "$((ITERATION + 1))" "$MAX_ITER")" || echo "[boucle] WARN: could not post the final-attempt notice — continuing (advisory only)."
+        fi
         set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
         # Chain back to worker with incremented iteration
         chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=$((ITERATION + 1))

@@ -143,8 +143,8 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_BUILD_CMD` | `npm ci && npm run build` | Build command. |
 | `BOUCLE_BUILD_OUTPUT` | `public` | Build output directory. |
 | `BOUCLE_BUILD_FEEDBACK` | *(empty)* | Build error tail from the previous failed `BOUCLE_BUILD_CMD` run, injected into the next worker iteration's prompt. Auto-managed — do not set manually. |
-| `BOUCLE_RUNNER_TAG` | `boucle` | Runner tag for agent jobs (GitLab; `bin/setup --runner-tag`). |
-| `BOUCLE_RUNS_ON` | `ubuntu-latest` | Runs-on expression (GitHub; forge-agnostic — maps to tags on GitLab). |
+| *(no variable)* | *untagged* | GitLab runner routing. Jobs run untagged on shared runners by default. Pinning to a dedicated runner is a `default: tags:` block in the **root shim**, written by `bin/setup --runner-tag <tag>` — not a CI variable, because GitLab expands `tags: [$VAR]` with an empty `VAR` into `tags: [""]`, which matches no runner and strands the job. See README "Advanced — dedicated runners". |
+| `BOUCLE_RUNS_ON` | `ubuntu-latest` | Runs-on expression (GitHub). JSON array of labels for a self-hosted runner, e.g. `["self-hosted", "linux", "x64"]`. |
 | `BOUCLE_MAX_PARALLEL_ISSUES` | `5` | Max concurrent boucle:working issues (`0` = unlimited). |
 | `BOUCLE_MAX_ITERATIONS` | `3` | Max worker re-runs per issue before escalation. |
 | `BOUCLE_STALENESS_THRESHOLD` | `2400` | Seconds before a stuck issue is re-triggered (must exceed max job timeout, 30 min). |
