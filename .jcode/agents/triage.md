@@ -41,12 +41,24 @@ repository files this issue will touch (source, styles, components, charter
 docs). Use the issue body, attachments, and the knowledge graph
 (`search_graph` / `trace_path` locally; `codebase-memory-mcp cli
 search_graph '{"query":"..."}'` in CI — lesson #23). Post a dedicated note
-with the marker `<!-- boucle:files v=1 paths=path1,path2 -->` (comma-separated,
-repo-relative paths, no `./` prefix, sorted, deduplicated). If you cannot
-predict with confidence, omit the note — the gate fails open. This marker
-drives the file-impact gate: a parallel worker whose issue claims the same
-files is deferred (`boucle:blocked`) until this issue's MR merges, avoiding
-rebase/merge conflicts.
+that contains BOTH a visible human-readable label AND the machine-readable
+marker, so the note is not blank in the forge UI. Structure:
+
+```
+📁 **Fichiers impactés:** `src/pages/right-to-resist.astro`, `src/content.config.ts`
+
+<!-- boucle:files v=1 paths=src/content.config.ts,src/pages/right-to-resist.astro -->
+<!-- boucle:agent -->
+```
+
+The visible line uses the same paths as the marker (comma-separated,
+repo-relative, no `./` prefix, sorted, deduplicated), each wrapped in
+backticks for readability. The marker `<!-- boucle:files v=1 paths=path1,path2 -->`
+is unchanged and machine-readable. If you cannot predict with confidence,
+omit the note — the gate fails open. This marker drives the file-impact
+gate: a parallel worker whose issue claims the same files is deferred
+(`boucle:blocked`) until this issue's MR merges, avoiding rebase/merge
+conflicts.
 
 ## Skills available
 
