@@ -81,6 +81,35 @@ boucle_ci_catchup() {
       echo "$sib_labels" | grep -q "boucle:blocked" || continue
       sib_desc=$(echo "$sib_data" | jq -r '.description // empty' 2> /dev/null)
       sib_deps=$(parse_depends_on "$sib_desc")
+      # ── Sibling-serialization unblock (a priori gate) ──────────────
+      # A sibling blocked by the serialization gate carries a note with
+      # `<!-- boucle:sibling-blocked v=1 sib=<active_iid> -->`. When that
+      # active sibling reaches done/closed, unblock the waiting sibling —
+      # BUT only if no OTHER sibling is still active (serialization: one
+      # sibling at a time, per domain).
+      local sib_notes sib_blocker active_other
+      sib_blocker=""
+      sib_notes=$(forge_issue_notes "$sib_iid" 2> /dev/null || echo "[]")
+      sib_blocker=$(echo "$sib_notes" \
+        | jq -r '[.[] | select(.body | contains("<!-- boucle:sibling-blocked"))] | last | .body // empty' 2> /dev/null \
+        | grep -oE 'sib=[0-9]+' | head -1 | cut -d= -f2)
+      if [ -n "$sib_blocker" ] && [ "$sib_blocker" = "$closed_iid" ]; then
+        # Only unblock if no other sibling is in an active work state.
+        active_other=$(echo "$children_data" | jq -r --arg self "$sib_iid" --arg closed "$closed_iid" '
+          [.[] | select((.iid | tostring) != $self and (.iid | tostring) != $closed)
+                 | select(.state == "opened")] | .[0].iid // empty' 2> /dev/null)
+        if [ -z "$active_other" ]; then
+          echo "maybe_unblock_dependents: #$sib_iid unblocked (serialized sibling #$closed_iid done, no other sibling active)"
+          set_boucle_label "$sib_iid" "boucle:todo" "boucle::status::bot"
+          local unblock_body
+          unblock_body=$(printf '✅ Sibling #%s done — worker starting.\n\n<!-- boucle:unblocked v=1 by=%s -->' "$closed_iid" "$closed_iid")
+          forge_issue_note "$sib_iid" "$unblock_body"
+          if ! issue_has_active_pipeline "$sib_iid"; then
+            chain_to_role "$sib_iid" "worker"
+          fi
+          continue
+        fi
+      fi
       [ -z "$sib_deps" ] && continue
       # Does this sibling depend on the just-closed IID?
       echo ",$sib_deps," | grep -q ",$closed_iid," || continue
