@@ -77,7 +77,7 @@ Any error (network failure, permissions, corrupt tarball) logs a warning and con
 | `bin/` | Yes | boucle code |
 | `.jcode/` | Yes | boucle agents + skills |
 | `.gitlab-ci.yml` | Yes | boucle pipeline |
-| `LOOP.md` | No | Per-consumer config |
+| `LOOP.md` | Yes | Product reference (config, modes, gates, caps) |
 | `.boucle-version` | No | Managed by `bin/update` |
 
 ### Version tracking
