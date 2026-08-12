@@ -189,6 +189,26 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_MAX_NOTE_CHARS` | `1500` | Per-note cap when a note thread is injected into a prompt. Every note survives — only its tail is elided. `0` disables trimming (escape hatch). |
 | `BOUCLE_MAX_PROMPT_CHARS` | `0` | Thread-level ceiling on the **assembled** prompt. `0` = disabled. See §Prompt budget. |
 | `BOUCLE_PROMPT_WARN_CHARS` | `0` | Log a warning above this assembled size without altering the prompt. `0` = never warn. |
+| `BOUCLE_ALLOWED_USERS` | *(installer)* | Issue allow-list: comma-separated usernames whose issues boucle accepts. Seeded by bin/setup with the installer's username. Unset/empty = allow list disabled (legacy fail-open). Case-insensitive. |
+
+### Issue allow list
+
+Boucle is a safety net: it only accepts issues whose resolved human author is in
+`BOUCLE_ALLOWED_USERS` (comma-separated usernames, case-insensitive match). This
+keeps the loop from working on issues filed by anyone with write access to the
+repo.
+
+- **Default = the installer.** `bin/setup` seeds the variable with the username
+  of the user who runs it. Extend it by adding usernames separated by commas
+  (e.g. `alice,bob`) — re-run `bin/setup --allowed-users alice,bob` or set the
+  variable directly in the forge UI.
+- **Rejection is loud.** An issue from a non-listed author gets a `:lock:` note
+  and a visibly failed dispatch pipeline (anti-accumulation) — no label is set,
+  so the loop never picks it up.
+- **Split sub-issues resolve to the parent's author**, not the bot — the bot is
+  never in the allow list, so a split never deadlocks.
+- **Fail-open if unset.** An absent or empty variable disables the gate
+  entirely (legacy behavior).
 
 ### Bot token (GitHub)
 
