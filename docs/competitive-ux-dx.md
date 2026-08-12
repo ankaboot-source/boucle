@@ -61,16 +61,19 @@ différenciation, pas un compromis. Elle doit être défendue, pas diluée.
 
 ### Les frictions UX réelles
 
-**F1 — Le temps avant la première valeur est le principal frein à l'adoption.**
+**F1 — Le temps avant la première valeur reste le principal frein à l'adoption.**
 Le parcours GitLab exige d'enregistrer un runner auto-hébergé portant le tag
 `boucle` (`README.md:129-132`), d'ajouter manuellement une variable masquée,
-de provisionner un compte bot et un PAT, et un token Cloudflare. Le persona
-visé — « ceux qui construisent des produits mais ne sont pas forcément
-développeurs à plein temps » (`CONTEXT.md` §3) — décroche avant l'étape 2.
-Le parcours GitHub est nettement plus léger (`ubuntu-latest`, pas de runner à
-gérer) mais `CONTEXT.md` §8 le déclare lui-même « moins éprouvé ».
-**Il y a une contradiction entre le persona affiché et le coût d'installation
-réel.**
+de provisionner un compte bot et un PAT, et un token Cloudflare. Le parcours
+GitHub est nettement plus léger (`ubuntu-latest`, pas de runner à gérer) mais
+`CONTEXT.md` §8 le déclare lui-même « moins éprouvé ».
+
+Ce coût est **cohérent avec le persona** (voir §6 : des utilisateurs ayant des
+bases techniques) — ce n'est pas une contradiction, c'est un frein
+d'installation ordinaire, et il se lève à peu de frais (P0.2). En revanche,
+il concentre toute la charge technique sur **une seule personne de l'équipe**,
+ce qui rend d'autant plus critique la qualité de l'interface vue par les
+autres (F3, F7).
 
 **F2 — Rien ne prouve que l'installation fonctionne.** `bin/setup` se termine
 sur « Create your first issue » (`bin/setup:1231`). La première issue réelle
@@ -82,7 +85,10 @@ premier échec arrive sur du travail auquel il tient.
 coexistent (`boucle:*` et `boucle::status::*`) pour ~25 labels distincts, dont
 des internes moteur exposés à l'utilisateur : `boucle:e2e-origin`,
 `boucle:split-parent`, `boucle:commit`, `boucle:obligations`,
-`boucle:verdict`. L'utilisateur n'en manipule réellement que 3 ou 4.
+`boucle:verdict`. L'utilisateur n'en manipule réellement que 3 ou 4. En équipe
+mixte (§6), un coéquipier non technique voit passer sur son board des
+concepts — rebase, verdict ancré sur SHA, issue parente — qui n'ont aucun
+sens pour lui et qu'il ne peut pas actionner.
 
 **F4 — 67 variables `BOUCLE_*` éditées une par une dans une UI web.** Aucune
 configuration versionnée côté consommateur, aucune validation au moment de
@@ -218,11 +224,37 @@ bats devient réelle sur les deux forges, et le delta GitLab/GitHub de
 
 **P0.2 — Installation sans runner auto-hébergé par défaut.** *(effort : S ;
 impact : élevé)*
-Supporter et documenter les runners partagés gitlab.com (tag par défaut vide
-ou `saas-linux-small-amd64` plutôt que `boucle` obligatoire), et promouvoir
-le parcours GitHub comme chemin d'entrée officiel — il ne demande aucune
-infrastructure. Faire tomber F1 de ~45 min à ~5 min est le levier d'adoption
-le plus rentable du dépôt.
+Le socle existe déjà : 8 jobs tournent en `tags: []`, et l'image
+`docker.io/ankabootops/boucle-agents:latest` — node 22, glab, jcode,
+codebase-memory-mcp pré-cuits — est publiée et déjà utilisée par `merger`,
+`post-merge` et `catchup`. Le `before_script` teste `command -v` avant chaque
+installation, donc il fonctionne sur les deux exécuteurs.
+
+Le seul verrou est `default: tags: [$BOUCLE_RUNNER_TAG]` (`.gitlab-ci.yml:151`)
+avec le défaut `boucle`, qui laisse 5 jobs — `triage`, `worker`, `reviewer`,
+`deploy`, `e2e` — exiger un runner taggé. Le fichier l'admet lui-même
+(`.gitlab-ci.yml:145`) : *« a shared docker runner without a matching tag
+cannot pick up these jobs »*.
+
+Correctif : `BOUCLE_RUNNER_TAG` vide par défaut, `image:
+docker.io/ankabootops/boucle-agents:latest` sur le bloc `default:`, et
+`bin/setup` n'écrit un tag que si `--runner-tag` est passé explicitement.
+
+**Contrepartie à documenter honnêtement — elle touche l'argumentaire coût.**
+GitLab.com Free plafonne à **400 minutes de calcul/mois** (puis $10/1 000 min) ;
+les runners auto-hébergés sont illimités. Les jobs d'agent sont longs (latence
+LLM) et une feature consomme triage + jusqu'à 3 worker + 3 reviewer + e2e —
+soit 30 à 60 min de calcul, donc **7 à 13 features/mois** avant facturation.
+Les « ~125 features/mois » du README supposent donc implicitement un runner à
+minutes illimitées. Le tableau de capacité doit porter **deux lignes** :
+runner auto-hébergé (minutes gratuites, coût = la machine) et shared runner
+(installation nulle, minutes facturées). Sans cela, la promesse de coût et la
+promesse d'installation se contredisent.
+
+À noter : rien ne persiste entre runs sur docker — c'est la raison d'être de
+`Dockerfile.agents` — et Chromium reste installé à la demande via npm
+(`puppeteer-core` + `@sparticuz/chromium`, `lib/boucle-ci/triage.sh:395`),
+soit ~30–60 s par job de preview, à imputer aux minutes.
 
 **P0.3 — Issue de fumée en fin d'installation.** *(effort : M ; impact : élevé)*
 `bin/setup --smoke` crée une issue triviale et auto-refermante qui traverse
@@ -230,56 +262,103 @@ toute la chaîne (dispatch → triage → worker → preview → e2e). L'utilisa
 obtient une validation verte de bout en bout avant d'y engager du travail
 réel. Transforme F2 en argument de confiance.
 
+**P0.4 — Antisèche d'interaction dans l'issue.** *(effort : S ; impact : élevé)*
+*Remonté de P1 : en équipe mixte (§6), c'est l'intégralité de l'interface pour
+les coéquipiers non techniques.* Le commentaire de statut de boucle (P1.1)
+porte en permanence ce que l'humain peut faire : quelles réactions valent
+approbation, l'effet d'un commentaire, les labels disponibles. L'interface se
+documente là où la décision se prend, plutôt que dans le README.
+
+**P0.5 — Hygiène des labels.** *(effort : S ; impact : élevé)*
+*Remonté de P1, même raison.* Un seul espace de noms. Les internes moteur
+(`boucle:e2e-origin`, `boucle:split-parent`, `boucle:commit`,
+`boucle:obligations`, `boucle:verdict`) passent en métadonnées de corps
+d'issue, ou reçoivent une couleur neutre qui les exclut de la vue board.
+Documenter explicitement les 4 labels que l'humain manipule réellement.
+
 ### P1 — L'UX de la boucle elle-même
 
 **P1.1 — Un commentaire « Loop status » édité en place, par issue.**
 *(effort : M ; impact : élevé — traite F5 + F6 d'un seul coup)*
 Étape courante, itération n/max, coût cumulé, liens job + preview. Toutes les
-données existent déjà (`health.jsonl`, `cost.json`). Réutiliser exactement le
-modèle du status board : édition en place, zéro écriture API si le corps est
-inchangé (`LOOP.md` §Status board). Coche au passage l'item roadmap
-« cost estimate » et aligne enfin le produit sur son propre argumentaire.
+données existent déjà (`health.jsonl`, `cost.json`). Coche au passage l'item
+roadmap « cost estimate » et aligne enfin le produit sur son propre
+argumentaire. Porte également l'antisèche P0.4 : un seul objet à maintenir,
+une seule note à lire pour l'humain.
 
-**P1.2 — Hygiène des labels.** *(effort : S ; impact : moyen)*
-Un seul espace de noms. Les internes moteur (`boucle:e2e-origin`,
-`boucle:split-parent`, `boucle:commit`, `boucle:obligations`) passent en
-métadonnées de corps d'issue ou reçoivent une couleur neutre les excluant du
-board. Documenter explicitement les 4 labels que l'humain manipule.
+**C'est une note unique, éditée en place — jamais un commentaire de plus.**
+Elle est créée au premier passage puis modifiée par `PATCH`. Trois raisons,
+toutes déjà établies dans le dépôt :
 
-**P1.3 — Configuration versionnée.** *(effort : M ; impact : moyen)*
+- `CONTEXT.md` §8 — les écritures no-op polluent l'historique d'événements et
+  peuvent fausser les transitions de la machine à états.
+- Le status board applique déjà exactement cette règle : *« edited in place
+  and never commented on »*, *« an unchanged body produces zero API writes »*
+  (`LOOP.md` §Status board). Le patron est éprouvé, il suffit de le réutiliser.
+- `bin/collapse-duplicate-notes` existe déjà : la prolifération de notes est
+  un problème connu du projet.
+
+Mécanique : un marqueur HTML caché `<!-- boucle:loopstatus v=1 -->` identifie
+la note (même convention que `<!-- boucle:triage` et `<!-- boucle:verdict`) ;
+on relit la note existante, on compare le corps rendu, et on `PATCH`
+uniquement s'il diffère.
+
+**P1.2 — Configuration versionnée.** *(effort : M ; impact : moyen)*
 Un `.boucle/config.yml` côté consommateur pour tout le non-secret, avec les
 variables CI/CD conservées pour les seuls secrets et gardant la priorité.
 Validation par `bin/doctor --audit` exécuté en CI sur chaque push : les
 erreurs de configuration deviennent des échecs de PR au lieu de pannes en
 milieu de boucle. Répond à F4.
 
-**P1.4 — Antisèche d'interaction dans l'issue.** *(effort : S ; impact : moyen)*
-Le premier commentaire de boucle sur chaque issue liste ce que l'humain peut
-faire : réactions valant approbation, effet d'un commentaire, labels
-disponibles. L'interface se documente là où la décision se prend, plutôt que
-dans le README. Répond à F7.
-
 ### P2 — Hygiène projet et fondations contributeur
 
-**P2.1 — `CONTRIBUTING.md`, `CHANGELOG.md`, `SECURITY.md`, templates
-issue/PR.** *(effort : S ; impact : moyen)* Le CHANGELOG est le plus urgent
-des quatre : `bin/update` doit lier les notes de version dans son commit de
-bump, pour qu'une auto-mise-à-jour cesse d'être opaque.
+**P2.1 — `CHANGELOG.md`.** *(effort : S ; impact : moyen — le plus urgent du
+lot)* En mode `release` (le défaut), `bin/update` tire le dernier tag amont
+(`bin/update:59-61`) et remplace le moteur du consommateur. Aujourd'hui
+personne ne peut lire ce qui a changé. C'est une asymétrie gênante sur un
+projet dont la contrainte n°1 est le *fail-open* : le pipeline est protégé
+contre les erreurs, mais l'utilisateur ne l'est pas contre les changements de
+comportement. Concrètement : un CHANGELOG au format Keep a Changelog, et
+`bin/update` qui inscrit l'URL des notes de version dans le message de son
+commit de bump.
 
-**P2.2 — Tags semver + `.boucle-version` lisible.** *(effort : S)* Permet
-d'épingler, de diagnostiquer, et de distinguer une mise à jour mineure d'une
-cassante.
+**P2.2 — `CONTRIBUTING.md`.** *(effort : S)* Aujourd'hui, contribuer suppose
+de lire 1 580 lignes d'`AGENTS.md`. Une page suffit : prérequis (shellcheck,
+shfmt, bats), `make check`, où vit la logique (`lib/boucle-ci/`), conventions
+de commit (déjà rédigées dans `AGENTS.md` §Commit conventions) et workflow
+upstream-first.
 
-**P2.3 — Éclater `AGENTS.md`.** *(effort : M)* Garder un noyau court et
-impératif pour les agents (principes opérationnels), déplacer les leçons
-apprises vers `docs/lessons/`, et écrire un vrai guide contributeur humain.
-Bénéfice double : budget de prompt allégé et point d'entrée lisible.
+**P2.3 — `SECURITY.md`.** *(effort : S)* Le produit manipule un PAT bot, une
+clé LLM et un token Cloudflare, et pratique la rédaction de secrets dans les
+logs (`bin/jc`). Gérer tout cela sans politique de divulgation est incohérent
+avec le soin déjà mis dans le code.
 
-**P2.4 — Bootstrap dev + harnais d'intégration local.** *(effort : M)*
+**P2.4 — Templates d'issue côté consommateur.** *(effort : S ; impact : moyen)*
+Ce point n'est pas de l'hygiène mais du produit : boucle est *piloté par les
+issues*. Un template améliore directement la qualité de l'entrée du triage —
+et donne à un coéquipier non technique (§6) un formulaire plutôt qu'une page
+blanche.
+
+**P2.5 — Tags semver + `.boucle-version` lisible.** *(effort : S)*
+`.boucle-version` contient `7575504`, un SHA, et le mode release saute au
+dernier tag. Impossible d'épingler une plage, de dire sur quoi on tourne, ni
+de distinguer une mise à jour mineure d'une cassante.
+
+**P2.6 — Éclater `AGENTS.md`.** *(effort : M)* Un fichier porte trois rôles
+incompatibles : contexte de prompt des agents, guide du contributeur humain,
+journal des leçons (lignes 89–1455 à lui seul). Or `LOOP.md` §Prompt budget
+documente précisément le risque de *context rot* — le plus gros fichier du
+dépôt alimente le contexte des agents. Découpage : un noyau court et impératif
+(les 11 principes opérationnels) pour les agents, `docs/lessons/` pour
+l'historique, `CONTRIBUTING.md` pour les humains.
+
+**P2.7 — Bootstrap dev + harnais d'intégration local.** *(effort : M)*
 `mise`/devcontainer plus une cible `make dev` qui installe shellcheck, shfmt
 et bats ; fixture de forge simulée permettant d'exécuter `bin/boucle-ci
-<stage>` hors-ligne. Devient réalisable une fois P0.1 livré — et c'est
-précisément ce qui rend P0.1 rentable au-delà de la seule déduplication.
+<stage>` hors-ligne. N'est réalisable qu'**après** P0.1 — et c'est précisément
+ce qui rend P0.1 rentable au-delà de la seule déduplication : aujourd'hui, les
+bugs les plus coûteux (webhooks, transitions de labels, rebase) ne sont
+testables qu'en CI réel.
 
 ## 5. Ce qu'il ne faut surtout pas copier
 
@@ -295,22 +374,45 @@ précisément ce qui rend P0.1 rentable au-delà de la seule déduplication.
   est un choix produit fort, à contre-courant des chats qui exigent une
   présence permanente.
 
-## 6. Le point stratégique à trancher
+## 6. Le persona, et ce qu'il implique pour les priorités
 
-`CONTEXT.md` §3 vise les « Product Builders, pas nécessairement développeurs
-à plein temps ». Or l'installation réelle demande une forge, un runner, un
-compte bot, un PAT, des variables CI/CD masquées et un token Cloudflare —
-c'est-à-dire des compétences de DevOps. Deux issues cohérentes :
+Le persona visé (précision du mainteneur, 2026-08) : des gens qui **ne sont
+plus nécessairement développeurs mais ont des bases techniques**, ou qui
+**veulent collaborer avec des utilisateurs non techniques au sein d'une
+équipe**.
 
-1. **Tenir le persona** → P0.2 et P0.3 sont alors existentiels, et l'objectif
-   devient une installation en une commande sans aucune infrastructure.
-2. **Recadrer le persona** → « fondateurs techniques solos et petites équipes
-   déjà installées sur GitLab/GitHub », ce que le produit sert déjà très bien.
-   Les documents charte doivent alors le refléter.
+Cela lève la tension supposée entre le persona et le coût d'installation :
+demander une forge, un PAT et des variables CI/CD à quelqu'un qui a des bases
+techniques est parfaitement cohérent. P0.2 reste souhaitable, mais comme
+confort d'adoption — pas comme enjeu existentiel.
 
-Les deux sont défendables. Ce qui ne l'est pas, c'est de vendre le premier
-tout en livrant le second : c'est exactement là que se creuse l'écart entre
-la promesse et la première impression.
+En revanche, le second volet — **l'équipe mixte** — impose une exigence qui
+change le classement des priorités. Les rôles s'y séparent nettement :
+
+| Rôle | Ce qu'il touche | Ce dont il a besoin |
+| --- | --- | --- |
+| **L'installateur technique** | setup, runner, PAT, 67 variables | Une fois, au départ. Sert P0.2, P1.2, P2.x |
+| **Le coéquipier non technique** | l'issue, et rien d'autre | Créer, lire un TL;DR, réagir 👍, commenter |
+
+Pour le second, **l'issue *est* le produit** — il n'y a pas d'autre surface.
+D'où la remontée en P0 de deux items que j'avais classés en confort :
+
+- **P0.4 (antisèche dans l'issue)** — il n'a aucune raison de savoir qu'un 👍
+  vaut approbation ; rien ne le lui dit là où il décide.
+- **P0.5 (hygiène des labels)** — il voit aujourd'hui passer `boucle:verdict`,
+  `boucle:split-parent` et `boucle:e2e-origin` sur son board, concepts qu'il
+  ne peut ni interpréter ni actionner.
+
+C'est aussi l'écart le plus net face à Lovable et Replit, dont l'interface est
+conçue pour cette personne-là. boucle a le bon modèle de collaboration — le
+gate humain, l'asynchrone, la forge comme lieu unique — mais présente encore
+ses internes moteur à quelqu'un qui n'en a que faire.
+
+**Recommandation** : inscrire cette formulation du persona dans
+`CONTEXT.md` §3, qui dit aujourd'hui seulement « pas nécessairement
+développeurs à plein temps ». Le volet « équipe mixte » n'y figure pas, alors
+qu'il est ce qui justifie de traiter la lisibilité de l'issue comme une
+fonctionnalité de premier plan.
 
 ## 7. Références
 
