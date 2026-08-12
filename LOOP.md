@@ -304,7 +304,7 @@ less:
 
 ## Cost accounting
 
-Every agent invocation appends one entry to `.boucle/<issue>/cost.json`
+Every agent invocation appends one entry to `.boucle-state/<issue>/cost.json`
 (role, iteration, model, provider, tokens, cost) and emits a
 `[boucle:metrics]` line. The accumulator survives across iterations like
 `iterations.md`, so a re-run adds to the total instead of overwriting it.
@@ -327,7 +327,7 @@ This is the prerequisite for a real budget cap (§Caps below still reads
 
 ## Loop-health measurement
 
-Every agent run appends one JSONL line to `.boucle/<issue>/health.jsonl`
+Every agent run appends one JSONL line to `.boucle-state/<issue>/health.jsonl`
 (role, iteration, exit_code, prompt_chars, tokens, cost, model, provider),
 and every stage outcome appends another (worker: committed/no-changes/
 build-fail; reviewer/e2e: PASS/FAIL/UNCERTAIN; merger: merged/conflict).

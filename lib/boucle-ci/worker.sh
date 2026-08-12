@@ -19,14 +19,19 @@ boucle_ci_worker() {
   ITERATION="${BOUCLE_ITERATION:-1}"
   export BOUCLE_ITERATION
 
-  # ── Persist .boucle/<issue>/ across iterations ───────────────────
+  # ── Persist .boucle-state/<issue>/ across iterations ─────────────
+  # Per-issue state lives in .boucle-state/ (gitignored) — never in
+  # .boucle/, which is the engine submodule on consumers (git submodule
+  # update would clobber in-flight state). AGENTS.md lesson #20: the
+  # worker fills state.md's Approach section; the MR description reads
+  # it back from the same .boucle-state/<issue>/state.md path.
   BOUCLE_STATE_CACHE="${BOUCLE_STATE_CACHE:-${HOME}/.boucle-state-cache}"
   ISSUE_STATE_CACHE="${BOUCLE_STATE_CACHE}/${BOUCLE_ISSUE}"
 
   save_state_cache() {
-    if [ -d ".boucle/$BOUCLE_ISSUE" ]; then
+    if [ -d ".boucle-state/$BOUCLE_ISSUE" ]; then
       mkdir -p "$ISSUE_STATE_CACHE"
-      cp -a ".boucle/$BOUCLE_ISSUE/." "$ISSUE_STATE_CACHE/" 2> /dev/null || true
+      cp -a ".boucle-state/$BOUCLE_ISSUE/." "$ISSUE_STATE_CACHE/" 2> /dev/null || true
     fi
   }
   trap save_state_cache EXIT
@@ -110,9 +115,9 @@ boucle_ci_worker() {
 
   # ── Restore state cache AFTER checkout ───────────────────────────
   if [ -d "$ISSUE_STATE_CACHE" ]; then
-    echo "[boucle] Restoring .boucle/$BOUCLE_ISSUE/ from $ISSUE_STATE_CACHE"
-    mkdir -p ".boucle/$BOUCLE_ISSUE"
-    cp -a "$ISSUE_STATE_CACHE/." ".boucle/$BOUCLE_ISSUE/" 2> /dev/null || true
+    echo "[boucle] Restoring .boucle-state/$BOUCLE_ISSUE/ from $ISSUE_STATE_CACHE"
+    mkdir -p ".boucle-state/$BOUCLE_ISSUE"
+    cp -a "$ISSUE_STATE_CACHE/." ".boucle-state/$BOUCLE_ISSUE/" 2> /dev/null || true
   fi
 
   # ── Configure git credentials for push ───────────────────────────
@@ -160,13 +165,13 @@ EOF
   fi
 
   # ── Seed iterations.md on first run ───────────────────────────────
-  if [ ! -f ".boucle/$BOUCLE_ISSUE/iterations.md" ]; then
+  if [ ! -f ".boucle-state/$BOUCLE_ISSUE/iterations.md" ]; then
     # mkdir is NOT conditional here: the restore-from-cache block above only
-    # creates .boucle/<iid>/ when the cache exists — on a first run (or after
+    # creates .boucle-state/<iid>/ when the cache exists — on a first run (or after
     # GIT_CLEAN_FLAGS wiped the gitignored dir) the seed below would fail
     # with "No such file or directory" (observed on framagit, 2026-08).
-    mkdir -p ".boucle/$BOUCLE_ISSUE"
-    cat > ".boucle/$BOUCLE_ISSUE/iterations.md" << 'EOF'
+    mkdir -p ".boucle-state/$BOUCLE_ISSUE"
+    cat > ".boucle-state/$BOUCLE_ISSUE/iterations.md" << 'EOF'
 # Iteration log — issue #$BOUCLE_ISSUE
 
 Each entry: timestamp — role (agent) — iteration — result + files touched.
@@ -186,14 +191,14 @@ EOF
 
   # ── Build feedback channel: inject previous iteration's build error ──
   # Mirrors BOUCLE_REVIEWER_FEEDBACK. On a build failure the worker writes
-  # the build log tail to .boucle/<issue>/build-feedback.md (restored from
+  # the build log tail to .boucle-state/<issue>/build-feedback.md (restored from
   # the state cache on the next run) and exports it as BOUCLE_BUILD_FEEDBACK
   # so bin/jc injects it into the worker prompt. Empty on the first run or
   # after a successful build.
   export BOUCLE_BUILD_FEEDBACK
   BOUCLE_BUILD_FEEDBACK=""
-  if [ -f ".boucle/$BOUCLE_ISSUE/build-feedback.md" ]; then
-    BOUCLE_BUILD_FEEDBACK=$(cat ".boucle/$BOUCLE_ISSUE/build-feedback.md" 2> /dev/null || echo "")
+  if [ -f ".boucle-state/$BOUCLE_ISSUE/build-feedback.md" ]; then
+    BOUCLE_BUILD_FEEDBACK=$(cat ".boucle-state/$BOUCLE_ISSUE/build-feedback.md" 2> /dev/null || echo "")
   fi
 
   # ── Download attachments ─────────────────────────────────────────
@@ -261,7 +266,7 @@ EOF
   # ── Model/API failure detection (exit 4) ─────────────────────────
   if [ "$rc" -eq 4 ]; then
     local agent_log_file log_snippet diagnostic_body
-    agent_log_file="$BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE/agent-output.log"
+    agent_log_file="$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE/agent-output.log"
     log_snippet="(log file not found or empty)"
     if [ -f "$agent_log_file" ]; then
       log_snippet=$(tail -c 2000 "$agent_log_file" 2> /dev/null | sed 's/\x1b\[[0-9;]*m//g' || echo "(log read failed)")
@@ -331,8 +336,8 @@ EOF
     # (#44). A step-exhausted run leaves a half-written tree that the
     # safety-net commit makes durable on the branch; iteration N+1 would
     # otherwise inherit it and spend its budget working out what happened.
-    mkdir -p "$BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE" 2> /dev/null || true
-    echo "no-changes" > "$BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE/last-outcome" 2> /dev/null || true
+    mkdir -p "$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE" 2> /dev/null || true
+    echo "no-changes" > "$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE/last-outcome" 2> /dev/null || true
     if [ "$ITERATION" -lt "$max_iter" ]; then
       echo "WARN: worker produced no changes — re-triggering (iteration $((ITERATION + 1))/$max_iter)." >&2
       set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
@@ -356,7 +361,7 @@ EOF
   fi
 
   # The worker shipped code: the next iteration must PRESERVE this work.
-  echo "committed" > ".boucle/$BOUCLE_ISSUE/last-outcome" 2> /dev/null || true
+  echo "committed" > ".boucle-state/$BOUCLE_ISSUE/last-outcome" 2> /dev/null || true
   boucle_health_outcome "$BOUCLE_ISSUE" "worker" "committed" "iteration $ITERATION" || true
 
   # ── Rebase before build ──────────────────────────────────────────
@@ -378,7 +383,7 @@ EOF
     build_rc=$?
     if [ "$build_rc" -ne 0 ]; then
       echo "FAIL: BOUCLE_BUILD_CMD exited $build_rc — feeding build error to next iteration." >&2
-      tail -c 4000 "$build_log" 2> /dev/null | sed 's/\x1b\[[0-9;]*m//g' > ".boucle/$BOUCLE_ISSUE/build-feedback.md" 2> /dev/null || true
+      tail -c 4000 "$build_log" 2> /dev/null | sed 's/\x1b\[[0-9;]*m//g' > ".boucle-state/$BOUCLE_ISSUE/build-feedback.md" 2> /dev/null || true
       rm -f "$build_log"
       # Clean the build output so it does not dirty the tree / block rebase.
       [ -n "${BOUCLE_BUILD_OUTPUT:-}" ] && [ -d "$BOUCLE_BUILD_OUTPUT" ] && rm -rf "$BOUCLE_BUILD_OUTPUT" 2> /dev/null || true
@@ -406,7 +411,7 @@ EOF
     # Build succeeded: clear stale feedback. Keep the build output if a
     # deploy follows (the marker + deploy need it); clean it only when no
     # deploy is planned, so it does not dirty the tree on non-deploy runs.
-    rm -f ".boucle/$BOUCLE_ISSUE/build-feedback.md" 2> /dev/null || true
+    rm -f ".boucle-state/$BOUCLE_ISSUE/build-feedback.md" 2> /dev/null || true
     if ! boucle_worker_should_deploy; then
       [ -n "${BOUCLE_BUILD_OUTPUT:-}" ] && [ -d "$BOUCLE_BUILD_OUTPUT" ] && rm -rf "$BOUCLE_BUILD_OUTPUT" 2> /dev/null || true
     fi

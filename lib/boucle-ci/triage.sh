@@ -375,8 +375,8 @@ boucle_ci_triage() {
       # no RENDER_REQUEST → block is a no-op (zero Chromium cost).
       # Failure is isolated: fallback note, never blocks the loop.
       # Idempotent: RENDER_REQUEST deleted after successful embed.
-      PREVIEW_HTML="$BOUCLE_WORKSPACE/.boucle/$IID/preview.html"
-      RENDER_REQUEST_FILE="$BOUCLE_WORKSPACE/.boucle/$IID/RENDER_REQUEST"
+      PREVIEW_HTML="$BOUCLE_WORKSPACE/.boucle-state/$IID/preview.html"
+      RENDER_REQUEST_FILE="$BOUCLE_WORKSPACE/.boucle-state/$IID/RENDER_REQUEST"
 
       if [ "${BOUCLE_PREVIEW_DISABLE:-false}" != "true" ] && [ -s "$RENDER_REQUEST_FILE" ] && [ -s "$PREVIEW_HTML" ]; then
         echo "[boucle] RENDER_REQUEST found — attempting visual preview"
@@ -396,7 +396,7 @@ boucle_ci_triage() {
             # 3. Render preview.html → preview.png (1280x800, fullPage).
             #    NODE_PATH=$NPM_TMP/node_modules so the script (bin/) resolves
             #    the modules installed in the per-job dir.
-            PREVIEW_PNG="$BOUCLE_WORKSPACE/.boucle/$IID/preview.png"
+            PREVIEW_PNG="$BOUCLE_WORKSPACE/.boucle-state/$IID/preview.png"
             #    The renderer emits one PNG per BOUCLE_PREVIEW_VIEWPORTS
             #    entry (default: one phone, one desktop) and prints each
             #    path on stdout. A spec approved on a desktop-only shot

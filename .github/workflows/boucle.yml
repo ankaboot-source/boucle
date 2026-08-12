@@ -297,10 +297,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # Persist .boucle/<issue>/ state across worker iterations. On GitHub-hosted
-      # runners $HOME is ephemeral, so $BOUCLE_STATE_CACHE (default
-      # $HOME/.boucle-state-cache) would be lost between runs. actions/cache
-      # restores it before the worker runs and saves it after (lesson #28).
+      # Persist .boucle-state/<issue>/ state across worker iterations. On
+      # GitHub-hosted runners $HOME is ephemeral, so $BOUCLE_STATE_CACHE
+      # (default $HOME/.boucle-state-cache) would be lost between runs.
+      # actions/cache restores it before the worker runs and saves it after
+      # (lesson #28). Per-issue state lives OUTSIDE .boucle/ (the engine
+      # submodule on consumers): git submodule update clobbers anything
+      # inside the submodule, so state must never ride along with the engine.
       - name: Restore boucle state cache
         uses: actions/cache/restore@v4
         with:

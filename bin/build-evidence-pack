@@ -7,14 +7,14 @@
 #
 # This script needs NO forge API — it only uses git and the filesystem.
 #
-# Output: writes .boucle/$ISSUE/.evidence-pack.md (markdown). bin/jc
+# Output: writes .boucle-state/$ISSUE/.evidence-pack.md (markdown). bin/jc
 #         reads that file and injects it into the reviewer prompt as text.
 #         Idempotent: re-running overwrites the same file.
 #
 # Behavior contract:
 #   1. If BOUCLE_ISSUE is empty/unset → exit 0 (no-op, allow skipping).
 #   2. Resolve output dir by mirroring bin/jc's resolution
-#      ($BOUCLE_WORKSPACE/.boucle/$ISSUE). mkdir -p it.
+#      ($BOUCLE_WORKSPACE/.boucle-state/$ISSUE). mkdir -p it.
 #   3. Resolve the base ref: ${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}.
 #      If not in a git repo (no .git) → exit 0. If the base ref cannot be
 #      resolved via `git rev-parse --verify` → exit 0 (best-effort, never fail).
@@ -39,13 +39,15 @@
 set -euo pipefail
 
 ISSUE="${BOUCLE_ISSUE:-}"
-# $BOUCLE_WORKSPACE/.boucle/$ISSUE is gitignored per-issue state. This is the
-# same resolution bin/jc uses (see bin/jc STATE_DIR), so the evidence-pack is
-# written where bin/jc and the reviewer's deliverables restore expect it.
+# $BOUCLE_WORKSPACE/.boucle-state/$ISSUE is gitignored per-issue state. This is
+# the same resolution bin/jc uses (see bin/jc STATE_DIR), so the evidence-pack
+# is written where bin/jc and the reviewer's obligations restore expect it.
+# Per-issue state lives OUTSIDE .boucle/ (the engine submodule on consumers):
+# `git submodule update` clobbers anything inside the submodule.
 # Keep the CI_PROJECT_DIR fallback behavior intact for local dev.
 BOUCLE_WORKSPACE="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-$(pwd)}}"
 CI_PROJECT_DIR="$BOUCLE_WORKSPACE"
-STATE_DIR="$BOUCLE_WORKSPACE/.boucle/$ISSUE"
+STATE_DIR="$BOUCLE_WORKSPACE/.boucle-state/$ISSUE"
 EVIDENCE_FILE="$STATE_DIR/.evidence-pack.md"
 
 # ── Skip: no issue ─────────────────────────────────────────────────────

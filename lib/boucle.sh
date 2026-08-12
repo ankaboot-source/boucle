@@ -171,7 +171,7 @@ boucle_schedule_body() {
 # runner therefore cannot re-fire a template it already fired.
 boucle_schedules_run() {
   [ "${BOUCLE_SCHEDULES_ENABLED:-false}" = "true" ] || return 0
-  local dir="${BOUCLE_WORKSPACE:-.}/.boucle/schedules"
+  local dir="${BOUCLE_WORKSPACE:-.}/.boucle-state/schedules"
   [ -d "$dir" ] || return 0
 
   # A cron must never starve human-created work.
@@ -355,7 +355,7 @@ boucle_board_upsert() {
 # a confident wrong number is worse than tokens alone.
 boucle_cost_summary() {
   local iid="$1"
-  local file="${BOUCLE_WORKSPACE:-.}/.boucle/${iid}/cost.json"
+  local file="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/cost.json"
   [ -s "$file" ] || return 0
   command -v jq > /dev/null 2>&1 || return 0
   jq -r '
@@ -381,7 +381,7 @@ boucle_cost_summary() {
 }
 
 # ── Loop-health measurement (#52) ─────────────────────────────────────
-# Append one JSONL line per agent run to .boucle/<issue>/health.jsonl.
+# Append one JSONL line per agent run to .boucle-state/<issue>/health.jsonl.
 # Derived from what bin/jc already emits ([boucle:metrics], [boucle:prompt],
 # cost.json) plus the run exit code. Survives across iterations via the
 # state cache (like cost.json). Read by bin/health and by the escalation
@@ -390,7 +390,7 @@ boucle_health_record() {
   local iid="$1" role="$2" iteration="$3" exit_code="$4"
   local prompt_chars="${5:-0}" tokens="${6:-}" cost="${7:-}"
   local model="${8:-}" provider="${9:-}"
-  local file="${BOUCLE_WORKSPACE:-.}/.boucle/${iid}/health.jsonl"
+  local file="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
   mkdir -p "$(dirname "$file")" 2> /dev/null || true
   local ts
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -404,7 +404,7 @@ boucle_health_record() {
 # merger: merged/conflict). One line per stage outcome.
 boucle_health_outcome() {
   local iid="$1" role="$2" outcome="$3" detail="${4:-}"
-  local file="${BOUCLE_WORKSPACE:-.}/.boucle/${iid}/health.jsonl"
+  local file="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
   mkdir -p "$(dirname "$file")" 2> /dev/null || true
   local ts
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -421,8 +421,8 @@ boucle_health_outcome() {
 # not-mergeable, spec-ambiguity, engine-defect, infra, unknown.
 boucle_escalation_diagnostic() {
   local iid="$1" trigger="$2"
-  local health_file="${BOUCLE_WORKSPACE:-.}/.boucle/${iid}/health.jsonl"
-  local cost_file="${BOUCLE_WORKSPACE:-.}/.boucle/${iid}/cost.json"
+  local health_file="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
+  local cost_file="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/cost.json"
   local class="unknown" evidence="" action="Inspect the agent transcript (link below) and the health record."
 
   # Count outcomes by role from health.jsonl
