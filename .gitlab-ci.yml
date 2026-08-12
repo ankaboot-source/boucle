@@ -908,6 +908,21 @@ dispatch:
         fi
       fi
 
+      # ── Allow-list gate ──────────────────────────────────────────────────
+      # Safety net: only issues whose resolved human reporter is in
+      # BOUCLE_ALLOWED_USERS are accepted. Fail-open when the variable is
+      # unset (legacy consumers). The reporter is resolved through the parent
+      # chain (bot-authored sub-issues resolve to their parent's author). On
+      # rejection an explanatory note is posted and NO role is triggered — the
+      # anti-accumulation EXIT trap turns this no-op exit into a visible
+      # pipeline failure. Only applies to issue/note/emoji events: MR and
+      # MR-note events already exited above. check_allow_list_gate is defined
+      # in lib/boucle.sh (sourced in before_script) so it is available here.
+      if ! check_allow_list_gate "$IID"; then
+        echo "dispatch: issue #$IID rejected by the allow list — skipping"
+        exit 0
+      fi
+
       # Label helper: preserve non-boucle labels when writing a boucle label.
       # The jq filter uses startswith("boucle:") which catches BOTH the detail
       # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
@@ -4489,6 +4504,15 @@ doctor:
             echo "  → #$IID: file-gate blocked — skipping worker trigger"
             continue
           fi
+          # Allow-list gate (safety net): the doctor must not start work on
+          # an issue whose resolved human reporter is not in
+          # BOUCLE_ALLOWED_USERS. Fail-open when the variable is unset.
+          # check_allow_list_gate is defined in lib/boucle.sh (sourced in
+          # before_script) so it is available here.
+          if ! check_allow_list_gate "$IID"; then
+            echo "doctor: issue #$IID rejected by the allow list — skipping worker re-trigger"
+            continue
+          fi
           chain_to_role "$IID" "worker"
           doctor_mark_triggered "$IID"
           echo "  → re-triggered worker for #$IID"
@@ -4661,6 +4685,15 @@ doctor:
             # an in-flight issue.
             if ! check_file_gate "$IID"; then
               echo "  → #$IID: file-gate blocked — skipping worker trigger"
+              continue
+            fi
+            # Allow-list gate (safety net): the doctor must not start work on
+            # an issue whose resolved human reporter is not in
+            # BOUCLE_ALLOWED_USERS. Fail-open when the variable is unset.
+            # check_allow_list_gate is defined in lib/boucle.sh (sourced in
+            # before_script) so it is available here.
+            if ! check_allow_list_gate "$IID"; then
+              echo "doctor: issue #$IID rejected by the allow list — skipping worker re-trigger"
               continue
             fi
             chain_to_role "$IID" "worker"
