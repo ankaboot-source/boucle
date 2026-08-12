@@ -9,16 +9,17 @@
 # archives, etc.) — not just images. Variable names retain the IMAGE prefix
 # for backward compatibility with consumers that override them via GitLab UI.
 #
-# Output: writes .boucle/$ISSUE/.attachments.env (sourced by bin/jc) and
-#         .boucle/$ISSUE/attachments/MANIFEST.md (human-readable log).
+# Output: writes .boucle-state/$ISSUE/.attachments.env (sourced by bin/jc) and
+#         .boucle-state/$ISSUE/attachments/MANIFEST.md (human-readable log).
 set -euo pipefail
 
 : "${BOUCLE_TOKEN:?BOUCLE_TOKEN must be set}"
 ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
 CI_PROJECT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
-# .boucle/$ISSUE is gitignored per-issue state (kept inside the engine dir so
-# state rides along with the submodule and survives `git submodule update`).
-STATE_DIR="$CI_PROJECT_DIR/.boucle/$ISSUE"
+# .boucle-state/$ISSUE is gitignored per-issue state. It lives OUTSIDE .boucle/
+# (the engine submodule on consumers): `git submodule update` clobbers anything
+# inside the submodule, so state must never ride along with the engine.
+STATE_DIR="$CI_PROJECT_DIR/.boucle-state/$ISSUE"
 ATT_DIR="$STATE_DIR/attachments"
 ENV_FILE="$STATE_DIR/.attachments.env"
 
