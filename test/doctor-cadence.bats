@@ -70,3 +70,32 @@ setup() {
   run grep -q 'ephemeral runner (GitHub-hosted) the snapshot is never' lib/boucle-ci/doctor.sh
   assert_success
 }
+
+@test "doctor: stale closed/merged MR with open MR must NOT continue (fall through to re-trigger)" {
+  # A closed (or merged) MR from a previous iteration coexisting with the
+  # current open MR must not skip the stuck-issue re-trigger: `continue`
+  # in the "skipping close" branches strands the issue at boucle:working
+  # forever (consumer 2026-08: hours stuck, worker slot occupied).
+  run grep -n 'skipping close' lib/boucle-ci/doctor.sh
+  assert_success
+  # Every line mentioning "skipping close" must be followed by the
+  # FALL THROUGH comment, never by a bare `continue`.
+  while read -r line; do
+    lineno="${line%%:*}"
+    run sed -n "$((lineno + 1))p" lib/boucle-ci/doctor.sh
+    assert_output --partial "FALL THROUGH"
+  done <<< "$output"
+}
+
+@test "doctor: the inline job mirrors the extracted no-continue guard" {
+  # The inline doctor job in .gitlab-ci.yml must carry the same guard —
+  # a fix in one copy alone leaves the bug live on the other (lesson #56).
+  # The trailing `"` excludes the reviewer's own "skipping close." echo.
+  run grep -n 'skipping close"' .gitlab-ci.yml
+  assert_success
+  while read -r line; do
+    lineno="${line%%:*}"
+    run sed -n "$((lineno + 1))p" .gitlab-ci.yml
+    assert_output --partial "FALL THROUGH"
+  done <<< "$output"
+}
