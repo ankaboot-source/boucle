@@ -148,8 +148,10 @@ You have these skills in `.jcode/skills/`. **Use them** — they contain domain 
    - Run `file <path>` to get its type and dimensions (e.g. `PNG 52x100` = vertical image). This tells you the format and aspect ratio without needing to see the pixels.
    - **Do NOT use the Read tool on binary files** (PNG/ZIP/etc.) — it returns garbage on text-only models. Use `file` for metadata, not `Read` for content.
    - If it's a source asset (logo, photo, visual to display), copy it into the build tree (e.g. `cp <path> public/<name>`) and reference it in your code (e.g. `<img src="/<name>">`).
-   - If it's a mockup/screenshot, use it as context for the implementation (dimensions, layout hints).
-   - If no issue attachments are listed, none were attached (or they exceeded the size cap) — proceed with text only.
+    - If it's a mockup/screenshot, use it as context for the implementation (dimensions, layout hints).
+    - If no issue attachments are listed, none were attached (or they exceeded the size cap) — proceed with text only.
+    - **When "Image descriptions" are present in your prompt**: the vision model has already described every image attachment as TEXT. Use THOSE descriptions as your visual context. The image paths have been stripped from the attachment lists — do NOT try to locate, list, or Read the raw image files; the text descriptions are authoritative and complete.
+    - **Shipping an image asset WITHOUT reading it**: each description block carries the source path on its `- File: \`<path>\`` line. To ship a described image as a page asset, `cp` it straight from that path (e.g. `cp /root/.../attachments/hero.png public/hero.png`) — copying does NOT require reading the pixels, and the vision model has already told you what it contains. Never `Read` a `.png/.jpg/...` even to "verify" it; the description is the verification.
  7. **MR comment attachments** (paths listed in your prompt under "MR comment attachments") have the same dual nature — mockups/screenshots for context OR source assets to ship. Decide based on the comment intent:
     - Run `file <path>` to get type and dimensions.
     - **Do NOT use the Read tool on binary files** — same as issue attachments.

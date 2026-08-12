@@ -524,6 +524,39 @@ if [ -f "$IMAGE_DESC_FILE" ]; then
   BOUCLE_IMAGE_DESCRIPTIONS="$(cat "$IMAGE_DESC_FILE")"
 fi
 
+# ── 3c. Strip image paths from attachment lists when descriptions exist ─
+# When bin/describe-images has already described the attachments as TEXT
+# (vision model ran separately), the agent MUST NOT Read the raw image
+# binaries: a text-only model (deepseek-v4-flash) 400s on image input,
+# killing the worker run (consumer 2026-08, issue #55: worker exited 1
+# with "this model does not support image input" and shipped zero commits
+# for 3 iterations). Strip image extensions from the paths exposed to the
+# agent so it can only rely on the descriptions. Non-image attachments
+# (PDF, zip, ...) keep their paths — they are not readable as images and
+# must still be inspectable. The ship-as-asset case is covered by the
+# prompt text below (cp a described image when the issue says "use this
+# file as X").
+if [ -n "$BOUCLE_IMAGE_DESCRIPTIONS" ]; then
+  strip_image_paths() {
+    local paths="${1:-}"
+    local kept=""
+    local p
+    for p in $paths; do
+      case "$p" in
+        *.png|*.jpg|*.jpeg|*.gif|*.webp|*.avif|*.bmp|*.svg)
+          : # described as text above — strip from agent-visible paths
+          ;;
+        *)
+          kept="$kept $p"
+          ;;
+      esac
+    done
+    echo "$kept" | sed 's/^ //'
+  }
+  BOUCLE_ISSUE_ATTACHMENTS=$(strip_image_paths "$BOUCLE_ISSUE_ATTACHMENTS")
+  BOUCLE_MR_ATTACHMENTS=$(strip_image_paths "$BOUCLE_MR_ATTACHMENTS")
+fi
+
 # ── 3c. Trim injected note threads (token-cost control) ──────────────
 # The CI stages export the FULL note thread (BOUCLE_ISSUE_NOTES,
 # BOUCLE_REVIEWER_FEEDBACK) with no cap, and build_prompt injects it on
