@@ -346,21 +346,21 @@ guard_decision() {
 # the same domain diverging on the same components (consumer 2026-08:
 # #69/#71 diverged on RightToResistBlock.astro, merger escalated).
 #
-# check_sibling_gate is defined INSIDE boucle_ci_dispatch() (nested), so
-# sourcing dispatch.sh does not expose it. Extract the nested function
-# with an awk brace-counter (mirrors extract_func_body in jc.bats).
+# check_sibling_gate is defined in lib/boucle-ci/gates.sh (converged from
+# the inline/nested def in dispatch.sh — the 2026-08 gate refactor). Extract
+# it with an awk brace-counter (mirrors extract_func_body in jc.bats).
 
 extract_sibling_gate() {
   awk '
     BEGIN { p = 0; depth = 0 }
-    /^  check_sibling_gate\(\) \{/ { p = 1; depth = 1; print; next }
+    /^check_sibling_gate\(\) \{/ { p = 1; depth = 1; print; next }
     p == 1 {
       n = gsub(/\{/, "{"); depth += n
       n = gsub(/\}/, "}"); depth -= n
       print
       if (depth == 0) { p = 0 }
     }
-  ' lib/boucle-ci/dispatch.sh
+  ' lib/boucle-ci/gates.sh
 }
 
 @test "check_sibling_gate blocks when a sibling is active" {
