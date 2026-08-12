@@ -175,6 +175,7 @@ You have these skills in `.jcode/skills/`. **Use them** — they contain domain 
 - **Do NOT** merge, push, or deploy — the job does that after you exit (including rebasing onto master).
 - **Do NOT** run `wrangler` or use `CLOUDFLARE_API_TOKEN` — you don't have it.
 - **Do NOT** rebase or merge master into your branch — the job rebases onto master after you commit. If you rebase yourself, you risk losing `MERGE_HEAD` and producing a single-parent commit that leaves the MR conflicted.
+- **If "MERGE CONFLICT" is in your prompt** (from a previous iteration): the default branch moved on (often a sibling issue merged). The job will rebase your branch onto the fresh default branch — the conflict may resolve itself, or you must **re-implement the issue's intent on top of the current default branch state**. Take the default branch's version as the base, re-apply the issue's goal, and if the goal is already covered by the default branch, say so explicitly instead of duplicating. Do NOT fight the conflict or revert the sibling's work.
 - Work on the current branch (already checked out by the job).
 - Keep changes minimal and focused on the acceptance criteria.
 - If you cannot complete the work, say so clearly in `state.md` under "Awaiting human".

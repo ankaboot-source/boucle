@@ -1080,6 +1080,61 @@ HELPER
   assert_output "OK"
 }
 
+@test "boucle_escalate_merge_conflict re-triggers worker below the retry cap" {
+  run bash -c '
+    source lib/boucle.sh
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    BOUCLE_DEFAULT_BRANCH=main
+    BOUCLE_MAX_ITERATIONS=3
+    # forge mocks: no prior conflict-retry notes → retry 1 of 3
+    forge_issue_notes() { echo "[]"; }
+    forge_issue_note() { echo "note-posted:$1"; }
+    set_boucle_label() { echo "label:$*"; }
+    chain_to_role() { echo "chain:$*"; }
+    boucle_escalate_merge_conflict 55 93 main "CONFLICT (content): Merge conflict in src/pages/index.astro"
+  '
+  assert_success
+  assert_output --partial "chain:55 worker BOUCLE_ITERATION=1"
+  assert_output --partial "BOUCLE_CONFLICT_FEEDBACK="
+  assert_output --partial "label:55 boucle:todo boucle::status::bot"
+}
+
+@test "boucle_escalate_merge_conflict escalates to human at the retry cap" {
+  run bash -c '
+    source lib/boucle.sh
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    BOUCLE_DEFAULT_BRANCH=main
+    BOUCLE_MAX_ITERATIONS=3
+    # forge mocks: 3 prior conflict-retry notes → budget exhausted → human
+    forge_issue_notes() { echo "[{\"body\":\"<!-- boucle:conflict-retry 1 -->\"},{\"body\":\"<!-- boucle:conflict-retry 2 -->\"},{\"body\":\"<!-- boucle:conflict-retry 3 -->\"}]"; }
+    forge_issue_note() { echo "note-posted:$1|$2"; }
+    set_boucle_label() { echo "label:$*"; }
+    chain_to_role() { echo "chain:$*"; }
+    boucle_escalate_merge_conflict 55 93 main "CONFLICT (content): Merge conflict in src/pages/index.astro"
+  '
+  assert_success
+  assert_output --partial "label:55 boucle:human boucle::status::human"
+  refute_output --partial "chain:55 worker"
+  assert_output --partial "cannot be merged automatically"
+}
+
+@test "boucle_escalate_merge_conflict posts the conflict-retry note BEFORE re-triggering" {
+  run bash -c '
+    source lib/boucle.sh
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    BOUCLE_DEFAULT_BRANCH=main
+    BOUCLE_MAX_ITERATIONS=3
+    forge_issue_notes() { echo "[]"; }
+    forge_issue_note() { echo "note:$1|$2"; }
+    set_boucle_label() { echo "label:$*"; }
+    chain_to_role() { echo "chain:$*"; }
+    boucle_escalate_merge_conflict 55 93 main "CONFLICT (content): Merge conflict in src/pages/index.astro"
+  '
+  assert_success
+  assert_output --partial "note:55|"
+  assert_output --partial "boucle:conflict-retry 1"
+}
+
 # ── job_link (#33) ────────────────────────────────────────────────────
 # Escalation comments state that the loop stopped, never why. job_link is
 # the pointer to the transcript that makes them actionable.

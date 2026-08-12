@@ -339,3 +339,71 @@ guard_decision() {
     fi
   done < <(grep -n '"boucle:human" "boucle::status::human"' .gitlab-ci.yml)
 }
+
+# ── check_sibling_gate: a priori serialization between siblings ───────
+# Two sub-issues of the SAME parent run serially (one active at a time).
+# This prevents the most frequent class of merge conflicts: siblings of
+# the same domain diverging on the same components (consumer 2026-08:
+# #69/#71 diverged on RightToResistBlock.astro, merger escalated).
+#
+# check_sibling_gate is defined INSIDE boucle_ci_dispatch() (nested), so
+# sourcing dispatch.sh does not expose it. Extract the nested function
+# with an awk brace-counter (mirrors extract_func_body in jc.bats).
+
+extract_sibling_gate() {
+  awk '
+    BEGIN { p = 0; depth = 0 }
+    /^  check_sibling_gate\(\) \{/ { p = 1; depth = 1; print; next }
+    p == 1 {
+      n = gsub(/\{/, "{"); depth += n
+      n = gsub(/\}/, "}"); depth -= n
+      print
+      if (depth == 0) { p = 0 }
+    }
+  ' lib/boucle-ci/dispatch.sh
+}
+
+@test "check_sibling_gate blocks when a sibling is active" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    # Mock: this issue (#71) has parent #61 with an active child #69 (opened, working)
+    forge_issue_get() { echo "{\"description\":\"## Parent issue\\n#61\",\"labels\":[\"boucle:todo\"]}"; }
+    get_work_item_children() { echo "[{\"iid\":69,\"state\":\"opened\"}]"; }
+    forge_issue_labels_get() { echo "boucle:working,boucle::status::bot"; }
+    set_boucle_label() { echo "label:$*"; }
+    forge_issue_note() { echo "note:$1"; }
+    '"$(extract_sibling_gate)"'
+    check_sibling_gate 71
+  '
+  # return 1 = blocked (caller must NOT trigger the worker) — expected failure.
+  assert_failure
+  assert_output --partial "boucle:blocked"
+  assert_output --partial "sibling #69 is active"
+}
+
+@test "check_sibling_gate passes when no sibling is active" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { echo "{\"description\":\"## Parent issue\\n#61\",\"labels\":[\"boucle:todo\"]}"; }
+    get_work_item_children() { echo "[]"; }
+    forge_issue_labels_get() { echo ""; }
+    set_boucle_label() { echo "label:$*"; }
+    forge_issue_note() { echo "note:$1"; }
+    '"$(extract_sibling_gate)"'
+    check_sibling_gate 71
+  '
+  assert_success
+  assert_output ""
+}
+
+@test "check_sibling_gate passes for a non-sub-issue (no parent)" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { echo "{\"description\":\"Standalone issue\",\"labels\":[\"boucle:todo\"]}"; }
+    get_work_item_children() { echo "[]"; }
+    '"$(extract_sibling_gate)"'
+    check_sibling_gate 42
+  '
+  assert_success
+  assert_output ""
+}

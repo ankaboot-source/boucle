@@ -543,7 +543,7 @@ if [ -n "$BOUCLE_IMAGE_DESCRIPTIONS" ]; then
     local p
     for p in $paths; do
       case "$p" in
-        *.png|*.jpg|*.jpeg|*.gif|*.webp|*.avif|*.bmp|*.svg)
+        *.png | *.jpg | *.jpeg | *.gif | *.webp | *.avif | *.bmp | *.svg)
           : # described as text above — strip from agent-visible paths
           ;;
         *)
@@ -843,6 +843,15 @@ Build error from the previous iteration (the build failed — fix the root cause
 ---
 ${BOUCLE_BUILD_FEEDBACK}
 ---
+"
+      fi
+      if [ -n "${BOUCLE_CONFLICT_FEEDBACK:-}" ]; then
+        prompt="${prompt}
+MERGE CONFLICT from a previous iteration: the branch conflicted when rebasing onto the default branch. The default branch has moved on (often a sibling issue was merged). Re-implement the issue goal ON TOP of the current default branch state — the conflicted paths are:
+---
+${BOUCLE_CONFLICT_FEEDBACK}
+---
+Do NOT fight the conflict: take the current default branch's version as the base and re-apply the issue's intent on top of it. If the goal is now already covered by the default branch, say so explicitly instead of duplicating.
 "
       fi
       if [ -n "${BOUCLE_IMAGE_DESCRIPTIONS:-}" ]; then
