@@ -392,6 +392,8 @@ boucle_ci_triage() {
         else
           # 2. Install Chromium + puppeteer-core (only now, in a per-job dir).
           NPM_TMP="/tmp/npm-${CI_JOB_ID:-$$}"
+          RENDER_STDERR="$BOUCLE_WORKSPACE/.boucle-state/$IID/render-stderr.log"
+          mkdir -p "$(dirname "$RENDER_STDERR")"
           if npm install --prefix "$NPM_TMP" puppeteer-core @sparticuz/chromium > /dev/null 2>&1; then
             # 3. Render preview.html → preview.png (1280x800, fullPage).
             #    NODE_PATH=$NPM_TMP/node_modules so the script (bin/) resolves
@@ -402,7 +404,11 @@ boucle_ci_triage() {
             #    path on stdout. A spec approved on a desktop-only shot
             #    hides exactly the class of regression this audience
             #    cannot read from a diff.
-            RENDERED_PNGS=$(NODE_PATH="$NPM_TMP/node_modules" node "$BOUCLE_WORKSPACE/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2> /dev/null || true)
+            #    Capture stderr to a log file (CI artifact) so render
+            #    failures are diagnosable. stdout (produced PNG paths) is
+            #    captured in RENDERED_PNGS as before. Lesson: never swallow
+            #    render errors.
+            RENDERED_PNGS=$(NODE_PATH="$NPM_TMP/node_modules" node "$BOUCLE_WORKSPACE/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2> "$RENDER_STDERR" || true)
             if [ -n "$RENDERED_PNGS" ]; then
               # 4. Upload each PNG via the forge contract. The backend
               #    returns the embeddable path (GitLab: /uploads/...;
@@ -479,6 +485,11 @@ boucle_ci_triage() {
               fi
             else
               echo "[boucle] WARN: Chromium render failed — posting fallback note"
+              # Surface the render stderr in the job trace for diagnosis.
+              if [ -s "$RENDER_STDERR" ]; then
+                echo "[boucle:render-stderr] last 50 lines of render error:"
+                tail -n 50 "$RENDER_STDERR" | sed 's/^/[boucle:render-stderr] /' >&2
+              fi
               forge_issue_note "$IID" "Preview unavailable (render failed) — validate from the TL;DR."
             fi
           else
