@@ -1200,6 +1200,75 @@ parse_files_marker() {
 #     BOUCLE_ITERATION, BOUCLE_MAX_ITERATIONS, CI_PROJECT_ID,
 #     BOUCLE_DEFAULT_BRANCH, BOUCLE_HOME, BOUCLE_CONFLICT_FEEDBACK.
 #     Exits the job on the retry/escalate paths.
+
+# ── Dependency gate (lesson #49) ──────────────────────────────────────
+# Called by dispatch AND triage (the "ready" path) before chaining the
+# worker: an issue whose `## Depends on` deps are still open must park at
+# boucle:blocked, never start. Returns 0 (ready) or 1 (blocked — note
+# posted + boucle:blocked set). Fail-open: unreadable description or no
+# deps → ready. Lives in lib/boucle.sh so EVERY job that calls it gets
+# the definition — an inline def in the dispatch job left the triage job
+# calling an undefined function: bash "command not found" (exit 127),
+# `if ! cmd` → true → the "blocked" branch fired and the worker was
+# NEVER chained (observed on a consumer 2026-08: the re-queued issue
+# stayed at boucle:todo with no worker pipeline).
+check_dependencies_and_gate() {
+  local iid="$1"
+  local desc deps_iids dep_iid dep_state open_deps
+  desc=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null \
+    | jq -r '.description // empty' 2>/dev/null || echo "")
+  [ -z "$desc" ] && return 0  # can't check → don't block (fail open)
+  deps_iids=$(parse_depends_on "$desc" 2> /dev/null || echo "")
+  [ -z "$deps_iids" ] && return 0  # no deps (or parser unavailable) → not blocked
+  open_deps=""
+  for dep_iid in $(echo "$deps_iids" | tr ',' ' '); do
+    dep_state=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$dep_iid" 2>/dev/null \
+      | jq -r '.state // "unknown"' 2>/dev/null || echo "unknown")
+    if [ "$dep_state" != "closed" ]; then
+      open_deps="${open_deps:+$open_deps,}#$dep_iid ($dep_state)"
+    fi
+  done
+  if [ -n "$open_deps" ]; then
+    echo "[boucle] #$iid blocked — waiting on deps: $open_deps"
+    # Set boucle:blocked (replaces any boucle:todo). Preserve non-boucle labels.
+    set_boucle_label "$iid" "boucle:blocked" "boucle::status::bot"
+    # Post explanatory note (idempotent-ish: the unblock path will post a
+    # follow-up when deps clear). Use a marker so the note is identifiable.
+    local human_list
+    human_list=$(echo "$deps_iids" | sed 's/,/, #/g; s/^/#/')
+    local blocked_body
+    blocked_body=$(printf '⏳ Blocked on sibling sub-issue(s): %s. The worker will start automatically once all of them are closed.\n\n<!-- boucle:blocked v=1 iids=%s -->' "$human_list" "$deps_iids")
+    glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$CI_PROJECT_ID/issues/$iid/notes" \
+      -f body="$blocked_body" > /dev/null 2>&1 || true
+    return 1
+  fi
+  return 0
+}
+
+# ── Worker rebase-conflict handling (agent-first) ─────────────────────
+# Called when `git rebase origin/$CI_DEFAULT_BRANCH` fails inside the
+# worker job (setup + pre-build stages). Two modes:
+#
+#  - Conflict-retry run (BOUCLE_CONFLICT_FEEDBACK set — the merger
+#    re-triggered this run after a semantic conflict, see
+#    boucle_escalate_merge_conflict): hand the CONFLICTED TREE to the
+#    agent instead of aborting. bin/jc's worker prompt injects the
+#    conflict context + the supersession rule ("take the default branch's
+#    version as the base; if the goal is already covered by the default
+#    branch, say so instead of duplicating"). The agent edits the files
+#    and `git add`s the resolutions — it may also complete the rebase
+#    itself (cascading conflicts on later commits get the same judgment).
+#    A blind abort+retry can NEVER resolve a semantic conflict — the
+#    agent must see the tree (observed on a consumer: MR !88, 5
+#    mechanical retries, zero agent runs).
+#
+#  - Any other run: bounded abort → re-trigger → escalate (unchanged).
+#
+# $1: the re-trigger note text with a {ITER} placeholder for the
+#     "iteration N/MAX" suffix. Uses the job env: BOUCLE_ISSUE,
+#     BOUCLE_ITERATION, BOUCLE_MAX_ITERATIONS, CI_PROJECT_ID,
+#     BOUCLE_DEFAULT_BRANCH, BOUCLE_HOME, BOUCLE_CONFLICT_FEEDBACK.
+#     Exits the job on the retry/escalate paths.
 boucle_worker_rebase_conflict() {
   local retry_note="$1"
   local iteration="${BOUCLE_ITERATION:-1}"
@@ -1225,7 +1294,13 @@ boucle_worker_rebase_conflict() {
         if [ "$attempt" -gt 1 ]; then
           echo "[boucle] rebase --continue hit a new conflict — re-running the agent (attempt $attempt/3)."
         fi
-        $BOUCLE_HOME/bin/jc worker || echo "WARN: conflict-resolution agent exited non-zero — checking the tree state..."
+        # Bounded per invocation: the resolve must be DECISIVE (inspect,
+        # pick a side, continue), not open-ended — a slow agent eats the
+        # whole 30m job timeout before the worker's build/push. A kill
+        # (exit 124) is fine if the tree is already clean — the tree state
+        # below is the verdict.
+        timeout "${BOUCLE_CONFLICT_RESOLVE_TIMEOUT:-420}" $BOUCLE_HOME/bin/jc worker \
+          || echo "WARN: conflict-resolution agent exited non-zero (or timed out) — checking the tree state..."
         if git status --porcelain | grep -qE '^(UU|AA|DD|AU|UA|DU|UD)'; then
           echo "FAIL: conflict markers remain after the agent (attempt $attempt/3) — aborting" >&2
           break

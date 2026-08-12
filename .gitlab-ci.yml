@@ -930,38 +930,10 @@ dispatch:
       # but no slot"; blocked = "not ready, waiting for a sibling". The doctor
       # re-triggers boucle:todo on capacity-free; it does NOT re-trigger
       # boucle:blocked (only the unblock path does, when a dep closes).
-      check_dependencies_and_gate() {
-        local iid="$1"
-        local desc deps_iids dep_iid dep_state open_deps
-        desc=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null \
-          | jq -r '.description // empty' 2>/dev/null || echo "")
-        [ -z "$desc" ] && return 0  # can't check → don't block (fail open)
-        deps_iids=$(parse_depends_on "$desc")
-        [ -z "$deps_iids" ] && return 0  # no deps → not blocked
-        open_deps=""
-        for dep_iid in $(echo "$deps_iids" | tr ',' ' '); do
-          dep_state=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$dep_iid" 2>/dev/null \
-            | jq -r '.state // "unknown"' 2>/dev/null || echo "unknown")
-          if [ "$dep_state" != "closed" ]; then
-            open_deps="${open_deps:+$open_deps,}#$dep_iid ($dep_state)"
-          fi
-        done
-        if [ -n "$open_deps" ]; then
-          echo "[boucle] #$iid blocked — waiting on deps: $open_deps"
-          # Set boucle:blocked (replaces any boucle:todo). Preserve non-boucle labels.
-          set_boucle_label "$iid" "boucle:blocked" "boucle::status::bot"
-          # Post explanatory note (idempotent-ish: the unblock path will post a
-          # follow-up when deps clear). Use a marker so the note is identifiable.
-          local human_list
-          human_list=$(echo "$deps_iids" | sed 's/,/, #/g; s/^/#/')
-          local blocked_body
-          blocked_body=$(printf '⏳ Blocked on sibling sub-issue(s): %s. The worker will start automatically once all of them are closed.\n\n<!-- boucle:blocked v=1 iids=%s -->' "$human_list" "$deps_iids")
-          glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$CI_PROJECT_ID/issues/$iid/notes" \
-            -f body="$blocked_body" > /dev/null 2>&1 || true
-          return 1
-        fi
-        return 0
-      }
+      # check_dependencies_and_gate now lives in lib/boucle.sh (sourced by
+      # ALL jobs) — an inline def here left the triage job calling an
+      # undefined function ("command not found" → the blocked branch fired
+      # and the worker was never chained, 2026-08).
 
       # ── Sibling serialization gate (a priori, no file manifest) ────
       # Converged: check_sibling_gate now lives in lib/boucle-ci/gates.sh
@@ -1150,9 +1122,14 @@ triage:
   variables:
     BOUCLE_ITERATION: 1
   script:
-    - |
+     - |
       # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
       set +o pipefail
+      # Dependency parser (lesson #49 gate) — sourced EARLY: the "ready"
+      # path below calls check_dependencies_and_gate, which uses
+      # parse_depends_on. A late source (next to its other use) left the
+      # gate calling an undefined function and the worker never chained.
+      source "$BOUCLE_HOME/bin/lib/depends-on.sh"
       # Guard: if dispatch skipped (bot note event, anti-loop), no .boucle-issue artifact
       if [ ! -f .boucle-issue ]; then
         # Recovery path: allow manual triage trigger via BOUCLE_ISSUE variable
@@ -2086,40 +2063,11 @@ worker:
         echo "[boucle] Branch has prior worker commits — rebasing onto origin/$CI_DEFAULT_BRANCH to preserve work."
         if ! git rebase origin/$CI_DEFAULT_BRANCH; then
           # PRESERVE, never reset: the branch holds worker commits that may
-          # not be merged yet. Abort leaves the branch at its pushed state
-          # (the remote is untouched — credentials are not configured until
-          # later in the job). Hand the conflict to the same bounded recovery
-          # as the rebase-before-build stage: abort + re-trigger (iter < MAX)
-          # or escalate to human (iter == MAX). Running the agent now would
-          # be wasted — its new commits would hit the same conflict at the
-          # rebase-before-build stage.
-          echo "[boucle] Rebase conflicted — aborting, preserving prior worker commits." >&2
-          git rebase --abort 2>/dev/null || true
-          ITERATION="${BOUCLE_ITERATION:-1}"
-          MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
-          if [ "$ITERATION" -lt "$MAX_ITER" ]; then
-            # Closed-issue guard: never re-trigger the loop on a closed issue.
-            SETUP_ISSUE_STATE=$(glab api --hostname $BOUCLE_FORGE_HOST --method GET "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" 2>/dev/null | jq -r '.state // "unknown"' 2>/dev/null || echo "unknown")
-            if [ "$SETUP_ISSUE_STATE" = "closed" ]; then
-              echo "boucle: issue #$BOUCLE_ISSUE is closed — not re-triggering worker after rebase conflict (no-op on closed issue)"
-              exit 1
-            fi
-            echo "Re-triggering worker (iteration $((ITERATION+1))/$MAX_ITER) — the next run preserves prior worker commits and re-bases again." >&2
-            set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-            forge_issue_note "$BOUCLE_ISSUE" "🔄 Rebase conflict on the preserved worker branch. Re-running the worker (iteration $((ITERATION+1))/$MAX_ITER) — prior commits are kept." > /dev/null 2>&1 || true
-            chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=$((ITERATION+1))
-          else
-            echo "Escalating to human (boucle:human) — iteration cap ($MAX_ITER) reached after repeated rebase conflicts." >&2
-            # Note BEFORE the terminal label — never a muted boucle:human.
-            # Observed 2026-08 on a consumer: label flipped at 14:55:50, the
-            # note POST swallowed silently; the human saw a state, no message.
-            if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker could not rebase onto $CI_DEFAULT_BRANCH (conflict) after $MAX_ITER attempts. Master keeps advancing. Human intervention needed."; then
-              echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
-              exit 1
-            fi
-            set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-          fi
-          exit 1
+          # not be merged yet. Conflict-retry runs (BOUCLE_CONFLICT_FEEDBACK
+          # set) hand the conflicted tree to the agent — it can conciliate
+          # semantic conflicts that a blind abort+retry never resolves.
+          # Other runs keep the bounded abort → re-trigger → escalate path.
+          boucle_worker_rebase_conflict "🔄 Rebase conflict on the preserved worker branch. Re-running the worker (iteration {ITER}) — prior commits are kept."
         fi
       else
         git reset --hard origin/$CI_DEFAULT_BRANCH
@@ -2447,34 +2395,10 @@ worker:
       git fetch origin $CI_DEFAULT_BRANCH
       boucle_deepen_rebase_fetch
       if ! git rebase origin/$CI_DEFAULT_BRANCH; then
-        echo "FAIL: rebase onto origin/$CI_DEFAULT_BRANCH conflicted — $CI_DEFAULT_BRANCH advanced since branch creation." >&2
-        git rebase --abort 2>/dev/null || true
-        ITERATION="${BOUCLE_ITERATION:-1}"
-        MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
-        if [ "$ITERATION" -lt "$MAX_ITER" ]; then
-          # Closed-issue guard: if the issue was closed while this worker was
-          # running (e.g. catchup closed it after a human merged another MR),
-          # do NOT re-trigger — the re-trigger would create a zombie worker on
-          # a closed issue. Exit 1 (the rebase failed) without chaining.
-          REBASE_ISSUE_STATE=$(glab api --hostname $BOUCLE_FORGE_HOST --method GET "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE" 2>/dev/null | jq -r '.state // "unknown"' 2>/dev/null || echo "unknown")
-          if [ "$REBASE_ISSUE_STATE" = "closed" ]; then
-            echo "boucle: issue #$BOUCLE_ISSUE is closed — not re-triggering worker after rebase conflict (no-op on closed issue)"
-            exit 1
-          fi
-          echo "Re-triggering worker (iteration $((ITERATION+1))/$MAX_ITER) — the next run preserves prior worker commits and re-bases again." >&2
-          set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-          forge_issue_note "$BOUCLE_ISSUE" "🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh $CI_DEFAULT_BRANCH (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null 2>&1 || true
-          chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=$((ITERATION+1))
-        else
-          echo "Escalating to human (boucle:human) — iteration cap ($MAX_ITER) reached after repeated rebase conflicts." >&2
-          # Note BEFORE the terminal label — never a muted boucle:human.
-          if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker could not rebase onto $CI_DEFAULT_BRANCH (conflict) after $MAX_ITER attempts. Master keeps advancing. Human intervention needed."; then
-            echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
-            exit 1
-          fi
-          set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-        fi
-        exit 1
+        # On conflict: conflict-retry runs (BOUCLE_CONFLICT_FEEDBACK set)
+        # hand the conflicted tree to the agent; other runs keep the bounded
+        # abort → re-trigger → escalate path.
+        boucle_worker_rebase_conflict "🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh $CI_DEFAULT_BRANCH (iteration {ITER})."
       fi
 
       # Guard (post-rebase): if $CI_DEFAULT_BRANCH advanced during this run and the

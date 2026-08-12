@@ -1478,6 +1478,34 @@ atomic.
       dependency gating, #51 covers rebase-fallback reset; none covers
       file-impact gating or the adaptive-reset claim-loss hole.
 
+63. **Semantic rebase conflicts MUST be resolved by the agent — a blind
+    abort+retry never sees the conflict**
+    - ❌ DO NOT let the worker's rebase-conflict handler abort + re-trigger
+      when `BOUCLE_CONFLICT_FEEDBACK` is set — the agent never sees the
+      conflicted tree, so a semantic conflict (two designs for the same
+      file, a sibling merging the same feature) re-conflicts identically
+      on every retry. Observed on a consumer MR !88 (2026-08): 5
+      mechanical retries, zero agent runs, then escalation — the retry
+      budget just re-attempts the same failing rebase.
+    - ✅ DO: hand the conflicted tree to the agent
+      (`boucle_worker_rebase_conflict`): it resolves the markers with
+      judgment (default branch as base, re-apply the issue's goal, or
+      declare the goal superseded), `git add`s, and may complete the
+      rebase itself (`rebase --continue`/`--skip` for cascading and
+      emptied commits). The verdict is the TREE STATE, not the agent's
+      exit code — it may exhaust its step budget right after resolving.
+      Re-run the agent when a later rebase commit hits a NEW conflict
+      (bounded), and wrap each invocation in `timeout` so a slow agent
+      cannot eat the whole job timeout before the build/push.
+    - ❌ DO NOT define a gate function inline in ONE job
+      (`check_dependencies_and_gate` in dispatch) and call it from
+      another (triage) — `command not found` (127) makes `if ! cmd`
+      TRUE, so the "blocked" branch fires and the worker is NEVER
+      chained (issue stays at boucle:todo with no worker pipeline).
+      Shared functions live in `lib/boucle.sh` (sourced by all jobs via
+      the default before_script), and their dependencies
+      (`depends-on.sh`) are sourced BEFORE the call site.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
