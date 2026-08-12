@@ -1215,15 +1215,15 @@ parse_files_marker() {
 check_dependencies_and_gate() {
   local iid="$1"
   local desc deps_iids dep_iid dep_state open_deps
-  desc=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null \
-    | jq -r '.description // empty' 2>/dev/null || echo "")
-  [ -z "$desc" ] && return 0  # can't check → don't block (fail open)
+  desc=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$iid" 2> /dev/null \
+    | jq -r '.description // empty' 2> /dev/null || echo "")
+  [ -z "$desc" ] && return 0 # can't check → don't block (fail open)
   deps_iids=$(parse_depends_on "$desc" 2> /dev/null || echo "")
-  [ -z "$deps_iids" ] && return 0  # no deps (or parser unavailable) → not blocked
+  [ -z "$deps_iids" ] && return 0 # no deps (or parser unavailable) → not blocked
   open_deps=""
   for dep_iid in $(echo "$deps_iids" | tr ',' ' '); do
-    dep_state=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$dep_iid" 2>/dev/null \
-      | jq -r '.state // "unknown"' 2>/dev/null || echo "unknown")
+    dep_state=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$dep_iid" 2> /dev/null \
+      | jq -r '.state // "unknown"' 2> /dev/null || echo "unknown")
     if [ "$dep_state" != "closed" ]; then
       open_deps="${open_deps:+$open_deps,}#$dep_iid ($dep_state)"
     fi
@@ -1315,7 +1315,7 @@ boucle_worker_rebase_conflict() {
           continue
         fi
         if git status --porcelain | grep -qE '^(UU|AA|DD|AU|UA|DU|UD)'; then
-          break  # new conflict → outer loop re-runs the agent
+          break # new conflict → outer loop re-runs the agent
         fi
         if ! GIT_EDITOR=true git rebase --skip > /dev/null 2>&1; then
           echo "FAIL: rebase cannot continue or skip — aborting" >&2
