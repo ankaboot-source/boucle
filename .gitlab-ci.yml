@@ -20,11 +20,18 @@ stages:
 
 variables:
   BOUCLE_FORGE_HOST: gitlab.example.com
-  # Runner tag for agent jobs (triage/worker/reviewer/e2e/deploy). Override via a
-  # project variable of the same name (Settings > CI/CD > Variables) to route jobs
-  # to a project-specific runner, e.g. BOUCLE_RUNNER_TAG=Debian. Precedence:
-  # project/group variables beat this YAML default, so unset consumers keep "boucle".
-  BOUCLE_RUNNER_TAG: "boucle"
+  # NOTE: there is deliberately no BOUCLE_RUNNER_TAG here. Jobs run UNTAGGED by
+  # default, so the instance's shared runners pick them up and a fresh install
+  # needs no runner of its own. A variable cannot express this: GitLab expands
+  # `tags: [$VAR]` with an empty VAR into `tags: [""]`, which matches no runner
+  # and strands the job. Routing to a dedicated runner is therefore opt-in at
+  # the consumer's root shim, which overrides `default:` key-by-key:
+  #
+  #   default:
+  #     tags: [boucle]
+  #
+  # `bin/setup --runner-tag <tag>` writes that block for you. See README
+  # "Advanced — dedicated runners".
   BOUCLE_BUILD_CMD: "npm ci && npm run build"
   BOUCLE_BUILD_OUTPUT: "public"
   # Deploy: swap to any deploy command. Use $$BRANCH (escaped so eval expands it at runtime with
@@ -136,19 +143,15 @@ variables:
 # The shared runner is a docker executor. node:22-slim is ~250MB vs ~1GB.
 # before_script installs glab + jcode + wrangler (not in the image).
 default:
-  image: node:22-slim
-  # Route to the project's dedicated runner. It's a shell executor (ignores
-  # image:), so before_script self-installs node — but the install persists
-  # across runs, making subsequent runs faster than docker (which reinstalls
-  # every time). NOTE: a shared docker runner without a matching tag cannot
-  # pick up these jobs — only a runner tagged with BOUCLE_RUNNER_TAG can.
-  # Loop-critical control-plane jobs (dispatch, merger) override this with
-  # `tags: []` so they run on any available runner and are never blocked by a
-  # busy dedicated runner.
-  # The tag is project-specific infrastructure — run `bin/setup --runner-tag
-  # <tag>` (or set the BOUCLE_RUNNER_TAG project variable) to configure it for
-  # your project. Default: "boucle" (see BOUCLE_RUNNER_TAG in `variables:` above).
-  tags: [$BOUCLE_RUNNER_TAG]
+  # Pre-baked agent toolchain (glab/jq/git/node/python3/jcode/codebase-memory-mcp)
+  # so docker-based runners skip the ~60s of downloads in the before_script
+  # below. Shell executors ignore `image:` entirely and fall back to that
+  # before_script, which probes `command -v` before installing anything — so
+  # the same configuration serves both executor types.
+  image: docker.io/ankabootops/boucle-agents:latest
+  # NO `tags:` here, on purpose: jobs run UNTAGGED so the instance's shared
+  # runners can pick them up. A fresh install therefore needs no runner of its
+  # own — see README "Advanced — dedicated runners" to route to one instead.
   before_script:
     - |
       # Trace commands only when CI_DEBUG_TRACE is set (GitLab's native debug flag).
@@ -1100,9 +1103,9 @@ dispatch:
 triage:
   stage: triage
   # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
-  # The triage job inherits default.tags: [boucle] — if the assigned runner is broken,
+  # The triage job runs untagged (default has no tags) — if the assigned runner is broken,
   # the job fails instantly with runner_system_failure and the issue is stranded.
-  # retry lets GitLab reassign to another tagged runner.
+  # retry lets GitLab reassign to another runner.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
   retry:
     max: 2
@@ -1920,9 +1923,9 @@ triage:
 worker:
   stage: work
   # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
-  # The worker job inherits default.tags: [boucle] — if the assigned runner is broken,
+  # The worker job runs untagged (default has no tags) — if the assigned runner is broken,
   # the job fails instantly with runner_system_failure and the issue is stranded.
-  # retry lets GitLab reassign to another tagged runner.
+  # retry lets GitLab reassign to another runner.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
   retry:
     max: 2
@@ -2748,9 +2751,9 @@ worker:
 reviewer:
   stage: review
   # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
-  # The reviewer job inherits default.tags: [boucle] — if the assigned runner is broken,
+  # The reviewer job runs untagged (default has no tags) — if the assigned runner is broken,
   # the job fails instantly with runner_system_failure and the MR is stranded.
-  # retry lets GitLab reassign to another tagged runner.
+  # retry lets GitLab reassign to another runner.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
   retry:
     max: 2
@@ -3288,10 +3291,6 @@ merger:
   # Run on ANY available runner (tags: []) so an approved MR is never blocked
   # waiting behind a heavy worker/reviewer job on the single data runner.
   tags: []
-  # Pre-baked agent toolchain (glab/jq/git/node/python3/jcode) so docker-based
-  # runners skip the ~60s global before_script downloads. The minimal
-  # before_script below is still a no-op fallback for shell executors.
-  image: docker.io/ankabootops/boucle-agents:latest
   # Serialize all merges project-wide — one MR merges at a time.
   resource_group: boucle-merge
   needs:
@@ -3566,9 +3565,6 @@ merger:
 post-merge:
   stage: merge
   tags: []
-  # Pre-baked agent toolchain (glab/jq/git/node/python3/jcode) so docker-based
-  # runners skip the ~60s global before_script downloads.
-  image: docker.io/ankabootops/boucle-agents:latest
   needs:
     - job: merger
   rules:
@@ -3701,9 +3697,6 @@ catchup:
   # available runner (tags: []) so a direct merge is never blocked waiting
   # behind a heavy worker/reviewer job on the single data runner.
   tags: []
-  # Pre-baked agent toolchain (glab/jq/git/node/python3/jcode) so docker-based
-  # runners skip the ~60s global before_script downloads.
-  image: docker.io/ankabootops/boucle-agents:latest
   needs:
     - job: dispatch
       optional: true
@@ -4087,8 +4080,8 @@ catchup:
 deploy:
   stage: deploy
   # Auto-retry transient runner failures (runner busy/offline, OOM, daemon restart).
-  # The deploy job inherits default.tags: [boucle] — it can only run on the dedicated
-  # shell runner, which is shared with worker jobs. Contention produces
+  # The deploy job runs untagged (default has no tags). On an install pinned to a
+  # dedicated runner it contends with worker jobs, which produces
   # runner_system_failure; retrying recovers without human intervention.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
   # Cap at 2 (GitLab hard limit for retry.max is 2).
@@ -4165,9 +4158,9 @@ deploy:
 e2e:
   stage: verify
   # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
-  # The e2e job inherits default.tags: [boucle] — if the assigned runner is broken,
+  # The e2e job runs untagged (default has no tags) — if the assigned runner is broken,
   # the job fails instantly with runner_system_failure and the issue is stranded.
-  # retry lets GitLab reassign to another tagged runner.
+  # retry lets GitLab reassign to another runner.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
   retry:
     max: 2
@@ -4546,10 +4539,11 @@ e2e:
 doctor:
   stage: verify
   # Loop-critical control-plane job: makes only API calls, no build.
-  # Override default.tags ([boucle]) so the doctor runs on ANY available runner
-  # and is never blocked by a busy dedicated runner — same
-  # pattern as dispatch, merger, and catchup. Without this, the doctor fails
-  # with runner_system_failure whenever a worker is running on the data runner.
+  # Explicit `tags: []` — the doctor runs on ANY available runner and is never
+  # blocked by a busy dedicated one, same pattern as dispatch, merger and
+  # catchup. It stays explicit even though `default:` is now untagged, so an
+  # install that pins `default: tags:` to its own runner (README "Advanced —
+  # dedicated runners") does not strand the doctor behind a running worker.
   tags: []
   rules:
     - if: $BOUCLE_ENABLED != "true"
