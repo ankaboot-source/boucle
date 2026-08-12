@@ -95,9 +95,10 @@ boucle_ci_worker() {
       else
         echo "[boucle] Branch has prior worker commits — rebasing onto origin/$BOUCLE_DEFAULT_BRANCH to preserve work."
         if ! git rebase "origin/$BOUCLE_DEFAULT_BRANCH"; then
-          echo "[boucle] Rebase conflicted — resetting to origin/$BOUCLE_DEFAULT_BRANCH (prior work lost)."
-          git rebase --abort 2> /dev/null || true
-          git reset --hard "origin/$BOUCLE_DEFAULT_BRANCH"
+          # PRESERVE, never reset (lessons #22/#51). Conflict-retry runs
+          # (BOUCLE_CONFLICT_FEEDBACK set) hand the conflicted tree to the
+          # agent; other runs keep the bounded abort → re-trigger → escalate.
+          boucle_worker_rebase_conflict "🔄 Rebase conflict on the preserved worker branch. Re-running the worker (iteration {ITER}) — prior commits are kept."
         fi
       fi
     else
@@ -362,34 +363,10 @@ EOF
   git fetch origin "$BOUCLE_DEFAULT_BRANCH"
   boucle_deepen_rebase_fetch
   if ! git rebase "origin/$BOUCLE_DEFAULT_BRANCH"; then
-    echo "FAIL: rebase onto origin/$BOUCLE_DEFAULT_BRANCH conflicted." >&2
-    git rebase --abort 2> /dev/null || true
-    ITERATION="${BOUCLE_ITERATION:-1}"
-    local max_iter="${BOUCLE_MAX_ITERATIONS:-3}"
-    if [ "$ITERATION" -lt "$max_iter" ]; then
-      # Closed-issue guard
-      local rebase_issue_state
-      rebase_issue_state=$(forge_issue_get "$BOUCLE_ISSUE" | jq -r '.state // "unknown"' 2> /dev/null || echo "unknown")
-      if [ "$rebase_issue_state" = "closed" ]; then
-        echo "boucle: issue #$BOUCLE_ISSUE is closed — not re-triggering worker after rebase conflict"
-        exit 1
-      fi
-      echo "Re-triggering worker (iteration $((ITERATION + 1))/$max_iter)." >&2
-      set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-      forge_issue_note "$BOUCLE_ISSUE" "🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh $BOUCLE_DEFAULT_BRANCH (iteration $((ITERATION + 1))/$max_iter).$(job_link)" || true
-      chain_to_role "$BOUCLE_ISSUE" "worker" "BOUCLE_ITERATION=$((ITERATION + 1))"
-    else
-      echo "Escalating to human — iteration cap ($max_iter) reached after repeated rebase conflicts." >&2
-      # Note BEFORE the terminal label — never a muted boucle:human.
-      if ! forge_issue_note "$BOUCLE_ISSUE" "$(boucle_escalation_diagnostic "$BOUCLE_ISSUE" "rebase-conflict")$(job_link)"; then
-        echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
-        boucle_health_outcome "$BOUCLE_ISSUE" "worker" "rebase-conflict" "iteration $ITERATION (cap reached, note FAILED)" || true
-        exit 1
-      fi
-      boucle_health_outcome "$BOUCLE_ISSUE" "worker" "rebase-conflict" "iteration $ITERATION (cap reached)" || true
-      set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-    fi
-    exit 1
+    # On conflict: conflict-retry runs (BOUCLE_CONFLICT_FEEDBACK set) hand
+    # the conflicted tree to the agent; other runs keep the bounded
+    # abort → re-trigger → escalate path.
+    boucle_worker_rebase_conflict "🔄 Master advanced since this branch was created, causing a rebase conflict. Re-running the worker on fresh $BOUCLE_DEFAULT_BRANCH (iteration {ITER})."
   fi
 
   # ── Build gate (#53): fail fast on build errors, feed back to next iter ──
