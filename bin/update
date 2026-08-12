@@ -5,6 +5,8 @@
 # before engine files are sourced). Fail-open: any error → warning + exit 0,
 # pipeline continues with current version.
 # Usage: bin/update [--dry-run]
+# Self-update test: this comment exists to bump the engine SHA and verify
+# that bin/update propagates the change to consumers automatically.
 
 # No -e: fail-open requires commands to fail individually without aborting the script.
 set -uo pipefail
