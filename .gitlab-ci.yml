@@ -2343,7 +2343,15 @@ worker:
         # entry (.boucle/), even though non-ignored files ARE staged correctly.
         # Under set -e that aborts before the commit — defeating the safety-net.
         git add -A -- ':!.boucle' ':!.npm' || true
-        git commit -m "feat: worker changes for #$BOUCLE_ISSUE [skip ci]" --no-verify
+        # || true: the agent may already have committed everything (only
+        # .boucle/ state files remain, excluded above) — `git commit` then
+        # fails with "no changes added to commit". A bare commit under
+        # set -e kills the job BEFORE the push, orphaning the agent's
+        # commits on the local branch (consumer 2026-08: worker ran fine,
+        # job died at the safety-net, MR never updated). The safety-net is
+        # best-effort by design — never fail the job because there was
+        # nothing to commit.
+        git commit -m "feat: worker changes for #$BOUCLE_ISSUE [skip ci]" --no-verify || true
       fi
 
       # Ensure wrangler + npm caches aren't committed. Commit this change
