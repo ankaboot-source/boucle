@@ -7,6 +7,8 @@
 # Usage: bin/update [--dry-run]
 # Self-update test: this comment exists to bump the engine SHA and verify
 # that bin/update propagates the change to consumers automatically.
+# Test 2: push auth fix is in place — the auto-update commit should now
+# reach the consumer's remote master via BOUCLE_TOKEN.
 
 # No -e: fail-open requires commands to fail individually without aborting the script.
 set -uo pipefail
