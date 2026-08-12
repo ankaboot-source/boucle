@@ -19,6 +19,10 @@ stages:
   - verify
 
 variables:
+  # Required by lib/boucle-ci.sh, which exits 1 when it is unset — jobs that
+  # call `bin/boucle-ci <stage>` cannot bootstrap without it. Overridable, but
+  # this file IS the GitLab pipeline, so gitlab is the only sane default.
+  BOUCLE_FORGE: "gitlab"
   BOUCLE_FORGE_HOST: gitlab.example.com
   # NOTE: there is deliberately no BOUCLE_RUNNER_TAG here. Jobs run UNTAGGED by
   # default, so the instance's shared runners pick them up and a fresh install
@@ -3571,115 +3575,17 @@ post-merge:
     - if: $BOUCLE_ENABLED != "true"
       when: never
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "merger"
-  before_script:
-    - |
-      [[ "${CI_DEBUG_TRACE:-false}" == "true" ]] && set -x
-      export PATH="$HOME/.local/bin:$PATH"
-      export GITLAB_TOKEN="$BOUCLE_TOKEN"
-      export GITLAB_HOST="$BOUCLE_FORGE_HOST"
-      export GLAB_NO_UPDATE_NOTIFIER=true
-
-      # ── curl + jq + git (no-op on the agents image, fallback otherwise) ──
-      if ! command -v curl &>/dev/null || ! command -v jq &>/dev/null || ! command -v git &>/dev/null; then
-        echo "Installing curl + jq + git..."
-        apt-get update -qq && apt-get install -y -qq curl jq git
-      fi
-
-      # ── glab CLI ───────────────────────────────────────────────────
-      if ! command -v glab &>/dev/null; then
-        echo "Installing glab..."
-        mkdir -p "$HOME/.local/bin"
-        GLAB_VER="1.50.0"
-        curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VER}/downloads/glab_${GLAB_VER}_linux_amd64.tar.gz" -o "/tmp/glab-${CI_JOB_ID:-local}.tar.gz"
-        mkdir -p "/tmp/glab-${CI_JOB_ID:-local}"
-        tar xzf "/tmp/glab-${CI_JOB_ID:-local}.tar.gz" -C "/tmp/glab-${CI_JOB_ID:-local}"
-        cp "/tmp/glab-${CI_JOB_ID:-local}/bin/glab" "$HOME/.local/bin/glab" 2>/dev/null || cp "/tmp/glab-${CI_JOB_ID:-local}/glab" "$HOME/.local/bin/glab"
-        chmod +x "$HOME/.local/bin/glab"
-        rm -rf "/tmp/glab-${CI_JOB_ID:-local}" "/tmp/glab-${CI_JOB_ID:-local}.tar.gz"
-      fi
-
-      # ── BOUCLE_BOT_ID resolution ──
-      # Skipped in mono-user mode: resolving by username would land on the
-      # human's own account, silently re-enabling the bot auto-assignment
-      # that set_boucle_label is meant to skip when there is no bot.
-      if [ -z "${BOUCLE_BOT_ID:-}" ] && [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ] \
-         && { [ -z "${BOUCLE_MONO_USER:-}" ] || [ "${BOUCLE_MONO_USER}" = "false" ]; }; then
-        BOUCLE_BOT_USERNAME="${BOUCLE_BOT_USERNAME:-up-bot}"
-        RESOLVED_ID=$(curl -sf --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-          "https://$BOUCLE_FORGE_HOST/api/v4/users?username=$BOUCLE_BOT_USERNAME" \
-          2>/dev/null | jq -r '.[0].id // empty' 2>/dev/null || true)
-        if [ -n "$RESOLVED_ID" ]; then
-          export BOUCLE_BOT_ID="$RESOLVED_ID"
-          echo "Resolved BOUCLE_BOT_ID=$BOUCLE_BOT_ID by username ($BOUCLE_BOT_USERNAME)"
-        fi
-      fi
-
-      # ── Locate the boucle engine (submodule or dogfood root) ──────
-      # Consumers install boucle as a git submodule at .boucle/ — engine
-      # files (bin/, lib/, .jcode/) resolve via $BOUCLE_HOME. The boucle
-      # repo itself (dogfood) runs with the engine at the repo root, so
-      # fall back to $CI_PROJECT_DIR.
-      if [ -d "$CI_PROJECT_DIR/.boucle/bin" ]; then
-        export BOUCLE_HOME="$CI_PROJECT_DIR/.boucle"
-      else
-        export BOUCLE_HOME="$CI_PROJECT_DIR"
-      fi
-      export JCODE_HOME="$CI_PROJECT_DIR/.boucle-state/.jcode"
-
-      # ── Shared boucle helpers (set_boucle_label, chain_to_role, ...) ──
-      # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
-      source "$BOUCLE_HOME/bin/forge/common.sh"
-      forge_init
-      # chain_to_role/forge_trigger_role rely on BOUCLE_DEFAULT_BRANCH — never
-      # set by GitLab; resolve from the native CI_DEFAULT_BRANCH (fallback
-      # master) so triggers target the real default branch, not "main".
-      export BOUCLE_DEFAULT_BRANCH="${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}"
-      # BOUCLE_PROJECT_ID is normalized by lib/boucle-ci.sh for bin/boucle-ci
-      # jobs; INLINE jobs (merger, doctor, ...) must get it here too, or the
-      # forge_* triggers/notes POST to an empty project id (silently dropped
-      # by `|| true`) — observed re-trigger failure on framagit, 2026-08.
-      export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:-}}"
-      export BOUCLE_WORKSPACE="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-$(pwd)}}"
-      source "$BOUCLE_HOME/lib/boucle.sh"
+  # No before_script override: the global `default:` one already installs the
+  # toolchain, resolves BOUCLE_BOT_ID, locates $BOUCLE_HOME and sources the
+  # forge layer. The copy that used to live here duplicated all of it and had
+  # drifted (glab 1.50.0 vs 1.111.0).
   script:
-    - |
-      set +o pipefail
-      export BOUCLE_ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
-
-      # The merge pushed to $CI_DEFAULT_BRANCH → triggers deploy → deploy triggers e2e.
-      # BUT deploy-triggered e2e has no BOUCLE_ISSUE context, so
-      # maybe_close_parent never runs. Fix: trigger e2e directly WITH
-      # BOUCLE_ISSUE set, so the issue gets boucle:done + closed + parent cascade.
-      # Wait for the deploy pipeline to finish first (production must be live
-      # before e2e can test it). Poll for the deploy pipeline to complete.
-      echo "Waiting for deploy pipeline to complete before triggering e2e..."
-      for i in $(seq 1 60); do
-        # Find the latest deploy pipeline for $CI_DEFAULT_BRANCH
-        DEPLOY_PIPELINES=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/pipelines?ref=$CI_DEFAULT_BRANCH&per_page=5" 2>/dev/null)
-        DEPLOY_STATUS=$(echo "$DEPLOY_PIPELINES" | jq -r '[.[] | select(.source == "push")] | first | .status // "unknown"')
-        if [ "$DEPLOY_STATUS" = "success" ] || [ "$DEPLOY_STATUS" = "failed" ] || [ "$DEPLOY_STATUS" = "canceled" ]; then
-          echo "Deploy pipeline status: $DEPLOY_STATUS"
-          break
-        fi
-        sleep 15
-      done
-
-      # Get the production URL (from the deploy's e2e trigger or fallback)
-      LIVE_URL="${BOUCLE_PRODUCTION_URL:-}"
-      if [ -z "$LIVE_URL" ] && [ -n "${CI_PAGES_URL:-}" ]; then
-        # Declarative GitLab Pages (BOUCLE_DEPLOY_PROVIDER=gitlab-pages):
-        # the forge serves the site at $CI_PAGES_URL — never the pages.dev
-        # fallback below, which would point at a nonexistent CF project.
-        LIVE_URL="$CI_PAGES_URL"
-      fi
-      if [ -z "$LIVE_URL" ]; then
-        # Fetch the deploy pipeline's e2e job variables (best-effort)
-        LIVE_URL="https://${BOUCLE_DEPLOY_PROJECT}.pages.dev"
-      fi
-
-      # Trigger e2e WITH BOUCLE_ISSUE set → enables maybe_close_parent
-      chain_to_role "$BOUCLE_ISSUE" "e2e" BOUCLE_LIVE_URL=$LIVE_URL
-      echo "Triggered e2e for issue #$BOUCLE_ISSUE with LIVE_URL=$LIVE_URL"
+    # Shared stage (lib/boucle-ci/post-merge.sh) — same code path as GitHub
+    # Actions. It also implements BOUCLE_DEPLOY_MODE=external (wait on the
+    # consumer's check suites for the merged commit), which the inline copy
+    # this replaces never had: on GitLab, external mode silently skipped
+    # straight to e2e without waiting for the consumer's own CI.
+    - bin/boucle-ci post-merge
   # 30m to accommodate provider fallback: 12m primary + 12m fallback + 6m overhead.
   timeout: 30m
 
@@ -4105,53 +4011,11 @@ deploy:
   needs:
     - job: build-site
   script:
-    - |
-      # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
-      set +o pipefail
-      # No deploy command (e.g. GitLab Pages mode / external): skip cleanly.
-      if [ -z "${BOUCLE_DEPLOY_CMD:-}" ]; then
-        echo "deploy: BOUCLE_DEPLOY_CMD is empty (Pages/external mode) — skipping"
-        exit 0
-      fi
-      # Site content comes from build-site's artifact (public/) — no rebuild
-      # here (WASM OOM on shell executors, framagit 2026-08).
-      # Deploy to production (configurable via BOUCLE_DEPLOY_CMD, force $CI_DEFAULT_BRANCH branch)
-      BRANCH=$CI_DEFAULT_BRANCH
-      DEPLOY_URL=$(eval "$BOUCLE_DEPLOY_CMD" 2>&1 | grep -oE "$BOUCLE_DEPLOY_URL_REGEX" | head -1)
-
-      # Assert: deployment URL returns 200 (production domain may not have DNS yet).
-      if [ -z "$DEPLOY_URL" ]; then
-        echo "FAIL: no deployment URL from wrangler" >&2; exit 1
-      fi
-      # Retry with exponential backoff — Cloudflare Pages edge propagation
-      # can lag the deploy command's return. Total budget ~5 min.
-      DEPLOY_OK=false
-      attempt=0
-      delay=5
-      while [ "$attempt" -lt 6 ]; do
-        attempt=$((attempt + 1))
-        HTTP_CODE=$(curl -sL -o /dev/null -w "%{http_code}" "$DEPLOY_URL" 2>/dev/null || echo "000")
-        if [ "$HTTP_CODE" = "200" ]; then
-          echo "Deployment URL 200 OK (attempt $attempt/6)"
-          DEPLOY_OK=true
-          break
-        fi
-        if [ "$attempt" -lt 6 ]; then
-          echo "Deployment URL returned $HTTP_CODE (attempt $attempt/6) — retrying in ${delay}s..." >&2
-          sleep "$delay"
-          delay=$((delay * 2))
-        fi
-      done
-      if [ "$DEPLOY_OK" != "true" ]; then
-        echo "FAIL: deployment URL $DEPLOY_URL not 200 after $attempt attempts (last code: $HTTP_CODE)" >&2; exit 1
-      fi
-      echo "Deployed to $DEPLOY_URL (200 OK)"
-
-      # Chain to e2e with the deployment URL (production domain may not have DNS yet)
-      curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-        -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=$CI_DEFAULT_BRANCH" \
-        -F "variables[BOUCLE_ROLE]=e2e" \
-        -F "variables[BOUCLE_LIVE_URL]=$DEPLOY_URL" > /dev/null
+    # Shared stage (lib/boucle-ci/deploy.sh) — same code path as GitHub
+    # Actions. It skips the build when $BOUCLE_BUILD_OUTPUT is already
+    # populated, which is the case here: build-site hands it over as an
+    # artifact (rebuilding OOMs WASM toolchains on shell executors).
+    - bin/boucle-ci deploy
   timeout: 10m
 
 # ── E2E (after deploy) ─────────────────────────────────────────────────
