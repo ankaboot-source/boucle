@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2154  # BOUCLE_FORGE, BOUCLE_PIPELINE_SOURCE are env vars set by CI.
+# shellcheck disable=SC2154,SC2250  # BOUCLE_FORGE, BOUCLE_PIPELINE_SOURCE are env vars set by CI.
 # bin/update — boucle self-update: fetch latest from upstream and apply.
 # Runs as the first step of the dispatch job (GitLab CI or GitHub Actions).
 # Fail-open: any error → warning + exit 0, pipeline continues with current version.
@@ -11,17 +11,50 @@ set -uo pipefail
 # ── Config ────────────────────────────────────────────────────────────
 UPSTREAM_REPO="ankaboot-source/boucle"
 UPSTREAM_API="https://api.github.com/repos/$UPSTREAM_REPO"
-UPSTREAM_TARBALL="https://codeload.github.com/$UPSTREAM_REPO/tarball"
-VERSION_FILE=".boucle-version"
+# Use the API tarball endpoint (redirects to codeload with a signed URL).
+# The direct codeload.github.com URL 404s for some repos/branches — the API
+# endpoint works for both public and private (with auth) repos.
+UPSTREAM_TARBALL="$UPSTREAM_API/tarball"
+
+# ── Engine directory detection ────────────────────────────────────────
+# Detect the engine directory from this script's location.
+# - Legacy/dogfood: bin/update at repo root → ENGINE_DIR="."
+# - .boucle/ install: .boucle/bin/update → ENGINE_DIR=".boucle"
+# This auto-detects the install model — no env var needed. The engine
+# files (bin/, lib/, .jcode/, .gitlab-ci.yml, LOOP.md, .boucle-version)
+# are synced INTO ENGINE_DIR, not the consumer repo root.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENGINE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Make ENGINE_DIR relative to CWD for cleaner git operations.
+CWD="$(pwd)"
+case "$ENGINE_DIR" in
+  "$CWD") ENGINE_DIR="." ;;
+  "$CWD"/*) ENGINE_DIR="${ENGINE_DIR#"$CWD"/}" ;;
+esac
+VERSION_FILE="$ENGINE_DIR/.boucle-version"
 
 # Forge-conditional SYNC_PATHS: sync the CI file that matches the active forge.
 # bin/forge/ is always synced (it's under bin/). lib/ is always synced
 # (lib/boucle-ci.sh + lib/boucle-ci/ live under lib/).
+# .jcode/ is synced as a whole — the engine owns it entirely (agents/,
+# skills/, UPSTREAM-FIX-WORKFLOW.md, DESIGN-template.md, prompt-overlay.md).
 if [ "${BOUCLE_FORGE:-gitlab}" = "github" ]; then
-  SYNC_PATHS="bin lib .pi .github/workflows/boucle.yml .jcode/agents .jcode/skills .jcode/UPSTREAM-FIX-WORKFLOW.md LOOP.md"
+  SYNC_PATHS="bin lib .jcode .github/workflows/boucle.yml LOOP.md"
 else
-  SYNC_PATHS="bin lib .pi .gitlab-ci.yml .jcode/agents .jcode/skills .jcode/UPSTREAM-FIX-WORKFLOW.md LOOP.md"
+  SYNC_PATHS="bin lib .jcode .gitlab-ci.yml LOOP.md"
 fi
+
+# ── Auth ──────────────────────────────────────────────────────────────
+# curl_with_auth: curl wrapper that injects a GitHub token if available.
+# The token is optional — public repos work without it. When set, it
+# raises the rate limit and grants access to private repos.
+curl_with_auth() {
+  if [ -n "${GITHUB_TOKEN:-${GH_TOKEN:-}}" ]; then
+    curl -fsSL -H "Authorization: Bearer ${GITHUB_TOKEN:-$GH_TOKEN}" "$@"
+  else
+    curl -fsSL "$@"
+  fi
+}
 
 # ── Pure functions (testable, no network) ──────────────────────────────
 
@@ -58,10 +91,10 @@ get_upstream_version() {
   case "$mode" in
     release)
       # GitHub returns tags newest-first by default; [0] is the latest.
-      curl -fsSL "$UPSTREAM_API/tags" 2> /dev/null | jq -r '.[0].name // empty' 2> /dev/null || echo ""
+      curl_with_auth "$UPSTREAM_API/tags" 2> /dev/null | jq -r '.[0].name // empty' 2> /dev/null || echo ""
       ;;
     dev)
-      curl -fsSL "$UPSTREAM_API/commits/main" 2> /dev/null | jq -r '.sha // empty' 2> /dev/null || echo ""
+      curl_with_auth "$UPSTREAM_API/commits/main" 2> /dev/null | jq -r '.sha // empty' 2> /dev/null || echo ""
       ;;
     *)
       echo ""
@@ -70,20 +103,20 @@ get_upstream_version() {
 }
 
 # download_and_extract <mode> <version>: download tarball, extract SYNC_PATHS
-# into the working tree. Returns 0 on success, 1 on failure.
+# into the engine directory. Returns 0 on success, 1 on failure.
 download_and_extract() {
   local mode="$1" version="$2" tarball_url tmpdir topdir
 
   case "$mode" in
-    release) tarball_url="$UPSTREAM_TARBALL/refs/tags/$version" ;;
-    dev) tarball_url="$UPSTREAM_TARBALL/refs/heads/main" ;;
+    release) tarball_url="$UPSTREAM_TARBALL/$version" ;;
+    dev) tarball_url="$UPSTREAM_TARBALL/main" ;;
     *) return 1 ;;
   esac
 
   tmpdir=$(mktemp -d) || return 1
 
   # Download
-  if ! curl -fsSL "$tarball_url" -o "$tmpdir/boucle.tar.gz" 2> /dev/null; then
+  if ! curl_with_auth "$tarball_url" -o "$tmpdir/boucle.tar.gz" 2> /dev/null; then
     rm -rf "$tmpdir"
     return 1
   fi
@@ -108,11 +141,13 @@ download_and_extract() {
     return 1
   fi
 
-  # Replace sync paths in the working tree with upstream versions
+  # Replace sync paths in the engine directory with upstream versions.
+  # Paths are relative to ENGINE_DIR (either "." for legacy or ".boucle"
+  # for the new install model).
   for path in $SYNC_PATHS; do
     if [ -e "$topdir/$path" ]; then
-      rm -rf "$path"
-      cp -r "$topdir/$path" "$path"
+      rm -rf "${ENGINE_DIR:?}/$path"
+      cp -r "$topdir/$path" "${ENGINE_DIR:?}/$path"
     fi
   done
 
@@ -123,7 +158,7 @@ download_and_extract() {
 # ── Main ──────────────────────────────────────────────────────────────
 
 main() {
-  local dry_run=false mode current upstream
+  local dry_run=false mode current upstream add_paths
 
   # Self-update guard: never push from a push-source pipeline. A push
   # triggers a new pipeline on the default branch; if bin/update pushes
@@ -203,7 +238,13 @@ main() {
   # Commit and push
   git config user.email > /dev/null 2>&1 || git config user.email "boucle-bot@boucle.local"
   git config user.name > /dev/null 2>&1 || git config user.name "boucle-bot"
-  git add $SYNC_PATHS "$VERSION_FILE"
+  # Build add paths: SYNC_PATHS prefixed with ENGINE_DIR.
+  add_paths=""
+  for path in $SYNC_PATHS; do
+    add_paths="$add_paths $ENGINE_DIR/$path"
+  done
+  # shellcheck disable=SC2086 # word-splitting is intentional: add_paths is a space-separated list.
+  git add $add_paths "$VERSION_FILE"
   git commit -m "chore(boucle): auto-update to $upstream" > /dev/null 2>&1 || true
   git push 2> /dev/null || echo "[boucle] WARN: push failed, will retry next pipeline" >&2
 
