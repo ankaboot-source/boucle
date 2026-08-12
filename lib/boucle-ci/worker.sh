@@ -529,6 +529,12 @@ EOF
   local preview_line=""
   if [ -n "$preview_url" ]; then
     preview_line="Preview: $preview_url"
+  else
+    # Diff-review mode (no deploy command — e.g. GitLab Pages): state it
+    # plainly so the MR does not look like a broken duplicate (a blank
+    # Preview: line reads as an unfinished deploy to a human scanning
+    # the MR list).
+    preview_line="Diff review (no preview deploy — BOUCLE_DEPLOY_CMD empty)"
   fi
   # Cost breakdown (#35): empty until an agent run reported usage, so the
   # description is unchanged on providers that report none. Only added on
