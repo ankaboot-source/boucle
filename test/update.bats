@@ -79,7 +79,7 @@ setup() {
   # to consumers on update, otherwise prompt fixes never reach CI.
   run bash -c 'source bin/update && echo "$SYNC_PATHS"'
   assert_success
-  assert_output --partial ".jcode/agents"
+  assert_output --partial ".jcode"
 }
 
 @test "SYNC_PATHS includes .jcode/skills (skill propagation)" {
@@ -87,7 +87,7 @@ setup() {
   # never reach CI.
   run bash -c 'source bin/update && echo "$SYNC_PATHS"'
   assert_success
-  assert_output --partial ".jcode/skills"
+  assert_output --partial ".jcode"
 }
 
 @test "SYNC_PATHS includes lib (boucle-ci pipeline libraries)" {
@@ -98,4 +98,97 @@ setup() {
   run bash -c 'source bin/update && echo "$SYNC_PATHS"'
   assert_success
   assert_output --partial "lib"
+}
+
+@test "SYNC_PATHS does NOT include .pi (migrated to .jcode in eba0013)" {
+  # .pi was migrated to .jcode (commit eba0013, 2026-08-06). A stale .pi
+  # entry in SYNC_PATHS is silently skipped by the [ -e ] guard in
+  # download_and_extract, but it's dead cruft that confuses readers and
+  # risks a false-positive if a .pi dir ever reappears upstream.
+  run bash -c 'source bin/update && echo "$SYNC_PATHS"'
+  assert_success
+  refute_output --partial ".pi"
+}
+
+@test "SYNC_PATHS includes .jcode as a whole (not just subdirs)" {
+  # .jcode/ is owned entirely by the engine (agents/, skills/,
+  # UPSTREAM-FIX-WORKFLOW.md, DESIGN-template.md, prompt-overlay.md).
+  # Syncing it as a whole is simpler and catches new top-level files
+  # (e.g. a future .jcode/config.toml) without needing a SYNC_PATHS bump.
+  run bash -c 'source bin/update && echo "$SYNC_PATHS"'
+  assert_success
+  # ".jcode" matches both ".jcode" and ".jcode/agents" — we want the
+  # bare ".jcode" token (whole-dir sync), not just a subdir.
+  assert_output --regexp '(^| )\.jcode( |$)'
+}
+
+# ── UPSTREAM_TARBALL (API endpoint, not codeload direct) ──────────────
+
+@test "UPSTREAM_TARBALL uses the API endpoint (codeload direct 404s)" {
+  # The direct codeload.github.com URL 404s for some repos/branches.
+  # The API endpoint (api.github.com/repos/.../tarball/...) redirects
+  # to codeload with a signed URL and works for both public and private
+  # (with auth) repos.
+  run bash -c 'source bin/update && echo "$UPSTREAM_TARBALL"'
+  assert_success
+  assert_output --partial "api.github.com/repos/ankaboot-source/boucle/tarball"
+  refute_output --partial "codeload.github.com"
+}
+
+# ── curl_with_auth (token injection) ──────────────────────────────────
+
+@test "curl_with_auth passes GITHUB_TOKEN as bearer header" {
+  # When GITHUB_TOKEN is set, curl_with_auth injects it as a bearer
+  # header — required for private repos and to raise the rate limit.
+  # Stub curl to capture the args it was called with.
+  GITHUB_TOKEN="test-token-abc123"
+  unset GH_TOKEN
+  curl() { echo "curl $*"; }
+  export -f curl
+  run curl_with_auth "https://example.com"
+  assert_success
+  assert_output --partial "Authorization: Bearer test-token-abc123"
+  unset -f curl
+}
+
+@test "curl_with_auth falls back to GH_TOKEN when GITHUB_TOKEN unset" {
+  unset GITHUB_TOKEN
+  GH_TOKEN="test-token-xyz789"
+  curl() { echo "curl $*"; }
+  export -f curl
+  run curl_with_auth "https://example.com"
+  assert_success
+  assert_output --partial "Authorization: Bearer test-token-xyz789"
+  unset -f curl
+}
+
+@test "curl_with_auth works without any token (public repos)" {
+  unset GITHUB_TOKEN
+  unset GH_TOKEN
+  curl() { echo "curl $*"; }
+  export -f curl
+  run curl_with_auth "https://example.com"
+  assert_success
+  refute_output --partial "Authorization"
+  unset -f curl
+}
+
+# ── ENGINE_DIR detection ──────────────────────────────────────────────
+
+@test "ENGINE_DIR defaults to . when bin/update is at repo root (dogfood/legacy)" {
+  # When bin/update is at the repo root (dogfood or legacy full-copy install),
+  # ENGINE_DIR should resolve to "." — the engine files live at the root.
+  # We're already at the repo root when bats runs, so source directly.
+  run bash -c 'source bin/update && echo "$ENGINE_DIR"'
+  assert_success
+  assert_output "."
+}
+
+@test "VERSION_FILE is relative to ENGINE_DIR" {
+  # VERSION_FILE must be "$ENGINE_DIR/.boucle-version", not a fixed path,
+  # so it resolves correctly in both legacy (./.boucle-version) and
+  # .boucle/ install (.boucle/.boucle-version) models.
+  run bash -c 'source bin/update && echo "$VERSION_FILE"'
+  assert_success
+  assert_output --partial ".boucle-version"
 }
