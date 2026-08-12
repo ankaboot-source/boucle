@@ -122,15 +122,20 @@ If an entry fails any test, fix the code and move on — do not add a
 lesson. The worker MUST justify a new entry against this test (state the
 justification on stdout); the reviewer MUST reject entries that fail it.
 
+> Each lesson that states a *current protocol invariant* cross-references
+> [SKILL.md](SKILL.md) §I<N> for the normative text. The lesson keeps the
+> incident context (the ❌/✅ pair and the explanation) but defers the rule
+> statement to SKILL.md to avoid dual-maintenance drift. Lessons that are
+> pure incident catalogs (the bug is fixed in code) stay as-is.
+
 1. **Post before refining**
    - ❌ DO NOT refine a comment in a loop before posting it.
-   - ✅ DO: post the comment **FIRST** (even incomplete), then refine in a
-     follow-up. An incomplete post always beats a refinement never posted.
+   - ✅ DO: See [SKILL.md](SKILL.md) §I4 (Post-early).
 
 2. **Detect silent failures**
    - ❌ DO NOT let a no-output agent pass silently.
-   - ✅ DO: treat no posted/drafted comment as a hard failure (exit `3`)
-     and escalate to a human.
+   - ✅ DO: See [SKILL.md](SKILL.md) §I4 (Post-early — silent failure is the
+     inverse of post-early).
 
 3. **No MCP in CI**
    - ❌ DO NOT rely on `codebase-memory-mcp` tools in CI (handshake hangs).
@@ -140,18 +145,16 @@ justification on stdout); the reviewer MUST reject entries that fail it.
 
 4. **Idempotent label writes**
    - ❌ DO NOT `PUT` a label that is already present.
-   - ✅ DO: check current state before writing — GitLab records an event on
-     every `PUT`, even a no-op.
+   - ✅ DO: See [SKILL.md](SKILL.md) §I5 (Idempotence).
 
 5. **Always write to stdout**
    - ❌ DO NOT produce output only in memory or via tool calls.
-   - ✅ DO: the agent MUST write to stdout so CI can scrape
-     `agent-output.log` as a fallback for unposted drafts.
+   - ✅ DO: See [SKILL.md](SKILL.md) §I4 (Post-early — stdout is the post
+     channel).
 
 6. **SHA-anchored verdicts**
    - ❌ DO NOT post a verdict without a bare-hex SHA.
-   - ✅ DO: `<!-- boucle:verdict v=1 role=reviewer sha=abc123def456 -->` —
-     no quotes, no whitespace, no angle brackets around the SHA.
+   - ✅ DO: See [SKILL.md](SKILL.md) §I6 (SHA-anchored verdicts).
 
 7. **Webhooks must produce work**
    - ❌ DO NOT let a webhook consume a runner without producing work.
@@ -159,8 +162,7 @@ justification on stdout); the reviewer MUST reject entries that fail it.
 
 8. **Serial merges only**
    - ❌ DO NOT parallelize merges (rebase against a stale `master`).
-   - ✅ DO: serialize merges via `resource_group: boucle-merge` so each
-     rebase includes previously merged MRs.
+   - ✅ DO: See [SKILL.md](SKILL.md) §I10 (Serial merge).
 
 9. **Adequate output token budget**
    - ❌ DO NOT cap `OUTPUT_TOKEN_MAX` below what a complete structured
@@ -470,13 +472,11 @@ atomic.
       with `[0m$` (ANSI reset + PS4), so awk keeps printing past it. The
       downstream `grep -qiE 'VERDICT: ...'` validation then matches the
       substring inside the trace line — because it is NOT anchored.
-    - ✅ DO: anchor EVERY `grep` that validates or extracts a VERDICT with
-      `^`: `grep -qiE '^VERDICT: (PASS|FAIL|UNCERTAIN)'` for validation
-      and `grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)'` for extraction.
-      This applies to both the reviewer and e2e jobs, in both the primary
-      note-parse and the log-scraping fallback. The `^` anchor ensures the
-      grep only matches a real `VERDICT:` line (posted by the agent as a
-      verdict), never a substring inside a shell trace or quoted command.
+    - ✅ DO: See [SKILL.md](SKILL.md) §I6 (SHA-anchored verdicts — the
+      anchored grep is the implementation of the invariant). The `^` anchor
+      ensures the grep only matches a real `VERDICT:` line (posted by the
+      agent as a verdict), never a substring inside a shell trace or quoted
+      command.
 
 42. **Merger MUST handle "Pipelines must succeed" via MWPS**
     - ❌ DO NOT fail the merger when `detailed_merge_status` is
@@ -941,13 +941,11 @@ atomic.
       with `[0m$` (ANSI reset + PS4), so awk keeps printing past it. The
       downstream `grep -qiE 'VERDICT: ...'` validation then matches the
       substring inside the trace line — because it is NOT anchored.
-    - ✅ DO: anchor EVERY `grep` that validates or extracts a VERDICT with
-      `^`: `grep -qiE '^VERDICT: (PASS|FAIL|UNCERTAIN)'` for validation
-      and `grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)'` for extraction.
-      This applies to both the reviewer and e2e jobs, in both the primary
-      note-parse and the log-scraping fallback. The `^` anchor ensures the
-      grep only matches a real `VERDICT:` line (posted by the agent as a
-      verdict), never a substring inside a shell trace or quoted command.
+    - ✅ DO: See [SKILL.md](SKILL.md) §I6 (SHA-anchored verdicts — the
+      anchored grep is the implementation of the invariant). The `^` anchor
+      ensures the grep only matches a real `VERDICT:` line (posted by the
+      agent as a verdict), never a substring inside a shell trace or quoted
+      command.
 
 42. **Merger MUST handle "Pipelines must succeed" via MWPS**
     - ❌ DO NOT fail the merger when `detailed_merge_status` is
@@ -1203,9 +1201,7 @@ atomic.
       the label") to keep a comment from routing. Forges do not guarantee
       webhook delivery order, so the label webhook can overtake the note
       and the note lands on the new, possibly paused, state.
-    - ✅ DO: ask "did we write this?" instead of "who wrote this?". Testing
-      for a fixed, invisible token is stable, forge-agnostic, and immune to
-      both delivery reordering and single-account setups.
+    - ✅ DO: See [SKILL.md](SKILL.md) §I7 (Marker-based self-recognition).
     - ✅ DO: keep the guard identical in every copy of the routing while
       the CI paths remain unconverged. A guard that lands in one copy and
       not the other breaks that path silently.
@@ -1359,13 +1355,8 @@ atomic.
       `|| true` + `>/dev/null` pattern in `forge_issue_note` /
       `forge_mr_note` (gitlab.sh, github.sh) historically swallowed
       every failure code.
-    - ✅ DO: order the transition **note FIRST, label SECOND**: post
-      the explanation, and only after a verified successful POST —
-      `if ! forge_issue_note "$BOUCLE_ISSUE" "..."; then ... exit 1; fi`
-      — apply `set_boucle_label ... boucle:human ...`. If the note
-      cannot be posted, exit non-zero WITHOUT the label: the issue
-      stays in a retryable state and the job fails loudly (CI red +
-      stderr) instead of stranding a mute escalation.
+    - ✅ DO: See [SKILL.md](SKILL.md) §I4 (Post-early — note-before-label is
+      the terminal-transition ordering of post-early).
     - ✅ DO: keep `forge_issue_note` / `forge_mr_note` fail-loud by
       contract: they return the real POST exit code and WARN on stderr
       on failure (never `|| true`-swallowed). Callers that genuinely
