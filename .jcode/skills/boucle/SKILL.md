@@ -227,6 +227,7 @@ harness MUST use the markers correctly or dispatch will misroute its writes.
 | `<!-- boucle:depends-on iids=N,M -->` | `iids=<comma-separated-IIDs>` | triage.sh:755 (on each dependent sub-issue) | bin/lib/depends-on.sh:38 (grep), dispatch.sh:427 (gate check) | Declares sub-issue dependencies. Dispatch gates the worker until all dep IIDs are closed. |
 | `<!-- boucle:split-parent iids=N,M -->` | `iids=<comma-separated-IIDs>` | triage (split operation) | catchup.sh:66, doctor.sh:746, e2e.sh:75, triage.sh:518,520 (idempotency guard) | Marks the parent issue of a split with its sub-issue IIDs. Used to cascade closure and detect duplicate splits. |
 | `<!-- boucle:blocked v=1 iids=N,M -->` | `v=1 iids=<comma-separated-IIDs>` | dispatch.sh:461, boucle.sh:1136 | (informational — marks the blocked note) | Posted on a sub-issue blocked by open siblings. The label `boucle:blocked` is the state; this marker is the note's machine-readable header. |
+| `<!-- boucle:sibling-blocked v=1 sib=N -->` | `v=1 sib=<active-sibling-IID>` | dispatch.sh:508, .gitlab-ci.yml:997 | catchup.sh:86,94, e2e.sh:95,102 (jq parse) | Posted when a sibling sub-issue is still active (working/review/approval). The issue starts automatically once the sibling reaches done/closed — sibling issues share the same domain and run one at a time to avoid merge conflicts. |
 | `<!-- boucle:unblocked v=1 by=N -->` | `v=1 by=<closed-dep-IID>` | catchup.sh:100, e2e.sh:109 | (informational — marks the unblock note) | Posted when a dependency closes and the worker starts. |
 | `<!-- boucle:e2e-origin v=1 iid=N -->` | `v=1 iid=<origin-IID>` | e2e.sh:267 (on follow-up issues) | boucle.sh:705 (parse, to resolve the original issue from a follow-up) | Carries the original issue IID on a follow-up issue created by e2e FAIL, so the loop can cascade back. |
 | `<!-- boucle:e2e-fail v=1 iid=N followup=M -->` | `v=1 iid=<origin-IID> followup=<followup-IID>` | e2e.sh:291 (on follow-up issue created by e2e FAIL) | (informational — links follow-up to origin) | Posted on the follow-up issue created when e2e FAILs, linking it to the original issue for cascade. |
@@ -242,14 +243,13 @@ harness MUST use the markers correctly or dispatch will misroute its writes.
 | `<!-- boucle:commit sha=<hex> -->` | `sha=<short-sha>` | worker.sh:421-422 (in MR description + build marker) | (preview freshness assertion — worker.sh) | Anchors the MR/build to a commit SHA for preview freshness check (invariant I6-adjacent). |
 | `<!-- boucle:diagnostic v=1 iid=N class=X trigger=Y -->` | `v=1 iid=<IID> class=<failure-class> trigger=<trigger>` | boucle.sh:475 (escalation diagnostic) | (informational — structured escalation) | Replaces the generic "human intervention needed" note with a structured diagnostic (failure class + evidence + recommended action). |
 | `<!-- boucle:schedule id=<name> -->` | `id=<schedule-name>` | boucle.sh:201 (on scheduled issues) | boucle.sh (dedup — last firing marker) | Marks a scheduled issue with its template name. Used to prevent duplicate firings across sweeps. |
+| `<!-- boucle:conflict-retry N -->` | `N=<retry-count>` | boucle.sh:1099 (on re-trigger after rebase conflict) | boucle.sh:1085 (jq parse, count retries) | Posted on each re-trigger after a rebase conflict. Bounded retry count — after N retries, the conflict is handed to the worker agent for resolution. |
 
 ### 3.6 Markers NOT in code (do not emit)
 
 | Marker | Status | Note |
 |---|---|---|
 | `<!-- boucle:files v=1 paths=... -->` | **Planned, not implemented** | Documented in `docs/superpowers/specs/2026-08-12-file-impact-gate-design.md`, not yet in AGENTS.md. Absent from code. A harness MUST NOT emit it — the loop does not parse it. |
-| `<!-- boucle:sibling-blocked v=1 sib=N -->` | **Does not exist** | Audit false positive. The `boucle:blocked` marker (§3.4) covers this; there is no separate sibling-blocked marker. |
-| `<!-- boucle:conflict-retry N -->` | **Does not exist as a marker** | `conflict-retry` appears as a log message string (worker.sh:366, boucle.sh:1181), not as an HTML-comment marker. |
 
 ### 3.7 Structural signals (not HTML comments)
 
