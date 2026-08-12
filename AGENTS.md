@@ -1383,6 +1383,75 @@ atomic.
       silent agents, lesson #55 covers the marker stamping, this
       lesson covers the POST-result contract of the note helpers.
 
+60. **An empty `BOUCLE_DEPLOY_CMD` is a valid mode, not a failure**
+    - ❌ DO NOT let a stage `eval "$BOUCLE_DEPLOY_CMD"` unconditionally and
+      FAIL on a missing URL. In GitLab Pages declarative mode
+      (`BOUCLE_DEPLOY_PROVIDER=gitlab-pages`) the consumer sets
+      `BOUCLE_DEPLOY_CMD` to an empty project variable (which OVERRIDES the
+      YAML default), so `eval ""` exits 0 with no output and every stage
+      that asserts "no preview/URL → FAIL" dies. Observed on a consumer
+      (2026-08): the deploy job had the empty-cmd guard but the worker
+      did not — every worker iteration pushed the MR then failed with
+      `FAIL: no preview URL`, stranding the issue at `boucle:working`
+      while the reviewer PASSed MRs on the same commit were blocked behind
+      it. The MR description showed a blank `Preview:` line, making the MR
+      look like a duplicate of a sibling.
+    - ❌ DO NOT port the guard to ONE copy only. The inline jobs
+      (`.gitlab-ci.yml`) and the extracted functions
+      (`lib/boucle-ci/*.sh`) must stay symmetric — the consumer ran the
+      inline copy, which had no guard, while the extracted one (used by
+      the GitHub port) had the shared `boucle_worker_should_deploy`
+      helper. A fix in one copy leaves the bug live on the other
+      (lesson #56 greps ALL copies).
+    - ✅ DO: treat an empty `BOUCLE_DEPLOY_CMD` as a first-class mode: the
+      worker skips the preview deploy, the reviewer falls back to diff
+      review when no preview URL could be extracted, the deploy job skips
+      cleanly, and post-merge/e2e resolve the live URL to `$CI_PAGES_URL`
+      (gitlab-pages) instead of the `pages.dev` fallback. Document the
+      mode in LOOP.md alongside `self`/`external`.
+    - ✅ DO: centralize the decision in `boucle_worker_should_deploy`
+      (`lib/boucle.sh`) so the extracted worker gets it for free, and
+      mirror it in the inline worker job with the identical guard.
+    - Admission: class — any stage that runs or asserts on a deploy
+      command without checking it exists first; recurrence — every new
+      deploy-adjacent stage (worker preview, deploy, post-merge, e2e)
+      is a candidate, and providers without a CLI (GitLab Pages, static
+      hosters) are common; stable — no line numbers, no transient
+      values; distinct — lesson #21 covers stale previews (a deployed
+      but old URL), this lesson covers NO deploy at all (no URL by
+      design).
+
+61. **Doctor re-trigger must NOT be skipped by a stale closed MR**
+    - ❌ DO NOT `continue` in the doctor's stuck-issue loop when a closed
+      (or merged) MR coexists with an open MR on the same branch. The
+      "skipping close" branch is meant to avoid CLOSING the issue — but
+      the `continue` also skips the re-trigger logic below, stranding the
+      issue at `boucle:working` forever. Observed on a consumer (2026-08):
+      issue #55 had a closed MR from a previous iteration (!59) plus the
+      current open MR (!93); the doctor logged "closed MR exists but an
+      open MR also exists — skipping close" every 10 minutes and never
+      re-triggered the stuck worker. With `BOUCLE_MAX_PARALLEL_ISSUES=1`
+      the stranded issue occupied the single worker slot, so a second
+      queued issue (`boucle:todo`) was never started either — two issues
+      blocked by one `continue`.
+    - ❌ DO NOT fix only one copy. The guard lives in BOTH the extracted
+      `lib/boucle-ci/doctor.sh` and the inline doctor job in
+      `.gitlab-ci.yml`, in TWO branches each (merged-MR and closed-MR).
+      A fix in one copy leaves the bug live on the other (lesson #56
+      greps ALL copies).
+    - ✅ DO: on "open MR also exists", fall THROUGH to the re-trigger
+      logic (active-pipeline check → staleness check → `chain_to_role`)
+      instead of `continue` — the open MR is active work, so a stuck
+      worker/reviewer on it MUST be recovered. Only the terminal branches
+      (MR merged / MR closed with NO open MR) may `continue`.
+    - Admission: class — any future guard that conflates "don't close the
+      issue" with "skip recovery"; recurrence — the natural instinct when
+      adding a "don't close on reopen" check is to `continue`, and both
+      copies have two such branches; stable — no line numbers, no
+      transient values; distinct — lesson #57 covers the reviewer's
+      closed-MR done-transition, lesson #44 covers roles on closed
+      issues; this lesson covers the doctor's re-trigger path.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
