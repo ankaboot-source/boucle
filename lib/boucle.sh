@@ -742,6 +742,49 @@ resolve_reporter_username() {
   _resolve_reporter_walk "$1" | cut -f2
 }
 
+# check_allow_list_gate <iid>
+#
+# Safety net: only issues whose resolved human reporter is in
+# BOUCLE_ALLOWED_USERS are accepted. Fail-open when the variable is
+# unset/empty (legacy consumers — the net is seeded at install by
+# bin/setup). The reporter is resolved through the parent chain
+# (bot-authored sub-issues resolve to their parent's author), same
+# semantics as resolve_reporter_id. On rejection: post an explanatory
+# note; the caller must NOT trigger any role (the anti-accumulation
+# EXIT trap turns the no-op exit into a visible pipeline failure).
+# Returns 0 = allowed (or variable unset), 1 = rejected.
+#
+# Lives in lib/boucle.sh (not lib/boucle-ci/dispatch.sh) so it is
+# available to BOTH the extracted lib path (bin/boucle-ci, which sources
+# lib/boucle-ci.sh → all lib/boucle-ci/*.sh) AND the inline .gitlab-ci.yml
+# jobs (which source only lib/boucle.sh). One definition, every caller.
+check_allow_list_gate() {
+  local iid="$1"
+  local allowed_str needle username u
+  allowed_str="$(printf '%s' "${BOUCLE_ALLOWED_USERS:-}" | tr -d '[:space:]')"
+  [ -n "$allowed_str" ] || return 0
+  username=$(resolve_reporter_username "$iid" 2> /dev/null || true)
+  if [ -z "$username" ]; then
+    echo "allow-list: cannot resolve the human reporter for #$iid — failing OPEN (transient/legacy)"
+    return 0
+  fi
+  needle=$(printf '%s' "$username" | tr '[:upper:]' '[:lower:]')
+  # Iterate over each comma-separated username. A `for` loop with IFS=','
+  # (rather than `while read`) keeps `return` in the current shell so the
+  # gate's exit code propagates to the caller.
+  local IFS=','
+  for u in $allowed_str; do
+    [ -z "$u" ] && continue
+    if [ "$(printf '%s' "$u" | tr '[:upper:]' '[:lower:]')" = "$needle" ]; then
+      echo "allow-list: #$iid reporter @$username is allowed"
+      return 0
+    fi
+  done
+  echo "allow-list: #$iid reporter @$username is NOT in BOUCLE_ALLOWED_USERS — rejecting"
+  forge_issue_note "$iid" ":lock: This issue was not accepted by the boucle loop: its author \`@$username\` is not in \`BOUCLE_ALLOWED_USERS\`. Ask a maintainer to add the username to the allow list if this is a mistake.\n\n<!-- boucle:allow-list v=1 user=$username -->"
+  return 1
+}
+
 # get_work_item_global_id <iid>
 #
 # Fetch the global work-item ID for a project issue. Returns empty on

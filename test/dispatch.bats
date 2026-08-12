@@ -518,7 +518,10 @@ extract_sibling_gate() {
   refute_output --partial "note:"
 }
 
-@test "dispatch defines check_allow_list_gate" {
-  run grep -E '^check_allow_list_gate\(\)' lib/boucle-ci/dispatch.sh
+@test "lib defines check_allow_list_gate" {
+  # The gate lives in lib/boucle.sh (not lib/boucle-ci/dispatch.sh) so it
+  # is available to BOTH the extracted lib path (bin/boucle-ci) AND the
+  # inline .gitlab-ci.yml jobs (which source only lib/boucle.sh).
+  run grep -E '^check_allow_list_gate\(\)' lib/boucle.sh
   assert_success
 }
