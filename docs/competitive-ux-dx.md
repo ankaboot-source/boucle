@@ -81,14 +81,30 @@ de l'utilisateur devient donc son premier test d'intégration : webhook,
 runner, clé LLM, build, deploy, e2e — tout est validé d'un coup, et le
 premier échec arrive sur du travail auquel il tient.
 
-**F3 — Prolifération des labels et fuite d'internes.** Deux espaces de noms
-coexistent (`boucle:*` et `boucle::status::*`) pour ~25 labels distincts, dont
-des internes moteur exposés à l'utilisateur : `boucle:e2e-origin`,
-`boucle:split-parent`, `boucle:commit`, `boucle:obligations`,
-`boucle:verdict`. L'utilisateur n'en manipule réellement que 3 ou 4. En équipe
-mixte (§6), un coéquipier non technique voit passer sur son board des
-concepts — rebase, verdict ancré sur SHA, issue parente — qui n'ont aucun
-sens pour lui et qu'il ne peut pas actionner.
+**F3 — ~~Prolifération des labels et fuite d'internes~~ — RETIRÉ, l'analyse
+était fausse.**
+
+Une première version de ce document dénombrait « ~25 labels dont des internes
+moteur exposés à l'utilisateur » (`boucle:verdict`, `boucle:split-parent`,
+`boucle:e2e-origin`, `boucle:commit`, `boucle:obligations`…). Vérification
+faite, c'était une erreur de méthode : un `grep boucle:[a-z-]+` qui confondait
+**trois espaces de noms distincts**.
+
+| Chaîne | Nature réelle | Visible dans la forge ? |
+| --- | --- | --- |
+| `<!-- boucle:verdict -->`, `<!-- boucle:split-parent -->`, `<!-- boucle:obligations -->`, … | Marqueurs HTML en corps de commentaire | **Non** |
+| `[boucle:metrics]`, `[boucle:prompt]`, `[boucle:notify]`, `[boucle:guard]` | Préfixes de log CI | **Non** |
+| `boucle:triage/todo/working/review/approval/merging/done/blocked/human/needs-info/spec-review/split` | Labels d'état (12), posés par `set_boucle_label` | Oui |
+| `boucle::status::bot/human/done` | Labels scopés GitLab — la colonne de board | Oui |
+
+Aucun interne moteur n'atteint donc le board, et les 12 labels d'état sont
+auto-descriptifs (`needs-info`, `blocked`, `human` se lisent sans
+documentation). La seule redondance résiduelle est voulue : chaque issue
+porte l'état fin **et** la colonne de board, `set_boucle_label` prenant les
+deux en arguments.
+
+**Il n'y a pas de dette de lisibilité des labels.** Le modèle label-driven de
+`CONTEXT.md` §7 tient ce qu'il promet.
 
 **F4 — 67 variables `BOUCLE_*` éditées une par une dans une UI web.** Aucune
 configuration versionnée côté consommateur, aucune validation au moment de
@@ -262,46 +278,49 @@ toute la chaîne (dispatch → triage → worker → preview → e2e). L'utilisa
 obtient une validation verte de bout en bout avant d'y engager du travail
 réel. Transforme F2 en argument de confiance.
 
-**P0.4 — Antisèche d'interaction dans l'issue.** *(effort : S ; impact : élevé)*
-*Remonté de P1 : en équipe mixte (§6), c'est l'intégralité de l'interface pour
-les coéquipiers non techniques.* Le commentaire de statut de boucle (P1.1)
-porte en permanence ce que l'humain peut faire : quelles réactions valent
-approbation, l'effet d'un commentaire, les labels disponibles. L'interface se
-documente là où la décision se prend, plutôt que dans le README.
+**P0.4 — Note d'instruction au gate MR.** *(effort : S ; impact : moyen)*
+*Réduit : la version initiale demandait une antisèche permanente sur chaque
+issue. Vérification faite, elle existe déjà au gate de spec —
+`lib/boucle-ci/triage.sh:318` poste « React with 👍 ✅ ☑️ ✔️ 🆗 or 👌 on this
+comment to approve, OR Reply to this issue with any comment ».*
 
-**P0.5 — Hygiène des labels.** *(effort : S ; impact : élevé)*
-*Remonté de P1, même raison.* Un seul espace de noms. Les internes moteur
-(`boucle:e2e-origin`, `boucle:split-parent`, `boucle:commit`,
-`boucle:obligations`, `boucle:verdict`) passent en métadonnées de corps
-d'issue, ou reçoivent une couleur neutre qui les exclut de la vue board.
-Documenter explicitement les 4 labels que l'humain manipule réellement.
+Il reste une **asymétrie** : au gate MR, le reviewer pose `boucle:approval` +
+`boucle::status::human` et s'en remet à l'approbation native de la forge, sans
+rien expliquer. Pour un profil produit, « approuver nativement une MR » est
+nettement moins évident que « réagir 👍 ». Correctif : une note calquée sur
+`SPEC_MSG`, postée une fois à l'entrée du gate. En anglais, comme tout le
+moteur.
+
+**P0.5 — ~~Hygiène des labels~~ — RETIRÉ.** Fondé sur F3, dont l'analyse était
+fausse (voir §2). Il n'y a pas d'internes moteur sur le board.
 
 ### P1 — L'UX de la boucle elle-même
 
-**P1.1 — Un commentaire « Loop status » édité en place, par issue.**
-*(effort : M ; impact : élevé — traite F5 + F6 d'un seul coup)*
-Étape courante, itération n/max, coût cumulé, liens job + preview. Toutes les
-données existent déjà (`health.jsonl`, `cost.json`). Coche au passage l'item
-roadmap « cost estimate » et aligne enfin le produit sur son propre
-argumentaire. Porte également l'antisèche P0.4 : un seul objet à maintenir,
-une seule note à lire pour l'humain.
+**P1.1 — ~~Commentaire « Loop status » édité en place~~ — ABANDONNÉ.**
 
-**C'est une note unique, éditée en place — jamais un commentaire de plus.**
-Elle est créée au premier passage puis modifiée par `PATCH`. Trois raisons,
-toutes déjà établies dans le dépôt :
+Proposé pour traiter F5 (coût invisible) et F6 (pas de progression). Trois
+vérifications l'ont invalidé :
 
-- `CONTEXT.md` §8 — les écritures no-op polluent l'historique d'événements et
-  peuvent fausser les transitions de la machine à états.
-- Le status board applique déjà exactement cette règle : *« edited in place
-  and never commented on »*, *« an unchanged body produces zero API writes »*
-  (`LOOP.md` §Status board). Le patron est éprouvé, il suffit de le réutiliser.
-- `bin/collapse-duplicate-notes` existe déjà : la prolifération de notes est
-  un problème connu du projet.
+1. **Le coût en dollars n'existe pas, et c'est délibéré.** `LOOP.md` §Cost
+   accounting : *« No dollars without `BOUCLE_PRICING_JSON`. Prices drift and
+   boucle is provider-agnostic; hardcoding them would produce confident wrong
+   numbers. Unset, you get token counts. »* Les tokens eux-mêmes peuvent valoir
+   `n/a`. Et la description de la MR **porte déjà** un `### Cost` par rôle.
+2. **La fréquence de rafraîchissement est inatteignable.** boucle est
+   événementiel : la note ne s'écrit que quand un job tourne, soit aux
+   transitions d'étape (~6–10 par issue). Un « depuis 18 min » serait figé au
+   dernier job. Rafraîchir plus souvent supposerait de mobiliser le doctor —
+   exactement ce que sa cadence adaptative vient d'éliminer (*« on an idle
+   repository, a runner provisioned to confirm nothing changed »*).
+3. **À cette fréquence, un label fait déjà le travail** — sans écriture
+   supplémentaire et avec le rendu kanban en prime.
 
-Mécanique : un marqueur HTML caché `<!-- boucle:loopstatus v=1 -->` identifie
-la note (même convention que `<!-- boucle:triage` et `<!-- boucle:verdict`) ;
-on relit la note existante, on compare le corps rendu, et on `PATCH`
-uniquement s'il diffère.
+F5 et F6 restent donc ouverts, mais aucun des deux ne justifie une nouvelle
+surface. Le seul élément qu'aucun label ne porte est **l'itération n/max** :
+ce n'est pas une colonne de board mais un signal de dégradation à l'intérieur
+d'un état (à `boucle:working`, l'humain ne distingue pas « ça avance » de
+« dernière tentative avant escalade »). Si on le traite, c'est un suffixe sur
+le label existant, pas une note.
 
 **P1.2 — Configuration versionnée.** *(effort : M ; impact : moyen)*
 Un `.boucle/config.yml` côté consommateur pour tout le non-secret, avec les
@@ -395,18 +414,20 @@ change le classement des priorités. Les rôles s'y séparent nettement :
 | **Le coéquipier non technique** | l'issue, et rien d'autre | Créer, lire un TL;DR, réagir 👍, commenter |
 
 Pour le second, **l'issue *est* le produit** — il n'y a pas d'autre surface.
-D'où la remontée en P0 de deux items que j'avais classés en confort :
 
-- **P0.4 (antisèche dans l'issue)** — il n'a aucune raison de savoir qu'un 👍
-  vaut approbation ; rien ne le lui dit là où il décide.
-- **P0.5 (hygiène des labels)** — il voit aujourd'hui passer `boucle:verdict`,
-  `boucle:split-parent` et `boucle:e2e-origin` sur son board, concepts qu'il
-  ne peut ni interpréter ni actionner.
+J'en avais déduit deux chantiers prioritaires. La vérification dans le code
+les a réduits à presque rien, et c'est une bonne nouvelle pour boucle :
 
-C'est aussi l'écart le plus net face à Lovable et Replit, dont l'interface est
-conçue pour cette personne-là. boucle a le bon modèle de collaboration — le
-gate humain, l'asynchrone, la forge comme lieu unique — mais présente encore
-ses internes moteur à quelqu'un qui n'en a que faire.
+- **L'antisèche existe déjà** au gate de spec (`lib/boucle-ci/triage.sh:318`).
+  Seul le gate MR n'a pas d'équivalent — c'est tout ce qui reste de P0.4.
+- **Les labels sont déjà lisibles** : les internes moteur sont des marqueurs
+  HTML et des préfixes de log, jamais des labels (§2, F3). P0.5 est retiré.
+
+Autrement dit, la surface vue par le coéquipier non technique est **déjà
+correcte**. L'écart face à Lovable ou Replit ne se joue pas sur la lisibilité
+de l'issue, mais en amont : le fait qu'il faille une forge, un compte et une
+issue pour entrer dans le produit. C'est un choix d'architecture assumé
+(`CONTEXT.md` §7), pas un défaut à corriger.
 
 **Recommandation** : inscrire cette formulation du persona dans
 `CONTEXT.md` §3, qui dit aujourd'hui seulement « pas nécessairement
