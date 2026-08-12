@@ -557,6 +557,15 @@ if [ -n "$BOUCLE_IMAGE_DESCRIPTIONS" ]; then
   BOUCLE_MR_ATTACHMENTS=$(strip_image_paths "$BOUCLE_MR_ATTACHMENTS")
 fi
 
+# ── 3c. Load evidence pack (if bin/build-evidence-pack ran) ──────────
+# Charter docs at the base branch + diff brief, used to grade
+# design/architecture/conformance criteria against the base state.
+EVIDENCE_PACK_FILE="$STATE_DIR/.evidence-pack.md"
+BOUCLE_EVIDENCE_PACK=""
+if [ -f "$EVIDENCE_PACK_FILE" ]; then
+  BOUCLE_EVIDENCE_PACK="$(cat "$EVIDENCE_PACK_FILE")"
+fi
+
 # ── 3c. Trim injected note threads (token-cost control) ──────────────
 # The CI stages export the FULL note thread (BOUCLE_ISSUE_NOTES,
 # BOUCLE_REVIEWER_FEEDBACK) with no cap, and build_prompt injects it on
@@ -914,6 +923,14 @@ Verify content fidelity: the issue body below is the original spec. Check that t
       if [ -z "${BOUCLE_PREVIEW_URL:-}" ]; then
         prompt="${prompt}
 NO preview URL is available (diff review mode). Grade the MR against \$BOUCLE_MR_DIFF (the MR diff, injected by CI) and \$BOUCLE_MR_CHECKS (the check suites). Verify each criterion against the code in the diff, not a deployed site. Note in your verdict that this was a diff review (no preview deploy).
+"
+      fi
+      if [ -n "${BOUCLE_EVIDENCE_PACK:-}" ]; then
+        prompt="${prompt}
+Evidence pack (charter docs at the base branch + diff brief, produced by bin/build-evidence-pack — grade design/architecture/conformance criteria AGAINST these excerpts; apply the dual-delta rule when the MR itself modifies a charter):
+---
+${BOUCLE_EVIDENCE_PACK}
+---
 "
       fi
       if [ -n "$body" ]; then
