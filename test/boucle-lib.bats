@@ -665,6 +665,7 @@ source_with_mock_forge() {
     forge_issue_labels_set() { :; }
     BOUCLE_DEPLOY_MODE=""
     BOUCLE_REVIEW_MODE=""
+    BOUCLE_DEPLOY_CMD="npx wrangler pages deploy public"
     source lib/boucle.sh
     boucle_worker_should_deploy && echo "OK" || echo "FAIL"
   '
@@ -700,6 +701,58 @@ source_with_mock_forge() {
   '
   assert_success
   assert_output "FAIL"
+}
+
+@test "boucle_worker_should_deploy returns 1 when BOUCLE_DEPLOY_CMD empty (GitLab Pages mode)" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_DEPLOY_MODE=self
+    BOUCLE_REVIEW_MODE=preview
+    BOUCLE_DEPLOY_CMD=""
+    source lib/boucle.sh
+    boucle_worker_should_deploy && echo "OK" || echo "FAIL"
+  '
+  assert_success
+  assert_output "FAIL"
+}
+
+@test "boucle_resolve_live_url returns CI_PAGES_URL in gitlab-pages provider mode" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_LIVE_URL=""
+    BOUCLE_PRODUCTION_URL=""
+    BOUCLE_DEPLOY_PROVIDER=gitlab-pages
+    CI_PAGES_URL="https://user.example.gitlab.io/project"
+    source lib/boucle.sh
+    boucle_resolve_live_url ""
+  '
+  assert_success
+  assert_output "https://user.example.gitlab.io/project"
+}
+
+@test "boucle_resolve_live_url does not use CI_PAGES_URL without gitlab-pages provider" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_LIVE_URL=""
+    BOUCLE_PRODUCTION_URL=""
+    BOUCLE_DEPLOY_PROVIDER=""
+    BOUCLE_DEPLOY_MODE=self
+    BOUCLE_DEPLOY_PROJECT=""
+    CI_PAGES_URL="https://user.example.gitlab.io/project"
+    source lib/boucle.sh
+    boucle_resolve_live_url ""
+  '
+  assert_success
+  assert_output ""
 }
 
 @test "boucle_resolve_live_url returns BOUCLE_LIVE_URL when set" {

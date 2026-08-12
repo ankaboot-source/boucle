@@ -487,13 +487,21 @@ boucle_ci_doctor() {
       fi
       if [ "$MR_OPEN_STATE" = "opened" ]; then
         echo "  → #$IID ($ROLE): merged MR exists but an open MR also exists — issue reopened for new iteration, skipping close"
+        # FALL THROUGH (no close, no continue): an open MR means the issue
+        # is being worked again, so the re-trigger logic below still
+        # applies — the doctor must recover a STUCK worker/reviewer even
+        # when a stale closed/merged MR lingers on the same branch. A
+        # `continue` here strands the issue at boucle:working forever
+        # (consumer 2026-08: a closed MR from a previous iteration
+        # blocked re-triggering for hours while the issue occupied the
+        # worker slot).
+      else
+        echo "  → #$IID ($ROLE): MR already merged — closing issue + boucle:done"
+        set_boucle_label "$IID" "boucle:done" "boucle::status::done"
+        close_issue "$IID"
+        RECOVERED=$((RECOVERED + 1))
         continue
       fi
-      echo "  → #$IID ($ROLE): MR already merged — closing issue + boucle:done"
-      set_boucle_label "$IID" "boucle:done" "boucle::status::done"
-      close_issue "$IID"
-      RECOVERED=$((RECOVERED + 1))
-      continue
     fi
 
     # If the MR is open, approved, and mergeable, trigger the merger
@@ -556,13 +564,21 @@ boucle_ci_doctor() {
       fi
       if [ "$MR_OPEN_STATE" = "opened" ]; then
         echo "  → #$IID ($ROLE): closed MR exists but an open MR also exists — issue reopened for new iteration, skipping close"
+        # FALL THROUGH (no close, no continue): an open MR means the issue
+        # is being worked again, so the re-trigger logic below still
+        # applies — the doctor must recover a STUCK worker/reviewer even
+        # when a stale closed MR lingers on the same branch. A `continue`
+        # here strands the issue at boucle:working forever (consumer
+        # 2026-08: a closed MR from a previous iteration blocked
+        # re-triggering for hours while the issue occupied the worker
+        # slot).
+      else
+        echo "  → #$IID ($ROLE): MR already closed (non-merged) — closing issue + boucle:done"
+        set_boucle_label "$IID" "boucle:done" "boucle::status::done"
+        close_issue "$IID"
+        RECOVERED=$((RECOVERED + 1))
         continue
       fi
-      echo "  → #$IID ($ROLE): MR already closed (non-merged) — closing issue + boucle:done"
-      set_boucle_label "$IID" "boucle:done" "boucle::status::done"
-      close_issue "$IID"
-      RECOVERED=$((RECOVERED + 1))
-      continue
     fi
 
     # Active-pipeline check: skip if a pipeline with BOUCLE_ISSUE=$IID is
