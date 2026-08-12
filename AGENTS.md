@@ -1458,6 +1458,26 @@ atomic.
       closed-MR done-transition, lesson #44 covers roles on closed
       issues; this lesson covers the doctor's re-trigger path.
 
+62. **Declare file impact and gate parallel workers on overlap**
+    - ❌ DO NOT launch a worker whose issue claims files already claimed by an
+      in-flight issue — the branches will conflict at rebase/merge and burn
+      the conflict-retry budget.
+    - ❌ DO NOT clear a file-impact claim when an adaptive reset empties the
+      branch — the claim must survive a `git reset --hard` so a parallel
+      worker does not start into the same files mid-flight.
+    - ✅ DO: triage predicts impacted files (`<!-- boucle:files v=1 paths=... -->`
+      marker note); the worker job refreshes it with the actual branch diff
+      (skipping the refresh when the branch has no commits ahead, preserving
+      the last non-empty marker); `check_file_gate` defers the worker
+      (`boucle:blocked`) on overlap; the unblock path fires directly when the
+      named blocker closes. Fail-open on missing marker / API error.
+    - Admission: class — any parallel workers editing the same files;
+      recurrence — a new agent/CI step would not know to declare files or
+      gate on them without the doc; stable — no line numbers, no transient
+      values; distinct — lesson #22 covers destructive reset, #49 covers
+      dependency gating, #51 covers rebase-fallback reset; none covers
+      file-impact gating or the adaptive-reset claim-loss hole.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
