@@ -51,12 +51,12 @@ classify() {
 }
 
 @test "reset: the no-changes path records the outcome for the next iteration" {
-  run grep -q 'echo "no-changes" > "$BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE/last-outcome"' lib/boucle-ci/worker.sh
+  run grep -q 'echo "no-changes" > "$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE/last-outcome"' lib/boucle-ci/worker.sh
   assert_success
 }
 
 @test "reset: a shipping iteration records committed" {
-  run grep -q 'echo "committed" > ".boucle/$BOUCLE_ISSUE/last-outcome"' lib/boucle-ci/worker.sh
+  run grep -q 'echo "committed" > ".boucle-state/$BOUCLE_ISSUE/last-outcome"' lib/boucle-ci/worker.sh
   assert_success
 }
 
@@ -69,7 +69,7 @@ classify() {
 }
 
 @test "reset: the outcome file lives in the state cache so it survives checkout" {
-  # .boucle/<issue>/ is restored from ISSUE_STATE_CACHE after checkout, and
+  # .boucle-state/<issue>/ is restored from ISSUE_STATE_CACHE after checkout, and
   # saved back on EXIT — so the classification can read it next run.
   run grep -q 'ISSUE_STATE_CACHE/last-outcome' lib/boucle-ci/worker.sh
   assert_success

@@ -97,15 +97,15 @@ run_gate() {
 @test "build gate: BOUCLE_BUILD_FEEDBACK is exported from build-feedback.md when it exists" {
 	BATS_TEST_TMPDIR=$(mktemp -d)
 	mkdir -p "$BATS_TEST_TMPDIR/.boucle/42"
-	printf 'build error line 1\nline 2\n' >"$BATS_TEST_TMPDIR/.boucle/42/build-feedback.md"
+	printf 'build error line 1\nline 2\n' >"$BATS_TEST_TMPDIR/.boucle-state/42/build-feedback.md"
 	# Source the read block in isolation (the same logic as Edit A).
 	run bash -c '
     cd "$1"
     BOUCLE_ISSUE=42
     export BOUCLE_BUILD_FEEDBACK
     BOUCLE_BUILD_FEEDBACK=""
-    if [ -f ".boucle/$BOUCLE_ISSUE/build-feedback.md" ]; then
-      BOUCLE_BUILD_FEEDBACK=$(cat ".boucle/$BOUCLE_ISSUE/build-feedback.md" 2>/dev/null || echo "")
+    if [ -f ".boucle-state/$BOUCLE_ISSUE/build-feedback.md" ]; then
+      BOUCLE_BUILD_FEEDBACK=$(cat ".boucle-state/$BOUCLE_ISSUE/build-feedback.md" 2>/dev/null || echo "")
     fi
     printf "%s" "$BOUCLE_BUILD_FEEDBACK"
   ' -- "$BATS_TEST_TMPDIR"
