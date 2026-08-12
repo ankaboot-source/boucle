@@ -407,3 +407,118 @@ extract_sibling_gate() {
   assert_success
   assert_output ""
 }
+
+# ── check_allow_list_gate: allow-list safety net ───────────────────────
+# Only issues whose resolved human reporter is in BOUCLE_ALLOWED_USERS are
+# accepted. Fail-open when the variable is unset. On rejection an
+# explanatory note is posted and the gate returns 1 (caller must NOT
+# trigger any role).
+
+@test "check_allow_list_gate fails open when BOUCLE_ALLOWED_USERS is unset" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    unset BOUCLE_ALLOWED_USERS
+    resolve_reporter_username() { echo "alice"; }
+    forge_issue_note() { echo "note:$1|$2"; }
+    source lib/boucle.sh
+    source lib/boucle-ci/dispatch.sh
+    check_allow_list_gate 42
+  '
+  assert_success
+  refute_output --partial "note:"
+}
+
+@test "check_allow_list_gate fails open when BOUCLE_ALLOWED_USERS is empty" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    BOUCLE_ALLOWED_USERS=""
+    resolve_reporter_username() { echo "alice"; }
+    forge_issue_note() { echo "note:$1|$2"; }
+    source lib/boucle.sh
+    source lib/boucle-ci/dispatch.sh
+    check_allow_list_gate 42
+  '
+  assert_success
+  refute_output --partial "note:"
+}
+
+@test "check_allow_list_gate allows a listed author" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    BOUCLE_ALLOWED_USERS="alice,bob"
+    forge_issue_note() { echo "note:$1|$2"; }
+    source lib/boucle.sh
+    source lib/boucle-ci/dispatch.sh
+    resolve_reporter_username() { echo "alice"; }
+    check_allow_list_gate 42
+  '
+  assert_success
+  assert_output --partial "is allowed"
+  refute_output --partial "note:"
+}
+
+@test "check_allow_list_gate rejects an unlisted author and posts the note" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    BOUCLE_ALLOWED_USERS="alice,bob"
+    forge_issue_note() { echo "note:$1|$2"; }
+    source lib/boucle.sh
+    source lib/boucle-ci/dispatch.sh
+    resolve_reporter_username() { echo "mallory"; }
+    check_allow_list_gate 42
+  '
+  assert_failure
+  assert_output --partial "NOT in BOUCLE_ALLOWED_USERS"
+  assert_output --partial "note:42|"
+  assert_output --partial "boucle:allow-list"
+}
+
+@test "check_allow_list_gate matches case-insensitively" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    BOUCLE_ALLOWED_USERS="Alice,Bob"
+    forge_issue_note() { echo "note:$1|$2"; }
+    source lib/boucle.sh
+    source lib/boucle-ci/dispatch.sh
+    resolve_reporter_username() { echo "alice"; }
+    check_allow_list_gate 42
+  '
+  assert_success
+  assert_output --partial "is allowed"
+  refute_output --partial "note:"
+}
+
+@test "check_allow_list_gate trims whitespace around usernames" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    BOUCLE_ALLOWED_USERS=" alice , bob "
+    forge_issue_note() { echo "note:$1|$2"; }
+    source lib/boucle.sh
+    source lib/boucle-ci/dispatch.sh
+    resolve_reporter_username() { echo "bob"; }
+    check_allow_list_gate 42
+  '
+  assert_success
+  assert_output --partial "is allowed"
+  refute_output --partial "note:"
+}
+
+@test "check_allow_list_gate fails open when the reporter cannot be resolved" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    BOUCLE_ALLOWED_USERS="alice,bob"
+    forge_issue_note() { echo "note:$1|$2"; }
+    source lib/boucle.sh
+    source lib/boucle-ci/dispatch.sh
+    resolve_reporter_username() { echo ""; }
+    check_allow_list_gate 42
+  '
+  assert_success
+  assert_output --partial "failing OPEN"
+  refute_output --partial "note:"
+}
+
+@test "dispatch defines check_allow_list_gate" {
+  run grep -E '^check_allow_list_gate\(\)' lib/boucle-ci/dispatch.sh
+  assert_success
+}

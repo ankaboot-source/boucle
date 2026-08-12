@@ -287,6 +287,13 @@ boucle_ci_doctor() {
         echo "  → #$IID: file-gate blocked — skipping worker trigger"
         continue
       fi
+      # Allow-list gate (safety net): the doctor must not start work on
+      # an issue whose resolved human reporter is not in
+      # BOUCLE_ALLOWED_USERS. Fail-open when the variable is unset.
+      if ! check_allow_list_gate "$IID"; then
+        echo "doctor: issue #$IID rejected by the allow list — skipping worker re-trigger"
+        continue
+      fi
       chain_to_role "$IID" "worker"
       doctor_mark_triggered "$IID"
       echo "  → re-triggered worker for #$IID"
@@ -455,6 +462,13 @@ boucle_ci_doctor() {
         # issue.
         if ! check_file_gate "$IID"; then
           echo "  → #$IID: file-gate blocked — skipping worker trigger"
+          continue
+        fi
+        # Allow-list gate (safety net): the doctor must not start work on
+        # an issue whose resolved human reporter is not in
+        # BOUCLE_ALLOWED_USERS. Fail-open when the variable is unset.
+        if ! check_allow_list_gate "$IID"; then
+          echo "doctor: issue #$IID rejected by the allow list — skipping worker re-trigger"
           continue
         fi
         chain_to_role "$IID" "worker"
