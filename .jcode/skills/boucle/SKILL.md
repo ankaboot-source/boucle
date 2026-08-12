@@ -244,12 +244,14 @@ harness MUST use the markers correctly or dispatch will misroute its writes.
 | `<!-- boucle:diagnostic v=1 iid=N class=X trigger=Y -->` | `v=1 iid=<IID> class=<failure-class> trigger=<trigger>` | boucle.sh:475 (escalation diagnostic) | (informational — structured escalation) | Replaces the generic "human intervention needed" note with a structured diagnostic (failure class + evidence + recommended action). |
 | `<!-- boucle:schedule id=<name> -->` | `id=<schedule-name>` | boucle.sh:201 (on scheduled issues) | boucle.sh (dedup — last firing marker) | Marks a scheduled issue with its template name. Used to prevent duplicate firings across sweeps. |
 | `<!-- boucle:conflict-retry N -->` | `N=<retry-count>` | boucle.sh:1099 (on re-trigger after rebase conflict) | boucle.sh:1085 (jq parse, count retries) | Posted on each re-trigger after a rebase conflict. Bounded retry count — after N retries, the conflict is handed to the worker agent for resolution. |
+| `<!-- boucle:file-blocked v=1 on=N paths=... -->` | `v=1 on=<active-issue> paths=<overlap>` | gates.sh:106 (check_file_gate — defer on file overlap) | gates.sh:192 (unblock path, last marker) | The file-impact gate (AGENTS.md lesson #62): posted when a worker would edit files claimed by an in-flight sibling issue. The unblock path fires when the named blocker closes. |
+| `<!-- boucle:files v=1 paths=... -->` | `v=1 paths=<impacted-files>` | worker job (.gitlab-ci.yml:2619, refresh after the branch diff) | worker job (jq, find last marker) | File-impact declaration (AGENTS.md lesson #62): the triage predicts the impacted files, the worker refreshes the marker with the actual branch diff. Consumed by `check_file_gate` to defer parallel workers on overlap. |
 
 ### 3.6 Markers NOT in code (do not emit)
 
 | Marker | Status | Note |
 |---|---|---|
-| `<!-- boucle:files v=1 paths=... -->` | **Planned, not implemented** | Documented in `docs/superpowers/specs/2026-08-12-file-impact-gate-design.md`, not yet in AGENTS.md. Absent from code. A harness MUST NOT emit it — the loop does not parse it. |
+| *(none currently)* | — | Keep this table empty — a marker that is documented here but emitted by code FAILs `bin/check-doc-sync`. |
 
 ### 3.7 Structural signals (not HTML comments)
 
@@ -419,10 +421,6 @@ and may produce conflicts with in-flight MRs.
   consumer once the engine/consumer separation is stable. Until then, the
   62 AGENTS.md lessons remain as the incident catalog; new classes of bugs are
   discovered on real consumers. (CONTEXT.md §1.)
-- **`boucle:files` planned, not yet implemented.** Documented in
-  `docs/superpowers/specs/2026-08-12-file-impact-gate-design.md`, not yet in
-  AGENTS.md or the engine code. A harness MUST NOT emit the
-  `<!-- boucle:files v=1 paths=... -->` marker — the loop does not parse it yet.
 - **Lesson numbering drift.** AGENTS.md has duplicate lesson numbers (#17,
   #22, #23, #24, #27, #28, #29, #41, #42, #47 appear twice). The doc's own rule
   says "never renumber — a pruned entry leaves a gap, not a shift", but
