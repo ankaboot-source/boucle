@@ -1409,6 +1409,21 @@ atomic.
       cleanly, and post-merge/e2e resolve the live URL to `$CI_PAGES_URL`
       (gitlab-pages) instead of the `pages.dev` fallback. Document the
       mode in LOOP.md alongside `self`/`external`.
+    - ✅ DO: display the GitLab Pages URL even though the mechanics differ
+      from Cloudflare: when `BOUCLE_DEPLOY_PROVIDER=gitlab-pages` and
+      `$CI_PAGES_URL` is set, the worker writes
+      `Site (GitLab Pages): $CI_PAGES_URL — no per-branch preview; reviewed
+      via diff` in the MR description instead of a blank `Preview:` line.
+      The reviewer's `pages.dev` extraction regex cannot match the forge's
+      Pages domain (frama.io/gitlab.io/...), so it stays in diff review and
+      never probes the production site as a preview.
+    - ❌ DO NOT ship `pages.path_prefix`-based branch previews on CE
+      instances. Parallel deployments (`pages.path_prefix`, GitLab ≥ 17.9)
+      are a **Premium** feature: CE accepts the keyword at CI-lint time but
+      ignores it at RUNTIME — the branch job publishes at the ROOT and
+      clobbers the production deployment. Verified empirically on framagit
+      (GitLab CE 19.2.1, 2026-08): lint `valid: true`, deployment created
+      with `path_prefix: null` at the site root.
     - ✅ DO: centralize the decision in `boucle_worker_should_deploy`
       (`lib/boucle.sh`) so the extracted worker gets it for free, and
       mirror it in the inline worker job with the identical guard.
