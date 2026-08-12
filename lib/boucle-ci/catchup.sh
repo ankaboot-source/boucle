@@ -13,6 +13,9 @@
 # Extracted from the .gitlab-ci.yml catchup job (lines 3211-3569).
 
 boucle_ci_catchup() {
+  # Shared gate functions (check_sibling_gate, maybe_unblock_dependents) —
+  # single source of truth in lib/boucle-ci/gates.sh.
+  source "$BOUCLE_HOME/lib/boucle-ci/gates.sh"
   # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script
   # under set -eo pipefail. Without pipefail, the var is just empty (which
   # we handle).
@@ -23,9 +26,9 @@ boucle_ci_catchup() {
   # close_issue / get_work_item_children / maybe_close_parent /
   # set_boucle_label / chain_to_role come from lib/boucle.sh (sourced by
   # the lib/boucle-ci.sh bootstrap) — the local copies that used to live
-  # here are removed. issue_has_active_pipeline and
-  # maybe_unblock_dependents are NOT in lib/boucle.sh yet, so they stay
-  # local.
+  # here are removed. issue_has_active_pipeline stays local;
+  # maybe_unblock_dependents comes from lib/boucle-ci/gates.sh (sourced
+  # above).
 
   # Check if a pipeline with BOUCLE_ISSUE=$iid is already active.
   # Used by maybe_unblock_dependents to prevent double-trigger.
@@ -39,101 +42,6 @@ boucle_ci_catchup() {
 
   # Source the depends-on lib for parse_depends_on.
   source "$BOUCLE_HOME/bin/lib/depends-on.sh"
-
-  # When a sub-issue closes, check whether any sibling sub-issues were
-  # blocked waiting on it. For each blocked sibling whose deps are NOW all
-  # closed, flip boucle:blocked → boucle:todo and trigger the worker.
-  # Symmetric to maybe_close_parent (lesson #49 — unblock via a symmetric
-  # maybe_unblock_dependents(), NOT via the doctor's capacity scan).
-  maybe_unblock_dependents() {
-    local closed_iid="$1"
-    local closed_data parent_iid
-    closed_data=$(forge_issue_get "$closed_iid") || {
-      echo "maybe_unblock_dependents: can't fetch #$closed_iid — skipping."
-      return 0
-    }
-    parent_iid=$(echo "$closed_data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
-    if [ -z "$parent_iid" ]; then
-      return 0 # not a sub-issue → no dependents
-    fi
-    # Find siblings via the same 3-tier fallback as maybe_close_parent.
-    local children_data sibling_iids
-    children_data=$(get_work_item_children "$parent_iid")
-    sibling_iids=$(echo "$children_data" | jq -r '[.[].iid] | join(",")' 2> /dev/null)
-    if [ -z "$sibling_iids" ]; then
-      local parent_notes
-      parent_notes=$(forge_issue_notes "$parent_iid") || return 0
-      sibling_iids=$(echo "$parent_notes" | jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | first | .body // empty' | grep -oE 'iids=[0-9,]+' | cut -d= -f2)
-      if [ -z "$sibling_iids" ]; then
-        local links_data
-        links_data=$(forge_issue_links "$parent_iid")
-        sibling_iids=$(echo "$links_data" | jq -r '[.[] | select(.iid != null) | .iid] | join(",")')
-        [ -z "$sibling_iids" ] && return 0
-      fi
-    fi
-    # For each sibling, check if it's boucle:blocked AND its deps include
-    # the just-closed IID AND all its deps are now closed.
-    local sib_iid sib_data sib_labels sib_desc sib_deps all_closed dep_iid dep_state
-    for sib_iid in $(echo "$sibling_iids" | tr ',' ' '); do
-      [ "$sib_iid" = "$closed_iid" ] && continue
-      sib_data=$(forge_issue_get "$sib_iid") || continue
-      sib_labels=$(echo "$sib_data" | jq -r '.labels | join(",")' 2> /dev/null)
-      echo "$sib_labels" | grep -q "boucle:blocked" || continue
-      sib_desc=$(echo "$sib_data" | jq -r '.description // empty' 2> /dev/null)
-      sib_deps=$(parse_depends_on "$sib_desc")
-      # ── Sibling-serialization unblock (a priori gate) ──────────────
-      # A sibling blocked by the serialization gate carries a note with
-      # `<!-- boucle:sibling-blocked v=1 sib=<active_iid> -->`. When that
-      # active sibling reaches done/closed, unblock the waiting sibling —
-      # BUT only if no OTHER sibling is still active (serialization: one
-      # sibling at a time, per domain).
-      local sib_notes sib_blocker active_other
-      sib_blocker=""
-      sib_notes=$(forge_issue_notes "$sib_iid" 2> /dev/null || echo "[]")
-      sib_blocker=$(echo "$sib_notes" \
-        | jq -r '[.[] | select(.body | contains("<!-- boucle:sibling-blocked"))] | last | .body // empty' 2> /dev/null \
-        | grep -oE 'sib=[0-9]+' | head -1 | cut -d= -f2)
-      if [ -n "$sib_blocker" ] && [ "$sib_blocker" = "$closed_iid" ]; then
-        # Only unblock if no other sibling is in an active work state.
-        active_other=$(echo "$children_data" | jq -r --arg self "$sib_iid" --arg closed "$closed_iid" '
-          [.[] | select((.iid | tostring) != $self and (.iid | tostring) != $closed)
-                 | select(.state == "opened")] | .[0].iid // empty' 2> /dev/null)
-        if [ -z "$active_other" ]; then
-          echo "maybe_unblock_dependents: #$sib_iid unblocked (serialized sibling #$closed_iid done, no other sibling active)"
-          set_boucle_label "$sib_iid" "boucle:todo" "boucle::status::bot"
-          local unblock_body
-          unblock_body=$(printf '✅ Sibling #%s done — worker starting.\n\n<!-- boucle:unblocked v=1 by=%s -->' "$closed_iid" "$closed_iid")
-          forge_issue_note "$sib_iid" "$unblock_body"
-          if ! issue_has_active_pipeline "$sib_iid"; then
-            chain_to_role "$sib_iid" "worker"
-          fi
-          continue
-        fi
-      fi
-      [ -z "$sib_deps" ] && continue
-      # Does this sibling depend on the just-closed IID?
-      echo ",$sib_deps," | grep -q ",$closed_iid," || continue
-      # Are ALL deps now closed?
-      all_closed=true
-      for dep_iid in $(echo "$sib_deps" | tr ',' ' '); do
-        dep_state=$(forge_issue_get "$dep_iid" | jq -r '.state // "unknown"' 2> /dev/null || echo "unknown")
-        if [ "$dep_state" != "closed" ]; then
-          all_closed=false
-          break
-        fi
-      done
-      if [ "$all_closed" = "true" ]; then
-        echo "maybe_unblock_dependents: #$sib_iid deps all closed — unblocking"
-        set_boucle_label "$sib_iid" "boucle:todo" "boucle::status::bot"
-        local unblock_body
-        unblock_body=$(printf '✅ Dependencies satisfied — worker starting.\n\n<!-- boucle:unblocked v=1 by=%s -->' "$closed_iid")
-        forge_issue_note "$sib_iid" "$unblock_body"
-        if ! issue_has_active_pipeline "$sib_iid"; then
-          chain_to_role "$sib_iid" "worker"
-        fi
-      fi
-    done
-  }
 
   # ── Main: inspect issue state, branch, close, cascade ──────────────────
   # Disable errexit for the main flow: grep (no match) / forge API (transient

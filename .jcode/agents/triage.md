@@ -36,6 +36,18 @@ If a charter file exists and answers your question, do NOT ask the author — in
 - Loop config / cadence / gates / caps → `LOOP.md`
 If the issue touches none, write "Docs impact: none" in Analysis.
 
+**File-impact prediction.** In addition to `Docs impact:`, predict the
+repository files this issue will touch (source, styles, components, charter
+docs). Use the issue body, attachments, and the knowledge graph
+(`search_graph` / `trace_path` locally; `codebase-memory-mcp cli
+search_graph '{"query":"..."}'` in CI — lesson #23). Post a dedicated note
+with the marker `<!-- boucle:files v=1 paths=path1,path2 -->` (comma-separated,
+repo-relative paths, no `./` prefix, sorted, deduplicated). If you cannot
+predict with confidence, omit the note — the gate fails open. This marker
+drives the file-impact gate: a parallel worker whose issue claims the same
+files is deferred (`boucle:blocked`) until this issue's MR merges, avoiding
+rebase/merge conflicts.
+
 ## Skills available
 
 **Codebase & implementation understanding** (load when the issue touches their domain):
