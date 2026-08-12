@@ -1551,12 +1551,18 @@ triage:
             else
               # 2. Install Chromium + puppeteer-core (only now, in a per-job dir).
               NPM_TMP="/tmp/npm-${CI_JOB_ID:-local}"
+              RENDER_STDERR="$CI_PROJECT_DIR/.boucle-state/$IID/render-stderr.log"
+              mkdir -p "$(dirname "$RENDER_STDERR")"
               if npm install --prefix "$NPM_TMP" puppeteer-core @sparticuz/chromium >/dev/null 2>&1; then
                 # 3. Render preview.html → preview.png (1280x800, fullPage).
                 #    NODE_PATH=$NPM_TMP/node_modules so the script (bin/) resolves
                 #    the modules installed in the per-job dir.
                 PREVIEW_PNG="$CI_PROJECT_DIR/.boucle-state/$IID/preview.png"
-                if NODE_PATH="$NPM_TMP/node_modules" node "$CI_PROJECT_DIR/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2>/dev/null; then
+                #    Capture stderr to a log file (CI artifact) so render
+                #    failures are diagnosable. stdout (produced PNG paths) is
+                #    captured in RENDERED_PNGS as before. Lesson: never swallow
+                #    render errors.
+                if NODE_PATH="$NPM_TMP/node_modules" node "$CI_PROJECT_DIR/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2>"$RENDER_STDERR"; then
                   # 4. Upload the PNG via the GitLab uploads API.
                   UPLOAD_RESP=$(curl -s --request POST \
                     --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
@@ -1605,6 +1611,11 @@ triage:
                   fi
                 else
                   echo "[boucle] WARN: Chromium render failed — posting fallback note"
+                  # Surface the render stderr in the job trace for diagnosis.
+                  if [ -s "$RENDER_STDERR" ]; then
+                    echo "[boucle:render-stderr] last 50 lines of render error:"
+                    tail -n 50 "$RENDER_STDERR" | sed 's/^/[boucle:render-stderr] /' >&2
+                  fi
                   glab api --hostname "$BOUCLE_FORGE_HOST" -X POST \
                     "/projects/$CI_PROJECT_ID/issues/$IID/notes" \
                     -f body="Preview unavailable (render failed) — validate from the TL;DR." >/dev/null 2>&1
