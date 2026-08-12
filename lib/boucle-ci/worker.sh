@@ -296,7 +296,14 @@ EOF
   # ── Safety-net commit ────────────────────────────────────────────
   if ! git diff --quiet || ! git diff --cached --quiet; then
     git add -A -- ':!.boucle' || true
-    git commit -m "feat: worker changes for #$BOUCLE_ISSUE [skip ci]" --no-verify
+    # || true: the agent may already have committed everything (only
+    # .boucle/ state files remain, excluded above) — `git commit` then
+    # fails with "no changes added to commit". A bare commit under set -e
+    # kills the job BEFORE the push, orphaning the agent's commits on the
+    # local branch (consumer 2026-08: worker ran fine, job died at the
+    # safety-net, MR never updated). The safety-net is best-effort by
+    # design — never fail the job because there was nothing to commit.
+    git commit -m "feat: worker changes for #$BOUCLE_ISSUE [skip ci]" --no-verify || true
   fi
 
   # Ensure wrangler cache isn't committed
