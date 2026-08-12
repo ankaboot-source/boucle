@@ -21,6 +21,7 @@ never touch the engine itself.
 - [🛠️ Configuration](#️-configuration)
   - [The bot user](#the-bot-user)
   - [Running without a bot account (`--mono-user`)](#running-without-a-bot-account---mono-user)
+  - [Advanced — dedicated runners](#advanced--dedicated-runners)
 - [🗺️ Roadmap](#️-roadmap)
 - [⚖️ License](#️-license)
 - [📚 Docs](#docs)
@@ -126,10 +127,11 @@ environment variable — and only if your deploy target is Cloudflare.
 1. Add `BOUCLE_LLM_API_KEY` as a **masked** CI/CD variable (project →
    Settings → CI/CD → Variables). It is never handled by setup so it never
    crosses a conversation, a log, or a shell history.
-2. Make sure a runner is available for the project. `bin/setup` bakes the
-   runner tag into your root `.gitlab-ci.yml` (default: `boucle` — override
-   with `bin/setup --runner-tag <tag>` or the `BOUCLE_RUNNER_TAG` project
-   variable). Register a runner with that tag on your project.
+2. **Runners: nothing to do.** boucle's jobs run untagged, so your forge's
+   shared runners pick them up — GitLab.com and GitHub-hosted work out of the
+   box, as do most self-managed instances that expose shared runners. Bring
+   your own runner only if you want to; see
+   [Advanced — dedicated runners](#advanced--dedicated-runners).
 3. Create a GitLab issue with the `boucle:triage` label — or assign an
    existing issue to the boucle bot.
 
@@ -233,6 +235,22 @@ features** than Claude Code Max 20×. The capacity gap comes from the
 per-feature cost gap (18.8×), not the plan price gap (2×) — and parallelism
 multiplies it further.
 
+### CI compute is the second meter
+
+The figures above count **LLM tokens only**. boucle runs on your forge's CI,
+so the runner is metered separately — and the two options bill in opposite
+ways:
+
+| Runner | CI cost | Trade-off |
+| --- | --- | --- |
+| **Shared** (default) | Metered. GitLab.com Free includes 400 compute-minutes/month, then $10 per 1 000; GitHub-hosted is free on public repos, metered on private ones. | Zero infrastructure, but a feature spends 30–60 min of runner wall-clock (LLM latency dominates) — so a free tier sustains roughly **7–13 features/month** before it bills. |
+| **Dedicated** (opt-in) | Unmetered — you pay for the machine. | Requires a runner to register and keep alive; a shell executor also caches the toolchain between runs, so the loop is faster. See [Advanced — dedicated runners](#advanced--dedicated-runners). |
+
+So the **token** capacity above (~125 features/month on the default config) is
+only reachable end-to-end on an unmetered runner. On a free shared tier, CI
+minutes bind first. Pick shared runners to start with nothing to maintain, and
+move to a dedicated runner once the loop earns its keep.
+
 ## 🛠️ Configuration
 
 Boucle reads its configuration from CI/CD variables (GitLab) or Actions
@@ -265,7 +283,7 @@ Variables are edited in GitLab under **Settings → CI/CD → Variables** (see t
 or in GitHub under **Settings → Secrets and variables → Actions** — see
 [using variables in GitHub Actions](https://docs.github.com/en/actions/learn-github-actions/variables).
 
-Every other option — `BOUCLE_RUNNER_TAG`/`BOUCLE_RUNS_ON`, `BOUCLE_UPDATE_MODE`
+Every other option — `BOUCLE_RUNS_ON`, `BOUCLE_UPDATE_MODE`
 (`release`|`dev`), iteration/concurrency caps (`BOUCLE_MAX_ITERATIONS`,
 `BOUCLE_MAX_PARALLEL_ISSUES`), models per agent, vision routing, provider
 fallback (`BOUCLE_FALLBACK_*`), deploy overrides, staleness, attachment caps —
@@ -349,6 +367,59 @@ GitHub's per-organization email routing and inbox `reason:` filters help
 contain it; repository Watch levels keep unrelated repos quiet. None of this
 is as clean as a dedicated identity — **prefer a bot or service account when
 you can**, and treat mono-user as the fallback.
+
+### Advanced — dedicated runners
+
+By default boucle needs no runner of its own: every job runs **untagged**, so
+the shared runners of GitLab.com, GitHub, or your self-managed instance pick
+them up. Install is therefore zero-infrastructure.
+
+Bring your own runner when you want **unmetered compute** (shared runners bill
+by the minute — see [Cost](#cost)), a **faster loop** (a shell executor keeps
+node, glab and jcode installed between runs), **more memory or a bigger disk**
+than the hosted tier gives you, or **network access** to something private.
+
+**GitLab.** Register a runner carrying a tag, then pin boucle to it:
+
+```bash
+.boucle/bin/setup --runner-tag boucle    # idempotent — safe to re-run
+```
+
+That writes a `default:` override into your root `.gitlab-ci.yml`:
+
+```yaml
+include:
+  - remote: 'https://raw.githubusercontent.com/ankaboot-source/boucle/<ref>/.gitlab-ci.yml'
+
+default:
+  tags: [boucle]
+
+variables:
+  BOUCLE_FORGE_HOST: "gitlab.example.com"
+```
+
+GitLab merges included configuration key-by-key, so this changes **routing
+only** — the engine's `image:` and `before_script:` are preserved. To go back
+to shared runners, delete the `default:` block.
+
+The loop-critical control-plane jobs (`dispatch`, `merger`, `post-merge`,
+`catchup`, `doctor`, `check`) keep an explicit `tags: []` and stay on any
+available runner, on purpose: an approved MR must never sit in a queue behind
+a long-running worker on your single dedicated runner.
+
+**GitHub.** Set the `BOUCLE_RUNS_ON` repository variable (Settings → Secrets
+and variables → Actions). It defaults to `ubuntu-latest`; for a self-hosted
+runner use a JSON array of labels:
+
+```
+BOUCLE_RUNS_ON = ["self-hosted", "linux", "x64"]
+```
+
+**Either forge.** Agent jobs run on the pre-baked
+`docker.io/ankabootops/boucle-agents` image (node 22, glab, jcode,
+codebase-memory-mcp), so docker executors skip the toolchain download. Shell
+executors ignore `image:` and fall back to a `before_script` that installs
+only what is missing — both executor types work unchanged.
 
 ## 🗺️ Roadmap
 
