@@ -33,7 +33,7 @@ boucle_ci_reviewer() {
   # Evidence pack: charter excerpts at base + diff brief, read by
   # bin/jc and injected into the reviewer prompt. Best-effort: never
   # fails the job.
-  "${BOUCLE_HOME}"/bin/build-evidence-pack >/dev/null 2>&1 || true
+  "${BOUCLE_HOME}"/bin/build-evidence-pack > /dev/null 2>&1 || true
 
   # ── Restore the triage's obligations.md into the workspace ──────
   # The triage job writes obligations.md (the `## Deliverables` obligations)
