@@ -4902,17 +4902,19 @@ doctor:
             | jq -r '.[0].state // empty')
           if [ "$MR_OPEN_STATE" = "opened" ]; then
             echo "  → #$IID ($ROLE): merged MR exists but an open MR also exists — issue reopened for new iteration, skipping close"
-            # FALL THROUGH (no continue): an open MR means the issue is being
-            # worked again, so the re-trigger logic below still applies — the
-            # doctor must recover a STUCK worker/reviewer even when a stale
-            # closed/merged MR lingers on the same branch. A `continue` here
-            # strands the issue at boucle:working forever (consumer 2026-08).
+            # FALL THROUGH (no close, no continue): an open MR means the
+            # issue is being worked again, so the re-trigger logic below
+            # still applies — the doctor must recover a STUCK
+            # worker/reviewer even when a stale closed/merged MR lingers on
+            # the same branch. A `continue` here strands the issue at
+            # boucle:working forever (consumer 2026-08).
+          else
+            echo "  → #$IID ($ROLE): MR already merged — closing issue + boucle:done"
+            set_boucle_label "$IID" "boucle:done" "boucle::status::done"
+            glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
+            RECOVERED=$((RECOVERED + 1))
+            continue
           fi
-          echo "  → #$IID ($ROLE): MR already merged — closing issue + boucle:done"
-          set_boucle_label "$IID" "boucle:done" "boucle::status::done"
-          glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
-          RECOVERED=$((RECOVERED + 1))
-          continue
         fi
 
         # If the MR is open, approved, and mergeable, trigger the merger
@@ -4952,17 +4954,19 @@ doctor:
             | jq -r '.[0].state // empty')
           if [ "$MR_OPEN_STATE" = "opened" ]; then
             echo "  → #$IID ($ROLE): closed MR exists but an open MR also exists — issue reopened for new iteration, skipping close"
-            # FALL THROUGH (no continue): an open MR means the issue is being
-            # worked again, so the re-trigger logic below still applies — the
-            # doctor must recover a STUCK worker/reviewer even when a stale
-            # closed MR lingers on the same branch. A `continue` here strands
-            # the issue at boucle:working forever (consumer 2026-08).
+            # FALL THROUGH (no close, no continue): an open MR means the
+            # issue is being worked again, so the re-trigger logic below
+            # still applies — the doctor must recover a STUCK
+            # worker/reviewer even when a stale closed MR lingers on the
+            # same branch. A `continue` here strands the issue at
+            # boucle:working forever (consumer 2026-08).
+          else
+            echo "  → #$IID ($ROLE): MR already closed (non-merged) — closing issue + boucle:done"
+            set_boucle_label "$IID" "boucle:done" "boucle::status::done"
+            glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
+            RECOVERED=$((RECOVERED + 1))
+            continue
           fi
-          echo "  → #$IID ($ROLE): MR already closed (non-merged) — closing issue + boucle:done"
-          set_boucle_label "$IID" "boucle:done" "boucle::status::done"
-          glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$CI_PROJECT_ID/issues/$IID" -f state_event=close > /dev/null 2>&1 || true
-          RECOVERED=$((RECOVERED + 1))
-          continue
         fi
 
         # Active-pipeline check: skip if a pipeline with BOUCLE_ISSUE=$IID is
