@@ -984,7 +984,7 @@ Draft file hygiene: if you write your draft verdict to a file, use \`\$BOUCLE_VE
     echo ""
     echo "These may be source assets to ship in the build (logos, photos) OR mockups/screenshots for context. Decide based on the issue body and comment intent. For each file:"
     echo "- Run \`file <path>\` to get its type and dimensions (e.g. PNG 52x100 = vertical image)."
-    echo "- Do NOT use the Read tool on binary files (PNG/ZIP/etc.) — it returns garbage on text-only models."
+    echo "- CRITICAL: Do NOT use the Read tool on ANY binary file (images/videos/PDFs/ZIPs/fonts). You are a TEXT-ONLY model: reading a binary makes the API respond '400: this model does not support image input' and the ENTIRE worker run CRASHES with zero commits — the iteration is wasted and the issue stalls. Use \`file\` for metadata, never \`Read\` for content."
     echo "- If it's a source asset (logo, photo, visual to display), copy it into the build tree (e.g. \`cp <path> public/<name>\`) and reference it in your code."
     echo "- If it's a mockup/screenshot, use it as context for the implementation (dimensions, layout hints)."
   fi
@@ -1000,8 +1000,8 @@ Draft file hygiene: if you write your draft verdict to a file, use \`\$BOUCLE_VE
     echo ""
     echo "These may be mockups/screenshots for context OR source assets to ship. Decide based on the comment intent. For each file:"
     echo "- Run \`file <path>\` to get its type and dimensions (e.g. PNG 52x100 = vertical image)."
-    echo "- Do NOT use the Read tool on binary files (PNG/ZIP/etc.) — it returns garbage on text-only models."
-    echo "- If the human explicitly says to use the file as an asset (e.g. 'use this image', 'with the attached visual', 'separate the columns with the attached visual'), copy it into the build tree (e.g. \`cp <path> public/<name>\`) and reference it in your code."
+    echo "- CRITICAL: Do NOT use the Read tool on ANY binary file (images/videos/PDFs/ZIPs/fonts). You are a TEXT-ONLY model: reading a binary makes the API respond '400: this model does not support image input' and the ENTIRE worker run CRASHES with zero commits — the iteration is wasted and the issue stalls. Use \`file\` for metadata, never \`Read\` for content."
+    echo "- If the human explicitly says to use the file as an asset (e.g. 'use this image', 'with the attached visual', 'séparation visuelle avec le visuel ci-joint'), copy it into the build tree (e.g. \`cp <path> public/<name>\`) and reference it in your code."
     echo "- If it's a mockup/screenshot, use it as context for addressing the feedback (dimensions, layout hints)."
   fi
 }
