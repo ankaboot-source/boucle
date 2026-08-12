@@ -521,6 +521,9 @@ dispatch:
       export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:-}}"
       export BOUCLE_WORKSPACE="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-$(pwd)}}"
       source "$BOUCLE_HOME/lib/boucle.sh"
+      # Shared gate functions (check_sibling_gate, maybe_unblock_dependents) —
+      # single source of truth in lib/boucle-ci/gates.sh.
+      source "$BOUCLE_HOME/lib/boucle-ci/gates.sh"
   script:
     - |
       # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
@@ -961,48 +964,9 @@ dispatch:
       }
 
       # ── Sibling serialization gate (a priori, no file manifest) ────
-      # Mirrors lib/boucle-ci/dispatch.sh check_sibling_gate. Sub-issues of
-      # the SAME parent run SERIALLY: while a sibling is active
-      # (working/review/approval/merging/blocked), this issue stays
-      # boucle:blocked — same domain, same components → one at a time to
-      # avoid merge conflicts (consumer 2026-08: siblings #69/#71 diverged
-      # on RightToResistBlock.astro; the merger escalated).
-      check_sibling_gate() {
-        local iid="$1"
-        local data parent_iid
-        data=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$iid" 2>/dev/null \
-          | jq -r '.description // empty' 2>/dev/null || echo "")
-        [ -z "$data" ] && return 0  # can't read → don't block (fail open)
-        parent_iid=$(echo "$data" \
-          | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' \
-          | grep -oE '#[0-9]+' | head -1 | tr -d '#')
-        [ -z "$parent_iid" ] && return 0  # not a sub-issue → no siblings
-        local children active_sib
-        children=$(get_work_item_children "$parent_iid" 2>/dev/null || echo "[]")
-        if [ -z "$children" ] || [ "$children" = "[]" ]; then
-          return 0  # no children resolvable → fail open
-        fi
-        active_sib=$(echo "$children" | jq -r --arg self "$iid" '
-          [.[] | select((.iid | tostring) != $self)
-                 | select(.state == "opened")] | .[0].iid // empty' 2>/dev/null)
-        if [ -n "$active_sib" ]; then
-          local sib_labels
-          sib_labels=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$active_sib" 2>/dev/null \
-            | jq -r '.labels | join(",")' 2>/dev/null || echo "")
-          case ",$sib_labels," in
-            *",boucle:working,"*|*",boucle:review,"*|*",boucle:approval,"*|*",boucle:merging,"*|*",boucle:blocked,"*)
-              echo "[boucle] #$iid blocked — sibling #$active_sib is active (labels: $sib_labels)"
-              set_boucle_label "$iid" "boucle:blocked" "boucle::status::bot"
-              local sib_body
-              sib_body=$(printf '⏳ Serialized sibling sub-issue #%s is still active (working/review/approval). This issue will start automatically once the sibling reaches done/closed — sibling issues share the same domain, so they run one at a time to avoid merge conflicts.\n\n<!-- boucle:sibling-blocked v=1 sib=%s -->' "$active_sib" "$active_sib")
-              glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$CI_PROJECT_ID/issues/$iid/notes" \
-                -f body="$sib_body" > /dev/null 2>&1 || true
-              return 1
-              ;;
-          esac
-        fi
-        return 0
-      }
+      # Converged: check_sibling_gate now lives in lib/boucle-ci/gates.sh
+      # (sourced at the top of this job's script) — the inline def here
+      # left the dispatch job calling a divergent copy (2026-08).
 
       # Get current labels. Guard with || true so a glab api failure (missing
       # BOUCLE_FORGE_HOST, auth error on shared runner, network issue) does not
@@ -3764,6 +3728,9 @@ catchup:
       export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:-}}"
       export BOUCLE_WORKSPACE="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-$(pwd)}}"
       source "$BOUCLE_HOME/lib/boucle.sh"
+      # Shared gate functions (check_sibling_gate, maybe_unblock_dependents) —
+      # single source of truth in lib/boucle-ci/gates.sh.
+      source "$BOUCLE_HOME/lib/boucle-ci/gates.sh"
   script:
     - |
       # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
@@ -3910,66 +3877,9 @@ catchup:
       # blocked waiting on it. For each blocked sibling whose deps are NOW all
       # closed, flip boucle:blocked → boucle:todo and trigger the worker.
       # Symmetric to maybe_close_parent.
-      maybe_unblock_dependents() {
-        local closed_iid="$1"
-        local closed_data parent_iid
-        closed_data=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$closed_iid" 2>/dev/null) || { echo "maybe_unblock_dependents: can't fetch #$closed_iid — skipping."; return 0; }
-        parent_iid=$(echo "$closed_data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
-        if [ -z "$parent_iid" ]; then
-          return 0  # not a sub-issue → no dependents
-        fi
-        # Find siblings via the same 3-tier fallback as maybe_close_parent.
-        local children_data sibling_iids
-        children_data=$(get_work_item_children "$parent_iid")
-        sibling_iids=$(echo "$children_data" | jq -r '[.[].iid] | join(",")' 2>/dev/null)
-        if [ -z "$sibling_iids" ]; then
-          local parent_notes
-          parent_notes=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$parent_iid/notes" 2>/dev/null) || return 0
-          sibling_iids=$(echo "$parent_notes" | jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | first | .body // empty' | grep -oE 'iids=[0-9,]+' | cut -d= -f2)
-          if [ -z "$sibling_iids" ]; then
-            local links_data
-            links_data=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$parent_iid/links" 2>/dev/null) || links_data="[]"
-            sibling_iids=$(echo "$links_data" | jq -r '[.[] | select(.iid != null) | .iid] | join(",")')
-            [ -z "$sibling_iids" ] && return 0
-          fi
-        fi
-        # For each sibling, check if it's boucle:blocked AND its deps include
-        # the just-closed IID AND all its deps are now closed.
-        local sib_iid sib_data sib_labels sib_desc sib_deps all_closed dep_iid dep_state
-        for sib_iid in $(echo "$sibling_iids" | tr ',' ' '); do
-          [ "$sib_iid" = "$closed_iid" ] && continue
-          sib_data=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$sib_iid" 2>/dev/null) || continue
-          sib_labels=$(echo "$sib_data" | jq -r '.labels | join(",")' 2>/dev/null)
-          echo "$sib_labels" | grep -q "boucle:blocked" || continue
-          sib_desc=$(echo "$sib_data" | jq -r '.description // empty' 2>/dev/null)
-          sib_deps=$(parse_depends_on "$sib_desc")
-          [ -z "$sib_deps" ] && continue
-          # Does this sibling depend on the just-closed IID?
-          echo ",$sib_deps," | grep -q ",$closed_iid," || continue
-          # Are ALL deps now closed?
-          all_closed=true
-          for dep_iid in $(echo "$sib_deps" | tr ',' ' '); do
-            dep_state=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$dep_iid" 2>/dev/null | jq -r '.state // "unknown"' 2>/dev/null || echo "unknown")
-            if [ "$dep_state" != "closed" ]; then
-              all_closed=false
-              break
-            fi
-          done
-          if [ "$all_closed" = "true" ]; then
-            echo "maybe_unblock_dependents: #$sib_iid deps all closed — unblocking"
-            set_boucle_label "$sib_iid" "boucle:todo" "boucle::status::bot"
-            local unblock_body
-            unblock_body=$(printf '✅ Dependencies satisfied — worker starting.\n\n<!-- boucle:unblocked v=1 by=%s -->' "$closed_iid")
-            glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$CI_PROJECT_ID/issues/$sib_iid/notes" \
-              -f body="$unblock_body" > /dev/null 2>&1 || true
-            if ! issue_has_active_pipeline "$sib_iid"; then
-              curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-                -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=$CI_DEFAULT_BRANCH" \
-                -F "variables[BOUCLE_ISSUE]=$sib_iid" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
-            fi
-          fi
-        done
-      }
+      # Converged: maybe_unblock_dependents now lives in
+      # lib/boucle-ci/gates.sh (sourced in this job's before_script) — the
+      # inline def here left the catchup job calling a divergent copy.
 
       # ── Main: inspect issue state, branch, close, cascade ──────────────
       # Disable errexit for the main flow: GitLab Runner runs `- |` blocks with
@@ -4151,6 +4061,9 @@ e2e:
       # are provided by lib/boucle.sh (sourced in before_script).
       # Source the depends-on lib for parse_depends_on.
       source "$BOUCLE_HOME/bin/lib/depends-on.sh"
+      # Shared gate functions (check_sibling_gate, maybe_unblock_dependents) —
+      # single source of truth in lib/boucle-ci/gates.sh.
+      source "$BOUCLE_HOME/lib/boucle-ci/gates.sh"
 
       # Check if a pipeline with BOUCLE_ISSUE=$iid is already running.
       # Used by maybe_unblock_dependents to prevent double-trigger.
@@ -4177,66 +4090,9 @@ e2e:
       # blocked waiting on it. For each blocked sibling whose deps are NOW all
       # closed, flip boucle:blocked → boucle:todo and trigger the worker.
       # Symmetric to maybe_close_parent.
-      maybe_unblock_dependents() {
-        local closed_iid="$1"
-        local closed_data parent_iid
-        closed_data=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$closed_iid" 2>/dev/null) || { echo "maybe_unblock_dependents: can't fetch #$closed_iid — skipping."; return 0; }
-        parent_iid=$(echo "$closed_data" | jq -r '.description // empty' | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
-        if [ -z "$parent_iid" ]; then
-          return 0  # not a sub-issue → no dependents
-        fi
-        # Find siblings via the same 3-tier fallback as maybe_close_parent.
-        local children_data sibling_iids
-        children_data=$(get_work_item_children "$parent_iid")
-        sibling_iids=$(echo "$children_data" | jq -r '[.[].iid] | join(",")' 2>/dev/null)
-        if [ -z "$sibling_iids" ]; then
-          local parent_notes
-          parent_notes=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$parent_iid/notes" 2>/dev/null) || return 0
-          sibling_iids=$(echo "$parent_notes" | jq -r '[.[] | select(.body | contains("<!-- boucle:split-parent"))] | first | .body // empty' | grep -oE 'iids=[0-9,]+' | cut -d= -f2)
-          if [ -z "$sibling_iids" ]; then
-            local links_data
-            links_data=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$parent_iid/links" 2>/dev/null) || links_data="[]"
-            sibling_iids=$(echo "$links_data" | jq -r '[.[] | select(.iid != null) | .iid] | join(",")')
-            [ -z "$sibling_iids" ] && return 0
-          fi
-        fi
-        # For each sibling, check if it's boucle:blocked AND its deps include
-        # the just-closed IID AND all its deps are now closed.
-        local sib_iid sib_data sib_labels sib_desc sib_deps all_closed dep_iid dep_state
-        for sib_iid in $(echo "$sibling_iids" | tr ',' ' '); do
-          [ "$sib_iid" = "$closed_iid" ] && continue
-          sib_data=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$sib_iid" 2>/dev/null) || continue
-          sib_labels=$(echo "$sib_data" | jq -r '.labels | join(",")' 2>/dev/null)
-          echo "$sib_labels" | grep -q "boucle:blocked" || continue
-          sib_desc=$(echo "$sib_data" | jq -r '.description // empty' 2>/dev/null)
-          sib_deps=$(parse_depends_on "$sib_desc")
-          [ -z "$sib_deps" ] && continue
-          # Does this sibling depend on the just-closed IID?
-          echo ",$sib_deps," | grep -q ",$closed_iid," || continue
-          # Are ALL deps now closed?
-          all_closed=true
-          for dep_iid in $(echo "$sib_deps" | tr ',' ' '); do
-            dep_state=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$dep_iid" 2>/dev/null | jq -r '.state // "unknown"' 2>/dev/null || echo "unknown")
-            if [ "$dep_state" != "closed" ]; then
-              all_closed=false
-              break
-            fi
-          done
-          if [ "$all_closed" = "true" ]; then
-            echo "maybe_unblock_dependents: #$sib_iid deps all closed — unblocking"
-            set_boucle_label "$sib_iid" "boucle:todo" "boucle::status::bot"
-            local unblock_body
-            unblock_body=$(printf '✅ Dependencies satisfied — worker starting.\n\n<!-- boucle:unblocked v=1 by=%s -->' "$closed_iid")
-            glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$CI_PROJECT_ID/issues/$sib_iid/notes" \
-              -f body="$unblock_body" > /dev/null 2>&1 || true
-            if ! issue_has_active_pipeline "$sib_iid"; then
-              curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-                -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=$CI_DEFAULT_BRANCH" \
-                -F "variables[BOUCLE_ISSUE]=$sib_iid" -F "variables[BOUCLE_ROLE]=worker" > /dev/null
-            fi
-          fi
-        done
-      }
+      # Converged: maybe_unblock_dependents now lives in
+      # lib/boucle-ci/gates.sh (sourced in this job's script) — the inline
+      # def here left the e2e job calling a divergent copy.
 
       # Deploy-triggered e2e: no issue context. Run a deterministic HTTP smoke test.
       if [ -z "${BOUCLE_ISSUE:-}" ]; then

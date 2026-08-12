@@ -36,6 +36,9 @@ dispatch_note_body() {
 }
 
 boucle_ci_dispatch() {
+  # Shared gate functions (check_sibling_gate, maybe_unblock_dependents) —
+  # single source of truth in lib/boucle-ci/gates.sh.
+  source "$BOUCLE_HOME/lib/boucle-ci/gates.sh"
   # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
   set +o pipefail
   # Anti-accumulation: if dispatch exits 0 without writing .boucle-issue,
@@ -461,55 +464,6 @@ boucle_ci_dispatch() {
       blocked_body=$(printf '⏳ Blocked on sibling sub-issue(s): %s. The worker will start automatically once all of them are closed.\n\n<!-- boucle:blocked v=1 iids=%s -->' "$human_list" "$deps_iids")
       forge_issue_note "$iid" "$blocked_body"
       return 1
-    fi
-    return 0
-  }
-
-  # ── Sibling serialization gate (a priori, no file manifest) ───────
-  # Two sub-issues of the SAME parent are executed SERIALLY: while one
-  # sibling is active (working/review/approval/merging — any state that
-  # has not reached done/closed), the others stay boucle:blocked. This
-  # prevents the most frequent class of merge conflicts — two issues of
-  # the same domain touching the same components with diverging amendment
-  # choices (consumer 2026-08: siblings #69/#71 diverged on
-  # RightToResistBlock.astro and the merger escalated). Costs only
-  # sibling parallelism; unrelated issues stay fully parallel. The unblock
-  # happens when a sibling reaches done/closed (maybe_unblock_dependents).
-  check_sibling_gate() {
-    local iid="$1"
-    local data parent_iid
-    data=$(forge_issue_get "$iid" \
-      | jq -r '.description // empty' 2> /dev/null || echo "")
-    [ -z "$data" ] && return 0 # can't read → don't block (fail open)
-    parent_iid=$(echo "$data" \
-      | awk '/^## Parent issue[[:space:]]*$/{f=1;next}/^## /{f=0}f' \
-      | grep -oE '#[0-9]+' | head -1 | tr -d '#')
-    [ -z "$parent_iid" ] && return 0 # not a sub-issue → no siblings
-    local children active_sib
-    children=$(get_work_item_children "$parent_iid" 2> /dev/null || echo "[]")
-    if [ -z "$children" ] || [ "$children" = "[]" ]; then
-      return 0 # no children resolvable → fail open
-    fi
-    # A sibling is "active" if it is open, is not this issue, and does NOT
-    # carry boucle:done / boucle:human (done = merged/closed work; human =
-    # parked on the human, not competing for the same files).
-    active_sib=$(echo "$children" | jq -r --arg self "$iid" '
-      [.[] | select((.iid | tostring) != $self)
-             | select(.state == "opened")] | .[0].iid // empty' 2> /dev/null)
-    if [ -n "$active_sib" ]; then
-      # Check the sibling's labels: only block on ACTIVE work states.
-      local sib_labels
-      sib_labels=$(forge_issue_labels_get "$active_sib" 2> /dev/null || echo "")
-      case ",$sib_labels," in
-        *",boucle:working,"* | *",boucle:review,"* | *",boucle:approval,"* | *",boucle:merging,"* | *",boucle:blocked,"*)
-          echo "[boucle] #$iid blocked — sibling #$active_sib is active (labels: $sib_labels)"
-          set_boucle_label "$iid" "boucle:blocked" "boucle::status::bot"
-          local sib_body
-          sib_body=$(printf '⏳ Serialized sibling sub-issue #%s is still active (working/review/approval). This issue will start automatically once the sibling reaches done/closed — sibling issues share the same domain, so they run one at a time to avoid merge conflicts.\n\n<!-- boucle:sibling-blocked v=1 sib=%s -->' "$active_sib" "$active_sib")
-          forge_issue_note "$iid" "$sib_body"
-          return 1
-          ;;
-      esac
     fi
     return 0
   }
