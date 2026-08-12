@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# bin/check-doc-sync — validate engine code ↔ SKILL.md (protocol spec)
+#
+# Checks that labels and markers in the engine code match the protocol spec
+# in SKILL.md (.jcode/skills/boucle/SKILL.md, symlinked from root SKILL.md).
+# Catches the CLASS of drift: any future label/marker undocumented = red CI.
+#
+# Exit codes:
+#   0 — in sync (or parse-error-with-warning, fail-open)
+#   1 — drift detected (label/marker in code absent from SKILL.md)
+#
+# Idempotent, read-only, no side effects. shellcheck + shfmt clean.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SKILL_FILE="$REPO_ROOT/.jcode/skills/boucle/SKILL.md"
+ROOT_SKILL="$REPO_ROOT/SKILL.md"
+
+FAIL=0
+WARN=0
+
+warn() {
+	echo "WARN: $*" >&2
+	WARN=1
+}
+fail() {
+	echo "FAIL: $*"
+	FAIL=1
+}
+pass() { echo "OK: $*"; }
+
+# ── 0. Symlink check ────────────────────────────────────────────────────
+if [ ! -L "$ROOT_SKILL" ]; then
+	fail "root SKILL.md is not a symlink (expected symlink to .jcode/skills/boucle/SKILL.md)"
+elif [ ! -r "$ROOT_SKILL" ]; then
+	fail "root SKILL.md symlink is broken (target .jcode/skills/boucle/SKILL.md not readable)"
+else
+	pass "root SKILL.md symlink -> .jcode/skills/boucle/SKILL.md"
+fi
+
+if [ ! -r "$SKILL_FILE" ]; then
+	warn "SKILL.md not found at $SKILL_FILE — skipping sync checks (fail-open)"
+	exit 0
+fi
+
+# ── 1. Labels sync ───────────────────────────────────────────────────────
+# State-machine labels are a known finite set, created by bin/setup and set
+# by set_boucle_label. Extract from bin/setup label loops (authoritative).
+
+# Extract labels from SKILL.md §2.1 detail labels table
+skill_labels=$(sed -n '/^### 2\.1 Detail labels/,/^### 2\.[2-9]/p' "$SKILL_FILE" |
+	grep -oE '`boucle:[a-z][a-z-]*`' |
+	tr -d '`' |
+	sort -u)
+
+# Extract labels from bin/setup label-creation loops (the authoritative source)
+# Pattern: "for label in triage needs-info todo ... ; do"
+setup_labels=$(sed -n 's/.*for label in \(.*\); do.*/\1/p' "$REPO_ROOT/bin/setup" 2>/dev/null |
+	tr ' ' '\n' |
+	grep -v '^$' |
+	sed 's/^/boucle:/' |
+	sort -u)
+
+# Labels in setup but not in SKILL.md (undocumented)
+for label in $setup_labels; do
+	if ! echo "$skill_labels" | grep -qx "$label"; then
+		fail "label '$label' in bin/setup but absent from SKILL.md section 2.1"
+	fi
+done
+
+# Pruned labels (SKILL.md says Removed) should NOT be in setup
+for label in boucle:approved boucle:spec-approved; do
+	if echo "$setup_labels" | grep -qx "$label"; then
+		fail "label '$label' is pruned (SKILL.md says Removed) but still in bin/setup"
+	fi
+done
+
+if [ "$FAIL" -eq 0 ]; then
+	pass "labels in sync ($(echo "$setup_labels" | wc -l | tr -d ' ') setup labels checked)"
+fi
+
+# ── 2. Markers sync ──────────────────────────────────────────────────────
+# Extract marker NAMES (without v=N or attrs) from SKILL.md §3 tables
+# and from code, then compare the normalized names.
+
+# SKILL.md markers: extract from §3.1-3.5 tables (first column, | `<!-- boucle:... -->`)
+# Normalize to just the marker name: boucle:<name> (strip v=, attrs, -->)
+skill_markers=$(sed -n '/^## 3\. Marker reference/,/^## [4-9]\./p' "$SKILL_FILE" |
+	grep -oE '<!-- boucle:[a-z][a-z-]*' |
+	sed 's/<!-- //' |
+	sort -u)
+
+# Code markers: grep all <!-- boucle:... --> in code, normalize to name
+code_markers=$(grep -rohE '<!-- boucle:[a-z][a-z-]*' \
+	"$REPO_ROOT/bin" "$REPO_ROOT/lib" "$REPO_ROOT/.gitlab-ci.yml" 2>/dev/null |
+	sed 's/<!-- //' |
+	sort -u)
+
+# Markers in code but not in SKILL.md (undocumented)
+for marker in $code_markers; do
+	if ! echo "$skill_markers" | grep -qx "$marker"; then
+		fail "marker '$marker' in code but absent from SKILL.md section 3"
+	fi
+done
+
+# Markers in SKILL.md §3.6 "NOT in code" — should not be in code
+not_in_code_markers=$(sed -n '/^### 3\.6 Markers NOT in code/,/^### 3\.[7-9]\|^## [4-9]/p' "$SKILL_FILE" |
+	grep -oE '<!-- boucle:[a-z][a-z-]*' |
+	sed 's/<!-- //' |
+	sort -u)
+for marker in $not_in_code_markers; do
+	if echo "$code_markers" | grep -qx "$marker"; then
+		fail "marker '$marker' is in SKILL.md section 3.6 (NOT in code) but found in code"
+	fi
+done
+
+if [ "$FAIL" -eq 0 ]; then
+	pass "markers in sync ($(echo "$code_markers" | wc -l | tr -d ' ') code markers checked)"
+fi
+
+# ── 3. Mermaid validity (basic) ──────────────────────────────────────────
+if grep -q 'stateDiagram-v2' "$SKILL_FILE" 2>/dev/null; then
+	pass "Mermaid stateDiagram-v2 present in SKILL.md"
+else
+	warn "no stateDiagram-v2 found in SKILL.md — skipping diagram check"
+fi
+
+# ── Summary ─────────────────────────────────────────────────────────────
+if [ "$FAIL" -eq 1 ]; then
+	echo "doc-sync FAILED — see FAIL lines above"
+	exit 1
+elif [ "$WARN" -eq 1 ]; then
+	echo "doc-sync passed with warnings — see WARN lines above"
+	exit 0
+else
+	echo "doc-sync OK"
+	exit 0
+fi
