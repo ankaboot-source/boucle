@@ -1037,10 +1037,14 @@ chain_to_role() {
   shift 2
   forge_trigger_role "$issue_iid" "$role" "$@"
 }
-# ── S4: merge-conflict escalation (human in the loop, no blind worker retry) ──
-# Parses rebase output, classifies the conflict, posts a structured note with
-# manual options, and parks the issue on the human. Called by the merger when
-# a rebase onto the default branch fails.
+# ── S4: merge-conflict handling (worker retry first, human last) ──
+# Parses rebase output, classifies the conflict. On conflict the merger
+# FIRST re-triggers the worker (bounded by BOUCLE_MAX_ITERATIONS): the
+# worker rebases onto the fresh default branch and re-implements the
+# issue goal on top of whatever the sibling merged — it can conciliate
+# semantic conflicts (it has the issue body + human amendments), where a
+# blind rebase cannot. Only after the retry budget is exhausted does the
+# loop escalate to the human with structured options.
 
 # Pure parser: echo one line per conflicted path, format "- <path> (kind)".
 boucle_parse_merge_conflicts() {
@@ -1063,17 +1067,60 @@ boucle_escalate_merge_conflict() {
   conflicts=$(boucle_parse_merge_conflicts "$rebase_out")
   [ -z "$conflicts" ] && conflicts="- (unclassified — see rebase output in the pipeline log)"
 
+  # ── Conflict-retry budget ──────────────────────────────────────────
+  # Count prior conflict-retries on this issue via the marker comment
+  # `<!-- boucle:conflict-retry N -->` posted on each re-trigger. Bounded
+  # by BOUCLE_CONFLICT_RETRIES (default 5): a semantic conflict is retried
+  # by the WORKER (intelligent rebase + re-implementation on fresh master),
+  # NOT escalated blindly — the worker can conciliate amendments that a
+  # blind git rebase cannot (observed on a consumer 2026-08: sibling
+  # issues #69/#71 diverged on the same component; the worker could have
+  # re-implemented on top of the merged sibling instead of escalating).
+  # Note: the worker ALSO has its own rebase-conflict retry loop
+  # (iteration N/MAX), so the effective attempts are the product of both
+  # loops — 5 merger retries is the observed sweet spot.
+  local max_retries="${BOUCLE_CONFLICT_RETRIES:-5}"
+  local retry_count=0 conflict_notes
+  conflict_notes=$(forge_issue_notes "$issue" 2> /dev/null || echo "[]")
+  retry_count=$(echo "$conflict_notes" | jq -r '[.[] | select(.body | contains("<!-- boucle:conflict-retry"))] | length' 2> /dev/null || echo 0)
+  retry_count="${retry_count:-0}"
+
+  if [ "$retry_count" -lt "$max_retries" ]; then
+    local retry_n=$((retry_count + 1))
+    local retry_body
+    retry_body="🔄 **Merge conflict — re-triggering worker (retry ${retry_n}/${max_retries})**
+
+The rebase onto \`$default_branch\` conflicted on:
+
+$conflicts
+
+The worker is being re-triggered to rebase onto the fresh \`$default_branch\` and re-implement the issue goal on top of the merged work (it can conciliate semantic conflicts with the issue body + human amendments). Escalation to a human happens only after ${max_retries} failed conflict-retries.
+
+<!-- boucle:conflict-retry ${retry_n} -->"
+    # Note BEFORE the re-trigger — never a silent transition.
+    if ! forge_issue_note "$issue" "$retry_body"; then
+      echo "FAIL: conflict-retry note could not be posted on issue #$issue — NOT re-triggering (retry instead of muting)." >&2
+      return 1
+    fi
+    set_boucle_label "$issue" "boucle:todo" "boucle::status::bot"
+    echo "→ #$issue: merge conflict — re-triggering worker (retry ${retry_n}/${max_retries}) with conflict feedback." >&2
+    # Forward the conflicted paths so the worker knows what collided.
+    chain_to_role "$issue" "worker" "BOUCLE_ITERATION=$retry_n" "BOUCLE_CONFLICT_FEEDBACK=$(echo "$conflicts" | tr '\n' ';')"
+    return 0
+  fi
+
+  # ── Retry budget exhausted → human escalation ──────────────────────
   local body
   body="⚠️ **Merge conflict — human intervention required**
 
-Issue #$issue (MR !$mr_iid, branch \`boucle/$issue\`) cannot be merged automatically: the rebase onto \`$default_branch\` hit a **semantic conflict** that no retry can resolve. The loop is **paused** on this issue and it is assigned to you.
+Issue #$issue (MR !$mr_iid, branch \`boucle/$issue\`) cannot be merged automatically: the rebase onto \`$default_branch\` hit a **semantic conflict** that ${max_retries} worker conflict-retries could not resolve. The loop is **paused** on this issue and it is assigned to you.
 
 **Classification** : detected from the rebase output (modify/delete = this branch deletes a file the default branch has modified, or vice versa).
 
 **Conflicted paths** :
 $conflicts
 
-**What I did** : rebased onto $default_branch → conflict → aborted (branch preserved, nothing lost). I did **not** re-trigger the worker: a fresh run would reproduce the same conflict.
+**What I did** : rebased onto $default_branch → conflict → aborted (branch preserved, nothing lost). Re-triggered the worker ${max_retries} time(s) to re-implement on fresh $default_branch; the conflict persists.
 
 **Manual options** :
 1. **Resolve on the branch, then re-run the merger** :
