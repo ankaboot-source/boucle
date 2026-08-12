@@ -5,7 +5,7 @@
 # time is inside the DND window and 1 otherwise. We drive it deterministically
 # with BOUCLE_DND_NOW (epoch seconds) so tests don't depend on wall clock.
 #
-# Defaults (after the "good default" change): ENABLED=true, TZ=UTC.
+# Defaults: ENABLED=false (opt-in), TZ=UTC.
 # Tests that verify window logic pin BOUCLE_DND_TZ=UTC so the epochs (computed
 # in UTC) stay valid. A separate test verifies the TZ override is honored.
 
@@ -23,11 +23,11 @@ setup() {
 
 # ── Master switch ─────────────────────────────────────────────────────
 
-@test "enabled by default (no BOUCLE_DND_ENABLED) → inside window returns 0" {
+@test "disabled by default (no BOUCLE_DND_ENABLED) → exit 1 even inside window" {
   # 22:20 UTC on 2023-11-14 = epoch 1700000400 → inside 22:00-07:00 UTC.
-  # Default TZ is UTC, default ENABLED is true.
+  # Default TZ is UTC, default ENABLED is false (opt-in).
   run env -u BOUCLE_DND_ENABLED BOUCLE_DND_TZ=UTC BOUCLE_DND_NOW=1700000400 bin/dnd
-  assert_success
+  assert_failure
 }
 
 @test "BOUCLE_DND_ENABLED=false → exit 1 even inside window" {

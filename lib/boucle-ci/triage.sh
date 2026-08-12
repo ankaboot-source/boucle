@@ -200,12 +200,27 @@ boucle_ci_triage() {
     fi
   fi
 
+  # ── Persist triage Deliverables as obligations.md ─────────────────
+  # The triage comment may carry an optional `## Deliverables` section
+  # (one `- O1 — type: … — … — condition: …` line per obligation). The
+  # reviewer's obligations gate + prompt injection depend on this file;
+  # a missing file simply disables the gate, so this is best-effort.
+  OBLIGATIONS_TEXT=$(printf '%s\n' "$COMMENT" | awk '/^## Deliverables/{f=1;next}/^## /{f=0} f' 2>/dev/null || true)
+  if [ -n "$OBLIGATIONS_TEXT" ]; then
+    BOUCLE_STATE_CACHE="${BOUCLE_STATE_CACHE:-${HOME}/.boucle-state-cache}"
+    mkdir -p "$BOUCLE_STATE_CACHE/${BOUCLE_ISSUE}"
+    {
+      printf '<!-- boucle:obligations v=1 -->\n'
+      printf '%s\n' "$OBLIGATIONS_TEXT"
+    } > "$BOUCLE_STATE_CACHE/${BOUCLE_ISSUE}/obligations.md" 2>/dev/null || true
+  fi
+
   # If no NEW triage comment was posted by this run (agent crashed, hit
   # step limit, or decided no new triage was needed), leave the issue at
   # boucle:triage and exit without changing labels. Re-applying the OLD
   # disposition would bounce the label (e.g. triage→needs-info) with no
-  # new question asked — the exact "retour à une review humaine alors
-  # qu'aucune question n'est posée" symptom.
+  # new question asked — the exact "back to a human review although
+  # no question was asked" symptom.
   if [ -z "$DISPOSITION" ]; then
     # ── Circuit breaker (silent-failure escalation) ─────────────────
     # bin/jc exits 3 when the agent produced NO posted comment AND NO
@@ -219,7 +234,7 @@ boucle_ci_triage() {
     if [ "$rc" -eq 3 ]; then
       echo "[boucle] Silent triage failure (bin/jc exit 3) — escalating issue #$IID to human to break doctor re-trigger loop."
       # Note BEFORE the terminal label — never a muted boucle:human.
-      if ! forge_issue_note "$IID" ":rotating_light: Triage a échoué en silence (l'agent n'a produit aucun commentaire). Passage en revue humaine pour casser la boucle de re-déclenchement. Voir les logs du job $BOUCLE_JOB_URL."; then
+      if ! forge_issue_note "$IID" ":rotating_light: Triage failed silently (the agent produced no comment). Escalating to human review to break the re-trigger loop. See the job logs at $BOUCLE_JOB_URL."; then
         echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
         exit 1
       fi
@@ -272,7 +287,7 @@ boucle_ci_triage() {
           echo "[boucle] 🤖 Issue flagged autonomous — auto-validating spec gate for #$IID"
           SHOULD_GATE=false
           GATE_SKIP_LABELS="boucle:autonomous"
-          AUTONOMOUS_NOTE=$(printf "🤖 **Spec gate auto-validée — issue flaguée autonome**\n\nLa validation humaine du spec a été automatiquement validée car cette issue porte le label \`boucle:autonomous\`. La boucle continue donc jusqu'à la MR sans contact humain.\n\nLe label \`boucle:autonomous\` reste visible sur l'issue (tableau de bord) jusqu'à la prochaine transition d'état.\n\nVous pourrez valider la MR quand elle sera prête. Pour ne plus auto-valider le spec sur cette issue, retirez le label \`boucle:autonomous\`.")
+          AUTONOMOUS_NOTE=$(printf "🤖 **Spec gate auto-approved — issue flagged autonomous**\n\nThe human spec validation was automatically approved because this issue carries the \`boucle:autonomous\` label. The loop therefore continues up to the MR without human contact.\n\nThe \`boucle:autonomous\` label remains visible on the issue (board) until the next state transition.\n\nYou can validate the MR when it is ready. To stop auto-approving the spec for this issue, remove the \`boucle:autonomous\` label.")
           forge_issue_note "$IID" "$AUTONOMOUS_NOTE"
         fi
         if [ "$SHOULD_GATE" = "true" ] && "$BOUCLE_HOME/bin/dnd" 2> /dev/null; then
@@ -282,7 +297,7 @@ boucle_ci_triage() {
           echo "[boucle] 🌙 DND active — auto-validating spec gate for #$IID"
           SHOULD_GATE=false
           GATE_SKIP_LABELS="${GATE_SKIP_LABELS:+$GATE_SKIP_LABELS,}boucle:dnd"
-          DND_NOTE=$(printf "🌙 **Spec gate auto-validée — mode Do-Not-Disturb actif**\n\nLa validation humaine du spec a été automatiquement validée car la fenêtre DND est active (%s–%s %s). La boucle continue donc jusqu'à la MR sans contact humain.\n\nLe label \`boucle:dnd\` a été appliqué à l'issue (visible sur le tableau de bord) pour signaler cette auto-validation ; il sera retiré à la prochaine transition d'état.\n\nVous pourrez valider la MR quand elle sera prête. Pour désactiver le DND : mettez \`BOUCLE_DND_ENABLED=false\` dans les variables CI du projet." "$DND_START" "$DND_END" "$DND_TZ")
+          DND_NOTE=$(printf "🌙 **Spec gate auto-approved — Do-Not-Disturb active**\n\nThe human spec validation was automatically approved because the DND window is active (%s–%s %s). The loop therefore continues up to the MR without human contact.\n\nThe \`boucle:dnd\` label was applied to the issue (visible on the board) to flag this auto-approval; it will be removed at the next state transition.\n\nYou can validate the MR when it is ready. DND is disabled by default: this auto-approval only happens when \`BOUCLE_DND_ENABLED=true\` is explicitly set in the project CI variables — set the variable to \`false\` (or remove it) to disable it." "$DND_START" "$DND_END" "$DND_TZ")
           forge_issue_note "$IID" "$DND_NOTE"
         fi
         if [ "$SHOULD_GATE" = "true" ]; then
@@ -353,7 +368,7 @@ boucle_ci_triage() {
         fi
       fi
 
-      # ── Aperçu visuel (systematic for UI/UX issues) ────────────────
+      # ── Visual preview (systematic for UI/UX issues) ────────────────
       # Fires for ALL READY dispositions (Size S/M/L, gated or not).
       # The triage agent writes RENDER_REQUEST + preview.html for
       # UI/UX issues (mandatory per triage.md). Non-UI/UX issues have
@@ -424,14 +439,14 @@ boucle_ci_triage() {
                   PREVIEW_BYTES=$((PREVIEW_BYTES + png_size))
                   IMG_URL="${IMG_URL}**${label}**
 
-![Aperçu ${dims}](${img_path})
+![Preview ${dims}](${img_path})
 
 "
                 fi
               done <<< "$RENDERED_PNGS"
 
               if [ -n "$IMG_URL" ]; then
-                # 5. Fetch the existing comment, insert Aperçu right after
+                # 5. Fetch the existing comment, insert Preview right after
                 #    the TL;DR section (first thing the human sees), PUT.
                 #    Guard: if EXISTING_BODY is empty (fetch failed), do NOT
                 #    PUT — otherwise we overwrite the entire triage comment
@@ -442,10 +457,10 @@ boucle_ci_triage() {
                   NEW_BODY=$(printf '%s\n' "$EXISTING_BODY" | awk -v img="$IMG_URL" '
                                         /^## TL;DR/ { in_tldr=1; print; next }
                                         in_tldr && /^## / && !inserted {
-                                            print "## Aperçu"; print img; print ""; inserted=1; in_tldr=0
+                                            print "## Preview"; print img; print ""; inserted=1; in_tldr=0
                                         }
                                         { print }
-                                        END { if (!inserted) { print ""; print "## Aperçu"; print img } }
+                                        END { if (!inserted) { print ""; print "## Preview"; print img } }
                                     ')
                   if forge_issue_note_update "$IID" "$TRIAGE_NOTE_ID" "$NEW_BODY"; then
                     # 6. Idempotence: delete RENDER_REQUEST (no re-render on retry).
@@ -456,19 +471,19 @@ boucle_ci_triage() {
                   fi
                 else
                   echo "[boucle] WARN: existing comment body empty — posting fallback note"
-                  forge_issue_note "$IID" "Aperçu indisponible (échec lecture commentaire) — validez sur le TL;DR."
+                  forge_issue_note "$IID" "Preview unavailable (comment read failed) — validate from the TL;DR."
                 fi
               else
                 echo "[boucle] WARN: PNG upload failed — posting fallback note"
-                forge_issue_note "$IID" "Aperçu indisponible (échec upload) — validez sur le TL;DR."
+                forge_issue_note "$IID" "Preview unavailable (upload failed) — validate from the TL;DR."
               fi
             else
               echo "[boucle] WARN: Chromium render failed — posting fallback note"
-              forge_issue_note "$IID" "Aperçu indisponible (échec rendu) — validez sur le TL;DR."
+              forge_issue_note "$IID" "Preview unavailable (render failed) — validate from the TL;DR."
             fi
           else
             echo "[boucle] WARN: Chromium install failed — posting fallback note"
-            forge_issue_note "$IID" "Aperçu indisponible (Chromium indisponible) — validez sur le TL;DR."
+            forge_issue_note "$IID" "Preview unavailable (Chromium unavailable) — validate from the TL;DR."
             # Chain to worker (cap disabled)
             chain_to_role "$IID" "worker"
           fi
@@ -617,7 +632,7 @@ boucle_ci_triage() {
                 fi
                 # Set the parent via the forge contract. The backend
                 # tries the work-items hierarchy API first (real
-                # "Éléments enfants" relationship — needs the parent's
+                # "Child items" relationship — needs the parent's
                 # GLOBAL work-item ID, not the project-scoped IID);
                 # if unavailable (work_item_rest_api feature flag
                 # disabled on self-managed GitLab), it falls back to
