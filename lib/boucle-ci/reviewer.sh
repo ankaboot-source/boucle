@@ -36,7 +36,7 @@ boucle_ci_reviewer() {
   "${BOUCLE_HOME}"/bin/build-evidence-pack >/dev/null 2>&1 || true
 
   # ── Restore the triage's obligations.md into the workspace ──────
-  # The triage job writes obligations.md (the `## Livrables` obligations)
+  # The triage job writes obligations.md (the `## Deliverables` obligations)
   # to the state cache. The reviewer's obligations gate reads it from
   # $BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE/obligations.md, so restore it
   # here (mirrors the worker's state-cache restore). Best-effort: a missing
@@ -429,16 +429,16 @@ boucle_ci_reviewer() {
   "$BOUCLE_HOME"/bin/collapse-duplicate-notes reviewer "$BOUCLE_PROJECT_ID" "$MR_IID" "$PRE_RUN_VERDICT_ID" "$BOUCLE_FORGE_HOST" "$MR_HEAD"
 
   # ── Obligations gate (mechanical, no LLM) ─────────────────────────
-  # .boucle/<issue>/obligations.md holds the triage's `## Livrables`
-  # obligations (one `- On — type: … — … — condition: …` line each).
+  # .boucle/<issue>/obligations.md holds the triage's `## Deliverables`
+  # obligations (one `- O1 — type: … — … — condition: …` line each).
   # The reviewer must adjudicate EVERY obligation in the verdict. A PASS
-  # that skips an obligation, or a PASS contradicting non-adressé /
-  # non-vérifiable adjudications, is mechanically overridden below.
+  # that skips an obligation, or a PASS contradicting unaddressed /
+  # unverifiable adjudications, is mechanically overridden below.
   OBLIGATIONS_FILE="$BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE/obligations.md"
   if [ -f "$OBLIGATIONS_FILE" ]; then
     OBLIGATION_IDS=$(grep -oE '^- O[0-9]+' "$OBLIGATIONS_FILE" | tr -d '-' | tr '\n' ' ' || true)
     for oid in $OBLIGATION_IDS; do
-      if ! printf '%s' "$COMMENT" | grep -qE "^\- $oid \[(adressé|non-adressé|non-vérifiable)\]"; then
+      if ! printf '%s' "$COMMENT" | grep -qE "^\- $oid \[(addressed|unaddressed|unverifiable)\]"; then
         echo "[boucle] Obligations gate: $oid has NO adjudication in the verdict — verdict invalid."
         if [ "$VERDICT" = "PASS" ]; then
           VERDICT=""
@@ -447,11 +447,11 @@ boucle_ci_reviewer() {
       fi
     done
     if [ "$VERDICT" = "PASS" ]; then
-      if printf '%s' "$COMMENT" | grep -qE '^- O[0-9]+ \[non-adressé\]'; then
-        echo "[boucle] Obligations gate: PASS contradicts a [non-adressé] adjudication — overriding to FAIL."
+      if printf '%s' "$COMMENT" | grep -qE '^- O[0-9]+ \[unaddressed\]'; then
+        echo "[boucle] Obligations gate: PASS contradicts a [unaddressed] adjudication — overriding to FAIL."
         VERDICT="FAIL"
-      elif printf '%s' "$COMMENT" | grep -qE '^- O[0-9]+ \[non-vérifiable\]'; then
-        echo "[boucle] Obligations gate: PASS contradicts a [non-vérifiable] adjudication — overriding to UNCERTAIN."
+      elif printf '%s' "$COMMENT" | grep -qE '^- O[0-9]+ \[unverifiable\]'; then
+        echo "[boucle] Obligations gate: PASS contradicts a [unverifiable] adjudication — overriding to UNCERTAIN."
         VERDICT="UNCERTAIN"
       fi
     fi

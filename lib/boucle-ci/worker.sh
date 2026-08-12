@@ -266,9 +266,9 @@ EOF
       log_snippet=$(tail -c 2000 "$agent_log_file" 2> /dev/null | sed 's/\x1b\[[0-9;]*m//g' || echo "(log read failed)")
     fi
     diagnostic_body=$(printf '%s\n' \
-      "## ⚠️ Worker — échec du modèle (API indisponible ou crédits épuisés)" \
+      "## ⚠️ Worker — model failure (API unavailable or credits exhausted)" \
       "" \
-      "Le worker n'a produit **aucune sortie** — le log agent est vide ou ne montre aucune activité. Cela indique que l'API du modèle est probablement **indisponible** ou **à court de crédits**." \
+      "The worker produced **no output** — the agent log is empty or shows no activity. This indicates the model API is probably **unavailable** or **out of credits**." \
       "" \
       "### Logs" \
       "" \
@@ -276,14 +276,14 @@ EOF
       "$log_snippet" \
       '```' \
       "" \
-      "### Action requise" \
+      "### Action required" \
       "" \
-      "- Vérifiez le statut de l'API du modèle." \
-      "- Vérifiez les crédits/quota restants." \
-      "- Une fois le modèle disponible, re-déclenchez le worker en remettant le label \`boucle:todo\` et en assignant l'issue au bot." \
+      "- Check the model API status." \
+      "- Check the remaining credits/quota." \
+      "- Once the model is available, re-trigger the worker by re-applying the \`boucle:todo\` label and assigning the issue to the bot." \
       "" \
       "---" \
-      "*Diagnostic posté par boucle (exit 4 — model/API failure).*")
+      "*Diagnostic posted by boucle (exit 4 — model/API failure).*")
     if ! forge_issue_note "$BOUCLE_ISSUE" "$diagnostic_body"; then
       echo "FAIL: worker model/API failure (exit 4) — diagnostic note could NOT be posted on issue #$BOUCLE_ISSUE. NOT escalating to boucle:human (a silent escalation is worse than a retry)." >&2
       exit 1

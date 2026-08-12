@@ -160,7 +160,7 @@ spec approval and MR review — not in a live chat. A chat-based agent demands
 your attention *now*; boucle inverts that: you take back control of the
 timing.
 
-**Do-Not-Disturb** (`BOUCLE_DND_*`) auto-validates the spec gate during your
+**Do-Not-Disturb** (`BOUCLE_DND_*`, opt-in — disabled by default) auto-validates the spec gate during your
 off-hours, so the loop never blocks on you overnight. You approve the spec
 over morning coffee; by lunch the worker has implemented, the reviewer has
 verified the preview, and the MR is waiting. A calmer workflow, driven by
@@ -246,7 +246,7 @@ all have sane defaults — override them only when you need to:
 | `BOUCLE_LLM_API_KEY` | *(unset)* | LLM provider key. Set as a **masked** variable. |
 | `BOUCLE_LLM_BASE_URL` | `https://ollama.com/v1` | LLM provider endpoint (any OpenAI-compatible API). |
 | `BOUCLE_SPEC_PROFILE` | `product` | Spec gate strictness: `product` (default — gates Size M only), `strict` (gates all sizes), `off` (never gates); unknown → `product`. |
-| `BOUCLE_DND_ENABLED` | `true` | Do-Not-Disturb master switch: `true` (default) or `false`. |
+| `BOUCLE_DND_ENABLED` | `false` | Do-Not-Disturb master switch: `true` (opt-in) or `false` (default). |
 | `BOUCLE_DND_START` / `BOUCLE_DND_END` / `BOUCLE_DND_TZ` | `22:00` / `07:00` / `UTC` | Quiet-hours window: HH:MM 24h start/end + IANA timezone (e.g. `Europe/Paris`). |
 | `BOUCLE_DEPLOY_MODE` | `self` | Deploy handling: `self` (default — boucle runs `BOUCLE_DEPLOY_CMD`) or `external` (consumer's own CI/CD deploys; `BOUCLE_LIVE_URL` required). |
 | `BOUCLE_REVIEW_MODE` | `preview` | Reviewer gate: `preview` (default — tests deployed preview) or `diff` (reviews PR diff + check suites). |
