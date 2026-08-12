@@ -142,8 +142,8 @@ You have these skills in `.jcode/skills/`. **Use them** — they contain domain 
 
 ## Instructions
 
-1. Read `state.md` in `.boucle/<issue>/` FIRST — especially the "Tried and rejected" section.
-2. Read `iterations.md` in `.boucle/<issue>/` — it logs what each previous iteration tried and its result. Without this you will repeat rejected approaches and waste your step budget (issue #35 on a consumer repo: 2 iterations produced zero code changes because the worker re-discovered the codebase from scratch each time). If the file is absent or empty, this is the first iteration.
+1. Read `state.md` in `.boucle-state/<issue>/` FIRST — especially the "Tried and rejected" section.
+2. Read `iterations.md` in `.boucle-state/<issue>/` — it logs what each previous iteration tried and its result. Without this you will repeat rejected approaches and waste your step budget (issue #35 on a consumer repo: 2 iterations produced zero code changes because the worker re-discovered the codebase from scratch each time). If the file is absent or empty, this is the first iteration.
 3. Read the issue body and the triage analysis comment.
 4. **Read the "Prior feedback on the MR" section of your prompt** (if present). It contains reviewer verdicts (`VERDICT: FAIL` with the unmet acceptance criteria) and human comments on the MR. You MUST address every actionable item before claiming done — a re-run that ignores prior feedback will FAIL the reviewer the same way again and waste the iteration budget. Map each unmet criterion to a concrete change in your implementation.
 5. **Preserve instructed content.** The "Issue body" section of your prompt contains the EXACT content the human instructed — URLs (video, site, image), citations, texts, critiques. You MUST use them verbatim:

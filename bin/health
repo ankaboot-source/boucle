@@ -2,8 +2,8 @@
 # shellcheck shell=bash
 # bin/health — read-only per-issue loop-health summary (#52).
 #
-# Reads .boucle/<issue>/health.jsonl (one JSONL line per agent run + one per
-# stage outcome) and .boucle/<issue>/cost.json, and prints a text table:
+# Reads .boucle-state/<issue>/health.jsonl (one JSONL line per agent run + one per
+# stage outcome) and .boucle-state/<issue>/cost.json, and prints a text table:
 # iterations, outcomes by role, cost total, last verdict, failure class if
 # escalated. Purely read-only — never writes, always exits 0.
 #
@@ -16,7 +16,7 @@
 set -uo pipefail
 
 BOUCLE_WORKSPACE="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-$(pwd)}}"
-STATE_ROOT="$BOUCLE_WORKSPACE/.boucle"
+STATE_ROOT="$BOUCLE_WORKSPACE/.boucle-state"
 
 # resolve_issue <arg> — the argument is either a bare IID or already a path.
 # Returns the state dir for an issue. Empty when no health record exists.

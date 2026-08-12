@@ -111,7 +111,7 @@ boucle_ci_e2e() {
   # All marker patterns are anchored to start-of-line (AGENTS.md lesson
   # #47) so prose that merely quotes the marker is never matched.
   if [ -z "$VERDICT" ]; then
-    AGENT_LOG="$BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE/agent-output.log"
+    AGENT_LOG="$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE/agent-output.log"
     if [ -f "$AGENT_LOG" ]; then
       DRAFTED_VERDICT=$(awk '
                 /^<!-- boucle:verdict v=1 role=e2e/ { found=1 }
@@ -282,7 +282,7 @@ ${E2E_TRACE:-no verdict comment was posted by the agent}
     ITERATION="${BOUCLE_ITERATION:-1}"
     MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
     E2E_LOG_TAIL=""
-    AGENT_LOG="$BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE/agent-output.log"
+    AGENT_LOG="$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE/agent-output.log"
     if [ -f "$AGENT_LOG" ]; then
       E2E_LOG_TAIL=$(tail -c 4000 "$AGENT_LOG" 2> /dev/null || echo "")
     fi

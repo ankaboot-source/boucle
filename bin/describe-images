@@ -5,12 +5,12 @@
 # Replaces the old bin/detect-vision-need approach which swapped the worker's
 # model to a vision model for the whole run. Instead, this script runs the
 # vision model (minimax-m3) ONLY to describe images, then writes the
-# descriptions to .boucle/$ISSUE/.image-descriptions.md. bin/jc reads
+# descriptions to .boucle-state/$ISSUE/.image-descriptions.md. bin/jc reads
 # that file and injects the descriptions into the agent prompt as text — so the
 # worker/reviewer/triage stay on their default models (deepseek-v4-flash,
 # glm-5.2) and get image context as text, not as raw binaries.
 #
-# Output: writes .boucle/$ISSUE/.image-descriptions.md (markdown with
+# Output: writes .boucle-state/$ISSUE/.image-descriptions.md (markdown with
 #         one
 #         section per image: filename, dimensions, description).
 #         If no images found, exits 0 without writing the file.
@@ -26,11 +26,13 @@ ROLE="${1:?usage: bin/describe-images <role>}"
 ISSUE="${BOUCLE_ISSUE:-}"
 CI_PROJECT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
 # State dir MUST match the fetchers (fetch-issue-attachments /
-# fetch-mr-attachments) and bin/jc: .boucle/$ISSUE. A divergent path here
-# (historically .boucle-state/$ISSUE) silently yields "images=0" — the
-# worker then has no text descriptions, reads the PNGs itself and the
-# text-only model 400s on image input (consumer 2026-08).
-STATE_DIR="$CI_PROJECT_DIR/.boucle/$ISSUE"
+# fetch-mr-attachments) and bin/jc: .boucle-state/$ISSUE. A divergent path
+# silently yields "images=0" — the worker then has no text descriptions,
+# reads the PNGs itself and the text-only model 400s on image input
+# (consumer 2026-08). Per-issue state lives OUTSIDE .boucle/ (the engine
+# submodule on consumers): `git submodule update` clobbers anything inside
+# the submodule, so state must never ride along with the engine.
+STATE_DIR="$CI_PROJECT_DIR/.boucle-state/$ISSUE"
 DESC_FILE="$STATE_DIR/.image-descriptions.md"
 
 # ── Master switch ──────────────────────────────────────────────────────
