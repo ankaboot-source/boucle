@@ -574,6 +574,34 @@ EOF
   mr_description=$(printf '## Issue #%s — iteration %s/%s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s/%s_ | mode: deploy=%s review=%s' \
     "$BOUCLE_ISSUE" "$ITERATION" "$mr_max_iter" "$preview_line" "${commit_summary:-(no commits)}" "${approach:-(not recorded)}" "$cost_block" "$BOUCLE_ISSUE" "$commit_count" "$ITERATION" "$mr_max_iter" "$(boucle_deploy_mode)" "$(boucle_review_mode)")
 
+  # ── File-impact marker refresh (F1 guard) ─────────────────────────
+  # Refresh the <!-- boucle:files v=1 paths=... --> marker note with the
+  # actual branch diff. Skipped when the branch has no commits ahead (e.g.
+  # after an adaptive reset) to preserve the last non-empty claim mid-flight
+  # — a parallel worker would otherwise start into the same files.
+  if [ "${BOUCLE_FILE_GATE:-true}" != "false" ]; then
+    if [ -n "$(git log "origin/$BOUCLE_DEFAULT_BRANCH..HEAD" --oneline 2> /dev/null)" ]; then
+      local refresh_paths
+      refresh_paths=$(git diff --name-only "origin/$BOUCLE_DEFAULT_BRANCH...HEAD" 2> /dev/null \
+        | sed 's|^\./||' | sort -u | paste -sd, -)
+      if [ -n "$refresh_paths" ]; then
+        local marker_body existing_note_id
+        marker_body="<!-- boucle:files v=1 paths=$refresh_paths -->"
+        existing_note_id=$(forge_issue_notes "$BOUCLE_ISSUE" 2> /dev/null \
+          | jq -r '[.[] | select(.body | contains("<!-- boucle:files v=1"))] | sort_by(.created_at) | last | .id // empty' 2> /dev/null)
+        if [ -n "$existing_note_id" ]; then
+          forge_issue_note_update "$BOUCLE_ISSUE" "$existing_note_id" "$marker_body" \
+            || echo "[boucle] WARN: marker note update failed — leaving stale marker (fail-open)"
+        else
+          forge_issue_note "$BOUCLE_ISSUE" "$marker_body" \
+            || echo "[boucle] WARN: marker note post failed (fail-open)"
+        fi
+      fi
+    else
+      echo "[boucle] file-impact marker refresh SKIPPED — branch has no commits ahead (F1 guard, preserving last non-empty marker)"
+    fi
+  fi
+
   # ── MR create or update ──────────────────────────────────────────
   local mr_iid
   mr_iid=$(forge_mr_lookup_by_branch "$BRANCH" "opened" 2> /dev/null || echo "")
