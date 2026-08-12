@@ -457,7 +457,7 @@ forge_work_item_link_parent() {
   local parent_gid
   parent_gid=$(forge_work_item_global_id "$parent_iid")
   if [ -n "$parent_gid" ] && [ "$parent_gid" != "null" ]; then
-    # Hierarchy API first (creates the real "Éléments enfants" relationship
+    # Hierarchy API first (creates the real "Child items" relationship
     # visible in the UI). Requires the parent's GLOBAL work-item ID (not its
     # project-scoped IID). The PATCH response carries the work item's .id on
     # success — empty means the hierarchy API is unavailable (403, disabled
