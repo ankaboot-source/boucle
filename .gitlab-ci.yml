@@ -1490,8 +1490,8 @@ triage:
           # no RENDER_REQUEST → block is a no-op (zero Chromium cost).
           # Failure is isolated: fallback note, never blocks the loop.
           # Idempotent: RENDER_REQUEST deleted after successful embed.
-          PREVIEW_HTML="$CI_PROJECT_DIR/.boucle/$IID/preview.html"
-          RENDER_REQUEST_FILE="$CI_PROJECT_DIR/.boucle/$IID/RENDER_REQUEST"
+          PREVIEW_HTML="$CI_PROJECT_DIR/.boucle-state/$IID/preview.html"
+          RENDER_REQUEST_FILE="$CI_PROJECT_DIR/.boucle-state/$IID/RENDER_REQUEST"
 
           if [ "${BOUCLE_PREVIEW_DISABLE:-false}" != "true" ] && [ -s "$RENDER_REQUEST_FILE" ] && [ -s "$PREVIEW_HTML" ]; then
             echo "[boucle] RENDER_REQUEST found — attempting visual preview"
@@ -1512,7 +1512,7 @@ triage:
                 # 3. Render preview.html → preview.png (1280x800, fullPage).
                 #    NODE_PATH=$NPM_TMP/node_modules so the script (bin/) resolves
                 #    the modules installed in the per-job dir.
-                PREVIEW_PNG="$CI_PROJECT_DIR/.boucle/$IID/preview.png"
+                PREVIEW_PNG="$CI_PROJECT_DIR/.boucle-state/$IID/preview.png"
                 if NODE_PATH="$NPM_TMP/node_modules" node "$CI_PROJECT_DIR/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2>/dev/null; then
                   # 4. Upload the PNG via the GitLab uploads API.
                   UPLOAD_RESP=$(curl -s --request POST \
@@ -1956,9 +1956,14 @@ worker:
       ITERATION="${BOUCLE_ITERATION:-1}"
       export BOUCLE_ITERATION
 
-      # ── Persist .boucle/<issue>/ across iterations ───────────────────
-      # .boucle/ is gitignored (state.md, iterations.md, agent-output.log
-      # are NOT committed) and the worker re-triggers itself via the API
+      # ── Persist .boucle-state/<issue>/ across iterations ───────────
+      # Per-issue state lives in .boucle-state/ (gitignored) — never in
+      # .boucle/, which is the engine submodule on consumers (git submodule
+      # update would clobber in-flight state; AGENTS.md lesson #20: the
+      # worker fills state.md's Approach, the description reads it back
+      # from the same .boucle-state/<issue>/state.md path). state.md,
+      # iterations.md, agent-output.log are NOT committed and the worker
+      # re-triggers itself via the API
       # (new pipeline, no `needs` link → no artifact passing). On a shell
       # executor $CI_PROJECT_DIR may be wiped between runs, so we persist
       # the per-issue state dir to a stable path outside the workspace and
@@ -1972,15 +1977,15 @@ worker:
       BOUCLE_STATE_CACHE="${BOUCLE_STATE_CACHE:-${HOME}/.boucle-state-cache}"
       ISSUE_STATE_CACHE="${BOUCLE_STATE_CACHE}/${BOUCLE_ISSUE}"
 
-      # Persist .boucle/<issue>/ back to the stable cache on job exit (any
+      # Persist .boucle-state/<issue>/ back to the stable cache on job exit (any
       # path: success, no-changes re-trigger, rebase conflict, deploy fail).
       # The trap fires after the script body so it captures the latest state
       # (state.md with filled Approach, iterations.md with the new entry,
       # agent-output.log). Best-effort: never fail the job from the trap.
       save_state_cache() {
-        if [ -d ".boucle/$BOUCLE_ISSUE" ]; then
+        if [ -d ".boucle-state/$BOUCLE_ISSUE" ]; then
           mkdir -p "$ISSUE_STATE_CACHE"
-          cp -a ".boucle/$BOUCLE_ISSUE/." "$ISSUE_STATE_CACHE/" 2>/dev/null || true
+          cp -a ".boucle-state/$BOUCLE_ISSUE/." "$ISSUE_STATE_CACHE/" 2>/dev/null || true
         fi
       }
       trap save_state_cache EXIT
@@ -2073,17 +2078,18 @@ worker:
         git reset --hard origin/$CI_DEFAULT_BRANCH
       fi
 
-      # Restore .boucle/<issue>/ from the stable cache AFTER checkout.
+      # Restore .boucle-state/<issue>/ from the stable cache AFTER checkout.
       # MUST be after `git checkout`/`git reset` — otherwise the cp -a creates
-      # local modifications to tracked .boucle/ files (some repos have .boucle/
-      # tracked despite .gitignore) and `git checkout` refuses to overwrite
-      # them, failing the worker with "Your local changes would be overwritten".
-      # After checkout, .boucle/ is either absent (untracked, gitignored) or
+      # local modifications to tracked .boucle-state/ files (some repos have
+      # .boucle-state/ tracked despite .gitignore) and `git checkout` refuses
+      # to overwrite them, failing the worker with "Your local changes would be
+      # overwritten".
+      # After checkout, .boucle-state/ is either absent (untracked, gitignored) or
       # at the $CI_DEFAULT_BRANCH version (tracked) — either way, cp -a overwrites safely.
       if [ -d "$ISSUE_STATE_CACHE" ]; then
-        echo "[boucle] Restoring .boucle/$BOUCLE_ISSUE/ from $ISSUE_STATE_CACHE"
-        mkdir -p ".boucle/$BOUCLE_ISSUE"
-        cp -a "$ISSUE_STATE_CACHE/." ".boucle/$BOUCLE_ISSUE/" 2>/dev/null || true
+        echo "[boucle] Restoring .boucle-state/$BOUCLE_ISSUE/ from $ISSUE_STATE_CACHE"
+        mkdir -p ".boucle-state/$BOUCLE_ISSUE"
+        cp -a "$ISSUE_STATE_CACHE/." ".boucle-state/$BOUCLE_ISSUE/" 2>/dev/null || true
       fi
 
       # Configure git credentials for push
@@ -2121,13 +2127,13 @@ worker:
       # appends to this file (bin/jc:488) and is instructed to read it at
       # startup (worker.md) so it knows what previous iterations tried —
       # without this, each re-run starts blind and repeats the same mistakes.
-      if [ ! -f ".boucle/$BOUCLE_ISSUE/iterations.md" ]; then
+      if [ ! -f ".boucle-state/$BOUCLE_ISSUE/iterations.md" ]; then
         # mkdir is NOT conditional here: the restore-from-cache block above
-        # only creates .boucle/<iid>/ when the cache exists — on a first run
+        # only creates .boucle-state/<iid>/ when the cache exists — on a first run
         # (or after GIT_CLEAN_FLAGS wiped the gitignored dir) the seed below
         # would fail with "No such file or directory" (framagit, 2026-08).
-        mkdir -p ".boucle/$BOUCLE_ISSUE"
-        cat > ".boucle/$BOUCLE_ISSUE/iterations.md" << 'EOF'
+        mkdir -p ".boucle-state/$BOUCLE_ISSUE"
+        cat > ".boucle-state/$BOUCLE_ISSUE/iterations.md" << 'EOF'
       # Iteration log — issue #$BOUCLE_ISSUE
 
       Each entry: timestamp — role (agent) — iteration — result + files touched.
@@ -2262,7 +2268,7 @@ worker:
       # the issue with the available logs and escalate to human immediately
       # — re-triggering won't help if the model is unavailable.
       if [ "$rc" -eq 4 ]; then
-        AGENT_LOG_FILE="$CI_PROJECT_DIR/.boucle/$BOUCLE_ISSUE/agent-output.log"
+        AGENT_LOG_FILE="$CI_PROJECT_DIR/.boucle-state/$BOUCLE_ISSUE/agent-output.log"
         LOG_SNIPPET="(log file not found or empty)"
         if [ -f "$AGENT_LOG_FILE" ]; then
           # Capture last 2000 chars of the log (enough to see the error,
@@ -2301,10 +2307,14 @@ worker:
       # Safety-net commit: the agent may run out of steps before committing.
       # Stage and commit any uncommitted tracked changes so the index is clean
       # before the rebase (rebase refuses to run on a dirty tree).
-      # NEVER stage .boucle/ — it is runtime state (state.md, iterations.md,
-      # agent-output.log), not source code. Some repos have .boucle/ tracked
-      # from a past `git add -A` (gitignore doesn't untrack); staging it here
-      # re-commits stale state and causes checkout conflicts on the next run.
+      # NEVER stage .boucle/ — it is the engine submodule (consumers) or
+      # engine dir (dogfood), not source under change; staging it would bump
+      # the gitlink or commit stale engine files. Per-issue runtime state
+      # (state.md, iterations.md, agent-output.log) lives in .boucle-state/
+      # (gitignored) and is never staged either. Some repos have .boucle/
+      # tracked from a past `git add -A` (gitignore doesn't untrack); staging
+      # it here re-commits stale state and causes checkout conflicts on the
+      # next run.
       # NEVER stage .npm/ either — it is the npm cache (npm_config_cache),
       # restored by the runner BEFORE the script; a safety-net commit that
       # stages it leaves a local branch whose tree collides with the restored
@@ -2317,8 +2327,8 @@ worker:
         # Under set -e that aborts before the commit — defeating the safety-net.
         git add -A -- ':!.boucle' ':!.npm' || true
         # || true: the agent may already have committed everything (only
-        # .boucle/ state files remain, excluded above) — `git commit` then
-        # fails with "no changes added to commit". A bare commit under
+        # .boucle-state/ state files remain, excluded above) — `git commit`
+        # then fails with "no changes added to commit". A bare commit under
         # set -e kills the job BEFORE the push, orphaning the agent's
         # commits on the local branch (consumer 2026-08: worker ran fine,
         # job died at the safety-net, MR never updated). The safety-net is
@@ -3039,7 +3049,7 @@ reviewer:
       # VERDICT=UNCERTAIN, and the log-scraping was skipped — the FAIL verdict
       # was lost and the issue was wrongly escalated to human.)
       if [ -z "$VERDICT" ] || [ "$VERDICT_SHA_MATCHED" = false ]; then
-        AGENT_LOG="$CI_PROJECT_DIR/.boucle/$BOUCLE_ISSUE/agent-output.log"
+        AGENT_LOG="$CI_PROJECT_DIR/.boucle-state/$BOUCLE_ISSUE/agent-output.log"
         if [ -f "$AGENT_LOG" ]; then
           # Extract the drafted verdict comment: from the boucle:verdict marker
           # to the VERDICT line. Try SHA-anchored first, then SHA-unanchored
@@ -4095,7 +4105,7 @@ e2e:
       # (VERDICT empty), scrape the drafted verdict from the agent's stdout log
       # and post it ourselves. Mirrors the reviewer job's fallback.
       if [ -z "$VERDICT" ]; then
-        AGENT_LOG="$CI_PROJECT_DIR/.boucle/$BOUCLE_ISSUE/agent-output.log"
+        AGENT_LOG="$CI_PROJECT_DIR/.boucle-state/$BOUCLE_ISSUE/agent-output.log"
         if [ -f "$AGENT_LOG" ]; then
           DRAFTED_VERDICT=$(awk '
             /^<!-- boucle:verdict v=1 role=e2e/ { found=1 }
@@ -4255,7 +4265,7 @@ e2e:
         ITERATION="${BOUCLE_ITERATION:-1}"
         MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
         E2E_LOG_TAIL=""
-        AGENT_LOG="$CI_PROJECT_DIR/.boucle/$BOUCLE_ISSUE/agent-output.log"
+        AGENT_LOG="$CI_PROJECT_DIR/.boucle-state/$BOUCLE_ISSUE/agent-output.log"
         if [ -f "$AGENT_LOG" ]; then
           E2E_LOG_TAIL=$(tail -c 4000 "$AGENT_LOG" 2>/dev/null || echo "")
         fi

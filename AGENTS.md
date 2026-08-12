@@ -270,11 +270,13 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       stale one.
 
 28. **Persist worker state across iterations**
-    - ❌ DO NOT assume `.boucle/<issue>/` survives between iterations
+    - ❌ DO NOT assume `.boucle-state/<issue>/` survives between iterations
       (gitignored, no artifact passing, `$CI_PROJECT_DIR` may be wiped).
-    - ✅ DO: persist `.boucle/<issue>/` to `$BOUCLE_STATE_CACHE/<issue>/`
+    - ✅ DO: persist `.boucle-state/<issue>/` to `$BOUCLE_STATE_CACHE/<issue>/`
       and restore it at startup; the worker reads `iterations.md` to know
-      what was already tried.
+      what was already tried. Per-issue state lives in `.boucle-state/`
+      (gitignored), NEVER in `.boucle/` — `.boucle/` is the engine submodule
+      on consumers and `git submodule update` clobbers anything inside it.
 
 29. **Distinguish API outage from step exhaustion**
     - ❌ DO NOT treat an empty worker log as "agent exhausted its step
@@ -815,7 +817,7 @@ atomic.
     - ✅ DO: `bin/fetch-mr-attachments` mirrors `bin/fetch-issue-attachments`
       for merge requests. It mines `/uploads/` paths from MR notes
       (`/projects/<id>/merge_requests/<iid>/notes`), downloads them to
-      `.boucle/<issue>/mr-attachments/`, and exports `BOUCLE_MR_ATTACHMENTS`
+      `.boucle-state/<issue>/mr-attachments/`, and exports `BOUCLE_MR_ATTACHMENTS`
       via `.mr-attachments.env`. `bin/jc` sources this and appends the paths
       to the agent prompt so the worker can `Read` reviewer/human screenshots.
       Gated on `MR_FOR_FEEDBACK` being non-empty (no MR on first run).
@@ -874,8 +876,8 @@ atomic.
       acting on the FAIL verdict that was sitting in stdout.
 
 28. **Worker state not persisted between iterations** (issue #35 on a consumer repo)
-    - ❌ DO NOT assume `.boucle/<issue>/` survives between worker iterations.
-      `.boucle/` is gitignored (state.md, iterations.md, agent-output.log
+    - ❌ DO NOT assume `.boucle-state/<issue>/` survives between worker iterations.
+      `.boucle-state/` is gitignored (state.md, iterations.md, agent-output.log
       are NOT committed), and the worker re-triggers itself via the API
       (new pipeline, no `needs` link → no artifact passing). On a shell
       executor `$CI_PROJECT_DIR` may be wiped between runs. Each iteration
@@ -885,7 +887,7 @@ atomic.
       re-trying rejected approaches — and exhausts its step budget before
       implementing. Issue #35 had 2 consecutive iterations produce zero
       code changes for exactly this reason.
-    - ✅ DO: the worker job persists `.boucle/<issue>/` to a stable path
+    - ✅ DO: the worker job persists `.boucle-state/<issue>/` to a stable path
       outside `$CI_PROJECT_DIR` (`$BOUCLE_STATE_CACHE/<issue>/`, default
       `$HOME/.boucle-state-cache/<issue>/`) and restores it at startup via
       an EXIT trap. `state.md` and `iterations.md` now survive across
@@ -893,6 +895,9 @@ atomic.
       `iterations.md` at startup so it knows what previous iterations
       tried. `iterations.md` is seeded on first run (companion to
       `state.md`).
+    - ✅ DO: keep per-issue state in `.boucle-state/`, NEVER in `.boucle/`:
+      `.boucle/` is the engine submodule on consumers and `git submodule
+      update` / `git clean -ffdx` / re-clone clobber anything inside it.
     - Context: issue #35 iterations 1 and 2 both produced zero code changes.
       The worker (kimi-k2.7-code, 100 steps) spent all its steps
       reconstituting context — re-reading the charter docs,

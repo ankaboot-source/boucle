@@ -98,8 +98,8 @@ TPL
 
 @test "schedules: a due template creates one issue carrying its marker" {
   TMPF=$(mktemp); sched_funcs "$TMPF"; W=$(mktemp -d)
-  mkdir -p "$W/.boucle/schedules"
-  printf -- '---\ncron: "* * * * *"\ntitle: "audit: a11y"\n---\n\nAudit it.\n' > "$W/.boucle/schedules/a11y.md"
+  mkdir -p "$W/.boucle-state/schedules"
+  printf -- '---\ncron: "* * * * *"\ntitle: "audit: a11y"\n---\n\nAudit it.\n' > "$W/.boucle-state/schedules/a11y.md"
   run bash -c "
     export BOUCLE_WORKSPACE='$W' BOUCLE_SCHEDULES_ENABLED=true BOUCLE_MAX_PARALLEL_ISSUES=0
     source '$TMPF'
@@ -120,8 +120,8 @@ TPL
 
 @test "schedules: enabled:false suppresses a template without deleting it" {
   TMPF=$(mktemp); sched_funcs "$TMPF"; W=$(mktemp -d)
-  mkdir -p "$W/.boucle/schedules"
-  printf -- '---\ncron: "* * * * *"\ntitle: "t"\nenabled: false\n---\n\nBody.\n' > "$W/.boucle/schedules/off.md"
+  mkdir -p "$W/.boucle-state/schedules"
+  printf -- '---\ncron: "* * * * *"\ntitle: "t"\nenabled: false\n---\n\nBody.\n' > "$W/.boucle-state/schedules/off.md"
   run bash -c "
     export BOUCLE_WORKSPACE='$W' BOUCLE_SCHEDULES_ENABLED=true BOUCLE_MAX_PARALLEL_ISSUES=0
     source '$TMPF'
@@ -136,8 +136,8 @@ TPL
 
 @test "schedules: no second issue while a previous one is still open" {
   TMPF=$(mktemp); sched_funcs "$TMPF"; W=$(mktemp -d)
-  mkdir -p "$W/.boucle/schedules"
-  printf -- '---\ncron: "* * * * *"\ntitle: "t"\n---\n\nBody.\n' > "$W/.boucle/schedules/dep.md"
+  mkdir -p "$W/.boucle-state/schedules"
+  printf -- '---\ncron: "* * * * *"\ntitle: "t"\n---\n\nBody.\n' > "$W/.boucle-state/schedules/dep.md"
   run bash -c "
     export BOUCLE_WORKSPACE='$W' BOUCLE_SCHEDULES_ENABLED=true BOUCLE_MAX_PARALLEL_ISSUES=0
     source '$TMPF'
@@ -153,8 +153,8 @@ TPL
 
 @test "schedules: a missed window fires once, not once per sweep" {
   TMPF=$(mktemp); sched_funcs "$TMPF"; W=$(mktemp -d)
-  mkdir -p "$W/.boucle/schedules"
-  printf -- '---\ncron: "* * * * *"\ntitle: "t"\n---\n\nBody.\n' > "$W/.boucle/schedules/dep.md"
+  mkdir -p "$W/.boucle-state/schedules"
+  printf -- '---\ncron: "* * * * *"\ntitle: "t"\n---\n\nBody.\n' > "$W/.boucle-state/schedules/dep.md"
   NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   run bash -c "
     export BOUCLE_WORKSPACE='$W' BOUCLE_SCHEDULES_ENABLED=true BOUCLE_MAX_PARALLEL_ISSUES=0
@@ -171,9 +171,9 @@ TPL
 
 @test "schedules: a malformed template is skipped, not fatal" {
   TMPF=$(mktemp); sched_funcs "$TMPF"; W=$(mktemp -d)
-  mkdir -p "$W/.boucle/schedules"
-  printf 'no frontmatter at all\n' > "$W/.boucle/schedules/broken.md"
-  printf -- '---\ncron: "* * * * *"\ntitle: "good"\n---\n\nBody.\n' > "$W/.boucle/schedules/good.md"
+  mkdir -p "$W/.boucle-state/schedules"
+  printf 'no frontmatter at all\n' > "$W/.boucle-state/schedules/broken.md"
+  printf -- '---\ncron: "* * * * *"\ntitle: "good"\n---\n\nBody.\n' > "$W/.boucle-state/schedules/good.md"
   run bash -c "
     export BOUCLE_WORKSPACE='$W' BOUCLE_SCHEDULES_ENABLED=true BOUCLE_MAX_PARALLEL_ISSUES=0
     source '$TMPF'
@@ -189,8 +189,8 @@ TPL
 
 @test "schedules: the parallelism cap is respected — a cron cannot starve human work" {
   TMPF=$(mktemp); sched_funcs "$TMPF"; W=$(mktemp -d)
-  mkdir -p "$W/.boucle/schedules"
-  printf -- '---\ncron: "* * * * *"\ntitle: "t"\n---\n\nBody.\n' > "$W/.boucle/schedules/dep.md"
+  mkdir -p "$W/.boucle-state/schedules"
+  printf -- '---\ncron: "* * * * *"\ntitle: "t"\n---\n\nBody.\n' > "$W/.boucle-state/schedules/dep.md"
   run bash -c "
     export BOUCLE_WORKSPACE='$W' BOUCLE_SCHEDULES_ENABLED=true BOUCLE_MAX_PARALLEL_ISSUES=2
     source '$TMPF'

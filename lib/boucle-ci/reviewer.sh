@@ -38,14 +38,14 @@ boucle_ci_reviewer() {
   # ── Restore the triage's obligations.md into the workspace ──────
   # The triage job writes obligations.md (the `## Deliverables` obligations)
   # to the state cache. The reviewer's obligations gate reads it from
-  # $BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE/obligations.md, so restore it
+  # $BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE/obligations.md, so restore it
   # here (mirrors the worker's state-cache restore). Best-effort: a missing
   # file simply disables the gate.
   BOUCLE_STATE_CACHE="${BOUCLE_STATE_CACHE:-${HOME}/.boucle-state-cache}"
   ISSUE_STATE_CACHE="${BOUCLE_STATE_CACHE}/${BOUCLE_ISSUE}"
   if [ -f "$ISSUE_STATE_CACHE/obligations.md" ]; then
-    mkdir -p "$BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE"
-    cp -a "$ISSUE_STATE_CACHE/obligations.md" "$BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE/obligations.md" 2> /dev/null || true
+    mkdir -p "$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE"
+    cp -a "$ISSUE_STATE_CACHE/obligations.md" "$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE/obligations.md" 2> /dev/null || true
   fi
 
   # Label helper: preserve non-boucle labels when writing a boucle label.
@@ -344,7 +344,7 @@ boucle_ci_reviewer() {
   # VERDICT=UNCERTAIN, and the log-scraping was skipped — the FAIL verdict
   # was lost and the issue was wrongly escalated to human.)
   if [ -z "$VERDICT" ] || [ "$VERDICT_SHA_MATCHED" = false ]; then
-    AGENT_LOG="$BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE/agent-output.log"
+    AGENT_LOG="$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE/agent-output.log"
     if [ -f "$AGENT_LOG" ]; then
       # Extract the drafted verdict comment: from the boucle:verdict marker
       # to the VERDICT line. Try SHA-anchored first, then SHA-unanchored
@@ -429,12 +429,12 @@ boucle_ci_reviewer() {
   "$BOUCLE_HOME"/bin/collapse-duplicate-notes reviewer "$BOUCLE_PROJECT_ID" "$MR_IID" "$PRE_RUN_VERDICT_ID" "$BOUCLE_FORGE_HOST" "$MR_HEAD"
 
   # ── Obligations gate (mechanical, no LLM) ─────────────────────────
-  # .boucle/<issue>/obligations.md holds the triage's `## Deliverables`
+  # .boucle-state/<issue>/obligations.md holds the triage's `## Deliverables`
   # obligations (one `- O1 — type: … — … — condition: …` line each).
   # The reviewer must adjudicate EVERY obligation in the verdict. A PASS
   # that skips an obligation, or a PASS contradicting unaddressed /
   # unverifiable adjudications, is mechanically overridden below.
-  OBLIGATIONS_FILE="$BOUCLE_WORKSPACE/.boucle/$BOUCLE_ISSUE/obligations.md"
+  OBLIGATIONS_FILE="$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE/obligations.md"
   if [ -f "$OBLIGATIONS_FILE" ]; then
     OBLIGATION_IDS=$(grep -oE '^- O[0-9]+' "$OBLIGATIONS_FILE" | tr -d '-' | tr '\n' ' ' || true)
     for oid in $OBLIGATION_IDS; do

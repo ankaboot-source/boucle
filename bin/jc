@@ -228,7 +228,13 @@ fi
 # CI_PROJECT_DIR (GitLab predefined) then pwd for local dev.
 BOUCLE_WORKSPACE="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-$(pwd)}}"
 CI_PROJECT_DIR="$BOUCLE_WORKSPACE" # backward-compat alias for existing refs
-STATE_DIR="$BOUCLE_WORKSPACE/.boucle/$ISSUE"
+# Per-issue state lives in .boucle-state/ (gitignored). The .boucle/ dir is
+# reserved for the engine submodule in consumer repos — keeping state out of
+# it means `git submodule update` can never clobber in-flight work. The CI
+# worker job seeds state.md/iterations.md and extracts the MR Approach from
+# the same .boucle-state/<issue>/ paths (AGENTS.md lesson #20: the worker
+# fills the Approach section, the MR description reads it back from here).
+STATE_DIR="$BOUCLE_WORKSPACE/.boucle-state/$ISSUE"
 STATE_FILE="$STATE_DIR/state.md"
 ITERATIONS_FILE="$STATE_DIR/iterations.md"
 
@@ -491,7 +497,7 @@ fi
 mkdir -p "$STATE_DIR"
 
 # ── 3a. Load issue attachments (if bin/fetch-issue-attachments ran) ──
-# The fetch script writes .boucle/$ISSUE/.attachments.env with
+# The fetch script writes .boucle-state/$ISSUE/.attachments.env with
 # BOUCLE_ISSUE_ATTACHMENTS="path1 path2 ...". Empty string = no attachments.
 ATTACHMENTS_ENV="$STATE_DIR/.attachments.env"
 if [ -f "$ATTACHMENTS_ENV" ]; then
@@ -501,7 +507,7 @@ fi
 BOUCLE_ISSUE_ATTACHMENTS="${BOUCLE_ISSUE_ATTACHMENTS:-}"
 
 # ── 3b. Load MR attachments (if bin/fetch-mr-attachments ran) ──
-# The fetch script writes .boucle/$ISSUE/.mr-attachments.env with
+# The fetch script writes .boucle-state/$ISSUE/.mr-attachments.env with
 # BOUCLE_MR_ATTACHMENTS="path1 path2 ...". Empty string = no MR attachments
 # (first run with no MR, or no uploads in MR comments).
 MR_ATTACHMENTS_ENV="$STATE_DIR/.mr-attachments.env"
@@ -513,7 +519,7 @@ BOUCLE_MR_ATTACHMENTS="${BOUCLE_MR_ATTACHMENTS:-}"
 
 # ── 3c. Load image descriptions (if bin/describe-images ran) ────────
 # describe-images runs the vision model (minimax-m3) SEPARATELY to describe
-# each image as text, writing to .boucle/$ISSUE/.image-descriptions.md.
+# each image as text, writing to .boucle-state/$ISSUE/.image-descriptions.md.
 # This replaces the old detect-vision-need approach which swapped the worker's
 # entire model to a vision model (minimax-m3) — worse at code and prone to
 # WASM OOM crashes. With describe-images, the worker stays on deepseek-v4-flash
@@ -1000,7 +1006,7 @@ Draft file hygiene: if you write your draft verdict to a file, use \`\$BOUCLE_VE
 
   # Append attachment paths (if any) so the agent knows how to handle them.
   # bin/fetch-issue-attachments downloads issue uploads to
-  # .boucle/$ISSUE/attachments/ (images, PDFs, archives, etc.).
+  # .boucle-state/$ISSUE/attachments/ (images, PDFs, archives, etc.).
   # Attachments can be source assets to ship (logos, photos) OR mockups/
   # screenshots for context. Decide based on the issue body + comment intent.
   # Do NOT `Read` binary files (PNG/ZIP) — the Read tool returns garbage on
@@ -1019,7 +1025,7 @@ Draft file hygiene: if you write your draft verdict to a file, use \`\$BOUCLE_VE
 
   # Append MR attachment paths (if any) so the agent knows how to handle them.
   # bin/fetch-mr-attachments downloads MR-note uploads to
-  # .boucle/$ISSUE/mr-attachments/ (screenshots, mockups, assets from reviewer/human).
+  # .boucle-state/$ISSUE/mr-attachments/ (screenshots, mockups, assets from reviewer/human).
   # Same dual nature as issue attachments — decide based on the comment intent.
   if [ -n "${BOUCLE_MR_ATTACHMENTS:-}" ]; then
     echo ""
