@@ -227,6 +227,20 @@ default:
       # JCODE_HOME, which never touches the consumer repo root or ~/.jcode.
       export JCODE_HOME="$CI_PROJECT_DIR/.boucle-state/.jcode"
 
+      # ── Self-update (consumers only) ───────────────────────────────
+      # bin/update fetches the latest engine from upstream and applies it
+      # to $BOUCLE_HOME. Fail-open: any error → warning, pipeline continues
+      # with the current version. Skipped on:
+      # - the dogfood repo (BOUCLE_HOME = $CI_PROJECT_DIR, no .boucle/)
+      # - push pipelines (BOUCLE_PIPELINE_SOURCE=push) to avoid a feedback
+      #   loop (push → pipeline → bin/update → push → pipeline → ...)
+      # - when BOUCLE_UPDATE_DISABLE=true (opt-out for pinned installs)
+      if [ "${BOUCLE_UPDATE_DISABLE:-false}" != "true" ] \
+         && [ "$BOUCLE_HOME" != "$CI_PROJECT_DIR" ] \
+         && [ "${BOUCLE_PIPELINE_SOURCE:-}" != "push" ]; then
+        bash "$BOUCLE_HOME/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
+      fi
+
       # ── Shared boucle helpers (single source of truth) ────────────
       # lib/boucle.sh exports set_boucle_label, resolve_reporter_id,
       # get_work_item_children, close_issue, maybe_close_parent,
@@ -505,6 +519,20 @@ dispatch:
         export BOUCLE_HOME="$CI_PROJECT_DIR"
       fi
       export JCODE_HOME="$CI_PROJECT_DIR/.boucle-state/.jcode"
+
+      # ── Self-update (consumers only) ───────────────────────────────
+      # bin/update fetches the latest engine from upstream and applies it
+      # to $BOUCLE_HOME. Fail-open: any error → warning, pipeline continues
+      # with the current version. Skipped on:
+      # - the dogfood repo (BOUCLE_HOME = $CI_PROJECT_DIR, no .boucle/)
+      # - push pipelines (BOUCLE_PIPELINE_SOURCE=push) to avoid a feedback
+      #   loop (push → pipeline → bin/update → push → pipeline → ...)
+      # - when BOUCLE_UPDATE_DISABLE=true (opt-out for pinned installs)
+      if [ "${BOUCLE_UPDATE_DISABLE:-false}" != "true" ] \
+         && [ "$BOUCLE_HOME" != "$CI_PROJECT_DIR" ] \
+         && [ "${BOUCLE_PIPELINE_SOURCE:-}" != "push" ]; then
+        bash "$BOUCLE_HOME/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
+      fi
 
       # ── Shared boucle helpers (set_boucle_label, chain_to_role, ...) ──
       # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
@@ -3387,6 +3415,20 @@ merger:
       fi
       export JCODE_HOME="$CI_PROJECT_DIR/.boucle-state/.jcode"
 
+      # ── Self-update (consumers only) ───────────────────────────────
+      # bin/update fetches the latest engine from upstream and applies it
+      # to $BOUCLE_HOME. Fail-open: any error → warning, pipeline continues
+      # with the current version. Skipped on:
+      # - the dogfood repo (BOUCLE_HOME = $CI_PROJECT_DIR, no .boucle/)
+      # - push pipelines (BOUCLE_PIPELINE_SOURCE=push) to avoid a feedback
+      #   loop (push → pipeline → bin/update → push → pipeline → ...)
+      # - when BOUCLE_UPDATE_DISABLE=true (opt-out for pinned installs)
+      if [ "${BOUCLE_UPDATE_DISABLE:-false}" != "true" ] \
+         && [ "$BOUCLE_HOME" != "$CI_PROJECT_DIR" ] \
+         && [ "${BOUCLE_PIPELINE_SOURCE:-}" != "push" ]; then
+        bash "$BOUCLE_HOME/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
+      fi
+
       # ── Shared boucle helpers (set_boucle_label, chain_to_role, ...) ──
       # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
       source "$BOUCLE_HOME/bin/forge/common.sh"
@@ -3691,6 +3733,20 @@ catchup:
         export BOUCLE_HOME="$CI_PROJECT_DIR"
       fi
       export JCODE_HOME="$CI_PROJECT_DIR/.boucle-state/.jcode"
+
+      # ── Self-update (consumers only) ───────────────────────────────
+      # bin/update fetches the latest engine from upstream and applies it
+      # to $BOUCLE_HOME. Fail-open: any error → warning, pipeline continues
+      # with the current version. Skipped on:
+      # - the dogfood repo (BOUCLE_HOME = $CI_PROJECT_DIR, no .boucle/)
+      # - push pipelines (BOUCLE_PIPELINE_SOURCE=push) to avoid a feedback
+      #   loop (push → pipeline → bin/update → push → pipeline → ...)
+      # - when BOUCLE_UPDATE_DISABLE=true (opt-out for pinned installs)
+      if [ "${BOUCLE_UPDATE_DISABLE:-false}" != "true" ] \
+         && [ "$BOUCLE_HOME" != "$CI_PROJECT_DIR" ] \
+         && [ "${BOUCLE_PIPELINE_SOURCE:-}" != "push" ]; then
+        bash "$BOUCLE_HOME/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
+      fi
 
       # ── Shared boucle helpers (set_boucle_label, chain_to_role, ...) ──
       # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
