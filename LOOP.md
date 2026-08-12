@@ -1,12 +1,20 @@
-# LOOP — <target repo>
+# LOOP — Boucle product reference
 
-Per-consumer configuration for the boucle autonomous dev loop: target repo,
-cadence, gates, caps. Read this file before touching the loop; it is
-consumer-specific and never synced from upstream.
+Configuration reference for the boucle autonomous dev loop: CI/CD
+variables, deploy modes, review modes, gates, caps, doctor, notifications,
+retry strategy, provider probe, prompt budget. This is the **product
+documentation** — the same for every consumer, synced from the engine repo
+via `bin/update` (SYNC_PATHS). A consumer configures its instance by setting
+`BOUCLE_*` variables in the forge CI/CD UI; this file is the reference that
+tells the operator what each variable does.
+
+Read this file before touching the loop — it documents every option the
+engine acts on.
 
 ## Purpose
 
-Autonomous dev loop for the target static site.
+Autonomous dev loop: turn a forge issue into a deployed product, with the
+human in the loop at decision points (spec validation, MR approval).
 
 ## Cadence
 
