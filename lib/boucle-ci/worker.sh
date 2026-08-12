@@ -468,7 +468,19 @@ EOF
     fi
     rm -f "$deploy_log"
   else
-    echo "[boucle] Deploy skipped (mode: $(boucle_deploy_mode), review: $(boucle_review_mode))"
+    # GitLab Pages declarative mode: the forge serves the production site
+    # at $CI_PAGES_URL. Branch previews are NOT possible on CE instances —
+    # pages.path_prefix is a Premium feature that CE ignores SILENTLY
+    # (publishes at the ROOT, clobbering production; verified on framagit
+    # 2026-08). Display the real site URL in the MR description; the
+    # reviewer falls back to diff review (its pages.dev extraction regex
+    # cannot match the Pages domain).
+    if [ "${BOUCLE_DEPLOY_PROVIDER:-}" = "gitlab-pages" ] && [ -n "${CI_PAGES_URL:-}" ]; then
+      boucle_site_url="${CI_PAGES_URL%/}"
+      echo "[boucle] GitLab Pages site URL: $boucle_site_url (no per-branch preview on CE)"
+    else
+      echo "[boucle] Deploy skipped (mode: $(boucle_deploy_mode), review: $(boucle_review_mode))"
+    fi
   fi
 
   # ── Preview URL deep-link ────────────────────────────────────────
@@ -529,6 +541,10 @@ EOF
   local preview_line=""
   if [ -n "$preview_url" ]; then
     preview_line="Preview: $preview_url"
+  elif [ -n "${boucle_site_url:-}" ]; then
+    # GitLab Pages declarative: no per-branch preview on CE — display the
+    # real site URL so the MR does not look like a broken duplicate.
+    preview_line="Site (GitLab Pages): $boucle_site_url — no per-branch preview; reviewed via diff"
   else
     # Diff-review mode (no deploy command — e.g. GitLab Pages): state it
     # plainly so the MR does not look like a broken duplicate (a blank
