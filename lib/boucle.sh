@@ -1070,13 +1070,16 @@ boucle_escalate_merge_conflict() {
   # ── Conflict-retry budget ──────────────────────────────────────────
   # Count prior conflict-retries on this issue via the marker comment
   # `<!-- boucle:conflict-retry N -->` posted on each re-trigger. Bounded
-  # by BOUCLE_MAX_ITERATIONS (default 3): a semantic conflict is retried
+  # by BOUCLE_CONFLICT_RETRIES (default 5): a semantic conflict is retried
   # by the WORKER (intelligent rebase + re-implementation on fresh master),
   # NOT escalated blindly — the worker can conciliate amendments that a
   # blind git rebase cannot (observed on a consumer 2026-08: sibling
   # issues #69/#71 diverged on the same component; the worker could have
   # re-implemented on top of the merged sibling instead of escalating).
-  local max_retries="${BOUCLE_MAX_ITERATIONS:-3}"
+  # Note: the worker ALSO has its own rebase-conflict retry loop
+  # (iteration N/MAX), so the effective attempts are the product of both
+  # loops — 5 merger retries is the observed sweet spot.
+  local max_retries="${BOUCLE_CONFLICT_RETRIES:-5}"
   local retry_count=0 conflict_notes
   conflict_notes=$(forge_issue_notes "$issue" 2> /dev/null || echo "[]")
   retry_count=$(echo "$conflict_notes" | jq -r '[.[] | select(.body | contains("<!-- boucle:conflict-retry"))] | length' 2> /dev/null || echo 0)

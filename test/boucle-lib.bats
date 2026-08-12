@@ -1085,7 +1085,7 @@ HELPER
     source lib/boucle.sh
     BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
     BOUCLE_DEFAULT_BRANCH=main
-    BOUCLE_MAX_ITERATIONS=3
+    BOUCLE_CONFLICT_RETRIES=3
     # forge mocks: no prior conflict-retry notes → retry 1 of 3
     forge_issue_notes() { echo "[]"; }
     forge_issue_note() { echo "note-posted:$1"; }
@@ -1104,7 +1104,7 @@ HELPER
     source lib/boucle.sh
     BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
     BOUCLE_DEFAULT_BRANCH=main
-    BOUCLE_MAX_ITERATIONS=3
+    BOUCLE_CONFLICT_RETRIES=3
     # forge mocks: 3 prior conflict-retry notes → budget exhausted → human
     forge_issue_notes() { echo "[{\"body\":\"<!-- boucle:conflict-retry 1 -->\"},{\"body\":\"<!-- boucle:conflict-retry 2 -->\"},{\"body\":\"<!-- boucle:conflict-retry 3 -->\"}]"; }
     forge_issue_note() { echo "note-posted:$1|$2"; }
@@ -1123,7 +1123,7 @@ HELPER
     source lib/boucle.sh
     BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
     BOUCLE_DEFAULT_BRANCH=main
-    BOUCLE_MAX_ITERATIONS=3
+    BOUCLE_CONFLICT_RETRIES=3
     forge_issue_notes() { echo "[]"; }
     forge_issue_note() { echo "note:$1|$2"; }
     set_boucle_label() { echo "label:$*"; }
