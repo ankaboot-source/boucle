@@ -238,8 +238,8 @@ ITERATIONS_FILE="$STATE_DIR/iterations.md"
 # survives and gets posted as the next agent's verdict (observed on a
 # consumer MR: a foreign keffiyeh PASS was posted twice on the wrong MR).
 # mktemp guarantees uniqueness; fall back to a job/issue-scoped path.
-if command -v mktemp >/dev/null 2>&1; then
-  BOUCLE_VERDICT_FILE="$(mktemp "${TMPDIR:-/tmp}/boucle-verdict.XXXXXX.md" 2>/dev/null || true)"
+if command -v mktemp > /dev/null 2>&1; then
+  BOUCLE_VERDICT_FILE="$(mktemp "${TMPDIR:-/tmp}/boucle-verdict.XXXXXX.md" 2> /dev/null || true)"
 fi
 if [ -z "${BOUCLE_VERDICT_FILE:-}" ]; then
   BOUCLE_VERDICT_FILE="${STATE_DIR}/verdict-${CI_JOB_ID:-local}.md"

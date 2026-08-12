@@ -565,9 +565,14 @@ EOF
   # a useful description, and lesson #19 wants it refreshed otherwise.
   local cost_block
   cost_block=$(boucle_cost_summary "$BOUCLE_ISSUE" || true)
+  # Iteration budget, spelled out. "iteration 3" alone does not tell a human
+  # whether the loop is progressing or on its last attempt before escalating
+  # to boucle:human — the label carries the state, never how much budget is
+  # left inside it.
+  local mr_max_iter="${BOUCLE_MAX_ITERATIONS:-3}"
   local mr_description
-  mr_description=$(printf '## Issue #%s — iteration %s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s_ | mode: deploy=%s review=%s' \
-    "$BOUCLE_ISSUE" "$ITERATION" "$preview_line" "${commit_summary:-(no commits)}" "${approach:-(not recorded)}" "$cost_block" "$BOUCLE_ISSUE" "$commit_count" "$ITERATION" "$(boucle_deploy_mode)" "$(boucle_review_mode)")
+  mr_description=$(printf '## Issue #%s — iteration %s/%s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s/%s_ | mode: deploy=%s review=%s' \
+    "$BOUCLE_ISSUE" "$ITERATION" "$mr_max_iter" "$preview_line" "${commit_summary:-(no commits)}" "${approach:-(not recorded)}" "$cost_block" "$BOUCLE_ISSUE" "$commit_count" "$ITERATION" "$mr_max_iter" "$(boucle_deploy_mode)" "$(boucle_review_mode)")
 
   # ── MR create or update ──────────────────────────────────────────
   local mr_iid

@@ -19,12 +19,23 @@ stages:
   - verify
 
 variables:
+  # Required by lib/boucle-ci.sh, which exits 1 when it is unset — jobs that
+  # call `bin/boucle-ci <stage>` cannot bootstrap without it. Overridable, but
+  # this file IS the GitLab pipeline, so gitlab is the only sane default.
+  BOUCLE_FORGE: "gitlab"
   BOUCLE_FORGE_HOST: gitlab.example.com
-  # Runner tag for agent jobs (triage/worker/reviewer/e2e/deploy). Override via a
-  # project variable of the same name (Settings > CI/CD > Variables) to route jobs
-  # to a project-specific runner, e.g. BOUCLE_RUNNER_TAG=Debian. Precedence:
-  # project/group variables beat this YAML default, so unset consumers keep "boucle".
-  BOUCLE_RUNNER_TAG: "boucle"
+  # NOTE: there is deliberately no BOUCLE_RUNNER_TAG here. Jobs run UNTAGGED by
+  # default, so the instance's shared runners pick them up and a fresh install
+  # needs no runner of its own. A variable cannot express this: GitLab expands
+  # `tags: [$VAR]` with an empty VAR into `tags: [""]`, which matches no runner
+  # and strands the job. Routing to a dedicated runner is therefore opt-in at
+  # the consumer's root shim, which overrides `default:` key-by-key:
+  #
+  #   default:
+  #     tags: [boucle]
+  #
+  # `bin/setup --runner-tag <tag>` writes that block for you. See README
+  # "Advanced — dedicated runners".
   BOUCLE_BUILD_CMD: "npm ci && npm run build"
   BOUCLE_BUILD_OUTPUT: "public"
   # Deploy: swap to any deploy command. Use $$BRANCH (escaped so eval expands it at runtime with
@@ -136,19 +147,15 @@ variables:
 # The shared runner is a docker executor. node:22-slim is ~250MB vs ~1GB.
 # before_script installs glab + jcode + wrangler (not in the image).
 default:
-  image: node:22-slim
-  # Route to the project's dedicated runner. It's a shell executor (ignores
-  # image:), so before_script self-installs node — but the install persists
-  # across runs, making subsequent runs faster than docker (which reinstalls
-  # every time). NOTE: a shared docker runner without a matching tag cannot
-  # pick up these jobs — only a runner tagged with BOUCLE_RUNNER_TAG can.
-  # Loop-critical control-plane jobs (dispatch, merger) override this with
-  # `tags: []` so they run on any available runner and are never blocked by a
-  # busy dedicated runner.
-  # The tag is project-specific infrastructure — run `bin/setup --runner-tag
-  # <tag>` (or set the BOUCLE_RUNNER_TAG project variable) to configure it for
-  # your project. Default: "boucle" (see BOUCLE_RUNNER_TAG in `variables:` above).
-  tags: [$BOUCLE_RUNNER_TAG]
+  # Pre-baked agent toolchain (glab/jq/git/node/python3/jcode/codebase-memory-mcp)
+  # so docker-based runners skip the ~60s of downloads in the before_script
+  # below. Shell executors ignore `image:` entirely and fall back to that
+  # before_script, which probes `command -v` before installing anything — so
+  # the same configuration serves both executor types.
+  image: docker.io/ankabootops/boucle-agents:latest
+  # NO `tags:` here, on purpose: jobs run UNTAGGED so the instance's shared
+  # runners can pick them up. A fresh install therefore needs no runner of its
+  # own — see README "Advanced — dedicated runners" to route to one instead.
   before_script:
     - |
       # Trace commands only when CI_DEBUG_TRACE is set (GitLab's native debug flag).
@@ -1100,9 +1107,9 @@ dispatch:
 triage:
   stage: triage
   # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
-  # The triage job inherits default.tags: [boucle] — if the assigned runner is broken,
+  # The triage job runs untagged (default has no tags) — if the assigned runner is broken,
   # the job fails instantly with runner_system_failure and the issue is stranded.
-  # retry lets GitLab reassign to another tagged runner.
+  # retry lets GitLab reassign to another runner.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
   retry:
     max: 2
@@ -1920,9 +1927,9 @@ triage:
 worker:
   stage: work
   # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
-  # The worker job inherits default.tags: [boucle] — if the assigned runner is broken,
+  # The worker job runs untagged (default has no tags) — if the assigned runner is broken,
   # the job fails instantly with runner_system_failure and the issue is stranded.
-  # retry lets GitLab reassign to another tagged runner.
+  # retry lets GitLab reassign to another runner.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
   retry:
     max: 2
@@ -2654,8 +2661,9 @@ worker:
       else
         PREVIEW_LINE="Diff review (no preview deploy — BOUCLE_DEPLOY_CMD empty)"
       fi
-      MR_DESCRIPTION=$(printf '## Issue #%s — iteration %s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s_' \
-        "$BOUCLE_ISSUE" "$ITERATION" "$PREVIEW_LINE" "${COMMIT_SUMMARY:-(no commits)}" "${APPROACH:-(not recorded)}" "$BOUCLE_ISSUE" "$COMMIT_COUNT" "$ITERATION")
+      MR_MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
+      MR_DESCRIPTION=$(printf '## Issue #%s — iteration %s/%s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s/%s_' \
+        "$BOUCLE_ISSUE" "$ITERATION" "$MR_MAX_ITER" "$PREVIEW_LINE" "${COMMIT_SUMMARY:-(no commits)}" "${APPROACH:-(not recorded)}" "$BOUCLE_ISSUE" "$COMMIT_COUNT" "$ITERATION" "$MR_MAX_ITER")
 
       # Check if a MR already exists for this branch (worker re-run / iteration 2+).
       # If so, reuse it instead of failing on a 409 from glab mr create.
@@ -2776,9 +2784,9 @@ worker:
 reviewer:
   stage: review
   # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
-  # The reviewer job inherits default.tags: [boucle] — if the assigned runner is broken,
+  # The reviewer job runs untagged (default has no tags) — if the assigned runner is broken,
   # the job fails instantly with runner_system_failure and the MR is stranded.
-  # retry lets GitLab reassign to another tagged runner.
+  # retry lets GitLab reassign to another runner.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
   retry:
     max: 2
@@ -3224,6 +3232,12 @@ reviewer:
             exit 0
           fi
           if [ "$ITERATION" -lt "$MAX_ITER" ]; then
+            # Last-chance warning. Posted ONLY when the iteration being started
+            # is the final one, so an issue produces at most one of these.
+            # Mirrors lib/boucle-ci/reviewer.sh.
+            if [ "$((ITERATION+1))" -eq "$MAX_ITER" ]; then
+              forge_mr_note "$MR_IID" "$(printf '⏳ **Final attempt** — starting worker iteration %s/%s.\n\nIf this iteration does not satisfy the acceptance criteria, the loop stops and hands the MR to you (`boucle:human`) instead of retrying. Commenting now — on this MR or on the issue — still amends the spec and reaches the worker.' "$((ITERATION+1))" "$MAX_ITER")" || echo "[boucle] WARN: could not post the final-attempt notice — continuing (advisory only)."
+            fi
             set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
             # Chain back to worker with incremented iteration
             chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=$((ITERATION+1))
@@ -3316,10 +3330,6 @@ merger:
   # Run on ANY available runner (tags: []) so an approved MR is never blocked
   # waiting behind a heavy worker/reviewer job on the single data runner.
   tags: []
-  # Pre-baked agent toolchain (glab/jq/git/node/python3/jcode) so docker-based
-  # runners skip the ~60s global before_script downloads. The minimal
-  # before_script below is still a no-op fallback for shell executors.
-  image: docker.io/ankabootops/boucle-agents:latest
   # Serialize all merges project-wide — one MR merges at a time.
   resource_group: boucle-merge
   needs:
@@ -3594,124 +3604,23 @@ merger:
 post-merge:
   stage: merge
   tags: []
-  # Pre-baked agent toolchain (glab/jq/git/node/python3/jcode) so docker-based
-  # runners skip the ~60s global before_script downloads.
-  image: docker.io/ankabootops/boucle-agents:latest
   needs:
     - job: merger
   rules:
     - if: $BOUCLE_ENABLED != "true"
       when: never
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "merger"
-  before_script:
-    - |
-      [[ "${CI_DEBUG_TRACE:-false}" == "true" ]] && set -x
-      export PATH="$HOME/.local/bin:$PATH"
-      export GITLAB_TOKEN="$BOUCLE_TOKEN"
-      export GITLAB_HOST="$BOUCLE_FORGE_HOST"
-      export GLAB_NO_UPDATE_NOTIFIER=true
-
-      # ── curl + jq + git (no-op on the agents image, fallback otherwise) ──
-      if ! command -v curl &>/dev/null || ! command -v jq &>/dev/null || ! command -v git &>/dev/null; then
-        echo "Installing curl + jq + git..."
-        apt-get update -qq && apt-get install -y -qq curl jq git
-      fi
-
-      # ── glab CLI ───────────────────────────────────────────────────
-      if ! command -v glab &>/dev/null; then
-        echo "Installing glab..."
-        mkdir -p "$HOME/.local/bin"
-        GLAB_VER="1.50.0"
-        curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VER}/downloads/glab_${GLAB_VER}_linux_amd64.tar.gz" -o "/tmp/glab-${CI_JOB_ID:-local}.tar.gz"
-        mkdir -p "/tmp/glab-${CI_JOB_ID:-local}"
-        tar xzf "/tmp/glab-${CI_JOB_ID:-local}.tar.gz" -C "/tmp/glab-${CI_JOB_ID:-local}"
-        cp "/tmp/glab-${CI_JOB_ID:-local}/bin/glab" "$HOME/.local/bin/glab" 2>/dev/null || cp "/tmp/glab-${CI_JOB_ID:-local}/glab" "$HOME/.local/bin/glab"
-        chmod +x "$HOME/.local/bin/glab"
-        rm -rf "/tmp/glab-${CI_JOB_ID:-local}" "/tmp/glab-${CI_JOB_ID:-local}.tar.gz"
-      fi
-
-      # ── BOUCLE_BOT_ID resolution ──
-      # Skipped in mono-user mode: resolving by username would land on the
-      # human's own account, silently re-enabling the bot auto-assignment
-      # that set_boucle_label is meant to skip when there is no bot.
-      if [ -z "${BOUCLE_BOT_ID:-}" ] && [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ] \
-         && { [ -z "${BOUCLE_MONO_USER:-}" ] || [ "${BOUCLE_MONO_USER}" = "false" ]; }; then
-        BOUCLE_BOT_USERNAME="${BOUCLE_BOT_USERNAME:-up-bot}"
-        RESOLVED_ID=$(curl -sf --header "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
-          "https://$BOUCLE_FORGE_HOST/api/v4/users?username=$BOUCLE_BOT_USERNAME" \
-          2>/dev/null | jq -r '.[0].id // empty' 2>/dev/null || true)
-        if [ -n "$RESOLVED_ID" ]; then
-          export BOUCLE_BOT_ID="$RESOLVED_ID"
-          echo "Resolved BOUCLE_BOT_ID=$BOUCLE_BOT_ID by username ($BOUCLE_BOT_USERNAME)"
-        fi
-      fi
-
-      # ── Locate the boucle engine (submodule or dogfood root) ──────
-      # Consumers install boucle as a git submodule at .boucle/ — engine
-      # files (bin/, lib/, .jcode/) resolve via $BOUCLE_HOME. The boucle
-      # repo itself (dogfood) runs with the engine at the repo root, so
-      # fall back to $CI_PROJECT_DIR.
-      if [ -d "$CI_PROJECT_DIR/.boucle/bin" ]; then
-        export BOUCLE_HOME="$CI_PROJECT_DIR/.boucle"
-      else
-        export BOUCLE_HOME="$CI_PROJECT_DIR"
-      fi
-      export JCODE_HOME="$CI_PROJECT_DIR/.boucle-state/.jcode"
-
-      # ── Shared boucle helpers (set_boucle_label, chain_to_role, ...) ──
-      # ── Forge abstraction (MUST precede lib/boucle.sh — it calls forge_*) ──
-      source "$BOUCLE_HOME/bin/forge/common.sh"
-      forge_init
-      # chain_to_role/forge_trigger_role rely on BOUCLE_DEFAULT_BRANCH — never
-      # set by GitLab; resolve from the native CI_DEFAULT_BRANCH (fallback
-      # master) so triggers target the real default branch, not "main".
-      export BOUCLE_DEFAULT_BRANCH="${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}"
-      # BOUCLE_PROJECT_ID is normalized by lib/boucle-ci.sh for bin/boucle-ci
-      # jobs; INLINE jobs (merger, doctor, ...) must get it here too, or the
-      # forge_* triggers/notes POST to an empty project id (silently dropped
-      # by `|| true`) — observed re-trigger failure on framagit, 2026-08.
-      export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:-}}"
-      export BOUCLE_WORKSPACE="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-$(pwd)}}"
-      source "$BOUCLE_HOME/lib/boucle.sh"
+  # No before_script override: the global `default:` one already installs the
+  # toolchain, resolves BOUCLE_BOT_ID, locates $BOUCLE_HOME and sources the
+  # forge layer. The copy that used to live here duplicated all of it and had
+  # drifted (glab 1.50.0 vs 1.111.0).
   script:
-    - |
-      set +o pipefail
-      export BOUCLE_ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
-
-      # The merge pushed to $CI_DEFAULT_BRANCH → triggers deploy → deploy triggers e2e.
-      # BUT deploy-triggered e2e has no BOUCLE_ISSUE context, so
-      # maybe_close_parent never runs. Fix: trigger e2e directly WITH
-      # BOUCLE_ISSUE set, so the issue gets boucle:done + closed + parent cascade.
-      # Wait for the deploy pipeline to finish first (production must be live
-      # before e2e can test it). Poll for the deploy pipeline to complete.
-      echo "Waiting for deploy pipeline to complete before triggering e2e..."
-      for i in $(seq 1 60); do
-        # Find the latest deploy pipeline for $CI_DEFAULT_BRANCH
-        DEPLOY_PIPELINES=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/pipelines?ref=$CI_DEFAULT_BRANCH&per_page=5" 2>/dev/null)
-        DEPLOY_STATUS=$(echo "$DEPLOY_PIPELINES" | jq -r '[.[] | select(.source == "push")] | first | .status // "unknown"')
-        if [ "$DEPLOY_STATUS" = "success" ] || [ "$DEPLOY_STATUS" = "failed" ] || [ "$DEPLOY_STATUS" = "canceled" ]; then
-          echo "Deploy pipeline status: $DEPLOY_STATUS"
-          break
-        fi
-        sleep 15
-      done
-
-      # Get the production URL (from the deploy's e2e trigger or fallback)
-      LIVE_URL="${BOUCLE_PRODUCTION_URL:-}"
-      if [ -z "$LIVE_URL" ] && [ -n "${CI_PAGES_URL:-}" ]; then
-        # Declarative GitLab Pages (BOUCLE_DEPLOY_PROVIDER=gitlab-pages):
-        # the forge serves the site at $CI_PAGES_URL — never the pages.dev
-        # fallback below, which would point at a nonexistent CF project.
-        LIVE_URL="$CI_PAGES_URL"
-      fi
-      if [ -z "$LIVE_URL" ]; then
-        # Fetch the deploy pipeline's e2e job variables (best-effort)
-        LIVE_URL="https://${BOUCLE_DEPLOY_PROJECT}.pages.dev"
-      fi
-
-      # Trigger e2e WITH BOUCLE_ISSUE set → enables maybe_close_parent
-      chain_to_role "$BOUCLE_ISSUE" "e2e" BOUCLE_LIVE_URL=$LIVE_URL
-      echo "Triggered e2e for issue #$BOUCLE_ISSUE with LIVE_URL=$LIVE_URL"
+    # Shared stage (lib/boucle-ci/post-merge.sh) — same code path as GitHub
+    # Actions. It also implements BOUCLE_DEPLOY_MODE=external (wait on the
+    # consumer's check suites for the merged commit), which the inline copy
+    # this replaces never had: on GitLab, external mode silently skipped
+    # straight to e2e without waiting for the consumer's own CI.
+    - bin/boucle-ci post-merge
   # 30m to accommodate provider fallback: 12m primary + 12m fallback + 6m overhead.
   timeout: 30m
 
@@ -3729,9 +3638,6 @@ catchup:
   # available runner (tags: []) so a direct merge is never blocked waiting
   # behind a heavy worker/reviewer job on the single data runner.
   tags: []
-  # Pre-baked agent toolchain (glab/jq/git/node/python3/jcode) so docker-based
-  # runners skip the ~60s global before_script downloads.
-  image: docker.io/ankabootops/boucle-agents:latest
   needs:
     - job: dispatch
       optional: true
@@ -4115,8 +4021,8 @@ catchup:
 deploy:
   stage: deploy
   # Auto-retry transient runner failures (runner busy/offline, OOM, daemon restart).
-  # The deploy job inherits default.tags: [boucle] — it can only run on the dedicated
-  # shell runner, which is shared with worker jobs. Contention produces
+  # The deploy job runs untagged (default has no tags). On an install pinned to a
+  # dedicated runner it contends with worker jobs, which produces
   # runner_system_failure; retrying recovers without human intervention.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
   # Cap at 2 (GitLab hard limit for retry.max is 2).
@@ -4140,62 +4046,20 @@ deploy:
   needs:
     - job: build-site
   script:
-    - |
-      # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
-      set +o pipefail
-      # No deploy command (e.g. GitLab Pages mode / external): skip cleanly.
-      if [ -z "${BOUCLE_DEPLOY_CMD:-}" ]; then
-        echo "deploy: BOUCLE_DEPLOY_CMD is empty (Pages/external mode) — skipping"
-        exit 0
-      fi
-      # Site content comes from build-site's artifact (public/) — no rebuild
-      # here (WASM OOM on shell executors, framagit 2026-08).
-      # Deploy to production (configurable via BOUCLE_DEPLOY_CMD, force $CI_DEFAULT_BRANCH branch)
-      BRANCH=$CI_DEFAULT_BRANCH
-      DEPLOY_URL=$(eval "$BOUCLE_DEPLOY_CMD" 2>&1 | grep -oE "$BOUCLE_DEPLOY_URL_REGEX" | head -1)
-
-      # Assert: deployment URL returns 200 (production domain may not have DNS yet).
-      if [ -z "$DEPLOY_URL" ]; then
-        echo "FAIL: no deployment URL from wrangler" >&2; exit 1
-      fi
-      # Retry with exponential backoff — Cloudflare Pages edge propagation
-      # can lag the deploy command's return. Total budget ~5 min.
-      DEPLOY_OK=false
-      attempt=0
-      delay=5
-      while [ "$attempt" -lt 6 ]; do
-        attempt=$((attempt + 1))
-        HTTP_CODE=$(curl -sL -o /dev/null -w "%{http_code}" "$DEPLOY_URL" 2>/dev/null || echo "000")
-        if [ "$HTTP_CODE" = "200" ]; then
-          echo "Deployment URL 200 OK (attempt $attempt/6)"
-          DEPLOY_OK=true
-          break
-        fi
-        if [ "$attempt" -lt 6 ]; then
-          echo "Deployment URL returned $HTTP_CODE (attempt $attempt/6) — retrying in ${delay}s..." >&2
-          sleep "$delay"
-          delay=$((delay * 2))
-        fi
-      done
-      if [ "$DEPLOY_OK" != "true" ]; then
-        echo "FAIL: deployment URL $DEPLOY_URL not 200 after $attempt attempts (last code: $HTTP_CODE)" >&2; exit 1
-      fi
-      echo "Deployed to $DEPLOY_URL (200 OK)"
-
-      # Chain to e2e with the deployment URL (production domain may not have DNS yet)
-      curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
-        -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=$CI_DEFAULT_BRANCH" \
-        -F "variables[BOUCLE_ROLE]=e2e" \
-        -F "variables[BOUCLE_LIVE_URL]=$DEPLOY_URL" > /dev/null
+    # Shared stage (lib/boucle-ci/deploy.sh) — same code path as GitHub
+    # Actions. It skips the build when $BOUCLE_BUILD_OUTPUT is already
+    # populated, which is the case here: build-site hands it over as an
+    # artifact (rebuilding OOMs WASM toolchains on shell executors).
+    - bin/boucle-ci deploy
   timeout: 10m
 
 # ── E2E (after deploy) ─────────────────────────────────────────────────
 e2e:
   stage: verify
   # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
-  # The e2e job inherits default.tags: [boucle] — if the assigned runner is broken,
+  # The e2e job runs untagged (default has no tags) — if the assigned runner is broken,
   # the job fails instantly with runner_system_failure and the issue is stranded.
-  # retry lets GitLab reassign to another tagged runner.
+  # retry lets GitLab reassign to another runner.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
   retry:
     max: 2
@@ -4574,10 +4438,11 @@ e2e:
 doctor:
   stage: verify
   # Loop-critical control-plane job: makes only API calls, no build.
-  # Override default.tags ([boucle]) so the doctor runs on ANY available runner
-  # and is never blocked by a busy dedicated runner — same
-  # pattern as dispatch, merger, and catchup. Without this, the doctor fails
-  # with runner_system_failure whenever a worker is running on the data runner.
+  # Explicit `tags: []` — the doctor runs on ANY available runner and is never
+  # blocked by a busy dedicated one, same pattern as dispatch, merger and
+  # catchup. It stays explicit even though `default:` is now untagged, so an
+  # install that pins `default: tags:` to its own runner (README "Advanced —
+  # dedicated runners") does not strand the doctor behind a running worker.
   tags: []
   rules:
     - if: $BOUCLE_ENABLED != "true"
