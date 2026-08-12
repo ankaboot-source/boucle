@@ -1421,6 +1421,37 @@ atomic.
       but old URL), this lesson covers NO deploy at all (no URL by
       design).
 
+61. **Doctor re-trigger must NOT be skipped by a stale closed MR**
+    - ❌ DO NOT `continue` in the doctor's stuck-issue loop when a closed
+      (or merged) MR coexists with an open MR on the same branch. The
+      "skipping close" branch is meant to avoid CLOSING the issue — but
+      the `continue` also skips the re-trigger logic below, stranding the
+      issue at `boucle:working` forever. Observed on a consumer (2026-08):
+      issue #55 had a closed MR from a previous iteration (!59) plus the
+      current open MR (!93); the doctor logged "closed MR exists but an
+      open MR also exists — skipping close" every 10 minutes and never
+      re-triggered the stuck worker. With `BOUCLE_MAX_PARALLEL_ISSUES=1`
+      the stranded issue occupied the single worker slot, so a second
+      queued issue (`boucle:todo`) was never started either — two issues
+      blocked by one `continue`.
+    - ❌ DO NOT fix only one copy. The guard lives in BOTH the extracted
+      `lib/boucle-ci/doctor.sh` and the inline doctor job in
+      `.gitlab-ci.yml`, in TWO branches each (merged-MR and closed-MR).
+      A fix in one copy leaves the bug live on the other (lesson #56
+      greps ALL copies).
+    - ✅ DO: on "open MR also exists", fall THROUGH to the re-trigger
+      logic (active-pipeline check → staleness check → `chain_to_role`)
+      instead of `continue` — the open MR is active work, so a stuck
+      worker/reviewer on it MUST be recovered. Only the terminal branches
+      (MR merged / MR closed with NO open MR) may `continue`.
+    - Admission: class — any future guard that conflates "don't close the
+      issue" with "skip recovery"; recurrence — the natural instinct when
+      adding a "don't close on reopen" check is to `continue`, and both
+      copies have two such branches; stable — no line numbers, no
+      transient values; distinct — lesson #57 covers the reviewer's
+      closed-MR done-transition, lesson #44 covers roles on closed
+      issues; this lesson covers the doctor's re-trigger path.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
