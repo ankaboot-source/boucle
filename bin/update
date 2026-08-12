@@ -59,6 +59,16 @@ curl_with_auth() {
   fi
 }
 
+# configure_git_push: configure git remote with the bot token so bin/update
+# can push the auto-update commit from a CI runner. The runner's default
+# token (CI_JOB_TOKEN) has pull-only permissions — push requires the bot
+# PAT (BOUCLE_TOKEN). No-op when BOUCLE_TOKEN is unset (local dev).
+configure_git_push() {
+  if [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ] && [ -n "${CI_PROJECT_PATH:-}" ]; then
+    git remote set-url origin "https://${BOUCLE_BOT_USERNAME:-up-bot}:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${CI_PROJECT_PATH}.git" 2>/dev/null
+  fi
+}
+
 # ── Pure functions (testable, no network) ──────────────────────────────
 
 # get_mode: echo the configured update mode (release|dev), default release.
@@ -211,6 +221,7 @@ main() {
     git config user.name > /dev/null 2>&1 || git config user.name "boucle-bot"
     git add "$VERSION_FILE"
     git commit -m "chore(boucle): record initial version $upstream" > /dev/null 2>&1 || true
+    configure_git_push
     git push 2> /dev/null || echo "[boucle] WARN: push failed, will retry next pipeline" >&2
     echo "[boucle] recorded initial version $upstream"
     return 0
@@ -249,6 +260,7 @@ main() {
   # shellcheck disable=SC2086 # word-splitting is intentional: add_paths is a space-separated list.
   git add $add_paths "$VERSION_FILE"
   git commit -m "chore(boucle): auto-update to $upstream" > /dev/null 2>&1 || true
+  configure_git_push
   git push 2> /dev/null || echo "[boucle] WARN: push failed, will retry next pipeline" >&2
 
   echo "[boucle] updated to $upstream"
