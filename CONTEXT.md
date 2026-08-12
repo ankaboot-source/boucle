@@ -25,6 +25,14 @@ Astro website (GitLab-hosted, deployed to Cloudflare Pages). The failure
 modes observed there — and in the *looper* POC that preceded boucle —
 shaped the design.
 
+> **Dogfood status (2026-08):** The engine repo no longer dogfoods on a
+> consumer (the origin Astro site was split out to its own repo to separate
+> engine from consumer). Dogfooding is **suspended voluntarily** — the
+> existing mix of engine and consumer code in one repo was untenable. A
+> dedicated test consumer will be re-introduced once the engine/consumer
+> separation is stable. Until then, new classes of bugs are discovered on
+> real consumers; the 62 AGENTS.md lessons remain as the incident catalog.
+
 ## 2. Features
 
 - **Self-maintaining documentation** — boucle keeps its charter docs
