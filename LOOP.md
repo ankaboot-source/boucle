@@ -21,13 +21,18 @@ Autonomous dev loop for the target static site.
 
 ## Do-Not-Disturb (DND)
 
-When `BOUCLE_DND_ENABLED=true`, the spec gate is auto-validated during the
-quiet window (default 22:00–07:00, configurable via
+DND is **opt-in** and OFF by default — an autonomous run must be
+explicit, never time-based by default. When `BOUCLE_DND_ENABLED=true`,
+the spec gate is auto-validated during the quiet window (default
+22:00–07:00, configurable via
 `BOUCLE_DND_START`/`BOUCLE_DND_END`/`BOUCLE_DND_TZ`). The loop runs
 autonomously up to the MR without contacting the human. The skip is
-transparent: triage posts an explanatory comment (active window + how to
-disable) and applies the `boucle:dnd` flag label so the board shows WHY the
-gate was skipped. MR approval stays human-gated.
+transparent: triage posts an explanatory comment (active window + how
+to disable) and applies the `boucle:dnd` flag label so the board shows
+WHY the gate was skipped. MR approval stays human-gated.
+
+For **per-issue** autonomy without DND, add the `boucle:autonomous`
+label to the issue — the spec gate is skipped for that issue only.
 
 ## Caps
 
@@ -85,7 +90,7 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_FORGE` | `gitlab` | Active forge: `gitlab` or `github`. |
 | `BOUCLE_MONO_USER` | *(empty)* | `true` when one account owns both the issues and the loop (`bin/setup --mono-user`). Swaps the actor-based anti-loop guard for the `<!-- boucle:agent -->` marker, drops the `boucle::status::*` gross label and both assignee side effects. `false` is treated as unset. Degrades notifications — see README. |
 | `BOUCLE_SPEC_PROFILE` | `product` | Spec validation profile: `product` (default, gates Size M only), `strict` (gates all sizes), `off` (never); unknown → `product`. |
-| `BOUCLE_DND_ENABLED` | `true` | Do-Not-Disturb master switch: `true` or `false`. |
+| `BOUCLE_DND_ENABLED` | `false` | Do-Not-Disturb master switch: `true` (opt-in) or `false` (default). |
 | `BOUCLE_DND_START` / `BOUCLE_DND_END` | `22:00` / `07:00` | Quiet-hours window: HH:MM 24h start/end. |
 | `BOUCLE_DND_TZ` | `UTC` | Quiet-hours timezone (IANA name, e.g. `Europe/Paris`); seeded by `bin/setup` from the machine's timezone. |
 | `BOUCLE_DND_EXCLUDE_DAYS` | *(empty)* | Comma-separated weekday names never in DND (e.g. `Fri,Sat`). |
