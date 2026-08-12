@@ -78,7 +78,7 @@ classify() {
 @test "reset: state and iteration notes survive a reset (only code is discarded)" {
   # The restore-from-cache block must still run after the checkout block.
   reset_line=$(grep -n 'Previous iteration shipped no code (contaminated tree)' lib/boucle-ci/worker.sh | cut -d: -f1)
-  restore_line=$(grep -n 'Restoring .boucle/\$BOUCLE_ISSUE/ from' lib/boucle-ci/worker.sh | cut -d: -f1)
+  restore_line=$(grep -n 'Restoring .boucle-state/\$BOUCLE_ISSUE/ from' lib/boucle-ci/worker.sh | cut -d: -f1)
   [ -n "$reset_line" ]
   [ -n "$restore_line" ]
   [ "$reset_line" -lt "$restore_line" ]

@@ -30,9 +30,9 @@ run_gate() {
 	local issue="$1" build_cmd="$2" deploy="$3" seed="$4"
 	local tmp
 	tmp=$(mktemp -d)
-	mkdir -p "$tmp/.boucle/$issue"
+	mkdir -p "$tmp/.boucle-state/$issue"
 	if [ -n "$seed" ]; then
-		printf '%s\n' "$seed" >"$tmp/.boucle/$issue/build-feedback.md"
+		printf '%s\n' "$seed" >"$tmp/.boucle-state/$issue/build-feedback.md"
 	fi
 	{
 		cat <<-'EOF'
@@ -64,7 +64,7 @@ run_gate() {
 	local rc=0
 	(cd "$tmp" && OUT="$tmp/out.txt" DEPLOY="$deploy" bash gate.sh "$issue" "$build_cmd" "public") 2>/dev/null || rc=$?
 	echo "$rc" >"$tmp/rc.txt"
-	cp -r "$tmp/.boucle" "$BATS_TEST_TMPDIR/.boucle" 2>/dev/null || true
+	cp -r "$tmp/.boucle-state" "$BATS_TEST_TMPDIR/.boucle-state" 2>/dev/null || true
 	cp "$tmp/out.txt" "$BATS_TEST_TMPDIR/out.txt" 2>/dev/null || true
 	cp "$tmp/rc.txt" "$BATS_TEST_TMPDIR/rc.txt"
 	rm -rf "$tmp"
@@ -75,15 +75,15 @@ run_gate() {
 	run_gate "42" "echo boom; exit 1" "0" ""
 	rc=$(cat "$BATS_TEST_TMPDIR/rc.txt")
 	[ "$rc" -ne 0 ]
-	[ -f "$BATS_TEST_TMPDIR/.boucle/42/build-feedback.md" ]
-	run grep -q "boom" "$BATS_TEST_TMPDIR/.boucle/42/build-feedback.md"
+	[ -f "$BATS_TEST_TMPDIR/.boucle-state/42/build-feedback.md" ]
+	run grep -q "boom" "$BATS_TEST_TMPDIR/.boucle-state/42/build-feedback.md"
 	assert_success
 }
 
 @test "build gate: a successful build removes build-feedback.md" {
 	BATS_TEST_TMPDIR=$(mktemp -d)
 	run_gate "42" "echo ok" "0" "stale error"
-	[ ! -f "$BATS_TEST_TMPDIR/.boucle/42/build-feedback.md" ]
+	[ ! -f "$BATS_TEST_TMPDIR/.boucle-state/42/build-feedback.md" ]
 }
 
 @test "build gate: an empty BOUCLE_BUILD_CMD skips the gate (no feedback file, exit 0)" {
@@ -91,12 +91,12 @@ run_gate() {
 	run_gate "42" "" "0" ""
 	rc=$(cat "$BATS_TEST_TMPDIR/rc.txt")
 	[ "$rc" -eq 0 ]
-	[ ! -f "$BATS_TEST_TMPDIR/.boucle/42/build-feedback.md" ]
+	[ ! -f "$BATS_TEST_TMPDIR/.boucle-state/42/build-feedback.md" ]
 }
 
 @test "build gate: BOUCLE_BUILD_FEEDBACK is exported from build-feedback.md when it exists" {
 	BATS_TEST_TMPDIR=$(mktemp -d)
-	mkdir -p "$BATS_TEST_TMPDIR/.boucle/42"
+	mkdir -p "$BATS_TEST_TMPDIR/.boucle-state/42"
 	printf 'build error line 1\nline 2\n' >"$BATS_TEST_TMPDIR/.boucle-state/42/build-feedback.md"
 	# Source the read block in isolation (the same logic as Edit A).
 	run bash -c '
