@@ -59,6 +59,55 @@ check_sibling_gate() {
   return 0
 }
 
+# ── File-impact gate (MR 1 — declared marker) ────────────────────────
+# Before a worker starts, compare the files its issue claims (via the
+# `<!-- boucle:files v=1 paths=... -->` marker note) against the files
+# claimed by in-flight issues (working/review/approval/merging). If
+# overlapping, DEFER the worker (boucle:blocked) until the claim is
+# released. Prevents parallel workers editing the same files from
+# conflicting at rebase/merge (consumer 2026-08: siblings #69/#71
+# diverged on RightToResistBlock.astro and the merger escalated).
+#
+# Fail-open everywhere: disabled (BOUCLE_FILE_GATE=false), missing own
+# marker, missing other marker, forge API error → return 0 (pass). A
+# flaky forge/git must never block the loop (CONTEXT.md §7).
+check_file_gate() {
+  local iid="$1"
+  # Disabled → fail-open (legacy behavior).
+  if [ "${BOUCLE_FILE_GATE:-true}" = "false" ]; then
+    return 0
+  fi
+  # Read own latest files-marker. Absent → no claim → pass (fail-open).
+  local own_notes own_paths
+  own_notes=$(forge_issue_notes "$iid" 2> /dev/null || echo "[]")
+  own_paths=$(parse_files_marker "$own_notes")
+  [ -z "$own_paths" ] && return 0
+  # List active issues (open, labeled working/review/approval/merging).
+  # Exclude self. Build the in-flight claim map.
+  local active_iids active_iid active_notes active_paths overlap
+  active_iids=$(forge_issue_list_by_label "boucle:working,boucle:review,boucle:approval,boucle:merging" opened 2> /dev/null \
+    | jq -r --arg self "$iid" '[.[] | select((.iid // .number | tostring) != $self) | .iid // .number] | join(" ")' 2> /dev/null || echo "")
+  [ -z "$active_iids" ] && return 0
+  for active_iid in $active_iids; do
+    active_notes=$(forge_issue_notes "$active_iid" 2> /dev/null || echo "[]")
+    active_paths=$(parse_files_marker "$active_notes")
+    [ -z "$active_paths" ] && continue
+    # Intersect own_paths with active_paths (exact match, normalized).
+    overlap=$(printf '%s\n%s\n' "$own_paths" "$active_paths" \
+      | tr ',' '\n' | sed 's|^\./||' | sort -u \
+      | uniq -d | paste -sd, -)
+    if [ -n "$overlap" ]; then
+      echo "[boucle] #$iid blocked — file overlap with #$active_iid ($overlap)"
+      set_boucle_label "$iid" "boucle:blocked" "boucle::status::bot"
+      local block_body
+      block_body=$(printf '⏳ Blocked on file overlap with #%s (%s). The worker will start once #%s reaches done/closed.\n\n<!-- boucle:file-blocked v=1 on=%s paths=%s -->' "$active_iid" "$overlap" "$active_iid" "$active_iid" "$overlap")
+      forge_issue_note "$iid" "$block_body"
+      return 1
+    fi
+  done
+  return 0
+}
+
 # When a sub-issue closes, check whether any sibling sub-issues were
 # blocked waiting on it. For each blocked sibling whose deps are NOW all
 # closed, flip boucle:blocked → boucle:todo and trigger the worker.
@@ -128,6 +177,27 @@ maybe_unblock_dependents() {
         fi
         continue
       fi
+    fi
+    # ── File-conflict unblock (F4 — direct unblock, no full-gate re-run) ─
+    # A sibling blocked by the file gate carries a note with
+    # `<!-- boucle:file-blocked v=1 on=N paths=... -->`. When the blocking
+    # issue #N reaches done/closed, unblock the waiting issue directly —
+    # the next dispatch attempt re-runs check_file_gate to catch a second
+    # blocker (F4 simplification: no O(blocked × active) re-evaluation here).
+    local file_blocker
+    file_blocker=$(echo "$sib_notes" 2> /dev/null \
+      | jq -r '[.[] | select(.body | contains("<!-- boucle:file-blocked"))] | last | .body // empty' 2> /dev/null \
+      | grep -oE 'on=[0-9]+' | head -1 | cut -d= -f2)
+    if [ -n "$file_blocker" ] && [ "$file_blocker" = "$closed_iid" ]; then
+      echo "maybe_unblock_dependents: #$sib_iid unblocked (file overlap with #$closed_iid cleared)"
+      set_boucle_label "$sib_iid" "boucle:todo" "boucle::status::bot"
+      local unblock_body
+      unblock_body=$(printf '✅ File overlap with #%s cleared — worker starting.\n\n<!-- boucle:unblocked v=1 by=%s -->' "$closed_iid" "$closed_iid")
+      forge_issue_note "$sib_iid" "$unblock_body"
+      if ! issue_has_active_pipeline "$sib_iid"; then
+        chain_to_role "$sib_iid" "worker"
+      fi
+      continue
     fi
     [ -z "$sib_deps" ] && continue
     # Does this sibling depend on the just-closed IID?

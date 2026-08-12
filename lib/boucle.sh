@@ -1144,6 +1144,149 @@ The loop is paused on #$issue until you decide."
   set_boucle_label "$issue" "boucle:human" "boucle::status::human"
 }
 
+# ── File-impact marker parsing (file gate, MR 1) ──────────────────────
+# parse_files_marker <notes_json> — extract the paths from the newest
+# `<!-- boucle:files v=1 paths=... -->` marker note.
+#
+# Pure parser (no forge calls). Input: a JSON array of notes as returned by
+# forge_issue_notes (each note has .body and .created_at). Behavior:
+#   - Find notes whose body contains the files marker.
+#   - Among matching notes, pick the NEWEST by created_at (handles duplicate
+#     markers from a failed update — F5).
+#   - Extract the comma-separated `paths=` value and echo it.
+#   - Malformed marker (no paths=, empty) → echo empty.
+#   - No matching note → echo empty.
+# Fail-open by construction: an unreadable/absent marker yields empty, which
+# the caller treats as "no claim = no gate".
+parse_files_marker() {
+  local notes_json="$1"
+  [ -n "$notes_json" ] || return 0
+  local marker_body
+  marker_body=$(printf '%s' "$notes_json" \
+    | jq -r '[.[] | select(.body | contains("<!-- boucle:files v=1"))] | sort_by(.created_at) | last | .body // empty' \
+      2> /dev/null || echo "")
+  [ -n "$marker_body" ] || return 0
+  local paths
+  paths=$(printf '%s' "$marker_body" \
+    | grep -oE 'paths=[^ >-]+' | head -1 | cut -d= -f2)
+  # Filter to safe path characters only (drops malformed junk). A trailing
+  # comma from a malformed marker is harmless — the caller's for-loop skips
+  # empty entries.
+  paths=$(printf '%s' "$paths" | grep -oE '[A-Za-z0-9_./-]+' | paste -sd, -)
+  printf '%s' "$paths"
+}
+
+# ── Worker rebase-conflict handling (agent-first) ─────────────────────
+# Called when `git rebase origin/$CI_DEFAULT_BRANCH` fails inside the
+# worker job (setup + pre-build stages). Two modes:
+#
+#  - Conflict-retry run (BOUCLE_CONFLICT_FEEDBACK set — the merger
+#    re-triggered this run after a semantic conflict, see
+#    boucle_escalate_merge_conflict): hand the CONFLICTED TREE to the
+#    agent instead of aborting. bin/jc's worker prompt injects the
+#    conflict context + the supersession rule ("take the default branch's
+#    version as the base; if the goal is already covered by the default
+#    branch, say so instead of duplicating"). The agent edits the files
+#    and `git add`s the resolutions ONLY — the job completes the rebase
+#    (continue/skip loop handles empty commits when a resolution makes a
+#    commit a no-op). A blind abort+retry can NEVER resolve a semantic
+#    conflict — the agent must see the tree (observed on a consumer:
+#    MR !88, 5 mechanical retries, zero agent runs).
+#
+#  - Any other run: bounded abort → re-trigger → escalate (unchanged).
+#
+# $1: the re-trigger note text with a {ITER} placeholder for the
+#     "iteration N/MAX" suffix. Uses the job env: BOUCLE_ISSUE,
+#     BOUCLE_ITERATION, BOUCLE_MAX_ITERATIONS, CI_PROJECT_ID,
+#     BOUCLE_DEFAULT_BRANCH, BOUCLE_HOME, BOUCLE_CONFLICT_FEEDBACK.
+#     Exits the job on the retry/escalate paths.
+boucle_worker_rebase_conflict() {
+  local retry_note="$1"
+  local iteration="${BOUCLE_ITERATION:-1}"
+  local max_iter="${BOUCLE_MAX_ITERATIONS:-3}"
+  # Capture the conflicted paths BEFORE any abort clears them — the retry
+  # below forwards them as BOUCLE_CONFLICT_FEEDBACK so the NEXT worker run
+  # switches to agent-first resolution.
+  local conflict_paths
+  conflict_paths=$(git diff --name-only --diff-filter=U 2> /dev/null | tr '\n' ';')
+  [ -z "$conflict_paths" ] && conflict_paths="unclassified"
+
+  # ── Conflict-retry run: let the agent resolve the conflicted tree ──
+  if [ -n "${BOUCLE_CONFLICT_FEEDBACK:-}" ]; then
+    echo "[boucle] conflict-retry run — handing the conflicted tree to the agent (BOUCLE_CONFLICT_FEEDBACK)."
+    # The agent's exit code is NOT the verdict — the tree state is (it may
+    # exhaust its step budget right after resolving, or complete the rebase
+    # itself). Loop: agent resolves → continue → if a LATER commit of the
+    # rebase hits a NEW conflict, hand the tree back to the agent again
+    # (cascading conflicts on subsequent commits need the same judgment).
+    local attempt s resolved=false
+    for attempt in 1 2 3; do
+      if git status --porcelain | grep -qE '^(UU|AA|DD|AU|UA|DU|UD)'; then
+        if [ "$attempt" -gt 1 ]; then
+          echo "[boucle] rebase --continue hit a new conflict — re-running the agent (attempt $attempt/3)."
+        fi
+        $BOUCLE_HOME/bin/jc worker || echo "WARN: conflict-resolution agent exited non-zero — checking the tree state..."
+        if git status --porcelain | grep -qE '^(UU|AA|DD|AU|UA|DU|UD)'; then
+          echo "FAIL: conflict markers remain after the agent (attempt $attempt/3) — aborting" >&2
+          break
+        fi
+      fi
+      for s in $(seq 1 30); do
+        if [ ! -d .git/rebase-merge ] && [ ! -d .git/rebase-apply ]; then
+          resolved=true
+          break 2
+        fi
+        if GIT_EDITOR=true git rebase --continue > /dev/null 2>&1; then
+          continue
+        fi
+        if git status --porcelain | grep -qE '^(UU|AA|DD|AU|UA|DU|UD)'; then
+          break  # new conflict → outer loop re-runs the agent
+        fi
+        if ! GIT_EDITOR=true git rebase --skip > /dev/null 2>&1; then
+          echo "FAIL: rebase cannot continue or skip — aborting" >&2
+          break 2
+        fi
+      done
+      if [ "$resolved" = "true" ]; then
+        break
+      fi
+    done
+    if [ "$resolved" = "true" ]; then
+      echo "[boucle] rebase completed after agent resolution."
+      return 0
+    fi
+    git rebase --abort 2> /dev/null || true
+  else
+    echo "[boucle] Rebase conflicted — aborting, preserving prior worker commits." >&2
+    git rebase --abort 2> /dev/null || true
+  fi
+
+  # ── Bounded fallback: re-trigger (iter < MAX) or escalate to human ──
+  if [ "$iteration" -lt "$max_iter" ]; then
+    local issue_state
+    issue_state=$(forge_issue_get "$BOUCLE_ISSUE" 2> /dev/null | jq -r '.state // "unknown"' 2> /dev/null || echo "unknown")
+    if [ "$issue_state" = "closed" ]; then
+      echo "boucle: issue #$BOUCLE_ISSUE is closed — not re-triggering worker after rebase conflict (no-op on closed issue)"
+      exit 1
+    fi
+    local note
+    note=$(printf '%s' "$retry_note" | sed "s/{ITER}/$((iteration + 1))\/$max_iter/")
+    echo "Re-triggering worker (iteration $((iteration + 1))/$max_iter) — the next run preserves prior worker commits and re-bases again." >&2
+    set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
+    forge_issue_note "$BOUCLE_ISSUE" "$note" > /dev/null 2>&1 || true
+    chain_to_role "$BOUCLE_ISSUE" "worker" "BOUCLE_ITERATION=$((iteration + 1))" "BOUCLE_CONFLICT_FEEDBACK=$conflict_paths"
+  else
+    echo "Escalating to human (boucle:human) — iteration cap ($max_iter) reached after repeated rebase conflicts." >&2
+    # Note BEFORE the terminal label — never a muted boucle:human.
+    if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Worker could not rebase onto $BOUCLE_DEFAULT_BRANCH (conflict) after $max_iter attempts. Master keeps advancing. Human intervention needed."; then
+      echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
+      exit 1
+    fi
+    set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
+  fi
+  exit 1
+}
+
 # ── Shallow-clone depth fix for rebases ─────────────────────────────────
 # CI clones are shallow (GIT_DEPTH default 20; the merger CI comment says
 # --depth=1). Once the default branch advances past the depth, the merge

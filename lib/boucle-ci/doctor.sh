@@ -25,6 +25,9 @@ boucle_ci_doctor() {
   # Must mirror the dispatch job's constant — each CI job runs its own shell.
   BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup"
   source "$BOUCLE_HOME/bin/lib/depends-on.sh" 2> /dev/null || true
+  # Shared gate functions (check_sibling_gate, check_file_gate,
+  # maybe_unblock_dependents) — single source of truth in lib/boucle-ci/gates.sh.
+  source "$BOUCLE_HOME/lib/boucle-ci/gates.sh" 2> /dev/null || true
 
   # ── Adaptive cadence (#38) ─────────────────────────────────────────────
   # The doctor runs on a fixed schedule and always performs the full sweep.
@@ -278,6 +281,12 @@ boucle_ci_doctor() {
         fi
       fi
       set_boucle_label "$IID" "boucle:todo" "boucle::status::bot"
+      # File-impact gate: a boucle:todo issue re-triggered by the doctor must
+      # not start into a file conflict with an in-flight issue.
+      if ! check_file_gate "$IID"; then
+        echo "  → #$IID: file-gate blocked — skipping worker trigger"
+        continue
+      fi
       chain_to_role "$IID" "worker"
       doctor_mark_triggered "$IID"
       echo "  → re-triggered worker for #$IID"
@@ -439,6 +448,13 @@ boucle_ci_doctor() {
           continue
         fi
         if doctor_should_skip_dedup "$IID"; then
+          continue
+        fi
+        # File-impact gate: a boucle:todo issue re-triggered by the doctor's
+        # capacity scan must not start into a file conflict with an in-flight
+        # issue.
+        if ! check_file_gate "$IID"; then
+          echo "  → #$IID: file-gate blocked — skipping worker trigger"
           continue
         fi
         chain_to_role "$IID" "worker"

@@ -608,8 +608,13 @@ boucle_ci_dispatch() {
       # at a time (a priori, no file manifest). If a sibling is active,
       # stay boucle:blocked until it reaches done/closed.
       if check_sibling_gate "$IID"; then
-        echo "Triggering worker for issue #$IID (boucle:todo re-trigger)"
-        chain_to_role "$IID" "worker"
+        # File-impact gate: defer the worker if its issue claims files
+        # already claimed by an in-flight issue (prevents parallel workers
+        # editing the same files from conflicting at rebase/merge).
+        if check_file_gate "$IID"; then
+          echo "Triggering worker for issue #$IID (boucle:todo re-trigger)"
+          chain_to_role "$IID" "worker"
+        fi
       fi
     fi
     exit 0

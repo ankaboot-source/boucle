@@ -1103,8 +1103,13 @@ dispatch:
           # at a time (a priori, no file manifest). If a sibling is active,
           # stay boucle:blocked until it reaches done/closed.
           if check_sibling_gate "$IID"; then
-            echo "Triggering worker for issue #$IID (boucle:todo re-trigger)"
-            chain_to_role "$IID" "worker"
+            # File-impact gate: defer the worker if its issue claims files
+            # already claimed by an in-flight issue (prevents parallel workers
+            # editing the same files from conflicting at rebase/merge).
+            if check_file_gate "$IID"; then
+              echo "Triggering worker for issue #$IID (boucle:todo re-trigger)"
+              chain_to_role "$IID" "worker"
+            fi
           fi
         fi
         exit 0
@@ -2677,6 +2682,31 @@ worker:
       MR_MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
       MR_DESCRIPTION=$(printf '## Issue #%s — iteration %s/%s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s/%s_' \
         "$BOUCLE_ISSUE" "$ITERATION" "$MR_MAX_ITER" "$PREVIEW_LINE" "${COMMIT_SUMMARY:-(no commits)}" "${APPROACH:-(not recorded)}" "$BOUCLE_ISSUE" "$COMMIT_COUNT" "$ITERATION" "$MR_MAX_ITER")
+
+      # ── File-impact marker refresh (F1 guard) ──────────────────────
+      # Refresh the <!-- boucle:files v=1 paths=... --> marker note with the
+      # actual branch diff. Skipped when the branch has no commits ahead (e.g.
+      # after an adaptive reset) to preserve the last non-empty claim mid-flight
+      # — a parallel worker would otherwise start into the same files.
+      if [ "${BOUCLE_FILE_GATE:-true}" != "false" ]; then
+        if [ -n "$(git log origin/$CI_DEFAULT_BRANCH..HEAD --oneline 2>/dev/null)" ]; then
+          REFRESH_PATHS=$(git diff --name-only origin/$CI_DEFAULT_BRANCH...HEAD 2>/dev/null | sed 's|^\./||' | sort -u | paste -sd, -)
+          if [ -n "$REFRESH_PATHS" ]; then
+            MARKER_BODY="<!-- boucle:files v=1 paths=$REFRESH_PATHS -->"
+            EXISTING_NOTE_ID=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" 2>/dev/null \
+              | jq -r '[.[] | select(.body | contains("<!-- boucle:files v=1"))] | sort_by(.created_at) | last | .id // empty' 2>/dev/null)
+            if [ -n "$EXISTING_NOTE_ID" ]; then
+              glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes/$EXISTING_NOTE_ID" \
+                -f body="$MARKER_BODY" > /dev/null 2>&1 || echo "[boucle] WARN: marker note update failed — leaving stale marker (fail-open)"
+            else
+              glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$CI_PROJECT_ID/issues/$BOUCLE_ISSUE/notes" \
+                -f body="$MARKER_BODY" > /dev/null 2>&1 || echo "[boucle] WARN: marker note post failed (fail-open)"
+            fi
+          fi
+        else
+          echo "[boucle] file-impact marker refresh SKIPPED — branch has no commits ahead (F1 guard, preserving last non-empty marker)"
+        fi
+      fi
 
       # Check if a MR already exists for this branch (worker re-run / iteration 2+).
       # If so, reuse it instead of failing on a 409 from glab mr create.
@@ -4359,6 +4389,11 @@ doctor:
       # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
       set +o pipefail
       RECOVERED=0
+      # Shared gate functions (check_sibling_gate, check_file_gate,
+      # maybe_unblock_dependents) — single source of truth in
+      # lib/boucle-ci/gates.sh (the default before_script sources lib/boucle.sh
+      # but not gates.sh).
+      source "$BOUCLE_HOME/lib/boucle-ci/gates.sh" 2> /dev/null || true
       # Emoji reactions that count as spec approval (GitLab internal alpha codes).
       # Must mirror the dispatch job's constant — each CI job runs its own shell.
       BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup|white_check_mark|ballot_box_with_check|heavy_check_mark|ok|ok_hand"
@@ -4514,6 +4549,12 @@ doctor:
             continue
           fi
           set_boucle_label "$IID" "boucle:todo" "boucle::status::bot"
+          # File-impact gate: a boucle:todo issue re-triggered by the doctor
+          # must not start into a file conflict with an in-flight issue.
+          if ! check_file_gate "$IID"; then
+            echo "  → #$IID: file-gate blocked — skipping worker trigger"
+            continue
+          fi
           chain_to_role "$IID" "worker"
           doctor_mark_triggered "$IID"
           echo "  → re-triggered worker for #$IID"
@@ -4679,6 +4720,13 @@ doctor:
               continue
             fi
             if doctor_should_skip_dedup "$IID"; then
+              continue
+            fi
+            # File-impact gate: a boucle:todo issue re-triggered by the
+            # doctor's capacity scan must not start into a file conflict with
+            # an in-flight issue.
+            if ! check_file_gate "$IID"; then
+              echo "  → #$IID: file-gate blocked — skipping worker trigger"
               continue
             fi
             chain_to_role "$IID" "worker"
