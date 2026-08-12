@@ -18,6 +18,7 @@ BOT_TOKEN="${BOUCLE_BOT_TOKEN:-}"
 MONO_USER="${BOUCLE_MONO_USER:-}"
 CF_TOKEN="${BOUCLE_CF_TOKEN:-}"
 RUNNER_TAG="${BOUCLE_RUNNER_TAG:-}"
+ALLOWED_USERS="${BOUCLE_ALLOWED_USERS:-}"
 SKIP_CF=false
 DRY_RUN=false
 NON_INTERACTIVE=false
@@ -67,6 +68,10 @@ while [[ $# -gt 0 ]]; do
       RUNNER_TAG="$2"
       shift 2
       ;;
+    --allowed-users)
+      ALLOWED_USERS="$2"
+      shift 2
+      ;;
     --skip-cf)
       SKIP_CF=true
       shift
@@ -104,6 +109,8 @@ while [[ $# -gt 0 ]]; do
       echo "                           'default: tags:' block into the root CI shim. Omit it"
       echo "                           (the default) to run untagged on the instance's shared"
       echo "                           runners — no runner of your own required."
+      echo "  --allowed-users <u1,u2>  Usernames allowed to feed issues to boucle, comma-separated."
+      echo "                           Default: the user running setup. Empty = allow list disabled (legacy)."
       echo "  --skip-cf                Skip Cloudflare Pages project creation"
       echo "  --dry-run                 Print what would be done, don't execute"
       echo "  --non-interactive        No prompts: read config from BOUCLE_* env vars only."
@@ -114,7 +121,7 @@ while [[ $# -gt 0 ]]; do
       echo "  passed, so an install can be a pure copy/paste inside the target repo."
       echo ""
       echo "Env fallbacks: BOUCLE_FORGE BOUCLE_PROJECT BOUCLE_HOST BOUCLE_BOT_ID BOUCLE_BOT_USERNAME"
-      echo "               BOUCLE_BOT_TOKEN BOUCLE_CF_TOKEN BOUCLE_RUNNER_TAG"
+      echo "               BOUCLE_BOT_TOKEN BOUCLE_CF_TOKEN BOUCLE_RUNNER_TAG BOUCLE_ALLOWED_USERS"
       echo "               BOUCLE_LLM_API_KEY BOUCLE_LLM_BASE_URL"
       exit 0
       ;;
@@ -596,6 +603,22 @@ if [ "$FORGE" = "gitlab" ]; then
   else
     log_skip "BOUCLE_FALLBACK_API_KEY (not provided — must be set manually when fallback is enabled)"
   fi
+
+  # BOUCLE_ALLOWED_USERS (issue allow-list — safety net)
+  ALLOWED_USERS_VALUE="${BOUCLE_ALLOWED_USERS:-}"
+  if [ -z "$ALLOWED_USERS_VALUE" ]; then
+    # Default: the user who runs setup (the installer).
+    ALLOWED_USERS_VALUE=$(glab api --hostname "$HOST" user 2> /dev/null | jq -r '.username // empty' || true)
+  fi
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_ALLOWED_USERS" 2> /dev/null | jq -r '.key // empty' || true)
+  if [ -n "$EXISTING" ]; then
+    log_skip "BOUCLE_ALLOWED_USERS already exists"
+  elif [ -n "$ALLOWED_USERS_VALUE" ]; then
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_ALLOWED_USERS -f value=$ALLOWED_USERS_VALUE -f masked=false -f protected=false >/dev/null"
+    log_pass "BOUCLE_ALLOWED_USERS set ($ALLOWED_USERS_VALUE — only these users' issues are accepted)"
+  else
+    log_skip "BOUCLE_ALLOWED_USERS (could not resolve the installer username — leave unset = no allow list, or set BOUCLE_ALLOWED_USERS)"
+  fi
 else
   # ── GitHub: repo secrets via gh secret set ──────────────────────────
   # BOUCLE_TOKEN (from --bot-token)
@@ -729,6 +752,19 @@ else
   # BOUCLE_FALLBACK_MODEL_E2E
   run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FALLBACK_MODEL_E2E --repo \"$PROJECT_ID\" --body \"${BOUCLE_FALLBACK_MODEL_E2E:-deepseek-v4-flash}\" 2>/dev/null"
   log_pass "BOUCLE_FALLBACK_MODEL_E2E set to ${BOUCLE_FALLBACK_MODEL_E2E:-deepseek-v4-flash} (vars)"
+
+  # BOUCLE_ALLOWED_USERS (issue allow-list — safety net)
+  ALLOWED_USERS_VALUE="${BOUCLE_ALLOWED_USERS:-}"
+  if [ -z "$ALLOWED_USERS_VALUE" ]; then
+    # Default: the user who runs setup (the installer).
+    ALLOWED_USERS_VALUE=$(gh api user --jq .login 2> /dev/null || true)
+  fi
+  if [ -n "$ALLOWED_USERS_VALUE" ]; then
+    run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_ALLOWED_USERS --repo \"$PROJECT_ID\" --body \"$ALLOWED_USERS_VALUE\" 2>/dev/null"
+    log_pass "BOUCLE_ALLOWED_USERS set to '$ALLOWED_USERS_VALUE' (vars) — only these users' issues are accepted"
+  else
+    log_skip "BOUCLE_ALLOWED_USERS (could not resolve the installer username — leave unset = no allow list, or set BOUCLE_ALLOWED_USERS)"
+  fi
 
   # BOUCLE_FALLBACK_BASE_URL (masked secret — only when provided via env)
   if [ -n "${BOUCLE_FALLBACK_BASE_URL:-}" ]; then
