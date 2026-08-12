@@ -214,3 +214,43 @@ bot_identity_section() {
   assert_success
   assert_output --partial "the loop will never fire for you"
 }
+
+# ── File-impact gate: doctor worker-trigger path (MR 1) ─────────────────
+# The doctor is a monolithic boucle_ci_doctor() function that executes its
+# full body on source (calls glab/jq/curl), so it cannot be unit-tested in
+# isolation. These grep-based assertions verify the file gate is wired into
+# BOTH chain_to_role worker paths (rebase-conflict recovery ~line 286 and
+# capacity scan ~line 456) and that boucle:blocked issues are skipped by the
+# capacity scan (lesson #49 — blocked issues are not re-triggered).
+
+@test "doctor calls check_file_gate before the rebase-conflict worker trigger" {
+  # The rebase-conflict recovery path (~line 286) must gate the worker
+  # trigger on check_file_gate so a boucle:todo issue re-triggered by the
+  # doctor does not start into a file conflict.
+  run grep -nE 'check_file_gate "\$IID"' lib/boucle-ci/doctor.sh
+  assert_success
+  # The gate is checked with `if ! check_file_gate` → blocked (returns 1)
+  # skips the worker trigger.
+  run grep -nE 'if ! check_file_gate "\$IID"; then' lib/boucle-ci/doctor.sh
+  assert_success
+  run grep -nE 'file-gate blocked — skipping worker trigger' lib/boucle-ci/doctor.sh
+  assert_success
+}
+
+@test "doctor calls check_file_gate before the capacity-scan worker trigger" {
+  # The capacity-scan path (~line 456) must also gate the worker trigger.
+  run grep -nE 'check_file_gate "\$IID"' lib/boucle-ci/doctor.sh
+  assert_success
+  run grep -nE 'file-gate blocked — skipping worker trigger' lib/boucle-ci/doctor.sh
+  assert_success
+}
+
+@test "doctor skips boucle:blocked issues in the capacity scan (lesson #49)" {
+  # Blocked issues (boucle:blocked) are not re-triggered by the capacity
+  # scan — file-blocked issues stay parked until the unblock path fires.
+  run grep -nE 'boucle:blocked' lib/boucle-ci/doctor.sh
+  assert_success
+  # The capacity scan iterates boucle:todo issues only (not blocked).
+  run grep -nE 'boucle:todo' lib/boucle-ci/doctor.sh
+  assert_success
+}

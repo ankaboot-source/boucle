@@ -1316,3 +1316,116 @@ extract_notify() {
   run bash -c "grep -B2 'boucle_notify \"\$iid\" \"\$new\"' lib/boucle.sh | grep -c 'grep -qx \"\$new\"'"
   assert_output "1"
 }
+
+# ── File-impact marker parsing (file gate, MR 1) ────────────────────────
+# parse_files_marker <notes_json> is a pure parser (no forge calls) that
+# extracts the comma-separated paths from the NEWEST `<!-- boucle:files
+# v=1 paths=... -->` marker note. Fail-open by construction: absent /
+# malformed / unreadable marker → empty (the caller treats empty as "no
+# claim = no gate").
+
+@test "parse_files_marker extracts paths from a single matching note" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    forge_issue_get() { :; }
+    source lib/boucle.sh
+    notes='"'"'[{"id":1,"created_at":"2026-01-01T00:00:00Z","body":"<!-- boucle:files v=1 paths=src/components/Card.astro,src/styles/base.css -->"}]'"'"'
+    parse_files_marker "$notes"
+  '
+  assert_success
+  assert_output "src/components/Card.astro,src/styles/base.css"
+}
+
+@test "parse_files_marker returns empty when no marker note exists" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    forge_issue_get() { :; }
+    source lib/boucle.sh
+    parse_files_marker "[]"
+  '
+  assert_success
+  assert_output ""
+}
+
+@test "parse_files_marker picks the newest marker by created_at (F5)" {
+  # Duplicate markers from a failed update: the NEWEST by created_at wins.
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    forge_issue_get() { :; }
+    source lib/boucle.sh
+    notes='"'"'[{"id":1,"created_at":"2026-01-01T00:00:00Z","body":"<!-- boucle:files v=1 paths=old.astro -->"},{"id":2,"created_at":"2026-01-02T00:00:00Z","body":"<!-- boucle:files v=1 paths=new.astro -->"}]'"'"'
+    parse_files_marker "$notes"
+  '
+  assert_success
+  assert_output "new.astro"
+}
+
+@test "parse_files_marker returns empty for a malformed marker (no paths=)" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    forge_issue_get() { :; }
+    source lib/boucle.sh
+    notes='"'"'[{"id":1,"created_at":"2026-01-01T00:00:00Z","body":"<!-- boucle:files v=1 -->"}]'"'"'
+    parse_files_marker "$notes"
+  '
+  assert_success
+  assert_output ""
+}
+
+@test "parse_files_marker returns empty for empty input" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    forge_issue_get() { :; }
+    source lib/boucle.sh
+    parse_files_marker ""
+  '
+  assert_success
+  assert_output ""
+}
+
+@test "parse_files_marker ignores non-marker notes in the same list" {
+  # A list mixing ordinary bot/human notes with the marker must extract
+  # only the marker note'"'"'s paths.
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    forge_issue_get() { :; }
+    source lib/boucle.sh
+    notes='"'"'[{"id":1,"created_at":"2026-01-01T00:00:00Z","body":"VERDICT: PASS"},{"id":2,"created_at":"2026-01-02T00:00:00Z","body":"<!-- boucle:files v=1 paths=src/pages/index.astro -->"}]'"'"'
+    parse_files_marker "$notes"
+  '
+  assert_success
+  assert_output "src/pages/index.astro"
+}
+
+# ── File-impact marker refresh (worker job, MR 1) — F1 guard ────────────
+# The refresh is embedded in boucle_ci_worker() (lib/boucle-ci/worker.sh)
+# and the inline .gitlab-ci.yml worker job — too integration-coupled to
+# unit-test in bats without a real git repo + forge API. We assert the F1
+# guard condition (skip the refresh when the branch has no commits ahead,
+# preserving the last non-empty marker) is present in BOTH engine copies.
+
+@test "worker refresh: F1 guard present in lib/boucle-ci/worker.sh" {
+  # The refresh must be gated on a non-empty `git log origin/<default>..HEAD
+  # --oneline` — after an adaptive reset the branch has no commits ahead and
+  # the claim must NOT be cleared mid-flight.
+  run grep -nE 'git log "origin/\$BOUCLE_DEFAULT_BRANCH\.\.HEAD" --oneline' lib/boucle-ci/worker.sh
+  assert_success
+  run grep -nE 'file-impact marker refresh SKIPPED' lib/boucle-ci/worker.sh
+  assert_success
+}
+
+@test "worker refresh: F1 guard present in inline .gitlab-ci.yml worker job" {
+  run grep -nE 'git log origin/\$CI_DEFAULT_BRANCH\.\.HEAD --oneline' .gitlab-ci.yml
+  assert_success
+  run grep -nE 'file-impact marker refresh SKIPPED' .gitlab-ci.yml
+  assert_success
+}
+
+@test "worker refresh: best-effort on forge API failure (fail-open)" {
+  # A forge API failure during the refresh must log a warning and continue —
+  # it must never fail the job (the gate falls back to the stale prediction).
+  run grep -nE 'WARN: marker note (update|post) failed' lib/boucle-ci/worker.sh
+  assert_success
+  run grep -nE 'WARN: marker note (update|post) failed' .gitlab-ci.yml
+  assert_success
+}

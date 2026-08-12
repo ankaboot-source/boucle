@@ -147,6 +147,7 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_PREVIEW_DISABLE` | `false` | Skip Chromium visual preview in triage: `true` or `false`. |
 | `BOUCLE_PREVIEW_VIEWPORTS` | `390x844,1440x900` | Viewports rendered for the triage mockup, comma-separated `WxH`. One screenshot per entry, labelled by device class in the triage comment. Total bytes respect `BOUCLE_IMAGE_TOTAL_MAX_BYTES`; a malformed entry is skipped, and one failing viewport never loses the others. |
 | `BOUCLE_EXTERNAL_DEPLOY_WAIT` | `600` | Max seconds to wait for consumer's own CI on merged commit. |
+| `BOUCLE_FILE_GATE` | `true` | Enable the file-impact gate. MR 1: declared marker + `check_file_gate` defers a worker whose issue claims files already claimed by an in-flight issue. MR 2 (deferred): adds a `git merge-tree` safety-net gate. `false` = disabled (fail-open, legacy behavior). |
 | `BOUCLE_REVIEW_CHECKS_WAIT` | `900` | Max seconds to wait for PR check suites in diff mode. |
 | `BOUCLE_BUILD_CMD` | `npm ci && npm run build` | Build command. |
 | `BOUCLE_BUILD_OUTPUT` | `public` | Build output directory. |
@@ -461,6 +462,64 @@ flip-flop across iterations, and the worker then chases a moving target and
 burns the iteration cap. Turn on `criteria-only`, compare verdict stability
 across iterations on real issues, and only then decide. An unknown value
 falls back to `full` rather than filtering blind.
+
+## File-impact gate
+
+Parallel workers (`BOUCLE_MAX_PARALLEL_ISSUES` > 1) on separate branches
+`boucle/<iid>` can edit the same files and conflict at rebase/merge time. The
+file-impact gate defers a worker before it starts when its issue claims files
+already claimed by an in-flight issue.
+
+```mermaid
+flowchart LR
+  T[Triage predicts files] --> M["<!-- boucle:files v=1 paths=... -->"]
+  M --> G[check_file_gate]
+  G -->|no overlap| W[Worker starts]
+  G -->|overlap| B[boucle:blocked]
+  B -->|blocker done/closed| U[maybe_unblock_dependents]
+  U --> W
+  W --> R[Worker job refreshes marker with actual diff]
+  R --> M
+```
+
+### How it works
+
+- **Triage** posts a `<!-- boucle:files v=1 paths=path1,path2 -->` marker note
+  predicting the files the issue will touch (source, styles, charter docs).
+  Absent marker = no claim → fail-open (the gate passes).
+- **`check_file_gate`** (3rd gate, after `check_dependencies_and_gate` and
+  `check_sibling_gate`) compares the issue's marker against in-flight issues'
+  markers (open issues labeled `boucle:working`/`review`/`approval`/`merging`).
+  Non-empty intersection → `boucle:blocked` + explanatory note; the worker is
+  NOT triggered.
+- **Worker job** refreshes the marker with the actual branch diff
+  (`git diff --name-only origin/<default>...HEAD`) after each run. The refresh
+  is skipped when the branch has no commits ahead (e.g. after an adaptive
+  reset), preserving the last non-empty claim mid-flight.
+- **`maybe_unblock_dependents`** (catchup + e2e) unblocks a file-blocked issue
+  directly when the named blocker reaches `done`/`closed`.
+
+### Invariants
+
+- Only active issues hold claims; blocked issues claim nothing → no deadlock.
+- Self-exclusion on re-triggers.
+- Fail-open on missing marker / forge API error.
+- The sibling gate stays (belt-and-suspenders); the file gate is finer-grained
+  (siblings on different files run in parallel).
+
+### Configuration
+
+`BOUCLE_FILE_GATE` (default `true`) enables the gate. `false` = disabled
+(legacy behavior). The gate is fail-open by construction: an issue that does
+not declare files is unaffected.
+
+### MR 2 (deferred): `git merge-tree` safety net
+
+A second gate at worker startup (iter 2+) runs `git merge-tree --write-tree
+--name-only` against each in-flight `origin/boucle/*` branch to catch
+prediction drift (a file the marker missed that actually conflicts). Deferred
+until MR 1's residual conflict rate justifies it; the existing conflict-retry
+budget (`BOUCLE_CONFLICT_RETRIES`) backstops drift until then.
 
 ## Agent transcript
 
