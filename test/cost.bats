@@ -114,9 +114,9 @@ summary_func() {
 }
 
 @test "cost summary: groups by role and totals" {
-  TMPF=$(mktemp); T=$(mktemp -d); mkdir -p "$T/.boucle/7"
+  TMPF=$(mktemp); T=$(mktemp -d); mkdir -p "$T/.boucle-state/7"
   summary_func "$TMPF"
-  cat > "$T/.boucle/7/cost.json" <<'JSON'
+  cat > "$T/.boucle-state/7/cost.json" <<'JSON'
 {"entries":[
  {"role":"worker","iteration":1,"prompt_tokens":100,"completion_tokens":10,"cost_usd":0.01},
  {"role":"worker","iteration":2,"prompt_tokens":200,"completion_tokens":20,"cost_usd":0.02},
@@ -132,9 +132,9 @@ JSON
 }
 
 @test "cost summary: tokens only, no dollar column, when nothing is priced" {
-  TMPF=$(mktemp); T=$(mktemp -d); mkdir -p "$T/.boucle/7"
+  TMPF=$(mktemp); T=$(mktemp -d); mkdir -p "$T/.boucle-state/7"
   summary_func "$TMPF"
-  cat > "$T/.boucle/7/cost.json" <<'JSON'
+  cat > "$T/.boucle-state/7/cost.json" <<'JSON'
 {"entries":[{"role":"worker","iteration":1,"prompt_tokens":100,"completion_tokens":10,"cost_usd":null}]}
 JSON
   run bash -c "BOUCLE_WORKSPACE='$T'; source '$TMPF'; boucle_cost_summary 7"
@@ -146,9 +146,9 @@ JSON
 }
 
 @test "cost summary: a partially-priced set is flagged as a lower bound" {
-  TMPF=$(mktemp); T=$(mktemp -d); mkdir -p "$T/.boucle/7"
+  TMPF=$(mktemp); T=$(mktemp -d); mkdir -p "$T/.boucle-state/7"
   summary_func "$TMPF"
-  cat > "$T/.boucle/7/cost.json" <<'JSON'
+  cat > "$T/.boucle-state/7/cost.json" <<'JSON'
 {"entries":[
  {"role":"worker","iteration":1,"prompt_tokens":100,"completion_tokens":10,"cost_usd":0.01},
  {"role":"e2e","iteration":1,"prompt_tokens":50,"completion_tokens":5,"cost_usd":null}
