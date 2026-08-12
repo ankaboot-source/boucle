@@ -1289,3 +1289,57 @@ probe_with_code() {
   run grep -q "5b. Provider fallback" bin/jc
   assert_success
 }
+
+# ── Evidence pack (build-evidence-pack integration) ──────────────────
+# bin/build-evidence-pack produces .evidence-pack.md (charter docs at the
+# base branch + diff brief). bin/jc loads it (3c) and injects it into the
+# reviewer prompt. Recovered from the orphaned feat/reviewer-obligations
+# branch (commits ddc9594/dc99c99 — boucle dogfooding) that referenced the
+# script from reviewer.sh without ever committing it.
+
+@test "jc loads the evidence pack file when present" {
+  run bash -c '
+    STATE_DIR=$(mktemp -d)
+    printf "## DESIGN.md (main)\n- sharp corners\n" > "$STATE_DIR/.evidence-pack.md"
+    EVIDENCE_PACK_FILE="$STATE_DIR/.evidence-pack.md"
+    BOUCLE_EVIDENCE_PACK=""
+    if [ -f "$EVIDENCE_PACK_FILE" ]; then
+      BOUCLE_EVIDENCE_PACK="$(cat "$EVIDENCE_PACK_FILE")"
+    fi
+    echo "$BOUCLE_EVIDENCE_PACK"
+    rm -rf "$STATE_DIR"
+  '
+  assert_success
+  assert_output --partial "sharp corners"
+}
+
+@test "jc leaves BOUCLE_EVIDENCE_PACK empty when no evidence pack file" {
+  run bash -c '
+    STATE_DIR=$(mktemp -d)
+    EVIDENCE_PACK_FILE="$STATE_DIR/.evidence-pack.md"
+    BOUCLE_EVIDENCE_PACK=""
+    if [ -f "$EVIDENCE_PACK_FILE" ]; then
+      BOUCLE_EVIDENCE_PACK="$(cat "$EVIDENCE_PACK_FILE")"
+    fi
+    echo "pack=[$BOUCLE_EVIDENCE_PACK]"
+    rm -rf "$STATE_DIR"
+  '
+  assert_success
+  assert_output "pack=[]"
+}
+
+@test "build-evidence-pack script is present and executable" {
+  run bash -n bin/build-evidence-pack
+  assert_success
+  [ -x bin/build-evidence-pack ]
+}
+
+@test "reviewer.sh references build-evidence-pack (dangling ref is now satisfied)" {
+  run grep -q 'build-evidence-pack' lib/boucle-ci/reviewer.sh
+  assert_success
+}
+
+
+# ── Evidence pack (build-evidence-pack integration) ──────────────────
+# bin/build-evidence-pack produces .evidence-pack.md (charter docs at the
+# base branch + diff brief). bin/jc loads it (3c) and injects it into the
