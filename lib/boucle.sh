@@ -1168,7 +1168,7 @@ parse_files_marker() {
   [ -n "$marker_body" ] || return 0
   local paths
   paths=$(printf '%s' "$marker_body" \
-    | grep -oE 'paths=[^ >-]+' | head -1 | cut -d= -f2)
+    | grep -oE 'paths=[^ >]+' | head -1 | cut -d= -f2)
   # Filter to safe path characters only (drops malformed junk). A trailing
   # comma from a malformed marker is harmless — the caller's for-loop skips
   # empty entries.

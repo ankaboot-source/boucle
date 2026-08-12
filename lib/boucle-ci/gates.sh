@@ -93,8 +93,11 @@ check_file_gate() {
     active_paths=$(parse_files_marker "$active_notes")
     [ -z "$active_paths" ] && continue
     # Intersect own_paths with active_paths (exact match, normalized).
+    # NOTE: `sort` (NOT `sort -u`) — we need duplicates to survive so
+    # `uniq -d` can find the overlap. `sort -u` dedupes first and the gate
+    # never blocks (the bug fix-8 surfaced: the gate was inert).
     overlap=$(printf '%s\n%s\n' "$own_paths" "$active_paths" \
-      | tr ',' '\n' | sed 's|^\./||' | sort -u \
+      | tr ',' '\n' | sed 's|^\./||' | sort \
       | uniq -d | paste -sd, -)
     if [ -n "$overlap" ]; then
       echo "[boucle] #$iid blocked — file overlap with #$active_iid ($overlap)"
