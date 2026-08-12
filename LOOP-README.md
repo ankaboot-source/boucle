@@ -14,7 +14,7 @@ Alternative (vendored install, when submodules are not an option):
 cp -r boucle/boucle/bin <target-repo>/
 cp -r boucle/boucle/.jcode <target-repo>/
 cp boucle/boucle/.gitlab-ci.yml <target-repo>/
-cp boucle/boucle/LOOP.template.md <target-repo>/LOOP.md
+cp boucle/boucle/LOOP.md <target-repo>/
 ```
 
 `bin/setup` configures GitLab (CI variables, labels, board, branch
@@ -77,7 +77,7 @@ Any error (network failure, permissions, corrupt tarball) logs a warning and con
 | `bin/` | Yes | boucle code |
 | `.jcode/` | Yes | boucle agents + skills |
 | `.gitlab-ci.yml` | Yes | boucle pipeline |
-| `LOOP.template.md` | No | Per-consumer config template (copied to `LOOP.md` at install) |
+| `LOOP.md` | Yes | Product reference (config, modes, gates, caps) |
 | `.boucle-version` | No | Managed by `bin/update` |
 
 ### Version tracking
