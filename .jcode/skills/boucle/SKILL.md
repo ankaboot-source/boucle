@@ -192,33 +192,74 @@ transition (never on the state).
 
 ## 3. Marker reference
 
-<!-- TODO: marker reference table — pending extraction (explorer task). -->
-
 Boucle communicates via invisible HTML-comment markers stamped on issue/MR
 comments and via structural sections in comment bodies. The markers are
-machine-readable; the structural sections are detected by pattern.
+machine-readable; the structural sections are detected by pattern. A local
+harness MUST use the markers correctly or dispatch will misroute its writes.
 
 ### 3.1 Self-recognition marker
 
 | Marker | Format | Written by | Parsed by | Purpose |
 |---|---|---|---|---|
-| `<!-- boucle:agent -->` | bare HTML comment | `stamp_agent_marker` (bin/forge/common.sh:81) on every `forge_issue_note` / `forge_mr_note` | `has_agent_marker` (bin/forge/common.sh:92) in dispatch.sh:99-103 | Distinguishes boucle's own writes from human replies. The primary anti-loop guard (invariant I7). |
+| `<!-- boucle:agent -->` | bare HTML comment | `stamp_agent_marker` (bin/forge/common.sh:81) on every `forge_issue_note` / `forge_mr_note` | `has_agent_marker` (bin/forge/common.sh:92) in dispatch.sh:99-103 | Distinguishes boucle's own writes from human replies. The primary anti-loop guard (invariant I7). A harness posting a comment MUST carry this stamp or dispatch treats it as a human reply and re-routes. |
 
-### 3.2 Verdict / triage markers
+### 3.2 Triage markers
 
-<!-- TODO: verdict + triage + draft markers — pending extraction. -->
+| Marker | Format | Written by | Parsed by | Purpose |
+|---|---|---|---|---|
+| `<!-- boucle:triage v=1 -->` | `v=1` (no attrs) | triage agent (final comment); draft promoted by triage.sh:178 (`sed s/draft role=triage/triage v=1/`) | triage.sh:163 (awk), collapse-duplicate-notes:71-72 (jq structural filter) | Marks a final triage comment. CI parser acts on it (sets disposition label, assigns, pauses). |
+| `<!-- boucle:draft role=triage -->` | `role=triage` | triage agent (first-pass draft) | collapse-duplicate-notes:73 (filter), triage.sh:178 (promotion source) | Marks a draft triage comment. CI parser does NOT act on drafts; log-scraping fallback promotes to final when the agent exhausts its steps. |
+| `<!-- boucle:obligations v=1 -->` | `v=1` | triage.sh:213 | (informational — marks the obligations section of a triage comment) | Marks the obligations block in a triage comment (what the human must do next). |
 
-### 3.3 Dependency / hierarchy markers
+### 3.3 Verdict markers (reviewer / e2e)
 
-<!-- TODO: depends-on, split-parent, sibling-blocked, blocked, e2e-origin, conflict-retry — pending extraction. -->
+| Marker | Format | Written by | Parsed by | Purpose |
+|---|---|---|---|---|
+| `<!-- boucle:verdict v=1 role=reviewer sha=<hex> -->` | `v=1 role=reviewer sha=<short-sha>` | reviewer agent (final verdict); draft promoted by reviewer.sh:381 | reviewer.sh:357 (SHA-anchored), :362 (SHA-unanchored fallback) | Marks a final reviewer verdict. SHA MUST be bare hex (no quotes/whitespace/angle brackets) — invariant I6. |
+| `<!-- boucle:verdict v=1 role=e2e sha=<hex> -->` | `v=1 role=e2e sha=<short-sha>` | e2e agent (final verdict); draft promoted by e2e.sh:192 | e2e.sh:179 | Marks a final e2e verdict. Same SHA contract. |
+| `<!-- boucle:draft role=reviewer -->` | `role=reviewer` | reviewer agent (first-pass draft) | collapse-duplicate-notes:79, reviewer.sh:381 (promotion source) | Draft reviewer verdict. Parser does NOT act; log-scraping promotes on step exhaustion. |
+| `<!-- boucle:draft role=e2e -->` | `role=e2e` | e2e agent (first-pass draft) | collapse-duplicate-notes:86, e2e.sh:187 (promotion source) | Draft e2e verdict. Same as above. |
 
-### 3.4 Operational markers
+### 3.4 Dependency / hierarchy markers
 
-<!-- TODO: board, unblocked, obligations, sub-issue, catchup, commit, diagnostic, schedule — pending extraction (verify each exists in code). -->
+| Marker | Format | Written by | Parsed by | Purpose |
+|---|---|---|---|---|
+| `<!-- boucle:depends-on iids=N,M -->` | `iids=<comma-separated-IIDs>` | triage.sh:755 (on each dependent sub-issue) | bin/lib/depends-on.sh:38 (grep), dispatch.sh:427 (gate check) | Declares sub-issue dependencies. Dispatch gates the worker until all dep IIDs are closed. |
+| `<!-- boucle:split-parent iids=N,M -->` | `iids=<comma-separated-IIDs>` | triage (split operation) | catchup.sh:66, doctor.sh:746, e2e.sh:75, triage.sh:518,520 (idempotency guard) | Marks the parent issue of a split with its sub-issue IIDs. Used to cascade closure and detect duplicate splits. |
+| `<!-- boucle:blocked v=1 iids=N,M -->` | `v=1 iids=<comma-separated-IIDs>` | dispatch.sh:461, boucle.sh:1136 | (informational — marks the blocked note) | Posted on a sub-issue blocked by open siblings. The label `boucle:blocked` is the state; this marker is the note's machine-readable header. |
+| `<!-- boucle:unblocked v=1 by=N -->` | `v=1 by=<closed-dep-IID>` | catchup.sh:100, e2e.sh:109 | (informational — marks the unblock note) | Posted when a dependency closes and the worker starts. |
+| `<!-- boucle:e2e-origin v=1 iid=N -->` | `v=1 iid=<origin-IID>` | e2e.sh:267 (on follow-up issues) | boucle.sh:705 (parse, to resolve the original issue from a follow-up) | Carries the original issue IID on a follow-up issue created by e2e FAIL, so the loop can cascade back. |
+| `<!-- boucle:sub-issue v=1 -->` | `v=1` | triage (split operation) | triage.sh:566 (skip in parent-body parsing) | Marks a sub-issue body. Used to avoid parsing sub-issue content as parent-issue content. |
 
-### 3.5 Structural signals (not HTML comments)
+### 3.5 Operational markers
 
-<!-- TODO: ## TL;DR + ## Disposition, ## Parent issue #N, ## Depends on, ## Approach, emoji thumbsup, BOT_JUST_ASSIGNED, VERDICT: line — pending extraction. -->
+| Marker | Format | Written by | Parsed by | Purpose |
+|---|---|---|---|---|
+| `<!-- boucle:board v=1 -->` | `v=1` | boucle.sh:268 (status board body) | (informational — identifies the board issue) | Marks the status-board issue body. Dispatch skips `boucle:board`-labelled issues; this marker is the body's stamp. |
+| `<!-- boucle:catchup v=1 iid=N state=X target=Y -->` | `v=1 iid=<IID> state=<from> target=<to>` | catchup.sh:180 (audit note on direct merge) | (informational — audit trail) | Posted when an MR is merged directly (not via the approval flow). Records the state at merge time for audit. |
+| `<!-- boucle:commit sha=<hex> -->` | `sha=<short-sha>` | worker.sh:421-422 (in MR description + build marker) | (preview freshness assertion — worker.sh) | Anchors the MR/build to a commit SHA for preview freshness check (invariant I6-adjacent). |
+| `<!-- boucle:diagnostic v=1 iid=N class=X trigger=Y -->` | `v=1 iid=<IID> class=<failure-class> trigger=<trigger>` | boucle.sh:475 (escalation diagnostic) | (informational — structured escalation) | Replaces the generic "human intervention needed" note with a structured diagnostic (failure class + evidence + recommended action). |
+| `<!-- boucle:schedule id=<name> -->` | `id=<schedule-name>` | boucle.sh:201 (on scheduled issues) | boucle.sh (dedup — last firing marker) | Marks a scheduled issue with its template name. Used to prevent duplicate firings across sweeps. |
+
+### 3.6 Markers NOT in code (do not emit)
+
+| Marker | Status | Note |
+|---|---|---|
+| `<!-- boucle:files v=1 paths=... -->` | **Planned, not implemented** | Documented in AGENTS.md lesson #62 + design spec, but absent from code. A harness MUST NOT emit it — the loop does not parse it. |
+| `<!-- boucle:sibling-blocked v=1 sib=N -->` | **Does not exist** | Audit false positive. The `boucle:blocked` marker (§3.4) covers this; there is no separate sibling-blocked marker. |
+| `<!-- boucle:conflict-retry N -->` | **Does not exist as a marker** | `conflict-retry` appears as a log message string (worker.sh:366, boucle.sh:1181), not as an HTML-comment marker. |
+
+### 3.7 Structural signals (not HTML comments)
+
+| Signal | Format | Parsed by | Purpose |
+|---|---|---|---|
+| `## TL;DR` + `## Disposition` | two section headers in the same comment | collapse-duplicate-notes:71-72, triage.sh:126,141,146 | Structural final-comment detection for triage. A draft only has `## Disposition`; a final has both `## TL;DR` and `## Disposition`. Defense-in-depth: even if the agent uses the wrong marker, the parser won't act on a draft that lacks `## TL;DR`. |
+| `## Parent issue\n#N` | section header + issue reference | boucle.sh:699,768,774 (awk) | Resolves the parent IID from a sub-issue body. Used by `resolve_reporter_id`, `fetch-issue-attachments`, `maybe_close_parent`. |
+| `## Depends on` | section header | bin/lib/depends-on.sh:57,61 (awk fallback) | Fallback parsing of dependencies when the `<!-- boucle:depends-on -->` marker is absent. Mirrors the `## Parent issue` pattern. |
+| `## Approach` | section header in `state.md` | worker.sh:482 (sed extraction), :551 (MR description) | The worker's implementation approach, extracted from `state.md` into the MR description. The reviewer reads it to verify doc conformance. |
+| `VERDICT: PASS\|FAIL\|UNCERTAIN` | line-anchored (`^VERDICT:`) | reviewer.sh:299,320,358,363; e2e.sh (same pattern) | The verdict line. MUST be start-of-line anchored in greps (AGENTS.md lesson #41) — an unanchored grep matches shell traces containing the substring. |
+| `BOT_JUST_ASSIGNED` | assignee-change detection | dispatch.sh:504-539 | The real "re-queue after boucle:human" mechanism (§4.1). Detected from `.changes.assignees` on the `issue update` webhook, not from a comment. |
+| Emoji `thumbsup` | emoji award on a Note | dispatch.sh:579-587 (`BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup"`) | Spec approval. Only valid on an issue at `boucle:spec-review`, awarded on a Note (not the issue body). MR approval is the native Approve button, NOT an emoji. |
 
 ---
 
