@@ -674,17 +674,18 @@ set_boucle_label() {
 
 # ── Issue / hierarchy helpers ───────────────────────────────────────────
 
-# resolve_reporter_id <iid>
+# _resolve_reporter_walk <iid>
 #
 # Walk up the parent-issue chain until we find a non-bot author.
-# Returns the forge user ID of the original human reporter.
+# Prints `reporter_id<TAB>author_username` for the resolved human reporter.
 # Bot-authored sub-issues (created by up-bot) are skipped by matching
 # BOUCLE_BOT_USERNAME (default "up-bot"). Max depth 10 to prevent loops.
 # E2E-fail follow-ups (bot-authored, no parent section) are followed via
 # their qualified origin marker (`<!-- boucle:e2e-origin v=1 iid=N -->`)
 # so the original human reporter is found — otherwise the reviewer assigns
 # the MR to the bot instead of the human.
-resolve_reporter_id() {
+# On a forge_issue_get failure, prints nothing (empty output).
+_resolve_reporter_walk() {
   local iid="$1" data parent_iid parent_data reporter_id author_username
   local bot_user="${BOUCLE_BOT_USERNAME:-up-bot}"
   local depth=0 max_depth=10
@@ -718,7 +719,27 @@ resolve_reporter_id() {
     data="$parent_data"
     depth=$((depth + 1))
   done
-  echo "$reporter_id"
+  printf '%s\t%s\n' "$reporter_id" "$author_username"
+}
+
+# resolve_reporter_id <iid>
+#
+# Walk up the parent-issue chain until we find a non-bot author.
+# Returns the forge user ID of the original human reporter (empty on
+# failure). Used by set_boucle_label to reassign issues to the human.
+resolve_reporter_id() {
+  _resolve_reporter_walk "$1" | cut -f1
+}
+
+# resolve_reporter_username <iid>
+#
+# Walk up the parent-issue chain until we find a non-bot author.
+# Returns the forge username of the original human reporter (empty if
+# unresolvable). Used by the allow-list gate (check_allow_list_gate) in
+# the dispatch and doctor stages to decide whether an issue's author is
+# in BOUCLE_ALLOWED_USERS.
+resolve_reporter_username() {
+  _resolve_reporter_walk "$1" | cut -f2
 }
 
 # get_work_item_global_id <iid>

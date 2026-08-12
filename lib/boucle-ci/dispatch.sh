@@ -35,6 +35,43 @@ dispatch_note_body() {
   jq -r '.object_attributes.note // .comment.body // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || true
 }
 
+# ── Allow-list gate ────────────────────────────────────────────────────
+# Safety net: only issues whose resolved human reporter is in
+# BOUCLE_ALLOWED_USERS are accepted. Fail-open when the variable is
+# unset (legacy consumers — the net is seeded at install by bin/setup).
+# The reporter is resolved through the parent chain (bot-authored
+# sub-issues resolve to their parent's author), same semantics as
+# resolve_reporter_id. On rejection: post an explanatory note; the
+# caller must NOT trigger any role (the anti-accumulation EXIT trap
+# turns the no-op exit into a visible pipeline failure).
+# Returns 0 = allowed (or variable unset), 1 = rejected.
+check_allow_list_gate() {
+  local iid="$1"
+  local allowed_str needle username u
+  allowed_str="$(printf '%s' "${BOUCLE_ALLOWED_USERS:-}" | tr -d '[:space:]')"
+  [ -n "$allowed_str" ] || return 0
+  username=$(resolve_reporter_username "$iid" 2> /dev/null || true)
+  if [ -z "$username" ]; then
+    echo "allow-list: cannot resolve the human reporter for #$iid — failing OPEN (transient/legacy)"
+    return 0
+  fi
+  needle=$(printf '%s' "$username" | tr '[:upper:]' '[:lower:]')
+  # Iterate over each comma-separated username. A `for` loop with IFS=','
+  # (rather than `while read`) keeps `return` in the current shell so the
+  # gate's exit code propagates to the caller.
+  local IFS=','
+  for u in $allowed_str; do
+    [ -z "$u" ] && continue
+    if [ "$(printf '%s' "$u" | tr '[:upper:]' '[:lower:]')" = "$needle" ]; then
+      echo "allow-list: #$iid reporter @$username is allowed"
+      return 0
+    fi
+  done
+  echo "allow-list: #$iid reporter @$username is NOT in BOUCLE_ALLOWED_USERS — rejecting"
+  forge_issue_note "$iid" ":lock: This issue was not accepted by the boucle loop: its author \`@$username\` is not in \`BOUCLE_ALLOWED_USERS\`. Ask a maintainer to add the username to the allow list if this is a mistake.\n\n<!-- boucle:allow-list v=1 user=$username -->"
+  return 1
+}
+
 boucle_ci_dispatch() {
   # Shared gate functions (check_sibling_gate, maybe_unblock_dependents) —
   # single source of truth in lib/boucle-ci/gates.sh.
@@ -411,6 +448,20 @@ boucle_ci_dispatch() {
       fi
       echo "boucle: issue #$IID is closed but bot was just assigned — letting through (human re-trigger)"
     fi
+  fi
+
+  # ── Allow-list gate ──────────────────────────────────────────────────
+  # Safety net: only issues whose resolved human reporter is in
+  # BOUCLE_ALLOWED_USERS are accepted. Fail-open when the variable is
+  # unset (legacy consumers). The reporter is resolved through the parent
+  # chain (bot-authored sub-issues resolve to their parent's author). On
+  # rejection an explanatory note is posted and NO role is triggered — the
+  # anti-accumulation EXIT trap turns this no-op exit into a visible
+  # pipeline failure. Only applies to issue/note/emoji events: MR and
+  # MR-note events already exited above.
+  if ! check_allow_list_gate "$IID"; then
+    echo "dispatch: issue #$IID rejected by the allow list — skipping"
+    exit 0
   fi
 
   # Label helper: preserve non-boucle labels when writing a boucle label.

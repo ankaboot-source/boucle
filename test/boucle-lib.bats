@@ -416,6 +416,63 @@ source_with_mock_forge() {
   assert_success
 }
 
+# ── resolve_reporter_username: parent-chain walking (allow-list gate) ──
+# Same walk semantics as resolve_reporter_id, but returns the username of
+# the resolved human reporter. Used by check_allow_list_gate.
+
+@test "resolve_reporter_username returns author username when author is human" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    BOUCLE_BOT_USERNAME=up-bot
+    forge_issue_get() {
+      printf "%s" "{\"author\":{\"id\":999,\"username\":\"alice\"}}"
+    }
+    source lib/boucle.sh
+    result=$(resolve_reporter_username 42)
+    [ "$result" = "alice" ]
+  '
+  assert_success
+}
+
+@test "resolve_reporter_username walks up to parent when author is bot" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    BOUCLE_BOT_USERNAME=up-bot
+    forge_issue_get() {
+      case "$1" in
+        42)
+          printf "%s" "{\"author\":{\"id\":1,\"username\":\"up-bot\"},\"description\":\"## Parent issue\n\n#10\"}"
+          ;;
+        10)
+          printf "%s" "{\"author\":{\"id\":777,\"username\":\"bob\"}}"
+          ;;
+        *) printf "%s" "{}" ;;
+      esac
+    }
+    source lib/boucle.sh
+    result=$(resolve_reporter_username 42)
+    [ "$result" = "bob" ]
+  '
+  assert_success
+}
+
+@test "resolve_reporter_username returns empty on API failure" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    BOUCLE_BOT_USERNAME=up-bot
+    forge_issue_get() { return 1; }
+    source lib/boucle.sh
+    result=$(resolve_reporter_username 42)
+    [ -z "$result" ]
+  '
+  assert_success
+}
+
+@test "defines resolve_reporter_username function" {
+  run grep -E '^resolve_reporter_username\(\)' lib/boucle.sh
+  assert_success
+}
+
 # ── get_work_item_children: array validation ──────────────────────────
 
 @test "get_work_item_children returns empty array on API failure" {
