@@ -1511,6 +1511,45 @@ atomic.
       the default before_script), and their dependencies
       (`depends-on.sh`) are sourced BEFORE the call site.
 
+64. **Deterministic engine messages MUST NOT be localized by consumers**
+    - ❌ DO NOT translate the engine's deterministic user-facing messages
+      (fallback notes, escalation comments, status notes) into another
+      language by patching the consumer's `.gitlab-ci.yml` or
+      `lib/boucle-ci/*.sh` in place. A localized copy is a fork: the next
+      `bin/update` sync (`cp -r` of SYNC_PATHS) overwrites it silently,
+      and the consumer loses its translations with no warning. Observed
+      on a consumer (2026-08): the entire triage preview block was
+      translated to French ("Aperçu indisponible (échec rendu) — validez
+      sur le TL;DR"), producing a message that does not exist upstream
+      and cannot be grepped or tested against.
+    - ❌ DO NOT assume a consumer-specific message is harmless because
+      "it's just a string". The engine's message-parsing greps (verdict
+      extraction, log-scraping fallbacks, marker detection) are anchored
+      on the exact upstream strings — a localized copy that changes a
+      keyword ("Preview" → "Aperçu", "validate" → "validez") breaks
+      every grep that references the original, and the log-scraping
+      fallback (lesson #47) cannot recover a verdict surrounded by
+      foreign-language prose.
+    - ✅ DO: keep all deterministic engine messages in English upstream.
+      If a consumer needs localized messages, the correct path is a
+      proper i18n mechanism in the engine (a `BOUCLE_LOCALE` variable +
+      a message catalog), NOT a consumer-side patch. Until such a
+      mechanism exists, consumers MUST accept English messages — the
+      forge UI is the audience, and the human reading a fallback note
+      can parse "Preview unavailable (render failed)" regardless of
+      their preferred language.
+    - ✅ DO: if a consumer has already localized its engine copy, remove
+      the patch and accept the upstream English strings. A localized
+      fork that drifts from upstream is worse than an English message
+      the human can still act on.
+    - Admission: class — any consumer-side translation of deterministic
+      engine messages; recurrence — the natural instinct when a
+      consumer's audience speaks another language is to translate the
+      messages in place, and `bin/update`'s `cp -r` sync makes the fork
+      invisible until the next sync; stable — no line numbers, no
+      transient values; distinct — lesson #56 covers literal env vars
+      in notes, this lesson covers localized message forks.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
