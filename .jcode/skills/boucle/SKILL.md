@@ -246,6 +246,7 @@ harness MUST use the markers correctly or dispatch will misroute its writes.
 | `<!-- boucle:conflict-retry N -->` | `N=<retry-count>` | boucle.sh:1099 (on re-trigger after rebase conflict) | boucle.sh:1085 (jq parse, count retries) | Posted on each re-trigger after a rebase conflict. Bounded retry count — after N retries, the conflict is handed to the worker agent for resolution. |
 | `<!-- boucle:file-blocked v=1 on=N paths=... -->` | `v=1 on=<active-issue> paths=<overlap>` | gates.sh:106 (check_file_gate — defer on file overlap) | gates.sh:192 (unblock path, last marker) | The file-impact gate (AGENTS.md lesson #62): posted when a worker would edit files claimed by an in-flight sibling issue. The unblock path fires when the named blocker closes. |
 | `<!-- boucle:files v=1 paths=... -->` | `v=1 paths=<impacted-files>` | worker job (.gitlab-ci.yml:2619, refresh after the branch diff) | worker job (jq, find last marker) | File-impact declaration (AGENTS.md lesson #62): the triage predicts the impacted files, the worker refreshes the marker with the actual branch diff. Consumed by `check_file_gate` to defer parallel workers on overlap. |
+| `<!-- boucle:evidence-pack v=1 -->` | `v=1` | bin/build-evidence-pack (header first line of the evidence pack) | — | Marks the auto-generated evidence pack (charter doc snapshot + diff brief) attached to escalations. |
 
 ### 3.6 Markers NOT in code (do not emit)
 

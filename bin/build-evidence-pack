@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# bin/build-evidence-pack — build an "evidence pack" for the reviewer
+# Called before bin/jc (reviewer role). Produces charter-doc excerpts at the
+# BASE branch (default branch of the repo) plus a computed diff brief of the
+# current branch vs base. The reviewer grades design/architecture/conformance
+# criteria AGAINST these base-state excerpts (see bin/jc build_prompt).
+#
+# This script needs NO forge API — it only uses git and the filesystem.
+#
+# Output: writes .boucle/$ISSUE/.evidence-pack.md (markdown). bin/jc
+#         reads that file and injects it into the reviewer prompt as text.
+#         Idempotent: re-running overwrites the same file.
+#
+# Behavior contract:
+#   1. If BOUCLE_ISSUE is empty/unset → exit 0 (no-op, allow skipping).
+#   2. Resolve output dir by mirroring bin/jc's resolution
+#      ($BOUCLE_WORKSPACE/.boucle/$ISSUE). mkdir -p it.
+#   3. Resolve the base ref: ${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}.
+#      If not in a git repo (no .git) → exit 0. If the base ref cannot be
+#      resolved via `git rev-parse --verify` → exit 0 (best-effort, never fail).
+#   4. Charters: read env BOUCLE_EVIDENCE_DOCS (comma-separated file names;
+#      default DESIGN.md,VISUAL-CHARTER.md,CONTEXT.md). For EACH doc, try
+#      `git show <base>:<doc>` (stderr → /dev/null). If it succeeds, take the
+#      first BOUCLE_EVIDENCE_MAX_LINES lines (default 120) EXCLUDING any
+#      leading frontmatter block (---\n...\n---) if present, and write a
+#      section "## <doc> @ <base>". Docs that don't exist at base → skipped.
+#   5. Diff brief: if HEAD differs from base, append diff --stat, name-only,
+#      and log --oneline (head -30). If HEAD == base, append "(none — branch
+#      at base commit)".
+#   6. Header first line: "<!-- boucle:evidence-pack v=1 -->" then a blank line.
+#   7. If NOTHING beyond the header was produced, still write the file (with
+#      "## Charters\n(none found at base)"). Exit 0 ALWAYS on success and skip
+#      paths; exit non-zero only on a genuine internal bug.
+#
+# Forge controls (all optional, with defaults):
+#   BOUCLE_EVIDENCE_DOCS     — comma-separated charter file names (default: DESIGN.md,VISUAL-CHARTER.md,CONTEXT.md)
+#   BOUCLE_EVIDENCE_MAX_LINES— max excerpt lines per doc (default: 120)
+#   BOUCLE_DEFAULT_BRANCH    — base ref (default: ${CI_DEFAULT_BRANCH:-master})
+set -euo pipefail
+
+ISSUE="${BOUCLE_ISSUE:-}"
+# $BOUCLE_WORKSPACE/.boucle/$ISSUE is gitignored per-issue state. This is the
+# same resolution bin/jc uses (see bin/jc STATE_DIR), so the evidence-pack is
+# written where bin/jc and the reviewer's deliverables restore expect it.
+# Keep the CI_PROJECT_DIR fallback behavior intact for local dev.
+BOUCLE_WORKSPACE="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-$(pwd)}}"
+CI_PROJECT_DIR="$BOUCLE_WORKSPACE"
+STATE_DIR="$BOUCLE_WORKSPACE/.boucle/$ISSUE"
+EVIDENCE_FILE="$STATE_DIR/.evidence-pack.md"
+
+# ── Skip: no issue ─────────────────────────────────────────────────────
+if [ -z "$ISSUE" ]; then
+  echo "[build-evidence-pack] BOUCLE_ISSUE is empty — skipping" >&2
+  exit 0
+fi
+
+# ── Skip: not a git repo ───────────────────────────────────────────────
+if [ ! -d "$CI_PROJECT_DIR/.git" ]; then
+  echo "[build-evidence-pack] not a git repo (no .git) — skipping" >&2
+  exit 0
+fi
+
+# ── Resolve base ref ───────────────────────────────────────────────────
+BASE_REF="${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}"
+if ! BASE_SHA="$(git -C "$CI_PROJECT_DIR" rev-parse --verify "$BASE_REF" 2> /dev/null)"; then
+  echo "[build-evidence-pack] base ref '${BASE_REF}' not resolvable — skipping" >&2
+  exit 0
+fi
+
+HEAD_SHA="$(git -C "$CI_PROJECT_DIR" rev-parse HEAD 2> /dev/null || true)"
+
+mkdir -p "$STATE_DIR"
+
+# ── Charters ──────────────────────────────────────────────────────────
+DOCS="${BOUCLE_EVIDENCE_DOCS:-DESIGN.md,VISUAL-CHARTER.md,CONTEXT.md}"
+MAX_LINES="${BOUCLE_EVIDENCE_MAX_LINES:-120}"
+
+# ── Write the file ─────────────────────────────────────────────────────
+{
+  echo "<!-- boucle:evidence-pack v=1 -->"
+  echo ""
+
+  FOUND_ANY=0
+
+  IFS=',' read -r -a DOC_LIST <<< "$DOCS"
+  for doc in "${DOC_LIST[@]}"; do
+    [ -z "$doc" ] && continue
+    if content="$(git -C "$CI_PROJECT_DIR" show "$BASE_REF:$doc" 2> /dev/null)"; then
+      FOUND_ANY=1
+      # Strip a leading frontmatter block (---\n...\n---) if present.
+      if [[ "$content" == $'---\n'* ]]; then
+        content="${content#---}"
+        content="${content#*$'\n---'}"
+        # Remove the leading newline left after the closing ---.
+        content="${content#$'\n'}"
+      fi
+      echo "## ${doc} @ ${BASE_REF}"
+      echo ""
+      printf '%s\n' "$content" | head -n "$MAX_LINES"
+      echo ""
+    fi
+  done
+
+  if [ "$FOUND_ANY" -eq 0 ]; then
+    echo "## Charters"
+    echo ""
+    echo "(none found at base)"
+    echo ""
+  fi
+
+  # ── Diff brief ──────────────────────────────────────────────────────
+  if [ -n "$HEAD_SHA" ] && [ "$HEAD_SHA" != "$BASE_SHA" ]; then
+    echo "## Diff brief (${BASE_REF}...HEAD)"
+    echo ""
+    git -C "$CI_PROJECT_DIR" diff --stat "$BASE_REF...HEAD"
+    echo ""
+    echo "Changed files:"
+    git -C "$CI_PROJECT_DIR" diff --name-only "$BASE_REF...HEAD"
+    echo ""
+    echo "Commits:"
+    git -C "$CI_PROJECT_DIR" log --oneline "$BASE_REF..HEAD" | head -30
+  else
+    echo "## Diff brief"
+    echo ""
+    echo "(none — branch at base commit)"
+  fi
+} > "$EVIDENCE_FILE"
+
+echo "[build-evidence-pack] wrote $EVIDENCE_FILE (base=${BASE_REF})" >&2
+exit 0
