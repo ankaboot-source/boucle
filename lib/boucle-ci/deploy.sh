@@ -16,8 +16,17 @@ boucle_ci_deploy() {
     return 0
   fi
 
-  # Build
-  eval "$BOUCLE_BUILD_CMD"
+  # Build — unless the build output is already populated. On GitLab the
+  # build-site job hands this job `public/` as an artifact, and rebuilding
+  # here OOMs WASM toolchains on shell executors (framagit, 2026-08). On
+  # GitHub there is no build-site job, so the tree is empty and this builds
+  # exactly as before.
+  if [ -n "${BOUCLE_BUILD_OUTPUT:-}" ] && [ -d "$BOUCLE_BUILD_OUTPUT" ] \
+    && [ -n "$(ls -A "$BOUCLE_BUILD_OUTPUT" 2> /dev/null)" ]; then
+    echo "deploy: $BOUCLE_BUILD_OUTPUT already populated (build artifact) — skipping build"
+  else
+    eval "$BOUCLE_BUILD_CMD"
+  fi
 
   # Deploy to production (configurable via BOUCLE_DEPLOY_CMD, force default branch)
   BRANCH="$BOUCLE_DEFAULT_BRANCH"
