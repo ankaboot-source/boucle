@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2154,SC2250  # BOUCLE_FORGE, BOUCLE_PIPELINE_SOURCE are env vars set by CI.
 # bin/update — boucle self-update: fetch latest from upstream and apply.
-# Runs as the first step of the dispatch job (GitLab CI or GitHub Actions).
-# Fail-open: any error → warning + exit 0, pipeline continues with current version.
+# Runs in the before_script of every CI job (after BOUCLE_HOME is resolved,
+# before engine files are sourced). Fail-open: any error → warning + exit 0,
+# pipeline continues with current version.
 # Usage: bin/update [--dry-run]
 
 # No -e: fail-open requires commands to fail individually without aborting the script.
