@@ -68,14 +68,24 @@ Boucle supports two deploy modes and two review modes, orthogonal and composable
 Opt-in token-less deploy path: set `BOUCLE_DEPLOY_PROVIDER=gitlab-pages` and
 leave `BOUCLE_DEPLOY_CMD` **empty** (a project variable with an empty value
 overrides the YAML default). The forge's own `pages` job builds
-`$BOUCLE_BUILD_OUTPUT` and serves it at `$CI_PAGES_URL` — no deploy command,
-no preview URLs.
+`$BOUCLE_BUILD_OUTPUT` and serves it at `$CI_PAGES_URL` — no deploy command.
+
+The site URL **is displayed** in the MR description (`Site (GitLab Pages):
+$CI_PAGES_URL`) so the MR does not look like a broken duplicate — even though
+the mechanics differ from Cloudflare Pages (no per-branch previews: branch
+previews would need GitLab **parallel deployments** (`pages.path_prefix`,
+GitLab ≥ 17.9), a **Premium** feature that CE instances ignore *silently* —
+a prefixed job publishes at the ROOT and clobbers production; verified
+empirically on framagit 2026-08).
 
 The loop adapts automatically to an empty `BOUCLE_DEPLOY_CMD`:
 
-- **Worker** — skips the preview deploy (no `FAIL: no preview URL`); the MR
-  description carries no `Preview:` line.
-- **Reviewer** — sees no preview URL and falls back to **diff review** (code
+- **Worker** — skips the preview deploy (no `FAIL: no preview URL`); when
+  `BOUCLE_DEPLOY_PROVIDER=gitlab-pages` and `$CI_PAGES_URL` is set, the MR
+  description carries `Site (GitLab Pages): $CI_PAGES_URL — no per-branch
+  preview; reviewed via diff` instead of a blank `Preview:` line.
+- **Reviewer** — sees no preview URL (the pages.dev extraction regex cannot
+  match the forge's Pages domain) and falls back to **diff review** (code
   review of the MR diff + check suites), same as `BOUCLE_REVIEW_MODE=diff`.
 - **Deploy job** — skips cleanly (`deploy: BOUCLE_DEPLOY_CMD is empty`).
 - **Post-merge/e2e** — resolves the live URL to `$CI_PAGES_URL` instead of
