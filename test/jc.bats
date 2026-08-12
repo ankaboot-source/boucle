@@ -622,6 +622,67 @@ NEEDS-SPLIT" > "$LOG"
   rm -rf "$WORKDIR"
 }
 
+# ── Image path stripping (lesson: text-only model 400s on image input) ─
+# When bin/describe-images has described the attachments as TEXT, bin/jc
+# strips image extensions (png/jpg/...) from BOUCLE_ISSUE_ATTACHMENTS and
+# BOUCLE_MR_ATTACHMENTS so the agent CANNOT Read the raw binaries (a
+# text-only model like deepseek-v4-flash 400s on image input, killing the
+# worker run with zero commits — consumer 2026-08, issue #55: 3 iterations
+# shipped nothing because the agent kept Reading the PNGs despite the
+# prompt instruction).
+@test "strip_image_paths: strips image extensions when descriptions exist" {
+  run bash -c '
+    strip_image_paths() {
+      local paths="${1:-}"
+      local kept=""
+      local p
+      for p in $paths; do
+        case "$p" in
+          *.png|*.jpg|*.jpeg|*.gif|*.webp|*.avif|*.bmp|*.svg)
+            : ;;
+          *)
+            kept="$kept $p" ;;
+        esac
+      done
+      echo "$kept" | sed "s/^ //"
+    }
+    strip_image_paths "/x/1_hero_full.png /x/2_plan.pdf /x/3_hero_without_object.png /x/mockup.jpg /x/archive.zip"
+  '
+  assert_success
+  assert_output "/x/2_plan.pdf /x/archive.zip"
+}
+
+@test "strip_image_paths: keeps all paths when no descriptions (no-op)" {
+  run bash -c '
+    # No BOUCLE_IMAGE_DESCRIPTIONS → the strip block is not executed, so
+    # the attachment variables pass through untouched. This mirrors the
+    # `if [ -n "$BOUCLE_IMAGE_DESCRIPTIONS" ]` guard in bin/jc.
+    strip_image_paths() {
+      local paths="${1:-}"
+      local kept=""
+      local p
+      for p in $paths; do
+        case "$p" in
+          *.png|*.jpg|*.jpeg|*.gif|*.webp|*.avif|*.bmp|*.svg)
+            : ;;
+          *)
+            kept="$kept $p" ;;
+        esac
+      done
+      echo "$kept" | sed "s/^ //"
+    }
+    # Descriptions empty → block skipped → full list kept.
+    BOUCLE_IMAGE_DESCRIPTIONS=""
+    if [ -z "$BOUCLE_IMAGE_DESCRIPTIONS" ]; then
+      echo "/x/a.png /x/b.pdf"
+    else
+      strip_image_paths "/x/a.png /x/b.pdf"
+    fi
+  '
+  assert_success
+  assert_output "/x/a.png /x/b.pdf"
+}
+
 @test "ensure_jcode_config: respects pre-existing config.toml when no env vars set (local dev)" {
   # Local dev / backward compat: if the runner already has a config.toml
   # (installed via the package), bin/jc MUST use it instead of clobbering.
