@@ -229,6 +229,8 @@ harness MUST use the markers correctly or dispatch will misroute its writes.
 | `<!-- boucle:blocked v=1 iids=N,M -->` | `v=1 iids=<comma-separated-IIDs>` | dispatch.sh:461, boucle.sh:1136 | (informational — marks the blocked note) | Posted on a sub-issue blocked by open siblings. The label `boucle:blocked` is the state; this marker is the note's machine-readable header. |
 | `<!-- boucle:unblocked v=1 by=N -->` | `v=1 by=<closed-dep-IID>` | catchup.sh:100, e2e.sh:109 | (informational — marks the unblock note) | Posted when a dependency closes and the worker starts. |
 | `<!-- boucle:e2e-origin v=1 iid=N -->` | `v=1 iid=<origin-IID>` | e2e.sh:267 (on follow-up issues) | boucle.sh:705 (parse, to resolve the original issue from a follow-up) | Carries the original issue IID on a follow-up issue created by e2e FAIL, so the loop can cascade back. |
+| `<!-- boucle:e2e-fail v=1 iid=N followup=M -->` | `v=1 iid=<origin-IID> followup=<followup-IID>` | e2e.sh:291 (on follow-up issue created by e2e FAIL) | (informational — links follow-up to origin) | Posted on the follow-up issue created when e2e FAILs, linking it to the original issue for cascade. |
+| `<!-- boucle:e2e-escalation v=1 iid=N verdict=X -->` | `v=1 iid=<IID> verdict=<uncertain\|empty>` | e2e.sh:321,357 (on e2e UNCERTAIN or no-verdict) | (informational — structured escalation) | Posted when e2e escalates to human due to UNCERTAIN verdict or no verdict (step exhaustion). Records the verdict reason. |
 | `<!-- boucle:sub-issue v=1 -->` | `v=1` | triage (split operation) | triage.sh:566 (skip in parent-body parsing) | Marks a sub-issue body. Used to avoid parsing sub-issue content as parent-issue content. |
 
 ### 3.5 Operational markers
@@ -245,7 +247,7 @@ harness MUST use the markers correctly or dispatch will misroute its writes.
 
 | Marker | Status | Note |
 |---|---|---|
-| `<!-- boucle:files v=1 paths=... -->` | **Planned, not implemented** | Documented in AGENTS.md lesson #62 + design spec, but absent from code. A harness MUST NOT emit it — the loop does not parse it. |
+| `<!-- boucle:files v=1 paths=... -->` | **Planned, not implemented** | Documented in `docs/superpowers/specs/2026-08-12-file-impact-gate-design.md`, not yet in AGENTS.md. Absent from code. A harness MUST NOT emit it — the loop does not parse it. |
 | `<!-- boucle:sibling-blocked v=1 sib=N -->` | **Does not exist** | Audit false positive. The `boucle:blocked` marker (§3.4) covers this; there is no separate sibling-blocked marker. |
 | `<!-- boucle:conflict-retry N -->` | **Does not exist as a marker** | `conflict-retry` appears as a log message string (worker.sh:366, boucle.sh:1181), not as an HTML-comment marker. |
 
@@ -417,10 +419,10 @@ and may produce conflicts with in-flight MRs.
   consumer once the engine/consumer separation is stable. Until then, the
   62 AGENTS.md lessons remain as the incident catalog; new classes of bugs are
   discovered on real consumers. (CONTEXT.md §1.)
-- **`boucle:files` planned, not yet implemented.** Documented in AGENTS.md
-  lesson #62 and a design spec, but not in the engine code. A harness MUST NOT
-  emit the `<!-- boucle:files v=1 paths=... -->` marker — the loop does not
-  parse it yet.
+- **`boucle:files` planned, not yet implemented.** Documented in
+  `docs/superpowers/specs/2026-08-12-file-impact-gate-design.md`, not yet in
+  AGENTS.md or the engine code. A harness MUST NOT emit the
+  `<!-- boucle:files v=1 paths=... -->` marker — the loop does not parse it yet.
 - **Lesson numbering drift.** AGENTS.md has duplicate lesson numbers (#17,
   #22, #23, #24, #27, #28, #29, #41, #42, #47 appear twice). The doc's own rule
   says "never renumber — a pruned entry leaves a gap, not a shift", but

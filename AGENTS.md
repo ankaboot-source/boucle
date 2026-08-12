@@ -401,10 +401,10 @@ justification on stdout); the reviewer MUST reject entries that fail it.
       SHA. Git then reports upstream commits as "not present" even
       though their **content** is already there. Check file content,
       not commit count, to assess real drift.
-    - ✅ DO: when a fix lands on consumer `master`, push it upstream
-      **in the same session**: branch from `origin/main`, cherry-pick
-      the consumer commit(s), push the branch, open a PR. This is
-      mandatory — not optional, not "later".
+    - ✅ DO: See [SKILL.md](SKILL.md) §I9 (Upstream-first). When a fix lands
+      on consumer `master`, push it upstream **in the same session**: branch
+      from `origin/main`, cherry-pick the consumer commit(s), push the
+      branch, open a PR. This is mandatory — not optional, not "later".
     - ✅ DO: accept that consumer `master` and upstream `main` are
       **intentionally divergent** — consumer has consumer-specific
       features (`feat:` commits) that will never go upstream, and

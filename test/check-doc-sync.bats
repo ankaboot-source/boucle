@@ -44,6 +44,14 @@ teardown() {
   [[ "$output" == *"boucle:nonexistent-marker"* ]]
 }
 
+@test "check-doc-sync catches markers with digits (e2e-fail style)" {
+  echo '# <!-- boucle:e2e-nonexistent v=1 -->' > "$REPO_ROOT/lib/boucle-ci/test-marker-tmp.sh"
+
+  run "$REPO_ROOT/bin/check-doc-sync"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"boucle:e2e-nonexistent"* ]]
+}
+
 @test "check-doc-sync fails when root SKILL.md symlink is broken" {
   mv "$REPO_ROOT/SKILL.md" "$REPO_ROOT/SKILL.md.test-bak"
   ln -s .jcode/skills/boucle/NONEXISTENT.md "$REPO_ROOT/SKILL.md"

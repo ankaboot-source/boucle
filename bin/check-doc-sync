@@ -86,12 +86,12 @@ fi
 # SKILL.md markers: extract from §3.1-3.5 tables (first column, | `<!-- boucle:... -->`)
 # Normalize to just the marker name: boucle:<name> (strip v=, attrs, -->)
 skill_markers=$(sed -n '/^## 3\. Marker reference/,/^## [4-9]\./p' "$SKILL_FILE" |
-	grep -oE '<!-- boucle:[a-z][a-z-]*' |
+	grep -oE '<!-- boucle:[a-z0-9][a-z0-9-]*' |
 	sed 's/<!-- //' |
 	sort -u)
 
 # Code markers: grep all <!-- boucle:... --> in code, normalize to name
-code_markers=$(grep -rohE '<!-- boucle:[a-z][a-z-]*' \
+code_markers=$(grep -rohE '<!-- boucle:[a-z0-9][a-z0-9-]*' \
 	"$REPO_ROOT/bin" "$REPO_ROOT/lib" "$REPO_ROOT/.gitlab-ci.yml" 2>/dev/null |
 	sed 's/<!-- //' |
 	sort -u)
