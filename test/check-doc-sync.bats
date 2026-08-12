@@ -3,6 +3,7 @@
 # test/check-doc-sync.bats — tests for bin/check-doc-sync lint
 
 # Resolve repo root from the test file location
+# shellcheck disable=SC2154 # BATS_TEST_FILENAME is set by bats at runtime
 REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 
 setup() {
