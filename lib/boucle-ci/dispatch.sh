@@ -181,7 +181,7 @@ boucle_ci_dispatch() {
     SOURCE_BRANCH=$(jq -r '.object_attributes.source_branch // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
     MR_IID=$(jq -r '.object_attributes.iid // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
     # Extract issue IID from branch name boucle/<iid>
-    MR_ISSUE_IID=$(printf '%s' "$SOURCE_BRANCH" | sed -n 's/^boucle\/\([0-9]\+\)$/\1/p')
+    MR_ISSUE_IID=$(printf '%s' "$SOURCE_BRANCH" | sed -n 's/^boucle\/\([0-9]\+\).*/\1/p')
     if [ -z "$MR_ISSUE_IID" ]; then
       echo "MR !${MR_IID} ($MR_ACTION) but source_branch '$SOURCE_BRANCH' is not a boucle branch, skipping"
       exit 0
@@ -368,7 +368,7 @@ boucle_ci_dispatch() {
     MR_NOTE_IID=$(jq -r '.merge_request.iid // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
     if [ -n "$MR_NOTE_IID" ] && [ "$OBJECT_KIND" = "note" ]; then
       MR_NOTE_SOURCE_BRANCH=$(jq -r '.merge_request.source_branch // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
-      MR_NOTE_ISSUE_IID=$(printf '%s' "$MR_NOTE_SOURCE_BRANCH" | sed -n 's/^boucle\/\([0-9]\+\)$/\1/p')
+      MR_NOTE_ISSUE_IID=$(printf '%s' "$MR_NOTE_SOURCE_BRANCH" | sed -n 's/^boucle\/\([0-9]\+\).*/\1/p')
       if [ -z "$MR_NOTE_ISSUE_IID" ]; then
         echo "Note on MR !${MR_NOTE_IID} but source_branch '$MR_NOTE_SOURCE_BRANCH' is not a boucle branch, skipping"
         exit 0
@@ -627,8 +627,7 @@ boucle_ci_dispatch() {
     # boucle:spec-review here.
     if [ "$OBJECT_KIND" = "note" ] && [ "$ACTOR" != "${BOUCLE_BOT_USERNAME:-up-bot}" ]; then
       SHOULD_WORK=true
-    elif [ "$OBJECT_KIND" = "emoji" ] && [ "$ACTOR" != "${BOUCLE_BOT_USERNAME:-up-bot}" ]; then
-      EMOJI_NAME=$(jq -r '.object_attributes.name // empty' "$BOUCLE_TRIGGER_PAYLOAD")
+    elif [ "$OBJECT_KIND" = "emoji" ] && [ "$ACTOR" != "${BOUCLE_BOT_USERNAME:-up-bot}" ]; then      EMOJI_NAME=$(jq -r '.object_attributes.name // empty' "$BOUCLE_TRIGGER_PAYLOAD")
       EMOJI_ACTION=$(jq -r '.object_attributes.action // empty' "$BOUCLE_TRIGGER_PAYLOAD")
       AWARDABLE_TYPE=$(jq -r '.object_attributes.awardable_type // empty' "$BOUCLE_TRIGGER_PAYLOAD")
       if [ "$EMOJI_ACTION" = "award" ] \
@@ -636,6 +635,16 @@ boucle_ci_dispatch() {
         && echo "$EMOJI_NAME" | grep -Eq "^($BOUCLE_SPEC_APPROVAL_EMOJIS)$"; then
         SHOULD_WORK=true
       fi
+    fi
+  elif echo "$LABELS" | grep -q "boucle:human"; then
+    # Human comment on an issue at boucle:human — the human is providing
+    # feedback or amendments. Re-trigger the worker so it picks up the
+    # comments and re-implements. Without this, comments on an issue at
+    # boucle:human are silently ignored (the loop is paused, waiting for
+    # a terminal action like MR approval or manual re-assignment). The
+    # human expects their comment to be acted on, not ignored.
+    if [ "$OBJECT_KIND" = "note" ] && [ "$ACTOR" != "${BOUCLE_BOT_USERNAME:-up-bot}" ]; then
+      SHOULD_WORK=true
     fi
   elif [ -z "$LABELS" ] || [ "$ACTION" = "open" ]; then
     # New issue with no boucle label → triage

@@ -1752,6 +1752,57 @@ atomic.
       (shorter); stable — no line numbers, no transient values;
       distinct — no existing lesson covers branch lifecycle.
 
+71. **Dispatch MUST route human comments from every idle state and
+    handle slug-named branches**
+    - ❌ DO NOT omit a routing case for `boucle:human` in the dispatch
+      label-routing block. A human who comments on an issue at
+      `boucle:human` expects the loop to pick up their feedback and
+      re-run — the comment is silently dropped instead, because the
+      routing only handles `boucle:triage`, `boucle:needs-info`,
+      `boucle:todo`, and `boucle:spec-review`. The human then re-posts
+      on the MR, re-posts on the parent issue, and escalates to the
+      maintainer — none of which triggers the loop. Observed on a
+      consumer (2026-08): issue #79 sat at `boucle:human` for hours
+      while the human posted amendments on both the issue and the MR;
+      the issue comments were dropped, and the MR comments on the
+      slug-named branch were also dropped (see below).
+    - ❌ DO NOT use a `$`-anchored regex like `^boucle/\([0-9]\+\)$`
+      to extract the issue IID from a worker branch name. Lesson #70
+      introduced `boucle/<iid>-<slug>` branches, but the dispatch
+      branch-extraction regex was not updated — it only matches the
+      bare `boucle/<iid>` form. A human comment on an MR whose branch
+      is `boucle/79-fusion-des-sections-alli-s-et` is silently dropped
+      with "not a boucle branch, skipping". The `forge_mr_lookup_by_branch`
+      was updated to prefix-match (lesson #70), but the dispatch regex
+      was missed — a regression introduced in the same commit that
+      changed the naming.
+    - ✅ DO: the dispatch label-routing block MUST include a case for
+      `boucle:human`: when a non-bot note arrives on an issue at
+      `boucle:human`, set `SHOULD_WORK=true` so the worker re-runs
+      with the human's feedback. This treats a human comment as "I
+      want the loop to continue with my amendments" — which is the
+      human's expectation. The worker will pick up the issue notes
+      (including the new comment) via `BOUCLE_ISSUE_NOTES` and the MR
+      notes via `BOUCLE_REVIEWER_FEEDBACK`.
+    - ✅ DO: the branch-extraction regex in dispatch MUST be
+      prefix-anchored only: `^boucle/\([0-9]\+\)` (no `$`), or
+      equivalently `^boucle/\([0-9]\+\).*` — this extracts the IID
+      from both `boucle/79` (legacy) and `boucle/79-slug` (current).
+      Grep ALL branch-regex sites after any branch-naming change:
+      dispatch (MR event path + MR note path), `forge_mr_lookup_by_branch`
+      (already prefix-matched), and any new site that parses branch
+      names.
+    - Admission: class — any idle state without a dispatch routing
+      case silently drops human comments, and any branch-naming change
+      that doesn't update ALL regex sites silently drops MR comments;
+      recurrence — new boucle states are added routinely and the
+      natural regex instinct is `$`-anchored (exact match), and a
+      future branch-naming change would repeat the miss without the
+      doc; stable — no line numbers, no transient values; distinct —
+      lesson #70 covers branch naming + cleanup, this lesson covers
+      dispatch routing for comments on idle states and slug-named
+      branches.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
