@@ -110,48 +110,24 @@ git submodule add https://github.com/ankaboot-source/boucle .boucle
 
 # 2. Configure everything (idempotent — safe to re-run)
 #
-# GitLab (auto-detects host and project from the origin remote):
+# GitLab:
 .boucle/bin/setup gitlab
 #
-# GitHub — two paths (pick one):
-#
-#   RECOMMENDED — dedicated bot account (cleaner notifications, no self-activity noise):
-#   1. Create a GitHub account for the bot: https://github.com/signup
-#   2. Create a PAT on that account: https://github.com/settings/tokens/new
-#      (scopes: repo + workflow)
-#   3. Add the bot as a collaborator on your repo (write access)
-#   4. Run setup with the bot's PAT and user ID:
+# GitHub — dedicated bot (recommended):
+#   Create a bot account: https://github.com/signup
+#   Create a PAT: https://github.com/settings/tokens/new (scopes: repo + workflow)
+#   Add the bot as a collaborator on your repo, then:
 .boucle/bin/setup github --bot-token "<bot-PAT>" --bot-id <bot-user-id>
 #
-#   FALLBACK — mono-user (your own PAT drives the loop; notifications degrade):
+# GitHub — mono-user (fallback, your own PAT, notifications degrade):
 .boucle/bin/setup github --bot-token "$(gh auth token)"
-#   `gh auth token` gives you your own PAT if you are logged in via `gh auth login`.
-#   Mono-user is the default when no --bot-id is given.
 ```
-
-`bin/setup` configures the forge (GitLab CI/CD variables or GitHub Actions
-variables/secrets, labels, branch protection, webhook), writes a thin
-`.gitlab-ci.yml` or `.github/workflows/boucle.yml` shim, and appends
-`.boucle/` to your `.gitignore`. Your existing pipeline is never overwritten.
-Project, host and forge are read from the `origin` remote automatically. On
-GitLab, the bot is created for you (project service account); on GitHub,
-pass `--bot-token` + `--bot-id` for a dedicated bot, or just `--bot-token`
-for mono-user (your own account). Cloudflare is opt-in (`--cf-token`).
 
 ### After install
 
-1. Add `BOUCLE_LLM_API_KEY` as a **masked** secret:
-   - **GitLab:** project → Settings → CI/CD → Variables (masked).
-   - **GitHub:** project → Settings → Secrets and variables → Actions → New secret.
-   It is never handled by setup so it never crosses a conversation, a log,
-   or a shell history.
-2. **Runners: nothing to do.** boucle's jobs run untagged, so your forge's
-   shared runners pick them up — GitLab.com and GitHub-hosted work out of the
-   box, as do most self-managed instances that expose shared runners. Bring
-   your own runner only if you want to; see
-   [Advanced — dedicated runners](#advanced--dedicated-runners).
-3. Create an issue with the `boucle:triage` label — or assign an existing
-   issue to the boucle bot.
+1. Add `BOUCLE_LLM_API_KEY` as a masked secret (GitLab: Settings → CI/CD →
+   Variables; GitHub: Settings → Secrets and variables → Actions).
+2. Create an issue with the `boucle:triage` label.
 
 From there, the pipeline takes over. You only answer the human prompts:
 spec validation and MR approval. The `doctor` job (a scheduled
