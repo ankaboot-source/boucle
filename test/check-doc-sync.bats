@@ -53,15 +53,15 @@ teardown() {
   [[ "$output" == *"boucle:e2e-nonexistent"* ]]
 }
 
-@test "check-doc-sync fails when root SKILL.md symlink is broken" {
-  mv "$REPO_ROOT/SKILL.md" "$REPO_ROOT/SKILL.md.test-bak"
-  ln -s .jcode/skills/boucle/NONEXISTENT.md "$REPO_ROOT/SKILL.md"
+@test "check-doc-sync fails when .jcode SKILL.md symlink is broken" {
+  mv "$REPO_ROOT/.jcode/skills/boucle/SKILL.md" "$REPO_ROOT/.jcode/skills/boucle/SKILL.md.test-bak"
+  ln -s NONEXISTENT.md "$REPO_ROOT/.jcode/skills/boucle/SKILL.md"
 
   run "$REPO_ROOT/bin/check-doc-sync"
 
   # Restore symlink immediately (before assertions, so teardown is clean)
-  rm -f "$REPO_ROOT/SKILL.md"
-  mv "$REPO_ROOT/SKILL.md.test-bak" "$REPO_ROOT/SKILL.md"
+  rm -f "$REPO_ROOT/.jcode/skills/boucle/SKILL.md"
+  mv "$REPO_ROOT/.jcode/skills/boucle/SKILL.md.test-bak" "$REPO_ROOT/.jcode/skills/boucle/SKILL.md"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"symlink is broken"* ]]

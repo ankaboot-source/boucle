@@ -2,7 +2,8 @@
 # bin/check-doc-sync — validate engine code ↔ SKILL.md (protocol spec)
 #
 # Checks that labels and markers in the engine code match the protocol spec
-# in SKILL.md (.jcode/skills/boucle/SKILL.md, symlinked from root SKILL.md).
+# in SKILL.md (root SKILL.md is the real file, symlinked from
+# .jcode/skills/boucle/SKILL.md for runtimes that look in the skills dir).
 # Catches the CLASS of drift: any future label/marker undocumented = red CI.
 #
 # Exit codes:
@@ -13,8 +14,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SKILL_FILE="$REPO_ROOT/.jcode/skills/boucle/SKILL.md"
-ROOT_SKILL="$REPO_ROOT/SKILL.md"
+SKILL_FILE="$REPO_ROOT/SKILL.md"
+JCODE_SKILL="$REPO_ROOT/.jcode/skills/boucle/SKILL.md"
 
 FAIL=0
 WARN=0
@@ -29,13 +30,17 @@ fail() {
 }
 pass() { echo "OK: $*"; }
 
-# ── 0. Symlink check ────────────────────────────────────────────────────
-if [ ! -L "$ROOT_SKILL" ]; then
-  fail "root SKILL.md is not a symlink (expected symlink to .jcode/skills/boucle/SKILL.md)"
-elif [ ! -r "$ROOT_SKILL" ]; then
-  fail "root SKILL.md symlink is broken (target .jcode/skills/boucle/SKILL.md not readable)"
+# ── 0. File + symlink check ───────────────────────────────────────────
+# SKILL.md at root is the real file (source of truth). .jcode/skills/boucle/
+# SKILL.md is a symlink to it (projection for runtimes that look in skills/).
+if [ ! -f "$SKILL_FILE" ]; then
+  fail "root SKILL.md is not a regular file (expected the real protocol file)"
+elif [ ! -L "$JCODE_SKILL" ]; then
+  fail ".jcode/skills/boucle/SKILL.md is not a symlink (expected symlink to ../../../SKILL.md)"
+elif [ ! -r "$JCODE_SKILL" ]; then
+  fail ".jcode/skills/boucle/SKILL.md symlink is broken (target not readable)"
 else
-  pass "root SKILL.md symlink -> .jcode/skills/boucle/SKILL.md"
+  pass "root SKILL.md is the real file, .jcode/skills/boucle/SKILL.md -> ../../../SKILL.md"
 fi
 
 if [ ! -r "$SKILL_FILE" ]; then
