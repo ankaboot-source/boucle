@@ -636,7 +636,8 @@ boucle_ci_dispatch() {
     # boucle:spec-review here.
     if [ "$OBJECT_KIND" = "note" ] && [ "$ACTOR" != "${BOUCLE_BOT_USERNAME:-up-bot}" ]; then
       SHOULD_WORK=true
-    elif [ "$OBJECT_KIND" = "emoji" ] && [ "$ACTOR" != "${BOUCLE_BOT_USERNAME:-up-bot}" ]; then      EMOJI_NAME=$(jq -r '.object_attributes.name // empty' "$BOUCLE_TRIGGER_PAYLOAD")
+    elif [ "$OBJECT_KIND" = "emoji" ] && [ "$ACTOR" != "${BOUCLE_BOT_USERNAME:-up-bot}" ]; then
+      EMOJI_NAME=$(jq -r '.object_attributes.name // empty' "$BOUCLE_TRIGGER_PAYLOAD")
       EMOJI_ACTION=$(jq -r '.object_attributes.action // empty' "$BOUCLE_TRIGGER_PAYLOAD")
       AWARDABLE_TYPE=$(jq -r '.object_attributes.awardable_type // empty' "$BOUCLE_TRIGGER_PAYLOAD")
       if [ "$EMOJI_ACTION" = "award" ] \

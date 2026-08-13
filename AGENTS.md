@@ -1803,6 +1803,52 @@ atomic.
       dispatch routing for comments on idle states and slug-named
       branches.
 
+72. **Subshells that capture exit codes MUST be guarded against `set -e`**
+    - ❌ DO NOT write `(eval "$CMD") > "$log" 2>&1` followed by
+      `rc=$?` on the next line. Under `set -e` (GitLab runner default,
+      `bin/boucle-ci` starts with `set -euo pipefail`), a non-zero
+      subshell exit kills the shell BEFORE `rc=$?` executes — the error
+      handling that depends on `rc` NEVER fires, and the job fails with
+      a plain exit code that tells the human nothing. Observed on a
+      consumer (2026-08): the worker's build gate
+      (`(eval "$BOUCLE_BUILD_CMD") > "$build_log" 2>&1; build_rc=$?`)
+      was killed by a WASM OOM in `@astrojs/compiler` before
+      `build_rc=$?` could execute. The build gate's re-trigger logic
+      never ran. The worker's commit was never pushed. The issue sat
+      at `boucle:working` with no re-trigger.
+    - ✅ DO: guard every subshell that captures a non-zero exit code
+      with `|| rc=$?` and initialize `rc` to 0:
+      `(eval "$CMD") > "$log" 2>&1 || rc=$?; rc=${rc:-0}`. This
+      pattern is already used for the agent run
+      (`"$BOUCLE_HOME/bin/jc" worker || rc=$?`) — build and deploy
+      subshells MUST follow the same pattern.
+    - Admission: class — any unguarded subshell under `set -e` that
+      expects to capture a non-zero exit code; recurrence — the natural
+      instinct when writing a build gate is `(cmd); rc=$?`; stable —
+      no line numbers; distinct — no existing lesson covers `set -e`
+      guarding of subshells.
+
+73. **File-based state artifacts MUST be cleared at stage startup**
+    - ❌ DO NOT rely on the GitLab runner's `git clean` to remove
+      file-based state artifacts (`.boucle-issue`) between runs. A
+      stale artifact from a previous run causes the current run's
+      guards to make incorrect decisions.
+    - ❌ DO NOT assume the dispatch EXIT trap correctly detects whether
+      the CURRENT run wrote `.boucle-issue`. If a previous issue-webhook
+      dispatch wrote it and the file survived `git clean`, the trap
+      finds it and doesn't flip to exit 1 — triage runs and re-triages
+      the issue. Observed on a consumer (2026-08): an MR-note trigger
+      dispatch chained the worker and exited 0 without writing
+      `.boucle-issue`; a stale file survived, triage ran, re-triaged
+      the issue to `spec-review` + `status::human`, blocking the loop.
+    - ✅ DO: `rm -f .boucle-issue` at the START of `boucle_ci_dispatch`,
+      immediately after the EXIT trap is set. Apply the same pattern to
+      any stage that uses a file-based guard.
+    - Admission: class — any file-based state that survives across runs;
+      recurrence — a new stage function that uses a file-based guard
+      would not know to clear stale state; stable — no line numbers;
+      distinct — no existing lesson covers stale artifact files.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
