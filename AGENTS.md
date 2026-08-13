@@ -1550,6 +1550,43 @@ atomic.
       transient values; distinct — lesson #56 covers literal env vars
       in notes, this lesson covers localized message forks.
 
+65. **Inline CI jobs MUST use `$BOUCLE_HOME/bin/`, never `./bin/`**
+    - ❌ DO NOT reference engine scripts as `./bin/<script>` in the
+      inline jobs of `.gitlab-ci.yml`. On a consumer repo boucle is a
+      submodule at `.boucle/`, so `$CI_PROJECT_DIR/bin/` does not exist
+      — the call dies with `No such file or directory`, the job fails
+      with exit 1, and every step AFTER the failed call is skipped. The
+      extracted copies (`lib/boucle-ci/*.sh`) already use
+      `"$BOUCLE_HOME/bin/..."`; the inline copies drifted to `./bin/`.
+    - ❌ DO NOT assume a missing script is harmless because the call is
+      "best-effort". `collapse-duplicate-notes` is invoked WITHOUT
+      `|| true` in the inline reviewer/e2e jobs, so its failure aborts
+      the whole job — the verdict `case` block (PASS/FAIL/UNCERTAIN)
+      is never reached, the issue label is never advanced, and the
+      doctor re-triggers the reviewer every 10 min. The reviewer posts
+      a fresh verdict each time (the agent runs before the crash), so
+      the MR accumulates dozens of identical PASS/FAIL verdicts while
+      the issue stays pinned at `boucle:review` forever. Observed on a
+      consumer (2026-08): MR !100 had 28 identical PASS verdicts, MR
+      !101 had 29 identical FAIL verdicts, all on the same SHA, all
+      because `./bin/collapse-duplicate-notes` crashed the job before
+      the `case` block.
+    - ✅ DO: use `"$BOUCLE_HOME/bin/<script>"` in EVERY inline job call
+      site, matching the extracted copies. `$BOUCLE_HOME` is set in the
+      `default` before_script to `$CI_PROJECT_DIR/.boucle` (consumer) or
+      `$CI_PROJECT_DIR` (upstream), so the path resolves correctly in
+      both environments.
+    - ✅ DO: grep `.gitlab-ci.yml` for `./bin/` after any inline-job
+      edit — a single relative path slipped in is enough to pin every
+      issue at `boucle:review` and flood the MR with duplicate verdicts.
+    - Admission: class — any relative `./bin/` path in an inline CI job
+      that runs on a consumer where boucle is a submodule; recurrence —
+      the inline and extracted copies drift on every edit, and the
+      natural instinct when writing a new call is `./bin/...` (shorter);
+      stable — no line numbers, no transient values; distinct — lesson
+      #56 covers literal env vars in notes, this lesson covers relative
+      script paths that crash the job before the verdict case.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.

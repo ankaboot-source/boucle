@@ -1437,7 +1437,7 @@ triage:
                 -f body="$AUTONOMOUS_NOTE" \
                 > /dev/null 2>&1 || true
             fi
-            if [ "$SHOULD_GATE" = "true" ] && ./bin/dnd 2>/dev/null; then
+            if [ "$SHOULD_GATE" = "true" ] && "$BOUCLE_HOME/bin/dnd" 2>/dev/null; then
               DND_START="${BOUCLE_DND_START:-22:00}"
               DND_END="${BOUCLE_DND_END:-07:00}"
               DND_TZ="${BOUCLE_DND_TZ:-UTC}"
@@ -3022,14 +3022,14 @@ reviewer:
       # Gated on MR_IID being non-empty (it is set above from the MR lookup).
       if [ -n "${MR_IID:-}" ]; then
         export BOUCLE_MR_IID="$MR_IID"
-        ./bin/fetch-mr-attachments || echo "[boucle] WARN: MR attachment fetch failed — continuing without MR attachments"
+        "$BOUCLE_HOME/bin/fetch-mr-attachments" || echo "[boucle] WARN: MR attachment fetch failed — continuing without MR attachments"
       fi
-      ./bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
+      "$BOUCLE_HOME/bin/fetch-issue-attachments" || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
 
       # Detect image attachments (issue + MR comments) and route to a
       # vision-capable model if needed.
       # Forge controls: BOUCLE_VISION_ROUTING, BOUCLE_VISION_MODEL, BOUCLE_VISION_ROLES.
-      ./bin/describe-images reviewer || echo "[boucle] WARN: image description failed — continuing without descriptions"
+      "$BOUCLE_HOME/bin/describe-images" reviewer || echo "[boucle] WARN: image description failed — continuing without descriptions"
 
       # Run the agent against the preview.
       # Use `|| rc=$?` to suppress set -e so the script continues to
@@ -3177,7 +3177,7 @@ reviewer:
       fi
 
       # Collapse duplicate reviewer verdicts (agent may post a v2; CI replaces the first).
-      ./bin/collapse-duplicate-notes reviewer "$CI_PROJECT_ID" "$MR_IID" "$PRE_RUN_VERDICT_ID" "$BOUCLE_FORGE_HOST" "$MR_HEAD"
+      "$BOUCLE_HOME/bin/collapse-duplicate-notes" reviewer "$CI_PROJECT_ID" "$MR_IID" "$PRE_RUN_VERDICT_ID" "$BOUCLE_FORGE_HOST" "$MR_HEAD"
 
       # Resolve the reporter id once, before the verdict case, so every branch
       # (PASS, FAIL, UNCERTAIN) can assign the MR to the author when their
@@ -4231,7 +4231,7 @@ e2e:
       fi
 
       # Collapse duplicate e2e verdicts (agent may post a v2; CI replaces the first).
-      ./bin/collapse-duplicate-notes e2e "$CI_PROJECT_ID" "$BOUCLE_ISSUE" "$PRE_RUN_VERDICT_ID" "$BOUCLE_FORGE_HOST"
+      "$BOUCLE_HOME/bin/collapse-duplicate-notes" e2e "$CI_PROJECT_ID" "$BOUCLE_ISSUE" "$PRE_RUN_VERDICT_ID" "$BOUCLE_FORGE_HOST"
 
       case "$VERDICT" in
         PASS)
