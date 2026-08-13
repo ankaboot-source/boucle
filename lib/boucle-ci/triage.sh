@@ -254,7 +254,7 @@ boucle_ci_triage() {
   # NOTE: bin/collapse-duplicate-notes is fully forge-agnostic (uses the
   # forge_* contract: forge_issue_notes / forge_issue_note_update /
   # forge_note_delete) since the GitHub-support port.
-  $BOUCLE_HOME/bin/collapse-duplicate-notes triage "$BOUCLE_PROJECT_ID" "$IID" "$PRE_RUN_TRIAGE_ID" "$BOUCLE_FORGE_HOST"
+  $BOUCLE_HOME/bin/collapse-duplicate-notes triage "$BOUCLE_PROJECT_ID" "$IID" "$PRE_RUN_TRIAGE_ID" "$BOUCLE_FORGE_HOST" || true
   # Route based on disposition
   case "$DISPOSITION" in
     READY)
