@@ -294,6 +294,13 @@ forge_attachment_upload() {
   echo "$resp" | jq -r '.url // .full_path // empty' 2> /dev/null || true
 }
 
+forge_branch_url() {
+  local branch="$1"
+  [ -z "${BOUCLE_FORGE_HOST:-}" ] && return 0
+  [ -z "${BOUCLE_PROJECT_PATH:-}" ] && return 0
+  echo "https://$BOUCLE_FORGE_HOST/$BOUCLE_PROJECT_PATH/-/tree/$branch"
+}
+
 # ── MR operations ─────────────────────────────────────────────────────────
 
 forge_mr_get() {

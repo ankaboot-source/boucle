@@ -323,6 +323,13 @@ forge_attachment_upload() {
   return 0
 }
 
+forge_branch_url() {
+  local branch="$1"
+  [ -z "${BOUCLE_FORGE_HOST:-}" ] && return 0
+  [ -z "${BOUCLE_PROJECT_PATH:-}" ] && return 0
+  echo "https://$BOUCLE_FORGE_HOST/$BOUCLE_PROJECT_PATH/tree/$branch"
+}
+
 # ── MR (PR) operations ────────────────────────────────────────────────────
 
 forge_mr_get() {
