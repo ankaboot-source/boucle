@@ -349,6 +349,21 @@ cmd_check() {
   fi
 }
 
+# ── log <iid> ────────────────────────────────────────────────────────────
+#
+# Print the agent-output.log from the last run. Read-only.
+cmd_log() {
+  local iid="${1:?usage: boucle log <iid>}"
+  local log_file=".boucle-state/$iid/agent-output.log"
+  if [ -f "$log_file" ]; then
+    cat "$log_file"
+  else
+    echo "No agent-output.log found for issue #$iid." >&2
+    echo "Expected at: $log_file" >&2
+    exit 1
+  fi
+}
+
 # ── Main dispatch ────────────────────────────────────────────────────────
 case "${1:-}" in
   pause)    shift; cmd_pause "$@" ;;
@@ -356,5 +371,6 @@ case "${1:-}" in
   restart)  shift; cmd_restart "$@" ;;
   status)   shift; cmd_status "$@" ;;
   check)    shift; cmd_check "$@" ;;
+  log)      shift; cmd_log "$@" ;;
   *) echo "Usage: boucle <pause|resume|restart|status|check|log> <iid>" >&2; exit 1 ;;
 esac
