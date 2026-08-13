@@ -247,6 +247,11 @@ else
 fi
 echo ""
 
+# Export BOUCLE_PROJECT_ID so the forge helpers (forge_label_create,
+# forge_branch_protect, etc.) can resolve the repo. On GitLab this is the
+# numeric project ID; on GitHub it is "owner/repo".
+export BOUCLE_PROJECT_ID="$PROJECT_ID"
+
 # Dry-run wrapper
 run() {
   if [ "$DRY_RUN" = "true" ]; then
