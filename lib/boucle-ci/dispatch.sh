@@ -48,6 +48,15 @@ boucle_ci_dispatch() {
   # data runner while triage bootstraps only to find no work to do.
   trap 'if [ $? -eq 0 ] && [ ! -f .boucle-issue ]; then exit 1; fi' EXIT
 
+  # Clear any stale .boucle-issue from a previous run. The file is NOT in
+  # .gitignore and survives `git clean` on some runner configurations
+  # (observed on framagit 2026-08: a previous issue-webhook dispatch wrote
+  # .boucle-issue; the next run's MR-note trigger dispatch didn't write it,
+  # but the file still existed — the EXIT trap found it and didn't flip to
+  # exit 1, so triage ran and re-triaged the issue, setting spec-review +
+  # status::human and blocking the loop).
+  rm -f .boucle-issue
+
   # Sanity-check the trigger payload before jq touches it. GitLab file-type
   # CI variables resolve to a temp file path; on shared runners
   # the path can be unset, empty, or point to a deleted file. Without this
