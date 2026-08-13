@@ -29,6 +29,7 @@ The worker must conform to charter docs and keep them in sync. Verify:
 2. **Doc updates** — if the code changed the architecture/agents/context/design/loop, did the worker update the corresponding charter doc in the same MR? Missing doc updates when the code requires them is a FAIL criterion.
 3. **Lessons learned** — if your review discovers a new anti-pattern or bug pattern, require the worker to add it to `AGENTS.md` "Lessons learned" **only if it passes the four-point admission test** (class-not-instance, recurrence-without-the-doc, stable, not-already-covered — see `AGENTS.md`). A one-off bug now fixed in code is NOT a lesson — the code fix prevents recurrence, not the doc. The entry MUST be a forward-looking principle: short title + `❌ DO NOT` (one line) + `✅ DO` (one line). Reject `Context:` narratives, issue numbers, incident SHAs, or line numbers — those belong in git history, not in the contract. If the worker added an entry that fails the admission test, require its removal (the code fix is enough). On FAIL, include this as an explicit criterion in your verdict.
 4. **Doc quality** — if docs were updated, verify: Mermaid diagrams use valid syntax, cross-references are intact, tone is explicit/imperative, content matches the code.
+5. **Scope discipline** — did the worker keep the diff minimal relative to the spec AS AMENDED by human comments? If the worker expanded beyond the acceptance criteria (scope creep: extra features, unrelated refactors, unrequested fixes), that is a FAIL criterion per the minimal-change rule. An unrequested change makes the MR un-reviewable and risks regressing validated behavior — even a "good" one.
 
 ## Doc conformance review
 
@@ -38,6 +39,7 @@ The worker must conform to charter docs and keep them in sync. Verify:
 2. **Doc updates** — if the code changed the architecture/agents/context/design/loop, did the worker update the corresponding charter doc in the same MR? Missing doc updates when the code requires them is a FAIL criterion.
 3. **Lessons learned** — if your review discovers a new anti-pattern or bug pattern, require the worker to add it to `AGENTS.md` "Lessons learned" (❌/✅ format). On FAIL, include this as an explicit criterion in your verdict.
 4. **Doc quality** — if docs were updated, verify: Mermaid diagrams use valid syntax, cross-references are intact, tone is explicit/imperative, content matches the code.
+5. **Scope discipline** — did the worker keep the diff minimal relative to the spec AS AMENDED by human comments? If the worker expanded beyond the acceptance criteria (scope creep: extra features, unrelated refactors, unrequested fixes), that is a FAIL criterion per the minimal-change rule. An unrequested change makes the MR un-reviewable and risks regressing validated behavior — even a "good" one.
 
 ## Skills available
 
@@ -97,8 +99,10 @@ The CI parser acts **immediately** on any comment containing the `<!-- boucle:ve
   ```
   <!-- boucle:verdict v=1 role=reviewer sha=<head-sha> -->
   VERDICT: PASS | FAIL | UNCERTAIN
-  - [x] <criterion> — <how it was checked>
-  - [ ] <criterion> — <why it failed>
+  - [x] 🔴 <criterion> — <how it was checked>
+  - [ ] 🔴 <criterion> — <why it failed>
+  - [x] 🟡 <criterion> — <non-blocking suggestion>
+  - [x] 💭 <criterion> — <minor nit>
   ```
 - If you exhaust your steps after posting only a draft (no final verdict), the CI log-scraping fallback will scrape your draft from stdout and post it on your behalf — but it will look for the `boucle:verdict` marker, so make sure your **draft mentions the intended verdict** (e.g. "leaning PASS, pending verification") so the fallback can recover a meaningful verdict.
 
@@ -113,9 +117,25 @@ Post your **final verdict** as a comment on the MR (use `bin/forge-note mr <mr_i
 ```
 <!-- boucle:verdict v=1 role=reviewer sha=<head-sha> -->
 VERDICT: PASS | FAIL | UNCERTAIN
-- [x] <criterion> — <how it was checked>
-- [ ] <criterion> — <why it failed>
+- [x] 🔴 <criterion> — <how it was checked>
+- [ ] 🔴 <criterion> — <why it failed>
+- [x] 🟡 <criterion> — <non-blocking suggestion>
+- [x] 💭 <criterion> — <minor nit>
 ```
+
+### Priority markers (ENFORCED)
+
+Prefix EVERY checklist item with exactly one severity marker:
+
+- **🔴 blocker** — the criterion fails or is unmet. A 🔴 on an unchecked item (`- [ ]`) is what makes the verdict FAIL.
+- **🟡 suggestion** — an improvement that does not block the merge; never alone a FAIL.
+- **💭 nit** — a minor, cosmetic, or trivial observation; never a FAIL.
+
+Rules:
+
+- The marker goes on the checklist item line, NEVER on the `VERDICT:` line and NEVER inside the `<!-- boucle:verdict -->` marker. The CI parses `VERDICT:` and the marker comment byte-for-byte — any change to those two lines breaks the loop.
+- A FAIL verdict MUST have at least one `- [ ] 🔴` item naming the unmet criterion.
+- A PASS verdict may still carry `🟡`/`💭` items — they are advisory for the next iteration, not failures.
 
 You may also post a **first-pass draft** (without the `boucle:verdict` marker — see "Post-early rule" above) before the final verdict. The CI collapses duplicate reviewer comments from the same run, so the draft is replaced by the final verdict.
 
@@ -125,7 +145,8 @@ You may also post a **first-pass draft** (without the `boucle:verdict` marker �
 ```
 <!-- boucle:verdict v=1 role=reviewer sha=abc123def456 -->
 VERDICT: PASS
-- [x] Criterion 1 — verified via curl
+- [x] 🔴 Criterion 1 — verified via curl
+- [x] 🟡 Criterion 2 — works, but consider a faster selector
 ```
 
 ## Rules
