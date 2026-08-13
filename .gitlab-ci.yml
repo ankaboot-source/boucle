@@ -2448,7 +2448,7 @@ worker:
         if [ "$ITERATION" -lt "$MAX_ITER" ]; then
           echo "WARN: worker produced no changes (agent exhausted step budget?) — re-triggering (iteration $((ITERATION+1))/$MAX_ITER)." >&2
           set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-          forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker produced no code changes on iteration $ITERATION (agent likely exhausted its step budget). Re-running (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null 2>&1 || true
+          forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker produced no code changes on iteration $ITERATION/$MAX_ITER (agent likely exhausted its step budget). Re-running (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null 2>&1 || true
           curl -s -X POST "https://$BOUCLE_FORGE_HOST/api/v4/projects/$CI_PROJECT_ID/trigger/pipeline" \
             -F "token=$BOUCLE_TRIGGER_TOKEN" -F "ref=$CI_DEFAULT_BRANCH" \
             -F "variables[BOUCLE_ISSUE]=$BOUCLE_ISSUE" -F "variables[BOUCLE_ROLE]=worker" \
@@ -2684,8 +2684,17 @@ worker:
         PREVIEW_LINE="Diff review (no preview deploy — BOUCLE_DEPLOY_CMD empty)"
       fi
       MR_MAX_ITER="${BOUCLE_MAX_ITERATIONS:-5}"
-      MR_DESCRIPTION=$(printf '## Issue #%s — iteration %s/%s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s/%s_' \
-        "$BOUCLE_ISSUE" "$ITERATION" "$MR_MAX_ITER" "$PREVIEW_LINE" "${COMMIT_SUMMARY:-(no commits)}" "${APPROACH:-(not recorded)}" "$BOUCLE_ISSUE" "$COMMIT_COUNT" "$ITERATION" "$MR_MAX_ITER")
+      # Final-attempt warning, self-renewing in the MR description. The worker
+      # rebuilds the description every run, so the block appears only on the
+      # last iteration and naturally disappears when a human comment renews
+      # the budget (dispatch re-triggers the worker without BOUCLE_ITERATION →
+      # iteration 1). Mirrors lib/boucle-ci/worker.sh.
+      FINAL_ATTEMPT_BLOCK=""
+      if [ "$ITERATION" -eq "$MR_MAX_ITER" ]; then
+        FINAL_ATTEMPT_BLOCK=$(printf '> ⏳ **Final attempt** (%s/%s) — if this iteration does not satisfy the acceptance criteria, the loop stops and hands the MR to you (`boucle:human`) instead of retrying. Commenting now — on this MR or on the issue — still amends the spec and reaches the worker.' "$ITERATION" "$MR_MAX_ITER")
+      fi
+      MR_DESCRIPTION=$(printf '## Issue #%s — iteration %s/%s\n\n%s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s/%s_' \
+        "$BOUCLE_ISSUE" "$ITERATION" "$MR_MAX_ITER" "$FINAL_ATTEMPT_BLOCK" "$PREVIEW_LINE" "${COMMIT_SUMMARY:-(no commits)}" "${APPROACH:-(not recorded)}" "$BOUCLE_ISSUE" "$COMMIT_COUNT" "$ITERATION" "$MR_MAX_ITER")
 
       # ── File-impact marker refresh (F1 guard) ──────────────────────
       # Refresh the <!-- boucle:files v=1 paths=... --> marker note with the
@@ -3282,12 +3291,10 @@ reviewer:
             exit 0
           fi
           if [ "$ITERATION" -lt "$MAX_ITER" ]; then
-            # Last-chance warning. Posted ONLY when the iteration being started
-            # is the final one, so an issue produces at most one of these.
-            # Mirrors lib/boucle-ci/reviewer.sh.
-            if [ "$((ITERATION+1))" -eq "$MAX_ITER" ]; then
-              forge_mr_note "$MR_IID" "$(printf '⏳ **Final attempt** — starting worker iteration %s/%s.\n\nIf this iteration does not satisfy the acceptance criteria, the loop stops and hands the MR to you (`boucle:human`) instead of retrying. Commenting now — on this MR or on the issue — still amends the spec and reaches the worker.' "$((ITERATION+1))" "$MAX_ITER")" || echo "[boucle] WARN: could not post the final-attempt notice — continuing (advisory only)."
-            fi
+            # The final-attempt warning now lives in the MR description (written
+            # by the worker when it starts the last iteration), so the reviewer
+            # no longer posts a separate notice here. Mirrors
+            # lib/boucle-ci/reviewer.sh.
             set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
             # Chain back to worker with incremented iteration
             chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=$((ITERATION+1))

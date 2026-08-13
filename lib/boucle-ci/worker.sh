@@ -342,7 +342,7 @@ EOF
       echo "WARN: worker produced no changes — re-triggering (iteration $((ITERATION + 1))/$max_iter)." >&2
       set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
       boucle_health_outcome "$BOUCLE_ISSUE" "worker" "no-changes" "iteration $ITERATION" || true
-      forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker produced no code changes on iteration $ITERATION (agent likely exhausted its step budget). Re-running (iteration $((ITERATION + 1))/$max_iter).$(job_link)" || true
+      forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker produced no code changes on iteration $ITERATION/$max_iter (agent likely exhausted its step budget). Re-running (iteration $((ITERATION + 1))/$max_iter).$(job_link)" || true
       chain_to_role "$BOUCLE_ISSUE" "worker" "BOUCLE_ITERATION=$((ITERATION + 1))"
     else
       echo "Escalating to human — worker produced no changes after $max_iter attempts." >&2
@@ -392,7 +392,7 @@ EOF
       if [ "$ITERATION" -lt "$max_iter" ]; then
         echo "Re-triggering worker (iteration $((ITERATION + 1))/$max_iter) with build error in feedback." >&2
         set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-        forge_issue_note "$BOUCLE_ISSUE" "🔄 Build failed on iteration $ITERATION (\`$BOUCLE_BUILD_CMD\` exited $build_rc). Re-running with the build error in the feedback channel (iteration $((ITERATION + 1))/$max_iter).$(job_link)"
+        forge_issue_note "$BOUCLE_ISSUE" "🔄 Build failed on iteration $ITERATION/$max_iter (\`$BOUCLE_BUILD_CMD\` exited $build_rc). Re-running with the build error in the feedback channel (iteration $((ITERATION + 1))/$max_iter).$(job_link)"
         chain_to_role "$BOUCLE_ISSUE" "worker" "BOUCLE_ITERATION=$((ITERATION + 1))"
       else
         echo "Escalating to human — build failed after $max_iter attempts." >&2
@@ -552,9 +552,17 @@ EOF
   # to boucle:human — the label carries the state, never how much budget is
   # left inside it.
   local mr_max_iter="${BOUCLE_MAX_ITERATIONS:-5}"
+  # Final-attempt warning, self-renewing in the MR description. The worker
+  # rebuilds the description every run, so the block appears only on the last
+  # iteration and naturally disappears when a human comment renews the budget
+  # (dispatch re-triggers the worker without BOUCLE_ITERATION → iteration 1).
+  local final_attempt_block=""
+  if [ "$ITERATION" -eq "$mr_max_iter" ]; then
+    final_attempt_block=$(printf '> ⏳ **Final attempt** (%s/%s) — if this iteration does not satisfy the acceptance criteria, the loop stops and hands the MR to you (`boucle:human`) instead of retrying. Commenting now — on this MR or on the issue — still amends the spec and reaches the worker.' "$ITERATION" "$mr_max_iter")
+  fi
   local mr_description
-  mr_description=$(printf '## Issue #%s — iteration %s/%s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s/%s_ | mode: deploy=%s review=%s' \
-    "$BOUCLE_ISSUE" "$ITERATION" "$mr_max_iter" "$preview_line" "${commit_summary:-(no commits)}" "${approach:-(not recorded)}" "$cost_block" "$BOUCLE_ISSUE" "$commit_count" "$ITERATION" "$mr_max_iter" "$(boucle_deploy_mode)" "$(boucle_review_mode)")
+  mr_description=$(printf '## Issue #%s — iteration %s/%s\n\n%s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s/%s_ | mode: deploy=%s review=%s' \
+    "$BOUCLE_ISSUE" "$ITERATION" "$mr_max_iter" "$final_attempt_block" "$preview_line" "${commit_summary:-(no commits)}" "${approach:-(not recorded)}" "$cost_block" "$BOUCLE_ISSUE" "$commit_count" "$ITERATION" "$mr_max_iter" "$(boucle_deploy_mode)" "$(boucle_review_mode)")
 
   # ── File-impact marker refresh (F1 guard) ─────────────────────────
   # Refresh the <!-- boucle:files v=1 paths=... --> marker note with the

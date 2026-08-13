@@ -42,8 +42,8 @@ n_args = len(re.findall(r"\"\$[^\"]*\"", lines[i + 1]))
 print(n_fmt, n_args)
 '
   assert_success
-  # 10 placeholders, 10 arguments.
-  assert_output "10 10"
+  # 11 placeholders, 11 arguments.
+  assert_output "11 11"
 }
 
 @test "the rendered description shows the budget, not a bare iteration number" {
@@ -51,29 +51,46 @@ print(n_fmt, n_args)
     BOUCLE_ISSUE=42 ITERATION=2 MR_MAX_ITER=3
     PREVIEW_LINE="Preview: https://example.test"
     COMMIT_SUMMARY="- did a thing" APPROACH="an approach" COMMIT_COUNT=1
-    printf "## Issue #%s — iteration %s/%s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s/%s_" \
-      "$BOUCLE_ISSUE" "$ITERATION" "$MR_MAX_ITER" "$PREVIEW_LINE" "$COMMIT_SUMMARY" "$APPROACH" "$BOUCLE_ISSUE" "$COMMIT_COUNT" "$ITERATION" "$MR_MAX_ITER"
+    FINAL_ATTEMPT_BLOCK=""
+    printf "## Issue #%s — iteration %s/%s\n\n%s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s/%s_" \
+      "$BOUCLE_ISSUE" "$ITERATION" "$MR_MAX_ITER" "$FINAL_ATTEMPT_BLOCK" "$PREVIEW_LINE" "$COMMIT_SUMMARY" "$APPROACH" "$BOUCLE_ISSUE" "$COMMIT_COUNT" "$ITERATION" "$MR_MAX_ITER"
   '
   assert_success
   assert_output --partial "iteration 2/3"
   assert_output --partial "boucle worker run 2/3"
 }
 
-# ── Final-attempt notice: exactly once, on the last iteration ──────────────
+# ── Final-attempt block: in the MR description, on the last iteration ──────
 
-@test "shared reviewer gates the final-attempt notice on the last iteration" {
-  run grep -q 'Final attempt' lib/boucle-ci/reviewer.sh
+@test "shared worker writes the Final attempt block in the MR description" {
+  run grep -q 'Final attempt' lib/boucle-ci/worker.sh
   assert_success
-  # It must be inside an `ITERATION + 1 -eq MAX_ITER` guard, never on every FAIL.
-  run bash -c "grep -B2 'Final attempt' lib/boucle-ci/reviewer.sh | grep -c 'ITERATION + 1))\" -eq \"\$MAX_ITER'"
+}
+
+@test "inline GitLab worker writes the Final attempt block in the MR description" {
+  run grep -q 'Final attempt' .gitlab-ci.yml
+  assert_success
+}
+
+@test "shared worker gates the Final attempt block on the last iteration" {
+  # The block must be conditional on the iteration being the last one, never
+  # written unconditionally on every run.
+  run bash -c "grep -B2 'Final attempt' lib/boucle-ci/worker.sh | grep -c 'ITERATION\" -eq \"\$mr_max_iter'"
   assert_output "1"
 }
 
-@test "inline GitLab reviewer gates it the same way" {
+@test "inline GitLab worker gates the Final attempt block the same way" {
+  run bash -c "grep -B2 'Final attempt' .gitlab-ci.yml | grep -c 'ITERATION\" -eq \"\$MR_MAX_ITER'"
+  assert_output "1"
+}
+
+@test "the reviewer no longer posts a separate Final attempt notice" {
+  # The warning moved into the MR description (written by the worker); the
+  # reviewer must not post a duplicate forge note.
+  run grep -q 'Final attempt' lib/boucle-ci/reviewer.sh
+  assert_failure
   run grep -q 'Final attempt' .gitlab-ci.yml
   assert_success
-  run bash -c "grep -B3 'Final attempt' .gitlab-ci.yml | grep -c 'ITERATION+1))\" -eq \"\$MAX_ITER'"
-  assert_output "1"
 }
 
 @test "the notice fires on the last iteration only" {
@@ -103,12 +120,4 @@ print(n_fmt, n_args)
   '
   assert_success
   assert_output "ESCALATES"
-}
-
-@test "the notice failing to post never breaks the loop" {
-  # It is advisory: a forge that rejects the note must not stop the retry.
-  run grep -q 'advisory only' lib/boucle-ci/reviewer.sh
-  assert_success
-  run grep -q 'advisory only' .gitlab-ci.yml
-  assert_success
 }
