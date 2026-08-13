@@ -111,8 +111,66 @@ EOF
   echo "  Run \`boucle check $iid\` before coding to verify no file conflicts."
 }
 
+# ── resume <iid> ─────────────────────────────────────────────────────────
+#
+# Loop resumes the flow. If the branch boucle/<iid> has commits ahead of
+# origin/$BOUCLE_DEFAULT_BRANCH, sets boucle:review (loop runs reviewer +
+# merger on the human's code). Otherwise restores the previous label.
+cmd_resume() {
+  local iid="${1:?usage: boucle resume <iid>}"
+
+  local pre_file=".boucle-state/$iid/pre-interactive.json"
+  if [ ! -f "$pre_file" ]; then
+    echo "ERROR: issue #$iid is not in interactive pause (no pre-interactive.json)." >&2
+    exit 1
+  fi
+
+  local prev_label prev_gross
+  prev_label=$(jq -r '.label' "$pre_file")
+  prev_gross=$(jq -r '.gross' "$pre_file")
+
+  # Detect commits ahead on boucle/<iid>.
+  local branch="boucle/$iid"
+  local default_branch="${BOUCLE_DEFAULT_BRANCH:-master}"
+  local commits_ahead=0
+  if git rev-parse --verify "$branch" >/dev/null 2>&1; then
+    commits_ahead=$(git rev-list --count "origin/$default_branch..$branch" 2>/dev/null || echo 0)
+  fi
+
+  local target_label target_msg
+  if [ "$commits_ahead" -gt 0 ]; then
+    target_label="boucle:review"
+    target_msg="Restored state: boucle:review (code detected on branch $branch, $commits_ahead commit(s) ahead)."
+  else
+    target_label="$prev_label"
+    target_msg="Restored state: boucle:$prev_label (no new commits on branch)."
+  fi
+
+  # Restore the label + re-assign the bot (BOT_JUST_ASSIGNED path).
+  set_boucle_label "$iid" "$target_label" "boucle::status::bot"
+
+  # Post the resume comment.
+  local msg
+  msg=$(cat << EOF
+<!-- boucle:interactive v=1 -->
+
+Loop resumed by the human.
+
+$target_msg
+EOF
+)
+  forge_issue_note "$iid" "$(stamp_agent_marker "$msg")"
+
+  # Clean up the saved state.
+  rm -f "$pre_file"
+
+  echo "✓ Issue #$iid resumed → $target_label"
+  echo "  The loop will re-route on the next dispatch cycle (BOT_JUST_ASSIGNED)."
+}
+
 # ── Main dispatch ────────────────────────────────────────────────────────
 case "${1:-}" in
-  pause)  shift; cmd_pause "$@" ;;
+  pause)   shift; cmd_pause "$@" ;;
+  resume)  shift; cmd_resume "$@" ;;
   *) echo "Usage: boucle <pause|resume|restart|status|check|log> <iid>" >&2; exit 1 ;;
 esac
