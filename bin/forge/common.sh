@@ -454,6 +454,14 @@ forge_reaction_canonical() {
 #   kind = "issue" or "mr".
 #   (GitLab: award_emoji on note; GitHub: reactions on issue comment.)
 
+# ── Contract: branch URL ─────────────────────────────────────────────────
+#
+# forge_branch_url <branch>
+#   Build the forge web URL to view a branch (tree view / diff consultation).
+#   Returns the URL on stdout, empty on failure (missing host/project).
+#   (GitLab: https://<host>/<project>/-/tree/<branch>;
+#    GitHub: https://<host>/<project>/tree/<branch>.)
+
 # ── Contract: attachment upload (triage visual preview) ──────────────────
 #
 # forge_attachment_upload <iid> <file_path> <filename>
