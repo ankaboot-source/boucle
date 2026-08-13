@@ -111,11 +111,11 @@ git submodule add https://github.com/ankaboot-source/boucle .boucle
 # 2. Configure everything (idempotent — safe to re-run)
 #
 # GitLab (auto-detects host and project from the origin remote):
-.boucle/bin/setup
+.boucle/bin/setup gitlab
 #
 # GitHub (mono-user is the default — no --mono-user needed; Cloudflare is
 # opt-in — no --skip-cf needed):
-.boucle/bin/setup --forge github --bot-token "$(gh auth token)"
+.boucle/bin/setup github --bot-token "$(gh auth token)"
 #   The PAT needs `repo` + `workflow` scopes. `gh auth token` gives you one
 #   if you are already logged in via `gh auth login`.
 #   To use a dedicated bot account instead of mono-user, pass --bot-id <id>.
