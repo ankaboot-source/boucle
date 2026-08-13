@@ -431,6 +431,138 @@ and may produce conflicts with in-flight MRs.
 
 ---
 
+## 8. Interactive mode
+
+A local harness (opencode, jcode, or any agent CLI that reads markdown) can
+take over a boucle issue, work on it interactively, and hand it back to the
+loop. This section documents the commands, the protocol, and the conventions
+the harness MUST respect.
+
+### Commands
+
+The `bin/boucle` wrapper exposes six verbs. All require forge auth env vars
+(see §Forge auth below).
+
+| Command | Action |
+|---|---|
+| `bin/boucle pause <iid>` | Human takes over. Sets `boucle:human`, saves previous state, posts a comment. |
+| `bin/boucle resume <iid>` | Loop resumes. If branch `boucle/<iid>` has commits ahead → `boucle:review` (reviewer + merger). Otherwise restores the previous label. |
+| `bin/boucle restart <iid>` | Loop takes the issue from scratch (`boucle:todo`). Does not restore previous state. |
+| `bin/boucle status <iid>` | Synthetic view: forge label, assignee, MR status, iteration count, `state.md` content, last 3 iterations. |
+| `bin/boucle check <iid>` | Pre-work gate check: file-gate (overlap with in-flight issues), dependency gate, sibling gate. Consultation only — informs, does not block. |
+| `bin/boucle log <iid>` | Prints `.boucle-state/<iid>/agent-output.log` (last run trace: tool calls, file reads, git operations). |
+
+### Posting comments
+
+Always use `bin/forge-note` (not raw `glab`/`gh` note commands) so the
+`<!-- boucle:agent -->` marker is applied. Without the marker, dispatch
+treats the comment as a human reply and re-routes the loop (I7).
+
+```
+bin/forge-note issue <iid> --message "comment body"
+bin/forge-note issue <iid> --message-file /path/to/message.md
+bin/forge-note issue <iid> --message-stdin < file
+bin/forge-note mr <mr_iid> --message "comment body"
+```
+
+### Read-only inspection
+
+```
+bin/health <iid>        # per-issue health summary (iterations, outcomes, cost, verdict)
+bin/doctor --audit      # read-only board audit (~20 checks)
+```
+
+### Excluded commands (CI-context only)
+
+These `bin/*` commands require CI env vars and are NOT available locally.
+Use the local alternatives:
+
+| Excluded | Role | Local alternative |
+|---|---|---|
+| `bin/describe-images` | Describe images via vision model | The agent CLI reads the image directly with its `Read` tool (opencode supports vision) |
+| `bin/fetch-issue-attachments` | Download issue uploads | `glab api projects/:id/issues/<iid>/notes` then `glab api .../uploads/:secret/:filename` (or `gh api ...`) |
+| `bin/fetch-mr-attachments` | Download MR uploads | `glab api projects/:id/merge_requests/<iid>/notes` + download |
+| `bin/build-evidence-pack` | Extract charter docs + diff brief | The agent CLI reads `AGENTS.md`, `CONTEXT.md`, `LOOP.md`, `SKILL.md` directly with `Read` |
+| `bin/render-preview.cjs` | Render preview HTML → PNG | The agent CLI uses the browser tool (opencode browser) or screenshot |
+| `bin/collapse-duplicate-notes` | Dedupe bot notes | Not needed in interactive mode (the human controls what they post) |
+
+### Forge auth in local mode
+
+Set these env vars before running `bin/boucle` or `bin/forge-note`:
+
+```bash
+export BOUCLE_BOT_TOKEN="glpat-..."   # or GH_TOKEN for GitHub
+export BOUCLE_FORGE_HOST="gitlab.com" # or github.com
+export BOUCLE_PROJECT_PATH="org/repo" # project path
+export BOUCLE_FORGE="gitlab"          # or "github"
+```
+
+The agent CLI can also use `glab`/`gh` directly for forge operations (list
+MRs, view issues, etc.) — `bin/forge-note` is just a wrapper that applies the
+`<!-- boucle:agent -->` stamp.
+
+### Message templates
+
+The `templates/` directory at the repo root contains one `.md` file per
+boucle message type, with `{{placeholders}}`. These are the single source
+of truth for the format. To produce a boucle-valid message:
+
+1. Read the template (e.g. `templates/triage.md`).
+2. Fill the placeholders with the actual content.
+3. Post via `bin/forge-note issue <iid> --message-file <path>`.
+
+| Template | Purpose |
+|---|---|
+| `templates/triage.md` | Triage comment (marker + TL;DR, Analysis, Acceptance criteria, Classification, Disposition) |
+| `templates/verdict-reviewer.md` | Reviewer verdict (marker + VERDICT:) |
+| `templates/verdict-e2e.md` | E2e verdict (marker + VERDICT:) |
+| `templates/state.md` | state.md seed (Goal, Approach, Tried and rejected, Awaiting human) |
+| `templates/iterations.md` | iterations.md seed |
+| `templates/interactive-pause.md` | Comment posted by `boucle pause` |
+| `templates/interactive-resume.md` | Comment posted by `boucle resume` |
+
+### Protocol
+
+```
+# 1. Check the issue state
+boucle status <iid>
+
+# 2. Take over
+boucle pause <iid>
+boucle check <iid>
+
+# 3. Work in the agent CLI on boucle/<iid>
+#    (read state.md, fill templates/, commit, push)
+
+# 4. If new spec/conception was done:
+#    fill templates/triage.md, post via bin/forge-note
+
+# 5. Hand back to the loop
+boucle resume <iid>   # if code pushed → review+merge
+boucle restart <iid>  # if starting from scratch
+```
+
+### Critical rules
+
+1. **Work on `boucle/<iid>`**, never push to `master`/`main` — the merger
+   owns that transition (I10).
+2. **Always use `bin/forge-note`** for comments — the `<!-- boucle:agent -->`
+   stamp prevents dispatch from treating your comment as a human reply (I7).
+3. **Run `boucle check`** before coding to avoid file-gate conflicts with
+   in-flight issues.
+4. **Use `templates/`** for any boucle-format message (triage, verdict,
+   state.md) — do not improvise the format.
+5. **Read `state.md` and `iterations.md`** before starting work — they
+   contain the goal, acceptance criteria, and what previous iterations
+   tried.
+6. **Update `state.md`** (Approach section) and **append to
+   `iterations.md`** after working — the loop's reviewer reads them.
+7. **All code, templates, and CLI output are in English** — this matches
+   the boucle convention (charter docs, agent prompts, CI scripts are all
+   in English).
+
+---
+
 ## See also
 
 - [AGENTS.md](AGENTS.md) — contribution conventions + lessons learned (incident catalog)
