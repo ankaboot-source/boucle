@@ -22,6 +22,10 @@ ALLOWED_USERS="${BOUCLE_ALLOWED_USERS:-}"
 DRY_RUN=false
 NON_INTERACTIVE=false
 
+# Capture whether any CLI args were passed — used after the while loop to
+# auto-enable non-interactive mode (passing args = scripting, not prompting).
+CLI_ARGS_PASSED=$#
+
 while [[ $# -gt 0 ]]; do
   case $1 in
     --forge)
@@ -128,6 +132,14 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# ── Non-interactive auto-detection ────────────────────────────────────
+# If any args were passed on the command line, the user is scripting —
+# switch to non-interactive mode automatically. --non-interactive is still
+# accepted for explicitness but is no longer required when args are present.
+if [ "$CLI_ARGS_PASSED" -gt 0 ]; then
+  NON_INTERACTIVE=true
+fi
 
 # ── Mono-user auto-detection ──────────────────────────────────────────
 # Mono-user means one account owns both the issues and the loop (no separate
