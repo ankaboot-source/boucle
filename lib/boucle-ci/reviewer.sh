@@ -511,14 +511,9 @@ boucle_ci_reviewer() {
         exit 0
       fi
       if [ "$ITERATION" -lt "$MAX_ITER" ]; then
-        # Last-chance warning. Posted ONLY when the iteration being started is
-        # the final one, so an issue produces at most one of these — a note per
-        # iteration would be noise, and the escalation itself already speaks.
-        # Without it the human sees a FAIL identical to the previous ones and
-        # gets no warning that the next one escalates to boucle:human.
-        if [ "$((ITERATION + 1))" -eq "$MAX_ITER" ]; then
-          forge_mr_note "$MR_IID" "$(printf '⏳ **Final attempt** — starting worker iteration %s/%s.\n\nIf this iteration does not satisfy the acceptance criteria, the loop stops and hands the MR to you (`boucle:human`) instead of retrying. Commenting now — on this MR or on the issue — still amends the spec and reaches the worker.' "$((ITERATION + 1))" "$MAX_ITER")" || echo "[boucle] WARN: could not post the final-attempt notice — continuing (advisory only)."
-        fi
+        # The final-attempt warning now lives in the MR description (written by
+        # the worker when it starts the last iteration), so the reviewer no
+        # longer posts a separate notice here.
         set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
         # Chain back to worker with incremented iteration
         chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=$((ITERATION + 1))
