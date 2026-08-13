@@ -38,7 +38,11 @@ _gh_api_silent() {
 
 forge_issue_get() {
   local iid="$1"
-  _gh_api "/repos/$BOUCLE_PROJECT_ID/issues/$iid" || true
+  # GitHub exposes the issue body as .body, the engine contract expects
+  # .description (GitLab naming). Normalize so every caller that reads
+  # .description works identically on both forges.
+  _gh_api "/repos/$BOUCLE_PROJECT_ID/issues/$iid" \
+    | jq -c '. + {description: (.description // .body // "")}' 2> /dev/null || true
 }
 
 forge_issue_note() {
@@ -63,14 +67,17 @@ forge_issue_notes() {
   }
   # Normalize: GitHub .user.login → .author.username, .user.id → .author.id,
   # add .system=false (GitHub comments are never "system" — system events
-  # are in the timeline, not comments)
+  # are in the timeline, not comments).
+  # Ordering: the GitHub API returns comments ascending (oldest-first); the
+  # contract (common.sh) guarantees newest-first, matching GitLab. Callers
+  # that need oldest-first already `reverse` (e.g. triage.sh). Reverse here.
   echo "$comments" | jq -c '[.[] | {
     id: .id,
     body: .body,
     author: { id: .user.id, username: .user.login },
     system: false,
     created_at: .created_at
-  }]' 2> /dev/null || echo "[]"
+  }] | reverse' 2> /dev/null || echo "[]"
 }
 
 forge_issue_labels_get() {

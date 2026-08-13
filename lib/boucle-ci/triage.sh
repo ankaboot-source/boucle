@@ -83,7 +83,7 @@ boucle_ci_triage() {
   # approach which swapped the entire model to minimax-m3 (worse at code, prone
   # to WASM OOM crashes). With describe-images, the agent stays on its default
   # model and gets image context as text.
-  "$BOUCLE_HOME/bin/describe-images triage" || echo "[boucle] WARN: image description failed — continuing without descriptions"
+  "$BOUCLE_HOME/bin/describe-images" triage || echo "[boucle] WARN: image description failed — continuing without descriptions"
 
   # Fetch the issue body and export it so the triage agent does not
   # waste steps calling forge issue view (minimax-m3
@@ -242,6 +242,44 @@ boucle_ci_triage() {
         exit 1
       fi
       set_boucle_label "$IID" "boucle:human" "boucle::status::human"
+      exit 1
+    elif [ "$rc" -eq 4 ]; then
+      # Model/API failure (provider down or quota exhausted). bin/jc exits 4
+      # when the agent log shows no activity or persistent quota errors. A
+      # provider-down re-trigger fails identically every time (doctor re-trigger
+      # loop, AGENTS.md lesson #29/#30), so post a diagnostic and escalate to
+      # the human instead — the same contract worker.sh honors.
+      local agent_log_file log_snippet diagnostic_body
+      agent_log_file="$BOUCLE_WORKSPACE/.boucle-state/$IID/agent-output.log"
+      log_snippet="(log file not found or empty)"
+      if [ -f "$agent_log_file" ]; then
+        log_snippet=$(tail -c 2000 "$agent_log_file" 2> /dev/null | sed 's/\x1b\[[0-9;]*m//g' || echo "(log read failed)")
+      fi
+      diagnostic_body=$(printf '%s\n' \
+        "## ⚠️ Triage — model failure (API unavailable or credits exhausted)" \
+        "" \
+        "The triage agent produced **no output** — the agent log is empty or shows no activity. This indicates the model API is probably **unavailable** or **out of credits**." \
+        "" \
+        "### Logs" \
+        "" \
+        '```' \
+        "$log_snippet" \
+        '```' \
+        "" \
+        "### Action required" \
+        "" \
+        "- Check the model API status." \
+        "- Check the remaining credits/quota." \
+        "- Once the model is available, re-trigger triage by re-applying the \`boucle:triage\` label and assigning the issue to the bot." \
+        "" \
+        "---" \
+        "*Diagnostic posted by boucle (exit 4 — model/API failure).*")
+      if ! forge_issue_note "$IID" "$diagnostic_body"; then
+        echo "FAIL: triage model/API failure (exit 4) — diagnostic note could NOT be posted on issue #$IID. NOT escalating to boucle:human (a silent escalation is worse than a retry)." >&2
+        exit 1
+      fi
+      set_boucle_label "$IID" "boucle:human" "boucle::status::human"
+      echo "FAIL: triage model/API failure (exit 4) — diagnostic posted on issue #$IID, escalated to human." >&2
       exit 1
     fi
     echo "[boucle] No new triage comment posted by this run — leaving issue #$IID at boucle:triage, no label change."
