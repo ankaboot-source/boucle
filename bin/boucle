@@ -168,9 +168,42 @@ EOF
   echo "  The loop will re-route on the next dispatch cycle (BOT_JUST_ASSIGNED)."
 }
 
+# ── restart <iid> ────────────────────────────────────────────────────────
+#
+# Loop takes the issue from scratch. Sets boucle:todo, re-assigns the bot.
+# Does NOT restore the previous state — this is a fresh start.
+cmd_restart() {
+  local iid="${1:?usage: boucle restart <iid>}"
+
+  local state
+  state=$(issue_state "$iid")
+  if [ "$state" = "closed" ]; then
+    echo "ERROR: issue #$iid is closed — cannot restart." >&2
+    exit 1
+  fi
+
+  set_boucle_label "$iid" "boucle:todo" "boucle::status::bot"
+
+  local msg
+  msg=$(cat << EOF
+<!-- boucle:interactive v=1 -->
+
+Loop restarted from scratch (boucle:todo).
+EOF
+)
+  forge_issue_note "$iid" "$(stamp_agent_marker "$msg")"
+
+  # Clean up any saved interactive state.
+  rm -f ".boucle-state/$iid/pre-interactive.json"
+
+  echo "✓ Issue #$iid restarted → boucle:todo"
+  echo "  The loop will triage (or worker if already triaged) on the next dispatch cycle."
+}
+
 # ── Main dispatch ────────────────────────────────────────────────────────
 case "${1:-}" in
-  pause)   shift; cmd_pause "$@" ;;
-  resume)  shift; cmd_resume "$@" ;;
+  pause)    shift; cmd_pause "$@" ;;
+  resume)   shift; cmd_resume "$@" ;;
+  restart)  shift; cmd_restart "$@" ;;
   *) echo "Usage: boucle <pause|resume|restart|status|check|log> <iid>" >&2; exit 1 ;;
 esac
