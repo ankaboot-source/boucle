@@ -224,18 +224,6 @@ guard_decision() {
   assert_success
 }
 
-@test "the inline .gitlab-ci.yml copy carries the same guard" {
-  # The routing exists in two copies until they converge (#8, open Q5).
-  # If one gains the guard and the other does not, mono-user silently
-  # breaks on that path.
-  run grep -q 'has_agent_marker "\$NOTE_BODY"' .gitlab-ci.yml
-  assert_success
-  run grep -q 'if ! boucle_mono_user; then' .gitlab-ci.yml
-  assert_success
-  run grep -q 'MR_ACTION" != "merge"' .gitlab-ci.yml
-  assert_success
-}
-
 # ── Marker plumbing: every posting path stamps ────────────────────────
 
 @test "every note-posting forge function stamps the agent marker" {

@@ -1455,11 +1455,12 @@ extract_notify() {
 }
 
 # ── File-impact marker refresh (worker job, MR 1) — F1 guard ────────────
-# The refresh is embedded in boucle_ci_worker() (lib/boucle-ci/worker.sh)
-# and the inline .gitlab-ci.yml worker job — too integration-coupled to
-# unit-test in bats without a real git repo + forge API. We assert the F1
-# guard condition (skip the refresh when the branch has no commits ahead,
-# preserving the last non-empty marker) is present in BOTH engine copies.
+# The refresh is embedded in boucle_ci_worker() (lib/boucle-ci/worker.sh) —
+# too integration-coupled to unit-test in bats without a real git repo +
+# forge API. We assert the F1 guard condition (skip the refresh when the
+# branch has no commits ahead, preserving the last non-empty marker) is
+# present in the extracted worker.sh (the inline .gitlab-ci.yml copy was
+# replaced by `bin/boucle-ci worker`, refactor 6fb09f7).
 
 @test "worker refresh: F1 guard present in lib/boucle-ci/worker.sh" {
   # The refresh must be gated on a non-empty `git log origin/<default>..HEAD
@@ -1471,18 +1472,9 @@ extract_notify() {
   assert_success
 }
 
-@test "worker refresh: F1 guard present in inline .gitlab-ci.yml worker job" {
-  run grep -nE 'git log origin/\$CI_DEFAULT_BRANCH\.\.HEAD --oneline' .gitlab-ci.yml
-  assert_success
-  run grep -nE 'file-impact marker refresh SKIPPED' .gitlab-ci.yml
-  assert_success
-}
-
 @test "worker refresh: best-effort on forge API failure (fail-open)" {
   # A forge API failure during the refresh must log a warning and continue —
   # it must never fail the job (the gate falls back to the stale prediction).
   run grep -nE 'WARN: marker note (update|post) failed' lib/boucle-ci/worker.sh
-  assert_success
-  run grep -nE 'WARN: marker note (update|post) failed' .gitlab-ci.yml
   assert_success
 }
