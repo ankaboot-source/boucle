@@ -147,7 +147,7 @@ boucle_ci_reviewer() {
   MR_HEAD=$(echo "$MR_DATA" | jq -r '.diff_refs.head_sha // .head.sha // empty')
   if [ -n "$MR_BASE" ] && [ "$MR_BASE" = "$MR_HEAD" ]; then
     ITERATION="${BOUCLE_ITERATION:-1}"
-    MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
+    MAX_ITER="${BOUCLE_MAX_ITERATIONS:-5}"
     echo "FAIL: worker shipped zero commits (MR !${MR_IID} empty — base_sha == head_sha). Re-triggering worker (iteration $((ITERATION + 1))/$MAX_ITER)." >&2
     set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
     forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker shipped zero commits (MR !${MR_IID} has empty diff). Re-running the worker (iteration $((ITERATION + 1))/$MAX_ITER).$(job_link)" || true
@@ -500,7 +500,7 @@ boucle_ci_reviewer() {
       ;;
     FAIL)
       ITERATION="${BOUCLE_ITERATION:-1}"
-      MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
+      MAX_ITER="${BOUCLE_MAX_ITERATIONS:-5}"
       # Closed-issue guard: if the issue was closed (e.g. by catchup after
       # a human merged the MR directly), do NOT re-trigger the worker —
       # it would run on a closed issue and create zombie MRs. The reviewer
@@ -575,7 +575,7 @@ boucle_ci_reviewer() {
   # assignment + note, matching the FAIL-after-max behavior).
   if [ -z "$VERDICT" ]; then
     ITERATION="${BOUCLE_ITERATION:-1}"
-    MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
+    MAX_ITER="${BOUCLE_MAX_ITERATIONS:-5}"
     echo "FAIL: agent did not post a verdict for sha $MR_HEAD (iteration $ITERATION/$MAX_ITER)" >&2
     if [ "$ITERATION" -lt "$MAX_ITER" ]; then
       echo "Re-triggering reviewer (iteration $((ITERATION + 1))/$MAX_ITER)."

@@ -65,8 +65,8 @@ variables:
   # doctor re-triggers it when a slot frees.
   BOUCLE_MAX_PARALLEL_ISSUES: "5"
   # Iteration cap: max worker re-runs per issue (rebase conflicts, empty MRs,
-  # reviewer FAIL). Default 3. Override per-project if you want more/fewer retries.
-  BOUCLE_MAX_ITERATIONS: "3"
+  # reviewer FAIL). Default 5. Override per-project if you want more/fewer retries.
+  BOUCLE_MAX_ITERATIONS: "5"
   # Doctor staleness threshold (seconds): how long before a boucle:working or
   # boucle:review issue is considered stuck and re-triggered. Default 2400
   # (40 min). MUST be strictly greater than the longest job timeout
@@ -2429,7 +2429,7 @@ worker:
       DIFF_FILES=$(git diff --name-only origin/$CI_DEFAULT_BRANCH..HEAD 2>/dev/null | grep -v '^\.gitignore$' || true)
       if [ -z "$DIFF_FILES" ]; then
         ITERATION="${BOUCLE_ITERATION:-1}"
-        MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
+        MAX_ITER="${BOUCLE_MAX_ITERATIONS:-5}"
         # Update the MR TITLE to reflect the current iteration, but do NOT
         # overwrite the description. The previous description may contain a
         # detailed Approach and a working preview URL from the last successful
@@ -2489,7 +2489,7 @@ worker:
       DIFF_FILES_POST=$(git diff --name-only origin/$CI_DEFAULT_BRANCH..HEAD 2>/dev/null | grep -v '^\.gitignore$' || true)
       if [ -z "$DIFF_FILES_POST" ]; then
         ITERATION="${BOUCLE_ITERATION:-1}"
-        MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
+        MAX_ITER="${BOUCLE_MAX_ITERATIONS:-5}"
         if [ "$ITERATION" -lt "$MAX_ITER" ]; then
           echo "WARN: rebase dropped all worker commits (changes already in $CI_DEFAULT_BRANCH) — re-triggering worker (iteration $((ITERATION+1))/$MAX_ITER)." >&2
           set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
@@ -2683,7 +2683,7 @@ worker:
       else
         PREVIEW_LINE="Diff review (no preview deploy — BOUCLE_DEPLOY_CMD empty)"
       fi
-      MR_MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
+      MR_MAX_ITER="${BOUCLE_MAX_ITERATIONS:-5}"
       MR_DESCRIPTION=$(printf '## Issue #%s — iteration %s/%s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s/%s_' \
         "$BOUCLE_ISSUE" "$ITERATION" "$MR_MAX_ITER" "$PREVIEW_LINE" "${COMMIT_SUMMARY:-(no commits)}" "${APPROACH:-(not recorded)}" "$BOUCLE_ISSUE" "$COMMIT_COUNT" "$ITERATION" "$MR_MAX_ITER")
 
@@ -2949,7 +2949,7 @@ reviewer:
       MR_HEAD=$(echo "$MR_DATA" | jq -r '.diff_refs.head_sha // empty')
       if [ -n "$MR_BASE" ] && [ "$MR_BASE" = "$MR_HEAD" ]; then
         ITERATION="${BOUCLE_ITERATION:-1}"
-        MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
+        MAX_ITER="${BOUCLE_MAX_ITERATIONS:-5}"
         echo "FAIL: worker shipped zero commits (MR !${MR_IID} empty — base_sha == head_sha). Re-triggering worker (iteration $((ITERATION+1))/$MAX_ITER)." >&2
         set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
         forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker shipped zero commits (MR !${MR_IID} has empty diff). Re-running the worker (iteration $((ITERATION+1))/$MAX_ITER)." > /dev/null 2>&1 || true
@@ -3271,7 +3271,7 @@ reviewer:
           ;;
         FAIL)
           ITERATION="${BOUCLE_ITERATION:-1}"
-          MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
+          MAX_ITER="${BOUCLE_MAX_ITERATIONS:-5}"
           # Closed-issue guard: if the issue was closed (e.g. by catchup after
           # a human merged the MR directly), do NOT re-trigger the worker —
           # it would run on a closed issue and create zombie MRs. The reviewer
@@ -3344,7 +3344,7 @@ reviewer:
       # assignment + note, matching the FAIL-after-max behavior).
       if [ -z "$VERDICT" ]; then
         ITERATION="${BOUCLE_ITERATION:-1}"
-        MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
+        MAX_ITER="${BOUCLE_MAX_ITERATIONS:-5}"
         echo "FAIL: agent did not post a verdict for sha $MR_HEAD (iteration $ITERATION/$MAX_ITER)" >&2
         if [ "$ITERATION" -lt "$MAX_ITER" ]; then
           echo "Re-triggering reviewer (iteration $((ITERATION+1))/$MAX_ITER)."
@@ -4398,7 +4398,7 @@ e2e:
         # ran but posted no parsable verdict (step limit, crash, or empty
         # output). Without this comment the human sees only a failed pipeline.
         ITERATION="${BOUCLE_ITERATION:-1}"
-        MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
+        MAX_ITER="${BOUCLE_MAX_ITERATIONS:-5}"
         E2E_LOG_TAIL=""
         AGENT_LOG="$CI_PROJECT_DIR/.boucle-state/$BOUCLE_ISSUE/agent-output.log"
         if [ -f "$AGENT_LOG" ]; then
