@@ -324,7 +324,7 @@ EOF
   diff_files=$(git diff --name-only "origin/$BOUCLE_DEFAULT_BRANCH..HEAD" 2> /dev/null | grep -v '^\.gitignore$' || true)
   if [ -z "$diff_files" ]; then
     ITERATION="${BOUCLE_ITERATION:-1}"
-    local max_iter="${BOUCLE_MAX_ITERATIONS:-3}"
+    local max_iter="${BOUCLE_MAX_ITERATIONS:-5}"
     # Update MR title only (not description — lesson #24)
     local existing_mr_iid
     existing_mr_iid=$(forge_mr_lookup_by_branch "$BRANCH" "opened" 2> /dev/null || echo "")
@@ -388,7 +388,7 @@ EOF
       # Clean the build output so it does not dirty the tree / block rebase.
       [ -n "${BOUCLE_BUILD_OUTPUT:-}" ] && [ -d "$BOUCLE_BUILD_OUTPUT" ] && rm -rf "$BOUCLE_BUILD_OUTPUT" 2> /dev/null || true
       ITERATION="${BOUCLE_ITERATION:-1}"
-      local max_iter="${BOUCLE_MAX_ITERATIONS:-3}"
+      local max_iter="${BOUCLE_MAX_ITERATIONS:-5}"
       if [ "$ITERATION" -lt "$max_iter" ]; then
         echo "Re-triggering worker (iteration $((ITERATION + 1))/$max_iter) with build error in feedback." >&2
         set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
@@ -551,7 +551,7 @@ EOF
   # whether the loop is progressing or on its last attempt before escalating
   # to boucle:human — the label carries the state, never how much budget is
   # left inside it.
-  local mr_max_iter="${BOUCLE_MAX_ITERATIONS:-3}"
+  local mr_max_iter="${BOUCLE_MAX_ITERATIONS:-5}"
   local mr_description
   mr_description=$(printf '## Issue #%s — iteration %s/%s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s/%s_ | mode: deploy=%s review=%s' \
     "$BOUCLE_ISSUE" "$ITERATION" "$mr_max_iter" "$preview_line" "${commit_summary:-(no commits)}" "${approach:-(not recorded)}" "$cost_block" "$BOUCLE_ISSUE" "$commit_count" "$ITERATION" "$mr_max_iter" "$(boucle_deploy_mode)" "$(boucle_review_mode)")

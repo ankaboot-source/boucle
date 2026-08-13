@@ -45,7 +45,7 @@ run_gate() {
 			BOUCLE_BUILD_CMD="$2"
 			BOUCLE_BUILD_OUTPUT="$3"
 			BOUCLE_ITERATION="${BOUCLE_ITERATION:-1}"
-			BOUCLE_MAX_ITERATIONS="${BOUCLE_MAX_ITERATIONS:-3}"
+			BOUCLE_MAX_ITERATIONS="${BOUCLE_MAX_ITERATIONS:-5}"
 			OUT="${OUT:-/dev/null}"
 			set_boucle_label() { echo "label:$1:$2" >> "$OUT"; }
 			forge_issue_note() { echo "note:$1" >> "$OUT"; }

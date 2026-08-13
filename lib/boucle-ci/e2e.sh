@@ -282,7 +282,7 @@ ${E2E_TRACE:-no verdict comment was posted by the agent}
     # ran but posted no parsable verdict (step limit, crash, or empty
     # output). Without this comment the human sees only a failed pipeline.
     ITERATION="${BOUCLE_ITERATION:-1}"
-    MAX_ITER="${BOUCLE_MAX_ITERATIONS:-3}"
+    MAX_ITER="${BOUCLE_MAX_ITERATIONS:-5}"
     E2E_LOG_TAIL=""
     AGENT_LOG="$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE/agent-output.log"
     if [ -f "$AGENT_LOG" ]; then

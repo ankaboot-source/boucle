@@ -1372,7 +1372,7 @@ check_dependencies_and_gate() {
 boucle_worker_rebase_conflict() {
   local retry_note="$1"
   local iteration="${BOUCLE_ITERATION:-1}"
-  local max_iter="${BOUCLE_MAX_ITERATIONS:-3}"
+  local max_iter="${BOUCLE_MAX_ITERATIONS:-5}"
   # Capture the conflicted paths BEFORE any abort clears them — the retry
   # below forwards them as BOUCLE_CONFLICT_FEEDBACK so the NEXT worker run
   # switches to agent-first resolution.
