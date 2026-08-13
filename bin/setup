@@ -369,6 +369,32 @@ SHIM
   echo ""
 fi
 
+# ── 0a. GitHub Actions workflow ───────────────────────────────────────
+# On GitHub, the workflow IS the webhook receiver (on: issues, on: pull_request).
+# The engine ships .github/workflows/boucle.yml; the setup copies it into the
+# consumer's .github/workflows/ so the consumer repo triggers the loop.
+# An existing non-boucle workflow in the same file is NEVER overwritten.
+if [ "$FORGE" = "github" ]; then
+  echo "=== GitHub Actions workflow ==="
+  ENGINE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+  ENGINE_WORKFLOW="$ENGINE_ROOT/.github/workflows/boucle.yml"
+  CONSUMER_WORKFLOW=".github/workflows/boucle.yml"
+  if [ ! -f "$ENGINE_WORKFLOW" ]; then
+    log_fail "engine workflow not found at $ENGINE_WORKFLOW — the .boucle submodule may be incomplete"
+  elif [ -f "$CONSUMER_WORKFLOW" ] && ! grep -q "boucle" "$CONSUMER_WORKFLOW" 2>/dev/null; then
+    log_skip "existing $CONSUMER_WORKFLOW is not a boucle workflow — left untouched"
+  else
+    mkdir -p .github/workflows
+    if [ "$DRY_RUN" = "true" ]; then
+      echo "  [dry-run] copy $CONSUMER_WORKFLOW from engine"
+    else
+      cp "$ENGINE_WORKFLOW" "$CONSUMER_WORKFLOW"
+    fi
+    log_pass "$CONSUMER_WORKFLOW copied from engine"
+  fi
+  echo ""
+fi
+
 # ── 0b. Consumer .gitignore — forge-agnostic ──────────────────────────
 # Per-issue state lives in .boucle-state/ at the consumer root (gitignored).
 # Never clobber an existing .gitignore — only append the entry if missing.
@@ -1323,21 +1349,18 @@ else
   echo "Next steps:"
   echo "  1. Make the engine a git submodule (if not already done):"
   echo "     git submodule add https://github.com/ankaboot-source/boucle .boucle"
-  echo "  2. Commit:"
-  echo "     git add .gitmodules .boucle"
+  echo "  2. Commit the engine, the workflow, and the root files:"
+  echo "     git add .gitmodules .boucle .github/workflows/boucle.yml"
   echo "     git commit -m \"chore: install boucle engine\""
-  echo "  3. The GitHub Actions workflow (.github/workflows/boucle.yml) must be present"
-  echo "     in the repo — it is the receiver (on: issues, on: pull_request)."
-  echo "     If missing, add it from the boucle engine."
-  echo "  4. Runner: by default boucle uses GitHub-hosted runners (ubuntu-latest)."
+  echo "  3. Runner: by default boucle uses GitHub-hosted runners (ubuntu-latest)."
   echo "     To use your own self-hosted runner instead, set the repo variable"
   echo "     BOUCLE_RUNS_ON to '[\"self-hosted\", \"<label>\"]' and register a runner"
   echo "     with that label (Settings > Actions > Runners)."
-  echo "  5. Repository variables and secrets should now be set in"
+  echo "  4. Repository variables and secrets should now be set in"
   echo "     Settings > Secrets and variables > Actions."
-  echo "  6. Create your first issue — boucle will pick it up via the workflow trigger."
+  echo "  5. Create your first issue — boucle will pick it up via the workflow trigger."
   if [ -n "${BOT_TOKEN:-}" ]; then
-    echo "  7. (Optional) Set BOUCLE_LLM_API_KEY as a repo secret if bin/setup skipped it."
+    echo "  6. (Optional) Set BOUCLE_LLM_API_KEY as a repo secret if bin/setup skipped it."
   fi
   echo ""
   echo "  NOTE: GitHub does not need a trigger token, webhook, or issue board —"
