@@ -56,8 +56,10 @@ The CI parser acts **immediately** on any comment containing the `<!-- boucle:ve
   ```
   <!-- boucle:verdict v=1 role=e2e sha=<head-sha> -->
   VERDICT: PASS | FAIL | UNCERTAIN
-  - [x] <criterion> — <how it was checked>
-  - [ ] <criterion> — <why it failed>
+  - [x] 🔴 <criterion> — <how it was checked>
+  - [ ] 🔴 <criterion> — <why it failed>
+  - [x] 🟡 <criterion> — <non-blocking suggestion>
+  - [x] 💭 <criterion> — <minor nit>
   ```
 - If you exhaust your steps after posting only a draft (no final verdict), the CI log-scraping fallback will scrape your draft from stdout and post it on your behalf — it promotes `boucle:draft` to `boucle:verdict` so the loop has a parsable verdict to act on.
 
@@ -68,9 +70,25 @@ Post your **final verdict** as a comment on the issue with this format:
 ```
 <!-- boucle:verdict v=1 role=e2e sha=<head-sha> -->
 VERDICT: PASS | FAIL | UNCERTAIN
-- [x] <criterion> — <how it was checked>
-- [ ] <criterion> — <why it failed>
+- [x] 🔴 <criterion> — <how it was checked>
+- [ ] 🔴 <criterion> — <why it failed>
+- [x] 🟡 <criterion> — <non-blocking suggestion>
+- [x] 💭 <criterion> — <minor nit>
 ```
+
+### Priority markers (ENFORCED)
+
+Prefix EVERY checklist item with exactly one severity marker:
+
+- **🔴 blocker** — the criterion fails or is unmet. A 🔴 on an unchecked item (`- [ ]`) is what makes the verdict FAIL.
+- **🟡 suggestion** — an improvement that does not block; never alone a FAIL.
+- **💭 nit** — a minor, cosmetic, or trivial observation; never a FAIL.
+
+Rules:
+
+- The marker goes on the checklist item line, NEVER on the `VERDICT:` line and NEVER inside the `<!-- boucle:verdict -->` marker. The CI parses `VERDICT:` and the marker comment byte-for-byte — any change to those two lines breaks the loop.
+- A FAIL verdict MUST have at least one `- [ ] 🔴` item naming the unmet criterion.
+- A PASS verdict may still carry `🟡`/`💭` items — they are advisory, not failures.
 
 You may also post a **first-pass draft** (with the `<!-- boucle:draft role=e2e -->` marker — see "Post-early rule" above) before the final verdict. The CI collapses duplicate e2e comments from the same run, so the draft is replaced by the final verdict.
 
