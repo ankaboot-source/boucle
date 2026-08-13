@@ -87,8 +87,8 @@ Source: [Ollama pricing](https://ollama.com/pricing),
 ## Configurations compared
 
 Each configuration assigns a model per role (triage, e2e, worker, reviewer).
-Cost per issue is estimated as: 1 triage + 1 e2e + 3 worker iterations + 3
-reviewer iterations (the default `BOUCLE_MAX_ITERATIONS=3`).
+Cost per issue is estimated as: 1 triage + 1 e2e + 5 worker iterations + 5
+reviewer iterations (the default `BOUCLE_MAX_ITERATIONS=5`).
 
 ### Role assignments
 
