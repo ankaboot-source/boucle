@@ -121,7 +121,7 @@ boucle_ci_worker() {
   fi
 
   # ── Configure git credentials for push ───────────────────────────
-  git config user.email "bot@ankaboot.dev"
+  git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
   git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
   git remote set-url origin "https://${BOUCLE_BOT_USERNAME:-up-bot}:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${BOUCLE_PROJECT_PATH}.git"
 
