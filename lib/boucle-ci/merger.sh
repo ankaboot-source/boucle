@@ -12,10 +12,15 @@ boucle_ci_merger() {
   # Set merging label
   set_boucle_label "$BOUCLE_ISSUE" "boucle:merging" "boucle::status::bot"
 
-  # Find the MR for this issue (contract helper: lookup by source branch)
-  MR_IID=$(forge_mr_lookup_by_branch "boucle/$BOUCLE_ISSUE" "opened")
-
-  if [ -z "$MR_IID" ]; then
+  # Find the MR for this issue (prefix match on the protocol key
+  # boucle/<iid> — the actual branch may be boucle/<iid> or
+  # boucle/<iid>-<slug>). Use the MR's source_branch as the source of
+  # truth for the branch name — boucle_branch_name may generate a
+  # different slug if the issue title was edited after the branch was
+  # created, or the branch may be a legacy boucle/<iid> (pre-slug).
+  MR_DATA=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests?state=opened" \
+    | jq -c '[.[] | select(.source_branch | startswith("boucle/'"$BOUCLE_ISSUE"'"))] | first // empty' 2>/dev/null)
+  if [ -z "$MR_DATA" ] || [ "$MR_DATA" = "null" ]; then
     echo "FAIL: no open MR found for issue #$BOUCLE_ISSUE (branch boucle/$BOUCLE_ISSUE)" >&2
     # Note BEFORE the terminal label — never a muted boucle:human.
     if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Merger could not find an open MR for branch boucle/$BOUCLE_ISSUE. Human intervention needed.$(job_link)"; then
@@ -25,13 +30,14 @@ boucle_ci_merger() {
     set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
     exit 1
   fi
+  MR_IID=$(echo "$MR_DATA" | jq -r '.iid')
+  BRANCH=$(echo "$MR_DATA" | jq -r '.source_branch')
 
   # Refresh default branch so we rebase onto the latest (another MR may have
   # just merged — the concurrency group guarantees we're the only merger running,
   # but the default branch may have advanced since this MR was created).
   # Also fetch the MR branch itself — CI clones with --depth=1 and only the
   # ref that triggered the pipeline, so the MR branch ref is NOT present by default.
-  BRANCH=$(boucle_branch_name "$BOUCLE_ISSUE")
   git fetch origin "$BOUCLE_DEFAULT_BRANCH" "$BRANCH"
   boucle_deepen_rebase_fetch
 
