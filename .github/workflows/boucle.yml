@@ -250,6 +250,19 @@ jobs:
         run: |
           apt-get update -qq && apt-get install -y -qq curl jq git
           npm install -g glab 2>/dev/null || true
+          # Install jcode coding agent (standalone Rust binary)
+          JCODE_VER="${JCODE_VERSION:-v0.75.3}"
+          if ! command -v jcode &>/dev/null || ! jcode --version 2>/dev/null | grep -q "$JCODE_VER"; then
+            echo "Installing jcode coding agent (standalone binary, $JCODE_VER)..."
+            mkdir -p "$HOME/.local/bin"
+            JCODE_TMP="/tmp/jcode-${GITHUB_RUN_ID:-local}"
+            curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x86_64.tar.gz" -o "$JCODE_TMP.tar.gz"
+            mkdir -p "$JCODE_TMP"
+            tar xzf "$JCODE_TMP.tar.gz" -C "$JCODE_TMP"
+            mv "$JCODE_TMP/jcode-linux-x86_64.bin" "$HOME/.local/bin/jcode"
+            chmod +x "$HOME/.local/bin/jcode"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           # Install gh CLI (pre-installed on ubuntu-latest)
           gh --version
       - name: Dispatch
@@ -277,6 +290,19 @@ jobs:
         run: |
           apt-get update -qq && apt-get install -y -qq curl jq git
           npm install -g glab 2>/dev/null || true
+          # Install jcode coding agent (standalone Rust binary)
+          JCODE_VER="${JCODE_VERSION:-v0.75.3}"
+          if ! command -v jcode &>/dev/null || ! jcode --version 2>/dev/null | grep -q "$JCODE_VER"; then
+            echo "Installing jcode coding agent (standalone binary, $JCODE_VER)..."
+            mkdir -p "$HOME/.local/bin"
+            JCODE_TMP="/tmp/jcode-${GITHUB_RUN_ID:-local}"
+            curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x86_64.tar.gz" -o "$JCODE_TMP.tar.gz"
+            mkdir -p "$JCODE_TMP"
+            tar xzf "$JCODE_TMP.tar.gz" -C "$JCODE_TMP"
+            mv "$JCODE_TMP/jcode-linux-x86_64.bin" "$HOME/.local/bin/jcode"
+            chmod +x "$HOME/.local/bin/jcode"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Triage
         env:
           BOUCLE_ISSUE: ${{ needs.dispatch.outputs.issue-iid }}
@@ -326,6 +352,19 @@ jobs:
         run: |
           apt-get update -qq && apt-get install -y -qq curl jq git
           npm install -g glab 2>/dev/null || true
+          # Install jcode coding agent (standalone Rust binary)
+          JCODE_VER="${JCODE_VERSION:-v0.75.3}"
+          if ! command -v jcode &>/dev/null || ! jcode --version 2>/dev/null | grep -q "$JCODE_VER"; then
+            echo "Installing jcode coding agent (standalone binary, $JCODE_VER)..."
+            mkdir -p "$HOME/.local/bin"
+            JCODE_TMP="/tmp/jcode-${GITHUB_RUN_ID:-local}"
+            curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x86_64.tar.gz" -o "$JCODE_TMP.tar.gz"
+            mkdir -p "$JCODE_TMP"
+            tar xzf "$JCODE_TMP.tar.gz" -C "$JCODE_TMP"
+            mv "$JCODE_TMP/jcode-linux-x86_64.bin" "$HOME/.local/bin/jcode"
+            chmod +x "$HOME/.local/bin/jcode"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Worker
         env:
           BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE || github.event.issue.number }}
@@ -367,6 +406,19 @@ jobs:
         run: |
           apt-get update -qq && apt-get install -y -qq curl jq git
           npm install -g glab 2>/dev/null || true
+          # Install jcode coding agent (standalone Rust binary)
+          JCODE_VER="${JCODE_VERSION:-v0.75.3}"
+          if ! command -v jcode &>/dev/null || ! jcode --version 2>/dev/null | grep -q "$JCODE_VER"; then
+            echo "Installing jcode coding agent (standalone binary, $JCODE_VER)..."
+            mkdir -p "$HOME/.local/bin"
+            JCODE_TMP="/tmp/jcode-${GITHUB_RUN_ID:-local}"
+            curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x86_64.tar.gz" -o "$JCODE_TMP.tar.gz"
+            mkdir -p "$JCODE_TMP"
+            tar xzf "$JCODE_TMP.tar.gz" -C "$JCODE_TMP"
+            mv "$JCODE_TMP/jcode-linux-x86_64.bin" "$HOME/.local/bin/jcode"
+            chmod +x "$HOME/.local/bin/jcode"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Reviewer
         env:
           BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE }}
@@ -404,6 +456,19 @@ jobs:
         run: |
           apt-get update -qq && apt-get install -y -qq curl jq git
           npm install -g glab 2>/dev/null || true
+          # Install jcode coding agent (standalone Rust binary)
+          JCODE_VER="${JCODE_VERSION:-v0.75.3}"
+          if ! command -v jcode &>/dev/null || ! jcode --version 2>/dev/null | grep -q "$JCODE_VER"; then
+            echo "Installing jcode coding agent (standalone binary, $JCODE_VER)..."
+            mkdir -p "$HOME/.local/bin"
+            JCODE_TMP="/tmp/jcode-${GITHUB_RUN_ID:-local}"
+            curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x86_64.tar.gz" -o "$JCODE_TMP.tar.gz"
+            mkdir -p "$JCODE_TMP"
+            tar xzf "$JCODE_TMP.tar.gz" -C "$JCODE_TMP"
+            mv "$JCODE_TMP/jcode-linux-x86_64.bin" "$HOME/.local/bin/jcode"
+            chmod +x "$HOME/.local/bin/jcode"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Merger
         env:
           BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE }}
@@ -426,6 +491,19 @@ jobs:
         run: |
           apt-get update -qq && apt-get install -y -qq curl jq git
           npm install -g glab 2>/dev/null || true
+          # Install jcode coding agent (standalone Rust binary)
+          JCODE_VER="${JCODE_VERSION:-v0.75.3}"
+          if ! command -v jcode &>/dev/null || ! jcode --version 2>/dev/null | grep -q "$JCODE_VER"; then
+            echo "Installing jcode coding agent (standalone binary, $JCODE_VER)..."
+            mkdir -p "$HOME/.local/bin"
+            JCODE_TMP="/tmp/jcode-${GITHUB_RUN_ID:-local}"
+            curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x86_64.tar.gz" -o "$JCODE_TMP.tar.gz"
+            mkdir -p "$JCODE_TMP"
+            tar xzf "$JCODE_TMP.tar.gz" -C "$JCODE_TMP"
+            mv "$JCODE_TMP/jcode-linux-x86_64.bin" "$HOME/.local/bin/jcode"
+            chmod +x "$HOME/.local/bin/jcode"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Post-merge
         env:
           BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE }}
@@ -448,6 +526,19 @@ jobs:
         run: |
           apt-get update -qq && apt-get install -y -qq curl jq git
           npm install -g glab 2>/dev/null || true
+          # Install jcode coding agent (standalone Rust binary)
+          JCODE_VER="${JCODE_VERSION:-v0.75.3}"
+          if ! command -v jcode &>/dev/null || ! jcode --version 2>/dev/null | grep -q "$JCODE_VER"; then
+            echo "Installing jcode coding agent (standalone binary, $JCODE_VER)..."
+            mkdir -p "$HOME/.local/bin"
+            JCODE_TMP="/tmp/jcode-${GITHUB_RUN_ID:-local}"
+            curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x86_64.tar.gz" -o "$JCODE_TMP.tar.gz"
+            mkdir -p "$JCODE_TMP"
+            tar xzf "$JCODE_TMP.tar.gz" -C "$JCODE_TMP"
+            mv "$JCODE_TMP/jcode-linux-x86_64.bin" "$HOME/.local/bin/jcode"
+            chmod +x "$HOME/.local/bin/jcode"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Catchup
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
@@ -489,6 +580,19 @@ jobs:
         run: |
           apt-get update -qq && apt-get install -y -qq curl jq git
           npm install -g glab 2>/dev/null || true
+          # Install jcode coding agent (standalone Rust binary)
+          JCODE_VER="${JCODE_VERSION:-v0.75.3}"
+          if ! command -v jcode &>/dev/null || ! jcode --version 2>/dev/null | grep -q "$JCODE_VER"; then
+            echo "Installing jcode coding agent (standalone binary, $JCODE_VER)..."
+            mkdir -p "$HOME/.local/bin"
+            JCODE_TMP="/tmp/jcode-${GITHUB_RUN_ID:-local}"
+            curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x86_64.tar.gz" -o "$JCODE_TMP.tar.gz"
+            mkdir -p "$JCODE_TMP"
+            tar xzf "$JCODE_TMP.tar.gz" -C "$JCODE_TMP"
+            mv "$JCODE_TMP/jcode-linux-x86_64.bin" "$HOME/.local/bin/jcode"
+            chmod +x "$HOME/.local/bin/jcode"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: E2E
         env:
           BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE }}
@@ -521,6 +625,19 @@ jobs:
         run: |
           apt-get update -qq && apt-get install -y -qq curl jq git
           npm install -g glab 2>/dev/null || true
+          # Install jcode coding agent (standalone Rust binary)
+          JCODE_VER="${JCODE_VERSION:-v0.75.3}"
+          if ! command -v jcode &>/dev/null || ! jcode --version 2>/dev/null | grep -q "$JCODE_VER"; then
+            echo "Installing jcode coding agent (standalone binary, $JCODE_VER)..."
+            mkdir -p "$HOME/.local/bin"
+            JCODE_TMP="/tmp/jcode-${GITHUB_RUN_ID:-local}"
+            curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x86_64.tar.gz" -o "$JCODE_TMP.tar.gz"
+            mkdir -p "$JCODE_TMP"
+            tar xzf "$JCODE_TMP.tar.gz" -C "$JCODE_TMP"
+            mv "$JCODE_TMP/jcode-linux-x86_64.bin" "$HOME/.local/bin/jcode"
+            chmod +x "$HOME/.local/bin/jcode"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Doctor
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
