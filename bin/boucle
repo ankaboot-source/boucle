@@ -200,10 +200,68 @@ EOF
   echo "  The loop will triage (or worker if already triaged) on the next dispatch cycle."
 }
 
+# ── status <iid> ─────────────────────────────────────────────────────────
+#
+# Synthetic view: forge label + assignee + MR status + state.md + iterations.md.
+cmd_status() {
+  local iid="${1:?usage: boucle status <iid>}"
+
+  local issue_json label assignee state
+  issue_json=$(forge_issue_get "$iid" 2>/dev/null || echo "{}")
+  label=$(current_label "$iid")
+  state=$(echo "$issue_json" | jq -r '.state // "unknown"')
+  assignee=$(echo "$issue_json" | jq -r '.assignees[0].username // .assignee.username // "unassigned"')
+
+  echo "=== Issue #$iid ==="
+  echo "State:    $state"
+  echo "Label:    boucle:$label"
+  echo "Assignee: $assignee"
+
+  # MR status (if any).
+  local mr_iid
+  mr_iid=$(forge_mr_lookup_by_branch "boucle/$iid" "opened" 2>/dev/null || echo "")
+  if [ -n "$mr_iid" ]; then
+    local mr_status
+    mr_status=$(forge_mr_merge_status "$mr_iid" 2>/dev/null || echo "unknown")
+    echo "MR:       !$mr_iid (status: $mr_status)"
+  else
+    echo "MR:       (none open)"
+  fi
+
+  # Iteration count from iterations.md.
+  local iter_file=".boucle-state/$iid/iterations.md"
+  if [ -f "$iter_file" ]; then
+    local iter_count
+    iter_count=$(grep -c '^### Iteration' "$iter_file" 2>/dev/null || echo 0)
+    echo "Iterations: $iter_count"
+  else
+    echo "Iterations: (no iterations.md)"
+  fi
+
+  # state.md summary.
+  local state_file=".boucle-state/$iid/state.md"
+  if [ -f "$state_file" ]; then
+    echo ""
+    echo "--- state.md ---"
+    cat "$state_file"
+  else
+    echo ""
+    echo "--- state.md: (not found) ---"
+  fi
+
+  # Last 3 iterations.
+  if [ -f "$iter_file" ]; then
+    echo ""
+    echo "--- iterations.md (last 3) ---"
+    grep -A5 '^### Iteration' "$iter_file" | tail -30
+  fi
+}
+
 # ── Main dispatch ────────────────────────────────────────────────────────
 case "${1:-}" in
   pause)    shift; cmd_pause "$@" ;;
   resume)   shift; cmd_resume "$@" ;;
   restart)  shift; cmd_restart "$@" ;;
+  status)   shift; cmd_status "$@" ;;
   *) echo "Usage: boucle <pause|resume|restart|status|check|log> <iid>" >&2; exit 1 ;;
 esac
