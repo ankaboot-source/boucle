@@ -235,9 +235,16 @@ default:
       # - push pipelines (BOUCLE_PIPELINE_SOURCE=push) to avoid a feedback
       #   loop (push → pipeline → bin/update → push → pipeline → ...)
       # - when BOUCLE_UPDATE_DISABLE=true (opt-out for pinned installs)
+      # Self-update MUST only run on the default branch — on a worker
+      # branch (boucle/<iid>) the self-update commit pollutes the MR
+      # with chore(boucle): commits that are the bot's engine-sync work,
+      # not the issue's work (observed on MR !105: 6 chore(boucle):
+      # commits landed on boucle/79, attributed to the human because
+      # the clone inherited their git identity).
       if [ "${BOUCLE_UPDATE_DISABLE:-false}" != "true" ] \
          && [ "$BOUCLE_HOME" != "$CI_PROJECT_DIR" ] \
-         && [ "${BOUCLE_PIPELINE_SOURCE:-}" != "push" ]; then
+         && [ "${BOUCLE_PIPELINE_SOURCE:-}" != "push" ] \
+         && [ "${CI_COMMIT_BRANCH:-}" = "${CI_DEFAULT_BRANCH:-master}" ]; then
         bash "$BOUCLE_HOME/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       fi
 
@@ -528,9 +535,16 @@ dispatch:
       # - push pipelines (BOUCLE_PIPELINE_SOURCE=push) to avoid a feedback
       #   loop (push → pipeline → bin/update → push → pipeline → ...)
       # - when BOUCLE_UPDATE_DISABLE=true (opt-out for pinned installs)
+      # Self-update MUST only run on the default branch — on a worker
+      # branch (boucle/<iid>) the self-update commit pollutes the MR
+      # with chore(boucle): commits that are the bot's engine-sync work,
+      # not the issue's work (observed on MR !105: 6 chore(boucle):
+      # commits landed on boucle/79, attributed to the human because
+      # the clone inherited their git identity).
       if [ "${BOUCLE_UPDATE_DISABLE:-false}" != "true" ] \
          && [ "$BOUCLE_HOME" != "$CI_PROJECT_DIR" ] \
-         && [ "${BOUCLE_PIPELINE_SOURCE:-}" != "push" ]; then
+         && [ "${BOUCLE_PIPELINE_SOURCE:-}" != "push" ] \
+         && [ "${CI_COMMIT_BRANCH:-}" = "${CI_DEFAULT_BRANCH:-master}" ]; then
         bash "$BOUCLE_HOME/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       fi
 
@@ -2149,7 +2163,7 @@ worker:
       fi
 
       # Configure git credentials for push
-      git config user.email "bot@ankaboot.dev"
+      git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
       git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
       git remote set-url origin "https://${BOUCLE_BOT_USERNAME:-up-bot}:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${CI_PROJECT_PATH}.git"
 
@@ -3438,9 +3452,16 @@ merger:
       # - push pipelines (BOUCLE_PIPELINE_SOURCE=push) to avoid a feedback
       #   loop (push → pipeline → bin/update → push → pipeline → ...)
       # - when BOUCLE_UPDATE_DISABLE=true (opt-out for pinned installs)
+      # Self-update MUST only run on the default branch — on a worker
+      # branch (boucle/<iid>) the self-update commit pollutes the MR
+      # with chore(boucle): commits that are the bot's engine-sync work,
+      # not the issue's work (observed on MR !105: 6 chore(boucle):
+      # commits landed on boucle/79, attributed to the human because
+      # the clone inherited their git identity).
       if [ "${BOUCLE_UPDATE_DISABLE:-false}" != "true" ] \
          && [ "$BOUCLE_HOME" != "$CI_PROJECT_DIR" ] \
-         && [ "${BOUCLE_PIPELINE_SOURCE:-}" != "push" ]; then
+         && [ "${BOUCLE_PIPELINE_SOURCE:-}" != "push" ] \
+         && [ "${CI_COMMIT_BRANCH:-}" = "${CI_DEFAULT_BRANCH:-master}" ]; then
         bash "$BOUCLE_HOME/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       fi
 
@@ -3508,7 +3529,7 @@ merger:
       # Set git identity BEFORE the rebase — git rebase rewrites commits and
       # needs a committer identity. On a fresh docker executor there is no
       # global git config, so the rebase fails with "Committer identity unknown".
-      git config user.email "bot@ankaboot.dev"
+      git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
       git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
       git remote set-url origin "https://${BOUCLE_BOT_USERNAME:-up-bot}:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${CI_PROJECT_PATH}.git"
 
@@ -3642,7 +3663,7 @@ merger:
       # This releases the merge lock immediately after the merge API call
       # so the next approved MR can start merging instead of waiting 2+ min
       # for the deploy to finish.
-  timeout: 5m
+  timeout: 10m
 
 # ── Post-merge (deploy-wait + e2e trigger, unlocked) ───────────────────
 # Runs in the same trigger pipeline as the merger (needs: [merger]) but
@@ -3757,9 +3778,16 @@ catchup:
       # - push pipelines (BOUCLE_PIPELINE_SOURCE=push) to avoid a feedback
       #   loop (push → pipeline → bin/update → push → pipeline → ...)
       # - when BOUCLE_UPDATE_DISABLE=true (opt-out for pinned installs)
+      # Self-update MUST only run on the default branch — on a worker
+      # branch (boucle/<iid>) the self-update commit pollutes the MR
+      # with chore(boucle): commits that are the bot's engine-sync work,
+      # not the issue's work (observed on MR !105: 6 chore(boucle):
+      # commits landed on boucle/79, attributed to the human because
+      # the clone inherited their git identity).
       if [ "${BOUCLE_UPDATE_DISABLE:-false}" != "true" ] \
          && [ "$BOUCLE_HOME" != "$CI_PROJECT_DIR" ] \
-         && [ "${BOUCLE_PIPELINE_SOURCE:-}" != "push" ]; then
+         && [ "${BOUCLE_PIPELINE_SOURCE:-}" != "push" ] \
+         && [ "${CI_COMMIT_BRANCH:-}" = "${CI_DEFAULT_BRANCH:-master}" ]; then
         bash "$BOUCLE_HOME/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       fi
 
@@ -4916,6 +4944,72 @@ doctor:
         RECOVERED=$((RECOVERED + 1))
       done
 
+      # ── Recover stuck boucle:merging issues ──────────────────────────────
+      # The merger can fail mid-run (runner timeout, network "remote end hung
+      # up unexpectedly", TLS handshake timeout, runner crash) leaving the issue
+      # at boucle:merging with no active pipeline. No other doctor scan covers
+      # this label — boucle:working/review scan skips it, boucle:human/approval
+      # scan skips it — so the issue hangs at boucle:merging forever, blocking
+      # the single merge slot if BOUCLE_MAX_PARALLEL_ISSUES=1. Recovery: if the
+      # issue has been stuck at boucle:merging with no active pipeline for
+      # longer than STALENESS, re-trigger the merger. The merger is idempotent
+      # (rebase + push + merge or MWPS), so a re-trigger is always safe.
+      echo "Scanning for stuck boucle:merging issues..."
+      STUCK_MERGING=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues?state=opened&labels=boucle:merging&per_page=100" 2>/dev/null | jq -r '.[].iid' 2>/dev/null)
+      for IID in $STUCK_MERGING; do
+        echo "Checking #$IID (boucle:merging) for stuck merger..."
+        # Active-pipeline guard: skip if a merger pipeline for this issue is
+        # already running/pending/created.
+        if issue_has_active_pipeline "$IID"; then
+          echo "  → #$IID: active pipeline already running — skipping re-trigger"
+          continue
+        fi
+        # Staleness: only re-trigger if the issue has been stuck (no active
+        # pipeline) for longer than STALENESS.
+        UPDATED_AT=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$IID" | jq -r '.updated_at')
+        UPDATED_EPOCH=$(date -d "$UPDATED_AT" +%s 2>/dev/null || echo 0)
+        NOW_EPOCH=$(date +%s)
+        AGE=$((NOW_EPOCH - UPDATED_EPOCH))
+        STALENESS="${BOUCLE_STALENESS_THRESHOLD:-2400}"
+        if [ "$AGE" -lt "$STALENESS" ]; then
+          echo "  → #$IID: issue updated ${AGE}s ago (< ${STALENESS}s) — may still be processing, skipping"
+          continue
+        fi
+        if doctor_should_skip_dedup "$IID"; then
+          continue
+        fi
+        # Verify the MR still exists and is still approved before re-triggering.
+        MR_IID=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests?state=opened" \
+          | jq -r '.[] | select(.source_branch == "boucle/'"$IID"'") | .iid' | head -1)
+        if [ -z "$MR_IID" ]; then
+          echo "  → #$IID: no open MR found — escalating to boucle:human (merger cannot run)"
+          if ! forge_issue_note "$IID" "⚠️ Merger stuck at boucle:merging but no open MR found for branch boucle/$IID. Human intervention needed.$(job_link)"; then
+            echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
+            exit 1
+          fi
+          set_boucle_label "$IID" "boucle:human" "boucle::status::human"
+          RECOVERED=$((RECOVERED + 1))
+          continue
+        fi
+        APPROVALS=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests/$MR_IID/approvals" 2>/dev/null)
+        APPROVED_COUNT=$(echo "$APPROVALS" | jq -r '[.approved_by[].user.username] | length' 2>/dev/null || echo 0)
+        if [ "$APPROVED_COUNT" -eq 0 ]; then
+          echo "  → #$IID: MR !$MR_IID no longer approved — escalating to boucle:human (merger cannot run without approval)"
+          if ! forge_issue_note "$IID" "⚠️ Merger stuck at boucle:merging but MR !$MR_IID is no longer approved. Human intervention needed.$(job_link)"; then
+            echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
+            exit 1
+          fi
+          set_boucle_label "$IID" "boucle:human" "boucle::status::human"
+          RECOVERED=$((RECOVERED + 1))
+          continue
+        fi
+        echo "  → #$IID: stuck at boucle:merging for ${AGE}s — re-triggering merger"
+        chain_to_role "$IID" "merger"
+        doctor_mark_triggered "$IID"
+        echo "  → re-triggered merger for #$IID"
+        RECOVERED=$((RECOVERED + 1))
+      done
+
       # ── Recover CLOSED issues stuck at boucle:working/boucle:review ──
       # The doctor's main scan filters state=opened, so a closed issue that
       # still has boucle:working or boucle:review is invisible. This happens
@@ -5090,7 +5184,7 @@ doctor:
       done
 
       echo "Doctor complete. Recovered $RECOVERED orphaned issue(s)."
-  timeout: 5m
+  timeout: 10m
 
 # ── build-site: one build, many publishers (W1.7 + memory fix) ───────────
 # The site is built ONCE here on a docker runner (node:22-slim, tags: []) and

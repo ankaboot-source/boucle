@@ -646,6 +646,79 @@ boucle_ci_doctor() {
     RECOVERED=$((RECOVERED + 1))
   done
 
+  # ── Recover stuck boucle:merging issues ──────────────────────────────────
+  # The merger can fail mid-run (runner timeout, network "remote end hung
+  # up unexpectedly", TLS handshake timeout, runner crash) leaving the issue
+  # at boucle:merging with no active pipeline. No other doctor scan covers
+  # this label — boucle:working/review scan skips it, boucle:human/approval
+  # scan skips it — so the issue hangs at boucle:merging forever, blocking
+  # the single merge slot if BOUCLE_MAX_PARALLEL_ISSUES=1. Recovery: if the
+  # issue has been stuck at boucle:merging with no active pipeline for
+  # longer than STALENESS, re-trigger the merger. The merger is idempotent
+  # (rebase + push + merge or MWPS), so a re-trigger is always safe.
+  echo "Scanning for stuck boucle:merging issues..."
+  STUCK_MERGING=$(forge_issue_list_by_label "boucle:merging" opened \
+    | jq -r '.[] | .iid // .number')
+  for IID in $STUCK_MERGING; do
+    echo "Checking #$IID (boucle:merging) for stuck merger..."
+    # Active-pipeline guard: skip if a merger pipeline for this issue is
+    # already running/pending/created (the merger may be slow but still
+    # in flight — e.g. a long rebase or a slow push on a congested network).
+    if issue_has_active_pipeline "$IID"; then
+      echo "  → #$IID: active pipeline already running — skipping re-trigger"
+      continue
+    fi
+    # Staleness: only re-trigger if the issue has been stuck (no active
+    # pipeline) for longer than STALENESS. The merger timeout is 10m, so
+    # the default 2400s/40min threshold gives ample room for a slow merger
+    # to complete before the doctor fires a duplicate.
+    UPDATED_AT=$(forge_issue_get "$IID" | jq -r '.updated_at')
+    UPDATED_EPOCH=$(date -d "$UPDATED_AT" +%s 2> /dev/null || echo 0)
+    NOW_EPOCH=$(date +%s)
+    AGE=$((NOW_EPOCH - UPDATED_EPOCH))
+    STALENESS="${BOUCLE_STALENESS_THRESHOLD:-2400}"
+    if [ "$AGE" -lt "$STALENESS" ]; then
+      echo "  → #$IID: issue updated ${AGE}s ago (< ${STALENESS}s) — may still be processing, skipping"
+      continue
+    fi
+    if doctor_should_skip_dedup "$IID"; then
+      continue
+    fi
+    # Verify the MR still exists and is still mergeable/approved before
+    # re-triggering — the human may have closed the MR or revoked approval
+    # while the issue sat at boucle:merging. If the MR is gone or not
+    # approved, fall back to boucle:human (the merger cannot run without an
+    # approved MR).
+    MR_IID=$(forge_mr_lookup_by_branch "boucle/$IID" opened)
+    if [ -z "$MR_IID" ]; then
+      echo "  → #$IID: no open MR found — escalating to boucle:human (merger cannot run)"
+      if ! forge_issue_note "$IID" "⚠️ Merger stuck at boucle:merging but no open MR found for branch boucle/$IID. Human intervention needed.$(job_link)"; then
+        echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
+        exit 1
+      fi
+      set_boucle_label "$IID" "boucle:human" "boucle::status::human"
+      RECOVERED=$((RECOVERED + 1))
+      continue
+    fi
+    APPROVED_COUNT=$(forge_mr_approvals "$MR_IID")
+    [ "$APPROVED_COUNT" = "true" ] && APPROVED_COUNT=1 || APPROVED_COUNT=0
+    if [ "$APPROVED_COUNT" -eq 0 ]; then
+      echo "  → #$IID: MR !$MR_IID no longer approved — escalating to boucle:human (merger cannot run without approval)"
+      if ! forge_issue_note "$IID" "⚠️ Merger stuck at boucle:merging but MR !$MR_IID is no longer approved. Human intervention needed.$(job_link)"; then
+        echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
+        exit 1
+      fi
+      set_boucle_label "$IID" "boucle:human" "boucle::status::human"
+      RECOVERED=$((RECOVERED + 1))
+      continue
+    fi
+    echo "  → #$IID: stuck at boucle:merging for ${AGE}s — re-triggering merger"
+    chain_to_role "$IID" "merger"
+    doctor_mark_triggered "$IID"
+    echo "  → re-triggered merger for #$IID"
+    RECOVERED=$((RECOVERED + 1))
+  done
+
   # ── Recover CLOSED issues stuck at boucle:working/boucle:review ─────────
   # The doctor's main scan filters state=opened, so a closed issue that
   # still has boucle:working or boucle:review is invisible. This happens

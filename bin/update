@@ -219,8 +219,13 @@ main() {
   # No file replacement happens on this run — we only record the baseline.
   if [ -z "$current" ]; then
     echo "$upstream" > "$VERSION_FILE"
-    git config user.email > /dev/null 2>&1 || git config user.email "boucle-bot@boucle.local"
-    git config user.name > /dev/null 2>&1 || git config user.name "boucle-bot"
+    # Force bot identity — NEVER preserve the clone's inherited identity.
+    # On a CI runner the clone inherits the human's git config, so a
+    # `git config user.email > /dev/null 2>&1 || ...` guard leaves the
+    # human's name as the commit author. The self-update commit is the
+    # bot's work, not the human's — force the bot identity unconditionally.
+    git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+    git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
     git add "$VERSION_FILE"
     git commit -m "chore(boucle): record initial version $upstream" > /dev/null 2>&1 || true
     configure_git_push
@@ -252,8 +257,13 @@ main() {
   echo "$upstream" > "$VERSION_FILE"
 
   # Commit and push
-  git config user.email > /dev/null 2>&1 || git config user.email "boucle-bot@boucle.local"
-  git config user.name > /dev/null 2>&1 || git config user.name "boucle-bot"
+  # Force bot identity — NEVER preserve the clone's inherited identity.
+  # On a CI runner the clone inherits the human's git config, so a
+  # `git config user.email > /dev/null 2>&1 || ...` guard leaves the
+  # human's name as the commit author. The self-update commit is the
+  # bot's work, not the human's — force the bot identity unconditionally.
+  git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+  git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
   # Build add paths: SYNC_PATHS prefixed with ENGINE_DIR.
   add_paths=""
   for path in $SYNC_PATHS; do
