@@ -121,7 +121,7 @@ boucle_ci_dispatch() {
         IID=$(jq -r '.issue.number // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
         ACTOR=$(jq -r '.sender.login // .user.login // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
         ;;
-      pull_request_review|pull_request_review_comment)
+      pull_request_review | pull_request_review_comment)
         OBJECT_KIND="note"
         MR_ACTION=$(jq -r '.action // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
         ACTOR=$(jq -r '.sender.login // .user.login // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true

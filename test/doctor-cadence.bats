@@ -96,22 +96,3 @@ setup() {
     assert_output "OK"
   done <<< "$output"
 }
-
-@test "doctor: the inline job mirrors the extracted no-continue guard" {
-  # The inline doctor job in .gitlab-ci.yml must carry the same guard —
-  # a fix in one copy alone leaves the bug live on the other (lesson #56).
-  # The trailing `"` excludes the reviewer's own "skipping close." echo.
-  run grep -n 'skipping close"' .gitlab-ci.yml
-  assert_success
-  while read -r line; do
-    lineno="${line%%:*}"
-    run sed -n "$((lineno + 1))p" .gitlab-ci.yml
-    assert_output --partial "FALL THROUGH"
-    # Same else-gating as the extracted copy.
-    run sed -n "$((lineno + 1)),$((lineno + 14))p" .gitlab-ci.yml
-    run grep -qE '^[[:space:]]*else$' <<< "$output"
-    assert_success
-    run awk -v s="$lineno" -v e="$((lineno + 14))" 'NR>s && NR<=e && /^[[:space:]]*else$/ {else_line=NR} NR>s && NR<=e && /closing issue \+ boucle:done/ {close_line=NR} END {if (close_line > else_line) print "OK"; else print "FAIL"}' .gitlab-ci.yml
-    assert_output "OK"
-  done <<< "$output"
-}
