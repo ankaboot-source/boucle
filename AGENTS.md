@@ -1695,6 +1695,37 @@ atomic.
       re-trigger path on stuck working/review; none covers the
       `boucle:merging` label specifically.
 
+69. **Interactive mode — a local harness can take over an issue and hand it back**
+    - ❌ DO NOT let a human agent CLI work on a boucle issue without a
+      documented handoff protocol — the agent does not know the conventions
+      (markers, state.md, branch contract, gates, templates) and will
+      improvise, breaking the loop.
+    - ❌ DO NOT post comments via raw `glab`/`gh` in interactive mode —
+      without the `<!-- boucle:agent -->` stamp, dispatch treats the
+      comment as a human reply and re-routes the loop (I7).
+    - ✅ DO: `bin/boucle` exposes six verbs (`pause`, `resume`, `restart`,
+      `status`, `check`, `log`) that wrap the existing primitives
+      (`set_boucle_label`, `forge_issue_note`). The human takes over with
+      `boucle pause` (sets `boucle:human`, saves state), works on
+      `boucle/<iid>`, and hands back with `boucle resume` (detects commits
+      ahead → `boucle:review`, else restores previous label) or
+      `boucle restart` (fresh `boucle:todo`).
+    - ✅ DO: extract all message formats into `templates/*.md` files with
+      `{{placeholders}}` — the agent CLI reads the template, fills it, and
+      posts via `bin/forge-note`. The templates are the single source of
+      truth for the format; the shell code should read them instead of
+      hardcoding (follow-up refactor).
+    - ✅ DO: document the protocol, the excluded CI-only commands with
+      local alternatives, and the critical rules in SKILL.md §8
+      "Interactive mode". The agent CLI reads this section to "speak
+      boucle" correctly.
+    - Admission: class — any local agent CLI that works on a boucle issue
+      without a documented handoff protocol; recurrence — new agent CLIs
+      and new consumers will repeat the improvisation without the doc;
+      stable — no line numbers, no transient values; distinct — no
+      existing lesson covers the interactive handoff (the nearest, #55,
+      covers marker-based self-recognition in the loop itself).
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
