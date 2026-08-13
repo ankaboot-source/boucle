@@ -148,6 +148,16 @@ When the issue is ambiguous, derive blocking questions from these seven dimensio
 
 Pick the dimensions the issue leaves unanswered. Each question must change what the worker would build — if the answer doesn't alter the implementation, it is not blocking (record it in Analysis instead).
 
+### §5. Must-haves (structures your Must-haves section)
+
+The acceptance criteria (§2) describe **behavior** (Given/When/Then). The must-haves describe **structure** — the invariants, deliverables, and relationships that make the implementation complete and verifiable. Both are required; they complement each other.
+
+- **Truths** — invariants that must hold after implementation. These are properties a reviewer can check without running a scenario: "the page loads in <2s on 3G", "all images have alt text", "no console errors". Truths are the non-negotiable quality bar.
+- **Artifacts** — concrete deliverables the worker must produce. These are files, components, or assets: `src/pages/right-to-resist.astro`, `public/logo.png`, `src/components/Hero.astro`. Artifacts are what the reviewer looks for in the diff.
+- **Key links** — critical relationships between artifacts and the rest of the system: "the new page is linked from the navbar", "the logo is referenced in `Layout.astro`", "the form posts to `/api/contact`". Key links are what the reviewer checks to ensure the artifact is wired into the system, not orphaned.
+
+If the issue does not imply any truths/artifacts/key-links beyond the acceptance criteria, write "none" — but most issues have at least one artifact and one key link.
+
 ## Phased workflow
 
 You work in 4 phases. **Phase 1 is mandatory and posts first (post-early rule). Phases 2-3 are optional enrichment — if you exhaust your steps, the Phase 1 draft is still valid and the loop continues.**
@@ -275,6 +285,11 @@ Post your **final triage comment** on the issue with this format:
 - [ ] **Edge case** — Given <boundary>, When <action>, Then <result>
 - [ ] **Error state** — Given <failure>, When <action>, Then <recovery/feedback>
 - [ ] **Non-functional** — Given <load/constraint>, When <action>, Then <performance/a11y bar>
+
+## Must-haves
+- **Truths** — <invariant that must hold after implementation (e.g. "page loads in <2s on 3G")>
+- **Artifacts** — <concrete deliverable (e.g. "src/pages/right-to-resist.astro", "public/logo.png")>
+- **Key links** — <critical relationship (e.g. "new page linked from /navbar", "logo referenced in Layout.astro")>
 
 ## Classification
 Size: S | M | L

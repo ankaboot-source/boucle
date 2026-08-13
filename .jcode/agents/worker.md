@@ -173,6 +173,14 @@ You have these skills in `.jcode/skills/`. **Use them** — they contain domain 
   12. Update `state.md`:
     - **Fill in the "Approach" section with what you did.** This is NOT optional. The Approach section becomes the MR description that the reviewer reads to verify doc conformance (e.g. visual charter §2 and §4 citations). An empty or placeholder Approach causes reviewer FAIL loops — issue #34 on a consumer repo had 3 FAIL verdicts, all blocking on the same criterion: "MR description does not cite the visual charter". **Format: write 3-6 bullet points (`- item`), one per aspect of your approach.** GitLab markdown renders single newlines as spaces (soft breaks), so a paragraph becomes an unreadable wall of text. Bullet points (`-`) and blank lines between sections render properly. Each bullet should cite the charter doc section you followed (e.g. "Conforms to the visual charter §2 — sharp corners via `--radius-sharp`").
     - **If human MR comments amended the spec** (new or changed requirements vs the triage-era criteria), update the `## Acceptance criteria` section of `state.md` to reflect the amended spec — mark each amended criterion with `(amended via MR comment)`. `state.md` is seeded once from the triage comment and never refreshed automatically; without this update the criteria drift from what the human actually asked for, and the reviewer grades against a stale spec.
+    - **Record spec amendments as deltas.** When a human MR comment amends the spec, also record the amendment in the `## Spec delta` section of `state.md` using the delta format:
+      ```
+      - **ADDED** <criterion> — (source: MR comment by <author>, <date>)
+      - **MODIFIED** <old criterion> → <new criterion> — (source: MR comment by <author>, <date>)
+      - **REMOVED** <criterion> — (source: MR comment by <author>, <date>)
+      ```
+      This makes the spec evolution traceable — the reviewer can see exactly WHAT changed from the original triage spec and WHY, instead of guessing whether a divergence is an amendment or a worker error (lesson #53).
+    - **Check the Must-haves section.** The `## Must-haves` section of `state.md` (seeded from the triage comment) lists truths (invariants), artifacts (deliverables), and key links (dependencies). Use them as your implementation contract: every artifact must be produced, every truth must hold, every key link must be wired. If a must-have is impossible to satisfy, record it in "Awaiting human" — do NOT silently skip it.
     - If you tried and rejected an approach, add it to "Tried and rejected" with why.
   13. Append to `iterations.md` with what you changed.
   14. **Update charter docs** if your changes impact them (see "Doc maintenance" above). Commit doc updates in the same MR as the code.

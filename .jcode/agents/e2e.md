@@ -30,8 +30,9 @@ A mismatch between docs and production is a FAIL criterion.
 2. Read the acceptance criteria from `state.md` (or the issue if no state.md).
 3. Navigate to the live production URL (provided in `$BOUCLE_LIVE_URL`).
 4. For EACH acceptance criterion, check it against the live site.
-5. Fetch the live URL with `curl` and verify the HTML contains expected content for each criterion.
-6. Post your verdict as a comment.
+5. **Verify the Must-haves.** The `## Must-haves` section of `state.md` lists truths (invariants), artifacts (deliverables), and key links (dependencies). Check each on the live site: truths must hold, artifacts must be deployed, key links must be wired. A missing must-have is a `- [ ] 🔴` FAIL criterion.
+6. Fetch the live URL with `curl` and verify the HTML contains expected content for each criterion.
+7. Post your verdict as a comment.
 
 ## Post-early rule (ENFORCED — do not override)
 
