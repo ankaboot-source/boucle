@@ -216,6 +216,26 @@ forge_mr_lookup_by_branch() {
   local branch="$1" state="${2:-opened}"
   local encoded
   encoded=$(printf '%s' "$branch" | jq -sRr @uri)
+  # Prefix matching for the protocol key "boucle/<digits>": the ACTUAL worker
+  # branch is "boucle/<iid>-<slug>" (readable, deterministic), so an exact
+  # source_branch match on the bare key would miss it. When the arg is a bare
+  # boucle/<digits> key, first try the exact match (backward compat with
+  # legacy branches), then fall back to listing MRs and filtering by prefix.
+  if printf '%s' "$branch" | grep -qE '^boucle/[0-9]+$'; then
+    local exact
+    exact=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
+      "/projects/$BOUCLE_PROJECT_ID/merge_requests?source_branch=$encoded&state=$state&per_page=1" 2> /dev/null \
+      | jq -r '.[0].iid // empty' 2> /dev/null || true)
+    if [ -n "$exact" ]; then
+      echo "$exact"
+      return 0
+    fi
+    # No exact match — list MRs in the requested state and filter by prefix.
+    glab api --hostname "$BOUCLE_FORGE_HOST" --paginate \
+      "/projects/$BOUCLE_PROJECT_ID/merge_requests?state=$state&per_page=100" 2> /dev/null \
+      | jq -r --arg prefix "$branch" '[.[] | select(.source_branch | startswith($prefix))] | first | .iid // empty' 2> /dev/null || true
+    return 0
+  fi
   glab api --hostname "$BOUCLE_FORGE_HOST" \
     "/projects/$BOUCLE_PROJECT_ID/merge_requests?source_branch=$encoded&state=$state&per_page=1" 2> /dev/null \
     | jq -r '.[0].iid // empty' 2> /dev/null || true
@@ -250,6 +270,14 @@ forge_mr_close() {
   local mr_iid="$1"
   glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid" \
     -f state_event=close > /dev/null 2>&1 || true
+}
+
+forge_branch_delete() {
+  local branch="$1"
+  local encoded
+  encoded=$(printf '%s' "$branch" | jq -sRr @uri)
+  glab api --hostname "$BOUCLE_FORGE_HOST" -X DELETE \
+    "/projects/$BOUCLE_PROJECT_ID/repository/branches/$encoded" > /dev/null 2>&1
 }
 
 # ── Note reactions ────────────────────────────────────────────────────────

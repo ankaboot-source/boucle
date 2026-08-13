@@ -2119,7 +2119,7 @@ worker:
       # (detailed_merge_status=commits_status) and sends the merger/doctor
       # into an infinite escalation loop. reset --hard is allowed ONLY for a
       # true clean slate (branch exists but has NO worker commits).
-      BRANCH="boucle/$BOUCLE_ISSUE"
+      BRANCH=$(boucle_branch_name "$BOUCLE_ISSUE")
       # Force-sync the local branch from origin: the executor REUSES the repo
       # between jobs, so a stale local branch (e.g. a crashed job's safety-net
       # commit that staged .npm/) can collide with the runner-restored cache
@@ -2859,9 +2859,10 @@ reviewer:
       # starts with "boucle:"), so we strip all boucle-managed labels when
       # writing a new pair. Caller passes detail as $2 and gross as $3.
       # set_boucle_label is provided by lib/boucle.sh (sourced in before_script).
-      # Find the MR for this issue
+      # Find the MR for this issue (prefix match on the protocol key
+      # boucle/<iid> — the actual branch is boucle/<iid>-<slug>).
       MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?state=opened" \
-        | jq -r '.[] | select(.source_branch == "boucle/'"$BOUCLE_ISSUE"'") | .iid' | head -1)
+        | jq -r '.[] | select(.source_branch | startswith("boucle/'"$BOUCLE_ISSUE"'")) | .iid' | head -1)
 
       if [ -z "$MR_IID" ]; then
         echo "FAIL: no open MR found for issue #$BOUCLE_ISSUE (branch boucle/$BOUCLE_ISSUE)" >&2
@@ -2870,8 +2871,8 @@ reviewer:
         # boucle:review forever, and the doctor would re-trigger the
         # reviewer every 5min — infinite loop (issue #34). Inspect the
         # MR state and transition the issue instead.
-        CLOSED_MR_STATE=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?source_branch=boucle/$BOUCLE_ISSUE&state=closed" 2>/dev/null | jq -r '.[0].state // empty' 2>/dev/null || true)
-        MERGED_MR_STATE=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?source_branch=boucle/$BOUCLE_ISSUE&state=merged" 2>/dev/null | jq -r '.[0].state // empty' 2>/dev/null || true)
+        CLOSED_MR_STATE=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?state=closed" 2>/dev/null | jq -r --arg p "boucle/$BOUCLE_ISSUE" '[.[] | select(.source_branch | startswith($p))] | first | .state // empty' 2>/dev/null || true)
+        MERGED_MR_STATE=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?state=merged" 2>/dev/null | jq -r --arg p "boucle/$BOUCLE_ISSUE" '[.[] | select(.source_branch | startswith($p))] | first | .state // empty' 2>/dev/null || true)
         if [ -n "$MERGED_MR_STATE" ]; then
           echo "boucle: a merged MR exists for issue #$BOUCLE_ISSUE — transitioning to boucle:done"
           set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
@@ -3501,9 +3502,10 @@ merger:
       # Set merging label
       set_boucle_label "$BOUCLE_ISSUE" "boucle:merging" "boucle::status::bot"
 
-      # Find the MR for this issue
+      # Find the MR for this issue (prefix match on the protocol key
+      # boucle/<iid> — the actual branch is boucle/<iid>-<slug>).
       MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?state=opened" \
-        | jq -r '.[] | select(.source_branch == "boucle/'"$BOUCLE_ISSUE"'") | .iid' | head -1)
+        | jq -r '.[] | select(.source_branch | startswith("boucle/'"$BOUCLE_ISSUE"'")) | .iid' | head -1)
 
       if [ -z "$MR_IID" ]; then
         echo "FAIL: no open MR found for issue #$BOUCLE_ISSUE (branch boucle/$BOUCLE_ISSUE)" >&2
@@ -3522,7 +3524,7 @@ merger:
       # Also fetch the MR branch itself — CI clones with --depth=1 and only the
       # ref that triggered the pipeline ($CI_DEFAULT_BRANCH for merger role), so the MR
       # branch ref is NOT present in the local clone by default.
-      BRANCH="boucle/$BOUCLE_ISSUE"
+      BRANCH=$(boucle_branch_name "$BOUCLE_ISSUE")
       git fetch origin $CI_DEFAULT_BRANCH "$BRANCH"
       boucle_deepen_rebase_fetch
 
@@ -3658,10 +3660,18 @@ merger:
 
       echo "Merged MR !${MR_IID} (merge_commit $MERGE_SHA) for issue #$BOUCLE_ISSUE"
 
+      # Post-merge branch cleanup: delete the worker branch. Best-effort — a
+      # failed deletion logs a warning but does not fail the job. lesson #68.
+      if ! forge_branch_delete "$BRANCH"; then
+        echo "WARN: could not delete branch $BRANCH after merge (stale but harmless)" >&2
+      else
+        echo "Deleted worker branch $BRANCH after merge"
+      fi
+
       # The deploy-wait + e2e-trigger has been moved to the post-merge job
       # (below) which runs WITHOUT the boucle-merge resource_group lock.
       # This releases the merge lock immediately after the merge API call
-      # so the next approved MR can start merging instead of waiting 2+ min
+      # succeeds so the next approved MR can start merging instead of waiting 2+ min
       # for the deploy to finish.
   timeout: 10m
 
@@ -4016,8 +4026,8 @@ catchup:
       # the open MR is the active work. This prevents the catchup from
       # re-closing a reopened issue when an old merged MR exists alongside
       # the new open one.
-      MR_OPEN_STATE=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?source_branch=boucle/$BOUCLE_ISSUE&state=opened" 2>/dev/null \
-        | jq -r '.[0].state // empty')
+      MR_OPEN_STATE=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?state=opened" 2>/dev/null \
+        | jq -r --arg p "boucle/$BOUCLE_ISSUE" '[.[] | select(.source_branch | startswith($p))] | first | .state // empty')
       if [ "$MR_OPEN_STATE" = "opened" ]; then
         echo "Catchup: open MR exists for branch boucle/$BOUCLE_ISSUE — issue reopened for new iteration, skipping close."
         exit 0
@@ -4046,6 +4056,15 @@ catchup:
       # Close the issue (boucle:done is a board label, not a GitLab close state).
       close_issue "$BOUCLE_ISSUE"
       echo "Catchup: closed issue #$BOUCLE_ISSUE"
+
+      # Post-merge branch cleanup: delete the worker branch. Best-effort — a
+      # failed deletion logs a warning but does not fail the job. lesson #68.
+      CATCHUP_BRANCH=$(boucle_branch_name "$BOUCLE_ISSUE")
+      if ! forge_branch_delete "$CATCHUP_BRANCH"; then
+        echo "WARN: could not delete branch $CATCHUP_BRANCH after catchup close (stale but harmless)" >&2
+      else
+        echo "Deleted worker branch $CATCHUP_BRANCH after catchup close"
+      fi
 
       # Cascade: if this is a sub-issue, close the parent when all siblings are closed.
       maybe_close_parent "$BOUCLE_ISSUE"
@@ -4833,11 +4852,11 @@ doctor:
         # reopened for a new iteration (e.g. human requested changes after
         # approval, or a new MR was created after the first one was merged).
         # In that case, do NOT close — the open MR is the active work.
-        MR_STATE=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests?source_branch=boucle/$IID&state=merged" 2>/dev/null \
-          | jq -r '.[0].state // empty')
+        MR_STATE=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests?state=merged" 2>/dev/null \
+          | jq -r --arg p "boucle/$IID" '[.[] | select(.source_branch | startswith($p))] | first | .state // empty')
         if [ "$MR_STATE" = "merged" ]; then
-          MR_OPEN_STATE=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests?source_branch=boucle/$IID&state=opened" 2>/dev/null \
-            | jq -r '.[0].state // empty')
+          MR_OPEN_STATE=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests?state=opened" 2>/dev/null \
+            | jq -r --arg p "boucle/$IID" '[.[] | select(.source_branch | startswith($p))] | first | .state // empty')
           if [ "$MR_OPEN_STATE" = "opened" ]; then
             echo "  → #$IID ($ROLE): merged MR exists but an open MR also exists — issue reopened for new iteration, skipping close"
             # FALL THROUGH (no close, no continue): an open MR means the
@@ -4861,8 +4880,8 @@ doctor:
         # approved the MR natively (the dispatch `approved` case only
         # acts on boucle:approval, so these issues would otherwise loop
         # forever re-running the worker/reviewer).
-        MR_OPEN_DATA=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests?source_branch=boucle/$IID&state=opened" 2>/dev/null \
-          | jq -c '[.[] | select(.source_branch == "boucle/$IID")] | first // empty' 2>/dev/null)
+        MR_OPEN_DATA=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests?state=opened" 2>/dev/null \
+          | jq -c --arg p "boucle/$IID" '[.[] | select(.source_branch | startswith($p))] | first // empty' 2>/dev/null)
         if [ -n "$MR_OPEN_DATA" ] && [ "$MR_OPEN_DATA" != "null" ]; then
           MR_OIID=$(echo "$MR_OPEN_DATA" | jq -r '.iid')
           MR_OSTATUS=$(echo "$MR_OPEN_DATA" | jq -r '.detailed_merge_status // .merge_status // "unknown"')
@@ -4885,11 +4904,11 @@ doctor:
         # escalates to boucle:human or stays terminal, but the doctor
         # needs to land the issue at boucle:done + close if the MR is
         # already closed at the moment of recovery).
-        MR_CLOSED_STATE=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests?source_branch=boucle/$IID&state=closed" 2>/dev/null \
-          | jq -r '.[0].state // empty')
+        MR_CLOSED_STATE=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests?state=closed" 2>/dev/null \
+          | jq -r --arg p "boucle/$IID" '[.[] | select(.source_branch | startswith($p))] | first | .state // empty')
         if [ "$MR_CLOSED_STATE" = "closed" ]; then
-          MR_OPEN_STATE=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests?source_branch=boucle/$IID&state=opened" 2>/dev/null \
-            | jq -r '.[0].state // empty')
+          MR_OPEN_STATE=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests?state=opened" 2>/dev/null \
+            | jq -r --arg p "boucle/$IID" '[.[] | select(.source_branch | startswith($p))] | first | .state // empty')
           if [ "$MR_OPEN_STATE" = "opened" ]; then
             echo "  → #$IID ($ROLE): closed MR exists but an open MR also exists — issue reopened for new iteration, skipping close"
             # FALL THROUGH (no close, no continue): an open MR means the
@@ -4980,7 +4999,7 @@ doctor:
         fi
         # Verify the MR still exists and is still approved before re-triggering.
         MR_IID=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests?state=opened" \
-          | jq -r '.[] | select(.source_branch == "boucle/'"$IID"'") | .iid' | head -1)
+          | jq -r '.[] | select(.source_branch | startswith("boucle/'"$IID"'")) | .iid' | head -1)
         if [ -z "$MR_IID" ]; then
           echo "  → #$IID: no open MR found — escalating to boucle:human (merger cannot run)"
           if ! forge_issue_note "$IID" "⚠️ Merger stuck at boucle:merging but no open MR found for branch boucle/$IID. Human intervention needed.$(job_link)"; then
@@ -5024,7 +5043,7 @@ doctor:
         echo "  → #$IID: closed but stuck at working/review — zombie recovery"
         # Close any open MR on the boucle/$IID branch (zombie MR created by
         # the worker running on the closed issue).
-        ZOMBIE_MR_IID=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests?source_branch=boucle/$IID&state=opened" 2>/dev/null | jq -r '.[0].iid // empty')
+        ZOMBIE_MR_IID=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests?state=opened" 2>/dev/null | jq -r --arg p "boucle/$IID" '[.[] | select(.source_branch | startswith($p))] | first | .iid // empty')
         if [ -n "$ZOMBIE_MR_IID" ]; then
           echo "  → #$IID: closing zombie MR !${ZOMBIE_MR_IID}"
           glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$CI_PROJECT_ID/merge_requests/$ZOMBIE_MR_IID" -f state_event=close > /dev/null 2>&1 || true
@@ -5062,7 +5081,7 @@ doctor:
         echo "Checking #$IID (boucle:human/approval) for approved MR..."
         # Find an open MR for this issue (branch boucle/$IID)
         MR_DATA=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/merge_requests?state=opened" \
-          | jq -c --arg branch "boucle/$IID" '[.[] | select(.source_branch == $branch)] | first // empty' 2>/dev/null)
+          | jq -c --arg p "boucle/$IID" '[.[] | select(.source_branch | startswith($p))] | first // empty' 2>/dev/null)
         if [ -z "$MR_DATA" ] || [ "$MR_DATA" = "null" ]; then
           echo "  → #$IID: no open MR — skipping"
           continue

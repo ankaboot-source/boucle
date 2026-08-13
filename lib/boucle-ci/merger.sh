@@ -31,7 +31,7 @@ boucle_ci_merger() {
   # but the default branch may have advanced since this MR was created).
   # Also fetch the MR branch itself — CI clones with --depth=1 and only the
   # ref that triggered the pipeline, so the MR branch ref is NOT present by default.
-  BRANCH="boucle/$BOUCLE_ISSUE"
+  BRANCH=$(boucle_branch_name "$BOUCLE_ISSUE")
   git fetch origin "$BOUCLE_DEFAULT_BRANCH" "$BRANCH"
   boucle_deepen_rebase_fetch
 
@@ -136,6 +136,15 @@ boucle_ci_merger() {
   fi
 
   echo "Merged MR !${MR_IID} (merge_commit $MERGE_SHA) for issue #$BOUCLE_ISSUE"
+
+  # Post-merge branch cleanup: delete the worker branch. Best-effort — a
+  # failed deletion logs a warning but does not fail the job (the branch is
+  # stale but harmless). lesson #68.
+  if ! forge_branch_delete "$BRANCH"; then
+    echo "WARN: could not delete branch $BRANCH after merge (stale but harmless)" >&2
+  else
+    echo "Deleted worker branch $BRANCH after merge"
+  fi
 
   # The deploy-wait + e2e-trigger has been moved to the post-merge stage
   # which runs WITHOUT the boucle-merge concurrency lock.

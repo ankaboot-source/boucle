@@ -403,6 +403,20 @@ forge_reaction_canonical() {
 #   Find MR/PR by source branch. Returns the MR/PR IID (number) on stdout,
 #   empty on failure. state defaults to "opened" (GitLab) / "open" (GitHub).
 #   Accepts GitLab-style state values and maps them for GitHub.
+#   When <source_branch> is a bare protocol key matching "boucle/<digits>"
+#   (no slug), the lookup PREFIX-matches: it first tries an exact match
+#   (backward compat with legacy branches) and, if that is empty, lists MRs
+#   in the requested state and returns the first whose source branch starts
+#   with "boucle/<digits>". This keeps lookups stable even when the readable
+#   worker branch slug changes because the issue title was edited.
+#
+# forge_branch_delete <branch>
+#   Delete a branch from the remote. Best-effort: returns 0 on success,
+#   non-zero on failure (callers MUST NOT fail the job on a failed deletion —
+#   a stale branch is harmless). Used to clean up worker branches after a
+#   successful merge.
+#   (GitLab: DELETE /projects/:id/repository/branches/:branch;
+#   GitHub: DELETE /repos/:owner/:repo/git/refs/heads/:branch.)
 #
 # forge_mr_merge_status <mr_iid>
 #   Get mergeable status string on stdout. Returns "unknown" on failure.
