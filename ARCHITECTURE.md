@@ -308,10 +308,66 @@ sweep (every 10 min). It:
   aborting. If the upstream fetch fails, the consumer stays on its current
   version and the pipeline continues (lesson #18: boucle is not yet public, so
   `bin/update` 401s on a private repo and fixes propagate manually).
+- **Default-branch gate** — the self-update runs ONLY on the default branch
+  (`CI_COMMIT_BRANCH == CI_DEFAULT_BRANCH`). On a worker branch
+  (`boucle/<iid>`) the self-update is skipped — otherwise its
+  `chore(boucle):` commits pollute the worker's MR with engine-sync work
+  that is not the issue's work (lesson #67). The existing
+  `BOUCLE_PIPELINE_SOURCE != "push"` guard prevents the feedback loop
+  (push → pipeline → bin/update → push); the branch gate prevents
+  branch pollution.
 
 See [LOOP-README.md](LOOP-README.md) for the install/update flow.
 
-## 9. Retry strategy
+## 9. Mono-user mode
+
+Boucle supports two deployment models:
+
+| Model | Bot account | Trigger | Anti-loop guard |
+|---|---|---|---|
+| **Multi-user** (default) | separate bot account (`up-bot`) | actor ≠ bot username | actor-based + marker |
+| **Mono-user** (`--mono-user`) | the human's own account | actor check is useless (one actor) | marker-only (`<!-- boucle:agent -->`) |
+
+In **mono-user mode** (`BOUCLE_MONO_USER=true`, set by `bin/setup --mono-user`),
+a single forge account owns both the issues and the loop. There is no separate
+bot identity. This is the fallback when the forge does not allow a second
+account or the human does not want to provision one.
+
+### What changes in mono-user mode
+
+- **Anti-loop guard** — the actor-based guard (`ACTOR != BOUCLE_BOT_USERNAME`)
+  is useless when one account owns both sides: it would discard the human's
+  own triggers. Dispatch falls back to the `<!-- boucle:agent -->` marker
+  (lesson #55): every comment posted via `forge_issue_note` /
+  `forge_mr_note` carries the invisible marker; dispatch skips comments
+  that carry it, regardless of who the actor is.
+- **Gross label axis** — `boucle::status::bot` / `boucle::status::human` are
+  not written (the "whose side is this on?" question has no answer when
+  there is one actor). `set_boucle_label` writes the detail axis alone.
+- **Assignee side effects** — both reassignments (to bot, to human) are
+  no-ops: the issue already belongs to the only human, and forges emit
+  nothing when the assignee set does not change.
+- **Git identity** — `BOUCLE_BOT_EMAIL` / `BOUCLE_BOT_USERNAME` default to
+  `boucle-bot@boucle.local` / `up-bot` (generic, never identifies a
+  consumer). In mono-user mode the consumer MAY override them to match
+  the single account's identity, but the defaults are safe — they never
+  leak a consumer name into commits (lesson #66).
+
+### What does NOT change
+
+- The state machine, the role pipeline, the reviewer/e2e verdict format,
+  the marker protocol, the doctor sweep — all run identically.
+- `BOUCLE_BOT_USERNAME` still defaults to `up-bot` (used for git config,
+  remote URL, and the actor guard in multi-user mode).
+- `BOUCLE_BOT_ID` is resolved by username via the forge users API in the
+  `default` before_script when unset (lesson #50) — in mono-user mode this
+  resolves to the human's own user ID, which is correct (the human IS the
+  bot).
+
+See [README.md](README.md) §"Running without a bot account" for setup, and
+[LOOP.md](LOOP.md) for the `BOUCLE_MONO_USER` variable reference.
+
+## 10. Retry strategy
 
 The worker's branch handling is governed by `BOUCLE_RETRY_STRATEGY`
 (`lib/boucle-ci/worker.sh:64`):
@@ -333,7 +389,7 @@ The worker's branch handling is governed by `BOUCLE_RETRY_STRATEGY`
   stages+commits uncommitted changes automatically before rebase (lesson #8,
   #14). The worker must avoid unstageable changes (binaries, local configs).
 
-## 10. Known limitations
+## 11. Known limitations
 
 The engine's known limitations are catalogued in [CONTEXT.md](CONTEXT.md) §8.
 The most architecturally relevant:

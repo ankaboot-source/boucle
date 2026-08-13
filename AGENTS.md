@@ -1587,6 +1587,114 @@ atomic.
       #56 covers literal env vars in notes, this lesson covers relative
       script paths that crash the job before the verdict case.
 
+66. **Git identity MUST be configurable, never hardcoded to a consumer**
+    - ❌ DO NOT hardcode a consumer-specific email (e.g.
+      `bot@ankaboot.dev`) in `git config user.email` across the engine.
+      The engine ships to multiple consumers, each with its own forge
+      instance, bot account, and email domain. A hardcoded email
+      attributes the bot's commits to a consumer that is not theirs —
+      observed on a consumer MR: 6 `chore(boucle):` commits displayed
+      the upstream maintainer's email as the author because
+      `bin/update` preserved the clone's inherited git identity (the
+      human's) and `worker.sh`/`merger.sh` hardcoded the upstream
+      email as committer.
+    - ❌ DO NOT preserve the clone's inherited git identity in
+      `bin/update`. On a CI runner the clone inherits the human's
+      `user.name`/`user.email`, so a
+      `git config user.email > /dev/null 2>&1 || git config ...` guard
+      leaves the human's identity as the commit author. The self-update
+      commit is the bot's work, not the human's.
+    - ✅ DO: use `${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}` and
+      `${BOUCLE_BOT_USERNAME:-up-bot}` in EVERY `git config user.*`
+      call site (`bin/update`, `worker.sh`, `merger.sh`, inline CI
+      jobs). The fallback `boucle-bot@boucle.local` is generic and
+      never identifies a consumer. A consumer overrides
+      `BOUCLE_BOT_EMAIL` / `BOUCLE_BOT_USERNAME` via CI variables to
+      match its forge account. This also makes mono-user mode
+      work correctly: the single account's identity is used
+      consistently, not a hardcoded upstream identity.
+    - ✅ DO: grep the engine for hardcoded emails after any git-identity
+      edit — the inline `.gitlab-ci.yml` jobs and the extracted
+      `lib/boucle-ci/*.sh` copies drift, and a fix in one copy leaves
+      the bug live on the other (lesson #56 greps ALL copies).
+    - Admission: class — any hardcoded consumer-identifying git
+      identity in the engine; recurrence — the natural instinct when
+      writing `git config user.email` is to put a real email, and
+      `bin/update`'s `|| true` guard makes the inherited identity
+      silently win; stable — no line numbers, no transient values;
+      distinct — lesson #38 covers leaking consumer info in upstream
+      *contributions* (PRs, issues), this lesson covers leaking
+      upstream/consumer identity in *git commits* on consumer
+      branches.
+
+67. **Self-update MUST NOT run on worker branches**
+    - ❌ DO NOT let `bin/update` (the engine self-update) run in the
+      `before_script` of a job that is checked out on a worker branch
+      (`boucle/<iid>`). The self-update commits engine-sync work
+      (`chore(boucle): auto-update`, `chore(boucle): fix bin/update`)
+      onto the worker's MR branch — polluting the MR with commits
+      that are not the issue's work. Observed on a consumer MR !105:
+      6 `chore(boucle):` commits landed on `boucle/79`, inflating the
+      MR to 274 changes and making it look like the worker produced
+      engine-bootstrap work instead of the issue's feature.
+    - ✅ DO: gate the self-update on
+      `[ "${CI_COMMIT_BRANCH:-}" = "${CI_DEFAULT_BRANCH:-master}" ]`
+      in EVERY `before_script` copy (default, dispatch, merger,
+      catchup). The self-update is a housekeeping operation that
+      belongs on the default branch, not on a feature/worker branch.
+      On a trigger pipeline (worker/reviewer) `CI_COMMIT_BRANCH` is
+      the source branch (`boucle/<iid>`), so the gate skips the
+      self-update; on a push pipeline to the default branch the
+      existing `BOUCLE_PIPELINE_SOURCE != "push"` guard already
+      skips it (feedback-loop avoidance).
+    - Admission: class — any self-update that runs on a non-default
+      branch and commits to it; recurrence — the `before_script` is
+      shared across all jobs, and without a branch gate the
+      self-update fires on every job including worker/reviewer;
+      stable — no line numbers, no transient values; distinct —
+      lesson #66 covers the identity of the commit, this lesson
+      covers *which branch* the commit lands on.
+
+68. **Doctor MUST scan boucle:merging for stuck mergers**
+    - ❌ DO NOT let an issue sit at `boucle:merging` forever after a
+      merger failure (runner timeout, network "remote end hung up
+      unexpectedly", TLS handshake timeout, runner crash). The doctor
+      scanned `boucle:working`, `boucle:review`, `boucle:blocked`,
+      `boucle:human`, `boucle:approval` — but NOT `boucle:merging`. A
+      failed merger left the issue stranded at `boucle:merging` with no
+      recovery path: no webhook re-triggers it (the MR is already
+      approved, so no `approved` webhook fires again), and the doctor
+      never scanned the label. Observed on a consumer (2026-08): MR !106
+      was approved + `mergeable` but the merger timed out at 5m during
+      `git push --force` ("the remote end hung up unexpectedly" on
+      framagit). The issue sat at `boucle:merging` for 2+ hours with no
+      recovery, blocking the single worker slot
+      (`BOUCLE_MAX_PARALLEL_ISSUES=1`) and stalling all other queued
+      issues.
+    - ✅ DO: the doctor MUST scan `boucle:merging` issues with no active
+      pipeline for longer than STALENESS. Re-trigger the merger (it is
+      idempotent — rebase + push + merge or MWPS). Before re-triggering,
+      verify the MR still exists and is still approved — if the human
+      closed the MR or revoked approval while the issue sat at
+      `boucle:merging`, escalate to `boucle:human` instead. The scan
+      lives in BOTH the extracted `lib/boucle-ci/doctor.sh` and the
+      inline doctor job in `.gitlab-ci.yml` — a fix in one copy leaves
+      the bug live on the other (lesson #56 greps ALL copies).
+    - ✅ DO: the merger timeout MUST be at least 10m (not 5m) to
+      accommodate `git push --force` on a congested network. The 5m
+      timeout killed a merger that was mid-push on framagit (the rebase
+      succeeded, the push was in flight, the timeout fired mid-transfer).
+      The doctor timeout MUST also be at least 10m — the doctor's scan
+      is API-heavy and can timeout on a slow forge before finishing.
+    - Admission: class — any state label with no doctor recovery path;
+      recurrence — new state labels are added routinely and the natural
+      instinct is to add the label without adding a doctor scan for it;
+      stable — no line numbers, no transient values; distinct — lesson
+      #44 covers running roles on CLOSED issues, #57 covers the
+      reviewer's closed-MR done-transition, #61 covers the doctor's
+      re-trigger path on stuck working/review; none covers the
+      `boucle:merging` label specifically.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
