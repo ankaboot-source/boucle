@@ -52,12 +52,14 @@ shaped the design.
   who do not master the entire CI/CD chain.
 - The human stays in the loop: spec validation (readable TL;DR), MR approval.
 - A solo builder should not have to run a second forge account just to use
-  boucle. `bin/setup --mono-user` supports that: one account carries the
-  issues, the MRs and the loop's own actions. It costs degraded
-  notifications (the forge stops signalling "your turn" once there is no
-  assignee change, and does not notify you about your own activity by
-  default), so a dedicated bot identity stays the recommended install —
-  automated on GitLab via project service accounts, manual on GitHub.
+  boucle. Mono-user mode (the default when no `--bot-id` is given) supports
+  that: one account carries the issues, the MRs and the loop's own actions.
+  It costs degraded notifications (the forge stops signalling "your turn"
+  once there is no assignee change, and does not notify you about your own
+  activity by default), so a dedicated bot identity stays the recommended
+  install — automated on GitLab via project service accounts, manual on GitHub
+  (create an account at https://github.com/signup, a PAT at
+  https://github.com/settings/tokens/new, then pass `--bot-token <pat> --bot-id <id>`).
 
 ## 4. Tech stack
 

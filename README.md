@@ -20,7 +20,7 @@ never touch the engine itself.
 - [💰 Cost](#cost)
 - [🛠️ Configuration](#️-configuration)
   - [The bot user](#the-bot-user)
-  - [Running without a bot account (`--mono-user`)](#running-without-a-bot-account---mono-user)
+  - [Running without a bot account (mono-user)](#running-without-a-bot-account-mono-user)
   - [Advanced — dedicated runners](#advanced--dedicated-runners)
 - [🗺️ Roadmap](#️-roadmap)
 - [⚖️ License](#️-license)
@@ -325,18 +325,17 @@ That page lets a project owner provision a bot without platform admin. Then:
 `BOUCLE_BOT_ID` / `BOUCLE_BOT_USERNAME` / `BOUCLE_TOKEN` CI/CD variables, and
 the loop reassigns issues to it automatically.
 
-### Running without a bot account (`--mono-user`)
+### Running without a bot account (mono-user)
 
-If you will not maintain a second account — the common case on GitHub, where
-nothing provisions one for you — run `bin/setup --mono-user`. Your own PAT
-drives the loop: one account carries the issues, the MRs, the approvals and
-boucle's own actions.
+Mono-user is the **default** when no `--bot-id` is given — one account
+carries the issues, the MRs, the approvals and boucle's own actions. This is
+the common case on GitHub, where nothing provisions a bot account for you.
 
 **Why the mode has to exist.** boucle normally recognises its own writes by
 the actor: dispatch discards any webhook whose author is the bot. Point that
 at your own account and the guard discards *your* actions too — opening an
 issue, replying on `boucle:needs-info`, approving a spec. The loop goes
-quiet, with no error anywhere. `--mono-user` swaps the actor check for an
+quiet, with no error anywhere. Mono-user swaps the actor check for an
 invisible `<!-- boucle:agent -->` marker that boucle appends to every comment
 it posts, so it recognises its own writes without asking who acted.
 `bin/doctor` fails loudly if you land in the broken configuration by
