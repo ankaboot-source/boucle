@@ -113,23 +113,30 @@ git submodule add https://github.com/ankaboot-source/boucle .boucle
 # GitLab (auto-detects host and project from the origin remote):
 .boucle/bin/setup gitlab
 #
-# GitHub (mono-user is the default — no --mono-user needed; Cloudflare is
-# opt-in — no --skip-cf needed):
+# GitHub — two paths (pick one):
+#
+#   RECOMMENDED — dedicated bot account (cleaner notifications, no self-activity noise):
+#   1. Create a GitHub account for the bot: https://github.com/signup
+#   2. Create a PAT on that account: https://github.com/settings/tokens/new
+#      (scopes: repo + workflow)
+#   3. Add the bot as a collaborator on your repo (write access)
+#   4. Run setup with the bot's PAT and user ID:
+.boucle/bin/setup github --bot-token "<bot-PAT>" --bot-id <bot-user-id>
+#
+#   FALLBACK — mono-user (your own PAT drives the loop; notifications degrade):
 .boucle/bin/setup github --bot-token "$(gh auth token)"
-#   The PAT needs `repo` + `workflow` scopes. `gh auth token` gives you one
-#   if you are already logged in via `gh auth login`.
-#   To use a dedicated bot account instead of mono-user, pass --bot-id <id>.
+#   `gh auth token` gives you your own PAT if you are logged in via `gh auth login`.
+#   Mono-user is the default when no --bot-id is given.
 ```
 
 `bin/setup` configures the forge (GitLab CI/CD variables or GitHub Actions
 variables/secrets, labels, branch protection, webhook), writes a thin
 `.gitlab-ci.yml` or `.github/workflows/boucle.yml` shim, and appends
 `.boucle/` to your `.gitignore`. Your existing pipeline is never overwritten.
-Project, host and forge are read from the `origin` remote automatically. The bot is
-created for you (pass `--bot-id` / `--bot-token` to use an existing account
-instead); the only token you may still need to pass explicitly is the
-Cloudflare one (`--cf-token`), which otherwise comes from the `BOUCLE_CF_TOKEN`
-environment variable — and only if your deploy target is Cloudflare.
+Project, host and forge are read from the `origin` remote automatically. On
+GitLab, the bot is created for you (project service account); on GitHub,
+pass `--bot-token` + `--bot-id` for a dedicated bot, or just `--bot-token`
+for mono-user (your own account). Cloudflare is opt-in (`--cf-token`).
 
 ### After install
 
