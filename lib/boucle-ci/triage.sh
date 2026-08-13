@@ -140,6 +140,9 @@ boucle_ci_triage() {
     | jq -r --argjson pre "$PRE_RUN_TRIAGE_ID" \
       '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## TL;DR")) | select(.body | test("## Disposition")) | select(.id > $pre)] | first | .body // ""')
 
+  # Debug: log what we found (helps diagnose empty DISPOSITION on new forges)
+  echo "triage: PRE_RUN_TRIAGE_ID=$PRE_RUN_TRIAGE_ID COMMENT_LEN=${#COMMENT} DISPOSITION_PREVIEW=$(echo "$COMMENT" | head -c 80 | tr '\n' ' ')"
+
   # Parse Disposition and Size from their SECTIONS only, not the whole body.
   # Scoping prevents false matches: e.g. "already" in an acceptance criterion
   # contains "ready" and would match a whole-body grep for READY.
