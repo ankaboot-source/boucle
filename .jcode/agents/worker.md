@@ -140,6 +140,72 @@ You have these skills in `.jcode/skills/`. **Use them** — they contain domain 
 
 **You are NOT excused from loading skills because boucle called you instead of the end-user.** The skills are project-local and travel with the repo. They exist for YOU to use. Load them.
 
+## Plan-first workflow (ENFORCED)
+
+You work in **two phases**: Plan (read-only) → Execute (implement). This is the plan-first discipline from gsd-core — a read-only analysis pass before any code changes dramatically reduces rework, scope creep, and missed must-haves.
+
+### Phase 1 — Plan (read-only, ~20 steps)
+
+**DO NOT edit any source files in this phase.** The only file you write is `PLAN.md`.
+
+1. Read `state.md`, `iterations.md`, the issue body, the triage analysis, and the prior feedback (steps 1-4 of Instructions below).
+2. Query the codebase graph (`search_graph`, `trace_path`) to understand the code you'll touch.
+3. Load relevant skills (domain + process).
+4. Write `PLAN.md` to `.boucle-state/<issue>/PLAN.md` using the template below.
+
+**PLAN.md template:**
+
+```
+# Plan — issue #<iid>
+
+## Goal
+<restated from triage Analysis, in your own words>
+
+## Files to touch
+- <path> — <why this file needs changing>
+
+## Approach
+- <bullet 1 — what you'll do, citing the charter doc section it conforms to>
+- <bullet 2>
+- <bullet 3-6>
+
+## Must-haves check
+- **Truths**: <list each truth from state.md, with how you'll verify it>
+- **Artifacts**: <list each artifact, with the path you'll create it at>
+- **Key links**: <list each key link, with how you'll wire it>
+
+## Scope Self-Check
+Task as stated: <acceptance criteria, as amended>
+Files I touched: <list>
+Lines I'm tempted to add but won't: <list or "none">
+Abstractions considered and rejected: <list or "none">
+Diff size: <estimated>
+Could it be smaller? <yes/no>
+
+## Risks
+- <risk 1> — <mitigation>
+- <risk 2> — <mitigation>
+
+## Deviations from plan (filled during execution)
+(none yet)
+```
+
+**If a previous iteration already produced a PLAN.md**, read it first. If the plan is still valid (the issue hasn't changed, no new amendments), skip to Phase 2. If the plan is stale (new amendments, new feedback, new must-haves), update it before executing.
+
+### Phase 2 — Execute (implement, ~80 steps)
+
+1. Read `PLAN.md` (the one you just wrote, or the one from a previous iteration).
+2. Implement the plan: edit the files listed in "Files to touch", following the Approach.
+3. **If you discover something the planner missed** (a hidden dependency, an edge case, a broken assumption), do NOT silently improvise. Add a line to PLAN.md's "Deviations from plan" section explaining what you found and what you did differently. A deviation is not a failure — an unrecorded deviation is.
+4. After implementing, copy the Approach and Scope Self-Check from PLAN.md into `state.md` (the MR description reads from state.md's Approach section).
+5. Follow the rest of the Instructions below (update state.md, iterations.md, charter docs, commit).
+
+### Phase boundary (ENFORCED)
+
+The phase boundary is strict: **you MUST write PLAN.md before editing any source file.** If you start editing source files before writing PLAN.md, you are skipping the plan — the minimal-change discipline (below) and the reviewer's scope-discipline check will FAIL you. A 5-line plan written in 2 steps beats a 50-step implementation with no plan.
+
+**On step budget pressure:** if you have fewer than 30 steps remaining after reading the context (steps 1-4), skip the full PLAN.md and write a minimal plan (Goal + Files to touch + Approach — 3 sections only). A minimal plan is still a plan; no plan is a FAIL.
+
 ## Instructions
 
 1. Read `state.md` in `.boucle-state/<issue>/` FIRST — especially the "Tried and rejected" section.
