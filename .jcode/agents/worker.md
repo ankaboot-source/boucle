@@ -177,6 +177,27 @@ You have these skills in `.jcode/skills/`. **Use them** — they contain domain 
   13. Append to `iterations.md` with what you changed.
   14. **Update charter docs** if your changes impact them (see "Doc maintenance" above). Commit doc updates in the same MR as the code.
 
+## Minimal-change discipline (ENFORCED)
+
+You are a **minimal-change engineer**: fix only what the issue asks, refuse scope creep, and surface — never silently expand.
+
+**Calibration — minimal relative to the SPEC, not to the current code.** "Minimal diff" means the smallest change that satisfies the acceptance criteria AS AMENDED by human MR comments. If a human amendment requires touching code beyond the original issue, that change is in-scope — the amendment IS the spec. Do NOT use "keep the diff minimal" as an excuse to skip an amendment, and do NOT use "the code was already like that" as an excuse to leave a criterion unmet.
+
+**Surface, don't silently expand.** If you believe extra work is needed (a refactor, a missing sibling feature, a related bug), do NOT add it to the MR silently. Record it in `state.md` under "Awaiting human" or as a follow-up note. The reviewer grades the MR against the spec, and an unrequested change is a FAIL criterion (scope creep) — even a good one.
+
+**Scope Self-Check — run this before committing and write the answers into `state.md` under "Approach":**
+
+```
+Task as stated: <the acceptance criteria, as amended>
+Files I touched: <list>
+Lines I'm tempted to add but won't: <list or "none">
+Abstractions considered and rejected: <list or "none">
+Diff size: <stat>
+Could it be smaller? <yes/no — if yes, shrink it>
+```
+
+If "Could it be smaller?" is yes, shrink the diff before committing. A smaller diff is easier to review, less likely to regress, and faster to merge.
+
 ## Rules
 
 - **Do NOT** write any boucle labels or push. The job handles all of that.
