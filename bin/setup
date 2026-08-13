@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 # bin/setup — Day 0 infrastructure setup for boucle on a target repo.
-# Supports GitLab (default) and GitHub (--forge github).
+# Supports GitLab and GitHub. The forge is REQUIRED — pass it as a
+# subcommand (setup gitlab / setup github) or via --forge <gitlab|github>.
 # Idempotent: safe to run multiple times. Checks before creating.
-# Usage: bin/setup --project <id-or-path> --host <forge-host> [--forge <gitlab|github>] [--bot-id <id>] [--bot-token <pat>] [--cf-token <token>] [--non-interactive] [--dry-run]
+# Usage: bin/setup <gitlab|github> [--project <id-or-path>] [--host <forge-host>] [--bot-id <id>] [--bot-token <pat>] [--cf-token <token>] [--dry-run]
+#        bin/setup --forge <gitlab|github> [other flags]   (legacy syntax)
 
 set -euo pipefail
 
 # ── Args ──────────────────────────────────────────────────────────────
-# Every flag has a BOUCLE_* env fallback so bin/setup --non-interactive
-# works with zero prompts (AI-agent-driven installs).
-FORGE="${BOUCLE_FORGE:-gitlab}"
+# Every flag has a BOUCLE_* env fallback so bin/setup works with zero
+# prompts (AI-agent-driven installs). The forge has NO default — it must
+# be specified (subcommand or --forge).
+FORGE="${BOUCLE_FORGE:-}"
 PROJECT="${BOUCLE_PROJECT:-}"
 HOST="${BOUCLE_HOST:-}"
 BOT_ID="${BOUCLE_BOT_ID:-}"
@@ -25,6 +28,26 @@ NON_INTERACTIVE=false
 # Capture whether any CLI args were passed — used after the while loop to
 # auto-enable non-interactive mode (passing args = scripting, not prompting).
 CLI_ARGS_PASSED=$#
+
+# ── Subcommand: setup gitlab / setup github ───────────────────────────
+# The first positional arg can be the forge name (subcommand syntax):
+#   bin/setup gitlab --bot-token <pat>
+#   bin/setup github --bot-token <pat>
+# This is equivalent to --forge <gitlab|github> but more ergonomic.
+if [ $# -gt 0 ]; then
+  case "$1" in
+    gitlab|github)
+      FORGE="$1"
+      shift
+      ;;
+    --forge)
+      # Legacy syntax: --forge <gitlab|github> as first arg is handled below
+      ;;
+    *)
+      # Not a subcommand — fall through to the flag parser
+      ;;
+  esac
+fi
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -84,14 +107,18 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h | --help)
-      echo "Usage: bin/setup --project <id-or-path> --host <forge-host> [--forge <gitlab|github>] [options]"
+      echo "Usage: bin/setup <gitlab|github> [options]"
+      echo "       bin/setup --forge <gitlab|github> [options]   (legacy syntax)"
+      echo ""
+      echo "The forge is REQUIRED — no default. Pass it as the first arg"
+      echo "(subcommand) or via --forge / BOUCLE_FORGE."
       echo ""
       echo "Options:"
-      echo "  --forge <gitlab|github>  Forge type (default: gitlab)"
       echo "  --project <id-or-path>   Target project ID or path (e.g. 123456, group/project, or owner/repo)"
       echo "                           Optional: auto-detected from the origin git remote"
-      echo "  --host <forge-host>      Forge host (default: gitlab.example.com; auto-detected from origin)"
-      echo "  --bot-id <id>            Bot user ID (for adding as project member)"
+      echo "  --host <forge-host>      Forge host (auto-detected from origin)"
+      echo "  --bot-id <id>            Bot user ID (for adding as project member)."
+      echo "                           When provided, mono-user is disabled (dedicated bot)."
       echo "  --bot-username <name>    Bot username (default: up-bot; used to seed BOUCLE_BOT_USERNAME CI variable)"
       echo "  --bot-token <pat>        Bot PAT (used as BOUCLE_TOKEN CI variable)"
       echo "                           GitHub scopes: 'repo' + 'workflow' (optionally 'admin:org'"
@@ -159,6 +186,24 @@ if [ -z "$MONO_USER" ]; then
     MONO_USER=true
   fi
 fi
+
+# ── Validate forge ────────────────────────────────────────────────────
+# The forge is REQUIRED — there is no default. Pass it as a subcommand
+# (setup gitlab / setup github) or via --forge / BOUCLE_FORGE.
+if [ -z "$FORGE" ]; then
+  echo "Error: forge is required. Usage: bin/setup <gitlab|github> [flags]" >&2
+  echo "       or: bin/setup --forge <gitlab|github> [flags]" >&2
+  echo "       or: export BOUCLE_FORGE=<gitlab|github> && bin/setup" >&2
+  exit 1
+fi
+
+case "$FORGE" in
+  gitlab|github) ;;
+  *)
+    echo "Error: forge must be 'gitlab' or 'github' (got: $FORGE)" >&2
+    exit 1
+    ;;
+esac
 
 # Validate required args
 # Auto-detect host + project from the origin remote when not provided,
