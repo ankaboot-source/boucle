@@ -2,7 +2,7 @@
 # bin/setup — Day 0 infrastructure setup for boucle on a target repo.
 # Supports GitLab (default) and GitHub (--forge github).
 # Idempotent: safe to run multiple times. Checks before creating.
-# Usage: bin/setup --project <id-or-path> --host <forge-host> [--forge <gitlab|github>] [--bot-id <id>] [--bot-token <pat>] [--cf-token <token>] [--skip-cf] [--non-interactive] [--dry-run]
+# Usage: bin/setup --project <id-or-path> --host <forge-host> [--forge <gitlab|github>] [--bot-id <id>] [--bot-token <pat>] [--cf-token <token>] [--non-interactive] [--dry-run]
 
 set -euo pipefail
 
@@ -19,7 +19,6 @@ MONO_USER="${BOUCLE_MONO_USER:-}"
 CF_TOKEN="${BOUCLE_CF_TOKEN:-}"
 RUNNER_TAG="${BOUCLE_RUNNER_TAG:-}"
 ALLOWED_USERS="${BOUCLE_ALLOWED_USERS:-}"
-SKIP_CF=false
 DRY_RUN=false
 NON_INTERACTIVE=false
 
@@ -72,10 +71,6 @@ while [[ $# -gt 0 ]]; do
       ALLOWED_USERS="$2"
       shift 2
       ;;
-    --skip-cf)
-      SKIP_CF=true
-      shift
-      ;;
     --dry-run)
       DRY_RUN=true
       shift
@@ -100,18 +95,20 @@ while [[ $# -gt 0 ]]; do
       echo "                           https://github.com/settings/tokens/new — see"
       echo "                           https://docs.github.com/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps"
       echo "                           An invalid/expired PAT fails setup with instructions."
-      echo "  --mono-user              Run without a separate bot account: your own PAT drives the"
-      echo "                           loop. Swaps the actor-based anti-loop guard for the"
+      echo "  --mono-user              Force mono-user mode (default when no --bot-id is given)."
+      echo "                           Mono-user = one account owns both the issues and the loop."
+      echo "                           Swaps the actor-based anti-loop guard for the"
       echo "                           label-state + agent-marker guard. Degrades notifications"
       echo "                           — see README. Prefer a bot/service account when you can."
-      echo "  --cf-token <token>       Cloudflare API token (for Pages project)"
+      echo "  --cf-token <token>       Cloudflare API token (for Pages project)."
+      echo "                           When omitted, Cloudflare Pages setup is skipped —"
+      echo "                           configure your deploy target via BOUCLE_DEPLOY_PROVIDER instead."
       echo "  --runner-tag <tag>       Pin jobs to a runner carrying <tag>, by writing a"
       echo "                           'default: tags:' block into the root CI shim. Omit it"
       echo "                           (the default) to run untagged on the instance's shared"
       echo "                           runners — no runner of your own required."
       echo "  --allowed-users <u1,u2>  Usernames allowed to feed issues to boucle, comma-separated."
       echo "                           Default: the user running setup. Empty = allow list disabled (legacy)."
-      echo "  --skip-cf                Skip Cloudflare Pages project creation"
       echo "  --dry-run                 Print what would be done, don't execute"
       echo "  --non-interactive        No prompts: read config from BOUCLE_* env vars only."
       echo "                           If BOUCLE_LLM_API_KEY is unset, it is skipped and must be"
@@ -131,6 +128,25 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# ── Mono-user auto-detection ──────────────────────────────────────────
+# Mono-user means one account owns both the issues and the loop (no separate
+# bot). This is the default — especially on GitHub where nothing provisions a
+# bot account for you. A dedicated bot is opt-in: pass --bot-id (a separate
+# account ID) to disable mono-user. --bot-token is ALWAYS required (it is the
+# auth token, whether it belongs to a bot or to the human in mono-user mode).
+#
+# Logic:
+#   - --mono-user explicitly forces mono-user (overrides everything)
+#   - --bot-id provided → dedicated bot → mono-user OFF
+#   - no --bot-id → mono-user ON (default)
+if [ -z "$MONO_USER" ]; then
+  if [ -n "$BOT_ID" ]; then
+    MONO_USER=false
+  else
+    MONO_USER=true
+  fi
+fi
 
 # Validate required args
 # Auto-detect host + project from the origin remote when not provided,
@@ -1213,11 +1229,15 @@ if [ "$FORGE" = "gitlab" ]; then
   echo ""
 fi
 
-# ── 8. Cloudflare Pages Project — forge-agnostic ──────────────────────
+# ── 8. Cloudflare Pages Project — forge-agnostic, opt-in ──────────────
+# Cloudflare is NOT the default deploy target. The setup skips CF Pages
+# project creation unless --cf-token is explicitly provided. Configure
+# your deploy target via BOUCLE_DEPLOY_PROVIDER (gitlab-pages, github-pages,
+# external, self) instead.
 echo "=== Cloudflare Pages Project ==="
 
-if [ "$SKIP_CF" = "true" ]; then
-  log_skip "CF Pages project (--skip-cf)"
+if [ -z "$CF_TOKEN" ]; then
+  log_skip "CF Pages project (no --cf-token provided — Cloudflare is opt-in, not the default)"
 elif [ -n "$CF_TOKEN" ]; then
   export CLOUDFLARE_API_TOKEN="$CF_TOKEN"
   CF_PROJECT_NAME="${CF_PROJECT_NAME:-$(echo "$PROJECT" | sed 's|.*/||' | sed 's/\.[a-z]*$//')}"
