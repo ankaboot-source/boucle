@@ -564,6 +564,118 @@ boucle restart <iid>  # if starting from scratch
 
 ---
 
+## 9. Failure mode framework
+
+The invariants (§1) are the rules; this section names the *patterns* those
+rules prevent. The AGENTS.md lessons are incident catalogs that instantiate
+these patterns — the framework gives them a shared vocabulary so a new failure
+can be classified against a known class, not rediscovered from scratch.
+
+The patterns below are adapted from the Multi-Agent Systems Architect body of
+knowledge (distilled pipeline-design patterns that independently converge on
+boucle's hard-won lessons). The mapping is boucle-specific: each pattern names
+the detection signal, the recovery path, and the lessons that instantiate it.
+
+### 9.1 Failure taxonomy
+
+Every agent run in the loop can fail in one of seven modes. Each mode has a
+detection signal and a recovery path already encoded in the engine.
+
+| Failure mode | Description | Boucle detection | Boucle recovery | Lessons |
+|---|---|---|---|---|
+| **Hard** | Agent crashes, times out, or the provider is down | Empty agent log / no activity traces (`is_api_down`, exit 4) | Fallback provider → human escalation | #29, #30, #32 |
+| **Silent** | Agent produces output but it is wrong, hallucinated, or a placeholder | Reviewer verdict FAIL; log-scraping fallback finds no verdict | Re-trigger worker with feedback; escalate on iteration cap | #1, #2, #5, #46 |
+| **Partial** | Agent exhausts step budget mid-draft (comment/verdict not posted) | No posted note with final marker; draft marker found in stdout | Log-scraping fallback promotes draft to final | #1, #27, #45, #47 |
+| **Contradiction** | Reviewer PASSes but human amendments are unaddressed | Reviewer grades against frozen criteria, ignores amendments | Feed amendments forward; reviewer MUST verify each amendment | #16, #53 |
+| **Cascade** | One role's bad output poisons downstream (stale preview, orphaned commit) | Preview SHA mismatch; empty MR (`commits_status`) | Re-trigger worker from preserved state; NEVER `reset --hard` a committed branch | #21, #22, #51 |
+| **Loop** | Rebase-conflict re-trigger never converges; doctor re-triggers a stuck issue | `<!-- boucle:conflict-retry N -->` count; iteration cap | Bounded retry → hand conflict to agent → escalate | #43, #61, #63 |
+| **Context** | Agent ignores instructions (context overload, lost state across iterations) | `state.md` re-seeded; `iterations.md` absent | Persist `.boucle-state/` to `$BOUCLE_STATE_CACHE`; restore at startup | #28 |
+
+A new incident that does not fit one of these seven modes is a new class of
+failure — the worker MUST add a lesson AND a taxonomy entry. A new incident
+that does fit a known mode is an instance, not a new class — the worker adds a
+lesson cross-referencing the mode, not a new taxonomy entry.
+
+### 9.2 Circuit breaker
+
+The fallback-provider logic (lesson #30) is a circuit breaker. The states:
+
+| State | Boucle behavior | Transition |
+|---|---|---|
+| **CLOSED** (normal) | Primary provider runs the agent. Track failure via `is_api_down` / `is_quota_exhausted`. | ≥1 failure (empty log, quota error) → **OPEN** |
+| **OPEN** (failing) | Do not call the primary. If `BOUCLE_FALLBACK_PROVIDER` is set, try the fallback model. If fallback also fails → human escalation. | Fallback succeeds → **HALF-OPEN**; fallback fails → human |
+| **HALF-OPEN** (testing recovery) | Fallback run completed. Next run attempts the primary again. | Primary succeeds → **CLOSED**; primary fails → **OPEN** |
+
+The exit-4 path (`bin/jc` exits 4 on empty log / no activity) is the trip
+mechanism. The diagnostic comment posted on the issue names the model and
+tells the human to check API status — this is the "always produce something"
+rule (§I4) applied to the failure path itself.
+
+### 9.3 Fallback chain
+
+Every role in the loop has a fallback chain. The system MUST always produce
+*something* — a structured degraded response beats a silent failure (§I4).
+
+| Priority | Agent | Condition | Boucle implementation |
+|---|---|---|---|
+| 1 (primary) | Full-capability model (e.g. deepseek-v4-flash) | Default | `AGENT` env var per role |
+| 2 (fallback) | Fallback model on exit-4 | Primary down / quota exhausted | `BOUCLE_FALLBACK_PROVIDER` + `BOUCLE_FALLBACK_MODEL_<ROLE>` (lesson #30) |
+| 3 (degraded) | Log-scraping fallback (post from stdout) | Agent exhausted steps before posting | `bin/jc` scrapes `agent-output.log` for drafted verdict/triage (lessons #27, #47) |
+| 4 (human) | Human escalation | All automated paths fail | `boucle:human` + diagnostic comment (lesson #59) |
+
+### 9.4 HITL gate calibration
+
+`boucle:human` is the HITL gate. The calibration problem applies directly:
+
+- **Over-escalation** → the human rubber-stamps → the gate is theater. Caused
+  by: iteration cap too low, reviewer too strict, doctor too aggressive.
+- **Under-escalation** → the human never sees edge cases → false confidence.
+  Caused by: reviewer PASSing unaddressed amendments (lesson #53), doctor not
+  scanning `boucle:merging` (lesson #68).
+
+Gate placement in boucle is label-driven, not code-driven:
+
+| Gate | Label | Criterion | Type |
+|---|---|---|---|
+| Spec review | `boucle:spec-review` | Triage validated spec (Size S) | Blocking approval (human replies/emoji) |
+| MR approval | `boucle:approval` | Reviewer PASSed | Blocking approval (native Approve button) |
+| Escalation | `boucle:human` | Iteration cap / UNCERTAIN / destructive | Blocking review (human acts) |
+| DND skip | `boucle:dnd` (transient) | DND window active | Auto-skip with trace (lesson #47) |
+| Autonomous skip | `boucle:autonomous` (transient) | Per-issue opt-in | Auto-skip with trace (lesson #47) |
+
+### 9.5 Observability contract
+
+The engine's observability is `agent-output.log` + the marker/verdict system.
+The minimum per-run record:
+
+| Field | Boucle source | How to access |
+|---|---|---|
+| trace_id | `BOUCLE_ISSUE` + `BOUCLE_ROLE` + pipeline ID | CI variables |
+| agent_id | `$AGENT` (model name) | env var |
+| latency | job duration | CI job timing |
+| input/output tokens | agent stdout (if logged) | `agent-output.log` |
+| output | posted comment / verdict | forge API |
+| confidence | verdict (PASS / FAIL / UNCERTAIN) | `VERDICT:` line |
+| status | success / failure / partial / escalated | exit code + label transition |
+| errors | agent stderr + `bin/jc` diagnostics | `agent-output.log` |
+
+The root-cause analysis protocol maps to the doctor's audit: identify blast
+radius (which issue/MR), trace backward (which role produced the bad output),
+isolate the failure (agent vs upstream vs inter-role contract), classify
+(prompt ambiguity / context overload / model limitation / schema mismatch /
+missing info), fix + regression test.
+
+### 9.6 Context budget
+
+The loop's context management is `state.md` + `iterations.md` persisted to
+`$BOUCLE_STATE_CACHE` (lesson #28). This is the "structured state object"
+pattern: each role reads only its required fields (goal, approach, tried,
+awaiting) and writes only its output fields. The checkpoint is the
+`iterations.md` append — a compressed record of what was tried, so the next
+iteration does not re-discover it.
+
+---
+
 ## See also
 
 - [AGENTS.md](AGENTS.md) — contribution conventions + lessons learned (incident catalog)
