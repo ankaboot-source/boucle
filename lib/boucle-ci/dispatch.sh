@@ -91,6 +91,43 @@ boucle_ci_dispatch() {
   fi
   OBJECT_KIND=$(jq -r '.object_kind // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
   MR_ACTION=$(jq -r '.object_attributes.action // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+
+  # ── GitHub payload normalisation ──────────────────────────────────
+  # GitHub Actions events have a different shape than GitLab webhooks:
+  #   - No .object_kind — the event type is in $BOUCLE_PIPELINE_SOURCE
+  #     (github.event_name: "issues", "pull_request", "issue_comment", etc.)
+  #   - .issue.number instead of .issue.iid
+  #   - .pull_request.number instead of .object_attributes.iid
+  #   - .sender.login instead of .user.username
+  #   - .action instead of .object_attributes.action
+  # Normalise the GitHub payload to the GitLab shape so the rest of the
+  # dispatch logic works unchanged.
+  if [ -z "$OBJECT_KIND" ]; then
+    case "${BOUCLE_PIPELINE_SOURCE:-}" in
+      issues)
+        OBJECT_KIND="issue"
+        ACTION=$(jq -r '.action // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+        IID=$(jq -r '.issue.number // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+        ACTOR=$(jq -r '.sender.login // .user.login // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+        ;;
+      pull_request)
+        OBJECT_KIND="merge_request"
+        MR_ACTION=$(jq -r '.action // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+        ACTOR=$(jq -r '.sender.login // .user.login // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+        ;;
+      issue_comment)
+        OBJECT_KIND="note"
+        ACTION=$(jq -r '.action // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+        IID=$(jq -r '.issue.number // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+        ACTOR=$(jq -r '.sender.login // .user.login // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+        ;;
+      pull_request_review|pull_request_review_comment)
+        OBJECT_KIND="note"
+        MR_ACTION=$(jq -r '.action // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+        ACTOR=$(jq -r '.sender.login // .user.login // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+        ;;
+    esac
+  fi
   # ── Anti-loop: boucle's own comments ──────────────────────────────
   # Applies in BOTH modes. Forges do not guarantee webhook delivery order,
   # so the label-change webhook of a transition can overtake the comment
@@ -358,9 +395,9 @@ boucle_ci_dispatch() {
       chain_to_role "$MR_NOTE_ISSUE_IID" "worker" "BOUCLE_ITERATION=$MR_NOTE_ITERATION"
       exit 0
     fi
-    IID=$(jq -r '.issue.iid // .work_item.iid // .epic.iid // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+    IID=$(jq -r '.issue.iid // .work_item.iid // .epic.iid // .issue.number // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
   else
-    IID=$(jq -r '.object_attributes.iid // .issue.iid // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+    IID=$(jq -r '.object_attributes.iid // .issue.iid // .issue.number // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
   fi
 
   if [ -z "$IID" ]; then
