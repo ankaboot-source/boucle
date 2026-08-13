@@ -226,6 +226,35 @@ with the two scopes is the simplest).
 the loop never runs half-configured. Renew the PAT and re-run `bin/setup`
 (idempotent) when the stored token expires.
 
+### Mono-user mode (`BOUCLE_MONO_USER`)
+
+Mono-user is the **default** when no `--bot-id` is given — one account owns
+both the issues and the loop. This is the common case on GitHub, where
+nothing provisions a bot account for you.
+
+**Why the mode has to exist.** boucle normally recognises its own writes by
+the actor: dispatch discards any webhook whose author is the bot. Point that
+at your own account and the guard discards *your* actions too — opening an
+issue, replying on `boucle:needs-info`, approving a spec. The loop goes
+quiet, with no error anywhere. Mono-user swaps the actor check for an
+invisible `<!-- boucle:agent -->` marker that boucle appends to every comment
+it posts, so it recognises its own writes without asking who acted.
+`bin/doctor` fails loudly if you land in the broken configuration by
+accident.
+
+**The cost: notifications degrade.** The forge signals "it's your turn" by
+*changing* an issue's assignee — but the issue is already yours, so nothing
+is emitted. And every action the loop takes runs under your token, so forges
+do not notify you about your own activity by default. Enable own-activity
+notifications (GitHub: Settings → Notifications → Include your own updates;
+GitLab: Preferences → Notifications → Receive notifications about your own
+activity) or you will hear nothing. Both are account-wide, so expect noise
+from the loop's routine comments. GitHub's per-organization email routing
+and inbox `reason:` filters help contain it; repository Watch levels keep
+unrelated repos quiet. None of this is as clean as a dedicated identity —
+prefer a bot or service account when you can, and treat mono-user as the
+fallback.
+
 ## Scheduled maintenance issues
 
 Boucle has exactly one entry point: a human creates an issue. Its scheduled
