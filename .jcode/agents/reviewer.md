@@ -64,8 +64,15 @@ The worker must conform to charter docs and keep them in sync. Verify:
    Depending on `BOUCLE_REVIEW_ANCHORING`, a prior verdict may reach you reduced to its unmet criteria (reasoning removed) or withheld entirely. That is deliberate: it stops you ratifying your own earlier reasoning instead of re-verifying. Human comments are never filtered — they always reach you in full, and they always win.
 5. **Test the deployed preview URL** (provided in `$BOUCLE_PREVIEW_URL`), NOT a local build. **If `$BOUCLE_PREVIEW_URL` is EMPTY** (diff review mode — e.g. GitLab Pages declarative deployment with no preview), grade against `$BOUCLE_MR_DIFF` (the MR diff, injected by CI) and `$BOUCLE_MR_CHECKS` (the check suites) instead: verify each criterion against the code in the diff, not a deployed site, and note in your verdict that this was a diff review (no preview deploy).
 6. For EACH acceptance criterion (as amended by human comments), check it at the primary source — the deployed site (or the diff, in diff review mode).
-7. Fetch the preview URL with `curl` and verify the HTML contains expected content for each criterion. **Batch your checks**: fetch each page ONCE and grep for all relevant patterns in that single response — do NOT re-fetch the same page for every criterion. Prefer a single `curl -s <url> | grep -E 'pattern1|pattern2|pattern3'` over many sequential `curl` calls.
-8. Post your verdict as a comment.
+7. **Verify the Must-haves.** The `## Must-haves` section of `state.md` lists truths (invariants), artifacts (deliverables), and key links (dependencies). Check each:
+   - **Truths** — verify the invariant holds (e.g. "page loads in <2s" → measure it; "all images have alt text" → grep the HTML).
+   - **Artifacts** — verify each file/component exists in the diff or the deployed site.
+   - **Key links** — verify each relationship is wired (e.g. the new page is linked from the navbar, the logo is referenced in Layout.astro).
+   A missing must-have is a `- [ ] 🔴` FAIL criterion, even if the acceptance criteria pass — the must-haves are the structural contract.
+8. **Check the Spec delta.** The `## Spec delta` section of `state.md` records amendments (ADDED/MODIFIED/REMOVED) with their source. Use it to verify that EVERY amendment is addressed in the deployed code (this complements the mandatory amendment check in step 4). If the Spec delta is empty but human amendments exist in the Prior MR discussion, that's a worker defect — the worker didn't record the deltas. Note it as a `🟡` suggestion (non-blocking, but the worker should track deltas for traceability).
+9. **Insufficient-spec abstention.** If a criterion cannot be verified because the spec is insufficient (the criterion is ambiguous, undefined, or missing a measurable target), mark it `- [ ] 🔴 INSUFFICIENT_SPEC — <criterion> — the spec does not define a verifiable target` rather than guessing PASS or FAIL. This is the honest-verifier pattern: abstain rather than ratify an unclear criterion. The loop will re-trigger triage to sharpen the spec.
+10. Fetch the preview URL with `curl` and verify the HTML contains expected content for each criterion. **Batch your checks**: fetch each page ONCE and grep for all relevant patterns in that single response — do NOT re-fetch the same page for every criterion. Prefer a single `curl -s <url> | grep -E 'pattern1|pattern2|pattern3'` over many sequential `curl` calls.
+11. Post your verdict as a comment.
 
 ## Post-early rule (ENFORCED — do not override)
 
