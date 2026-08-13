@@ -4991,14 +4991,19 @@ doctor:
           continue
         fi
         # Staleness: only re-trigger if the issue has been stuck (no active
-        # pipeline) for longer than STALENESS.
+        # pipeline) for longer than the merger timeout + margin. The merger
+        # timeout is 10m, so 900s (15 min) gives ample room for a slow merger
+        # to complete before the doctor fires a duplicate. The default
+        # BOUCLE_STALENESS_THRESHOLD (2400s/40min) is too long for the
+        # merger — a mergeable + approved MR should not wait 40 min for
+        # recovery.
         UPDATED_AT=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$CI_PROJECT_ID/issues/$IID" | jq -r '.updated_at')
         UPDATED_EPOCH=$(date -d "$UPDATED_AT" +%s 2>/dev/null || echo 0)
         NOW_EPOCH=$(date +%s)
         AGE=$((NOW_EPOCH - UPDATED_EPOCH))
-        STALENESS="${BOUCLE_STALENESS_THRESHOLD:-2400}"
-        if [ "$AGE" -lt "$STALENESS" ]; then
-          echo "  → #$IID: issue updated ${AGE}s ago (< ${STALENESS}s) — may still be processing, skipping"
+        MERGE_STALENESS="${BOUCLE_MERGE_STALENESS_THRESHOLD:-900}"
+        if [ "$AGE" -lt "$MERGE_STALENESS" ]; then
+          echo "  → #$IID: issue updated ${AGE}s ago (< ${MERGE_STALENESS}s) — may still be processing, skipping"
           continue
         fi
         if doctor_should_skip_dedup "$IID"; then
