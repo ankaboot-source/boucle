@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Collapse duplicate boucle comments posted in the same run.
-# When an agent posts a second "v2" comment, replace the first with the v2
-# content and delete the redundant copies. Also delete any draft comments
-# (<!-- boucle:draft role=<type> -->) that are superseded by a final.
-# Best-effort: always exits 0.
+# When an agent posts a draft then a final, REPLACE the draft in place
+# (PUT the final body onto the draft's note id) so the note id — and the
+# forge URL anchor (#note_<id>) — stays stable. Then delete any redundant
+# copies (extra drafts, extra finals). When an agent posts a second "v2"
+# final, replace the first with the v2 content and delete the redundant
+# copies. Best-effort: always exits 0.
 #
 # Usage:
 #   bin/collapse-duplicate-notes <type> <project_id> <note_iid> <pre_id> [host] [sha]
@@ -21,11 +23,14 @@
 #   3. Filter to draft comments of <type> with id > pre_id.
 #   4. If no finals exist: exit 0 (the log-scraping fallback may promote a
 #      draft to a final; deleting it here would lose the only output).
-#   5. If 2+ finals: PUT the newest body onto the FIRST (oldest) note_id,
-#      then DELETE every other final note_id.
-#   6. If any drafts exist and at least one final exists: DELETE all drafts
-#      (they are superseded by the final).
-#   7. Any API failure is logged to stderr but does not change exit code.
+#   5. Pick the TARGET note id (the one to keep): the OLDEST note id among
+#      drafts+finals from this run. This keeps the draft's note id stable
+#      when a draft was posted first, so the forge URL anchor (#note_<id>)
+#      the human may already have open keeps pointing at the final content.
+#   6. PUT the NEWEST final body onto the TARGET note id (replace in place).
+#   7. DELETE every other matching note id (all drafts + all finals except
+#      the target). A draft is superseded by the final, not duplicated.
+#   8. Any API failure is logged to stderr but does not change exit code.
 set -u
 
 TYPE="${1:-}"
@@ -121,54 +126,62 @@ if [[ -z "$FINAL_IDS" ]]; then
   exit 0
 fi
 
-# ── Collapse duplicate finals (2+ from the same run) ──────────────────
-FINAL_COUNT="$(printf '%s\n' "$FINAL_IDS" | wc -l | tr -d ' ')"
-if [[ "$FINAL_COUNT" -ge 2 ]]; then
-  log "collapse-duplicate-notes: collapsing $FINAL_COUNT duplicate $TYPE finals (pre_id=$PRE_ID)"
+# ── Replace drafts in place + collapse duplicate finals ───────────────
+# The agent posts a draft (<!-- boucle:draft role=X -->) first, then a
+# final (<!-- boucle:triage v=1 --> / <!-- boucle:verdict ... -->). The
+# draft and the final are two separate notes. Replacing the draft in
+# place (PUT the final body onto the draft's note id) keeps the note id
+# — and the forge URL anchor (#note_<id>) the human may already have
+# open — stable across the draft→final transition. The alternative
+# (DELETE the draft, keep the final as a new note) invalidates the
+# anchor and creates a visible "deleted comment" gap in the thread.
+#
+# Target note id = the OLDEST note id among drafts+finals from this run.
+# This is the draft's id when a draft was posted first (the common case),
+# or the oldest final's id when only finals were posted (v2 collapse).
+# We PUT the NEWEST final body onto the target id, then DELETE every
+# other matching note (all drafts + all finals except the target).
 
-  # Oldest note = keep this id, overwrite body. Newest note = source of body.
-  FIRST_ID="$(printf '%s\n' "$FINAL_IDS" | head -n1)"
-  NEWEST_ID="$(printf '%s\n' "$FINAL_IDS" | tail -n1)"
+# All matching note ids from this run (drafts + finals), oldest→newest.
+ALL_IDS="$(printf '%s\n' "${FINAL_IDS}" "${DRAFT_IDS}" | grep -E '^[0-9]+$' | sort -n | awk '!seen[$0]++')"
+if [[ -z "$ALL_IDS" ]]; then
+  # Defensive: finals are non-empty here (we passed the empty-check), so
+  # this branch only fires if FINAL_IDS held non-numeric junk.
+  log "collapse-duplicate-notes: no parsable $TYPE note ids (pre_id=$PRE_ID)"
+  exit 0
+fi
 
-  # Fetch the newest note's body via a separate jq query (bodies contain newlines).
-  NEWEST_BODY="$(printf '%s' "$NOTES_JSON" | jq -r "${FILTER} | select(.id > ${PRE_ID}) | select(.id == ${NEWEST_ID}) | .body" 2> /dev/null)"
+ALL_COUNT="$(printf '%s\n' "$ALL_IDS" | wc -l | tr -d ' ')"
+TARGET_ID="$(printf '%s\n' "$ALL_IDS" | head -n1)"
+NEWEST_FINAL_ID="$(printf '%s\n' "$FINAL_IDS" | tail -n1)"
 
-  # PUT newest body onto first (oldest) note id.
-  if [[ -n "$FIRST_ID" && -n "$NEWEST_BODY" ]]; then
-    log "collapse-duplicate-notes: PUT $ENDPOINT/$FIRST_ID (newest body onto oldest id)"
-    if [ "$KIND" = "mr" ]; then
-      forge_mr_note_update "$NOTE_IID" "$FIRST_ID" "$NEWEST_BODY" 2> /dev/null \
-        || log "collapse-duplicate-notes: PUT failed for note $FIRST_ID (continuing)"
-    else
-      forge_issue_note_update "$NOTE_IID" "$FIRST_ID" "$NEWEST_BODY" 2> /dev/null \
-        || log "collapse-duplicate-notes: PUT failed for note $FIRST_ID (continuing)"
-    fi
+log "collapse-duplicate-notes: replacing $TYPE draft(s) in place — target note id=$TARGET_ID, newest final id=$NEWEST_FINAL_ID ($ALL_COUNT note(s) this run, pre_id=$PRE_ID)"
+
+# Fetch the newest final's body (the body to land on the target id).
+# Bodies contain newlines, so they are fetched via a separate jq query.
+NEWEST_BODY="$(printf '%s' "$NOTES_JSON" | jq -r "${FILTER} | select(.id > ${PRE_ID}) | select(.id == ${NEWEST_FINAL_ID}) | .body" 2> /dev/null)"
+
+# PUT the newest final body onto the target note id (replace in place).
+if [[ -n "$TARGET_ID" && -n "$NEWEST_BODY" ]]; then
+  log "collapse-duplicate-notes: PUT $ENDPOINT/$TARGET_ID (newest final body onto target id)"
+  if [ "$KIND" = "mr" ]; then
+    forge_mr_note_update "$NOTE_IID" "$TARGET_ID" "$NEWEST_BODY" 2> /dev/null \
+      || log "collapse-duplicate-notes: PUT failed for note $TARGET_ID (continuing)"
+  else
+    forge_issue_note_update "$NOTE_IID" "$TARGET_ID" "$NEWEST_BODY" 2> /dev/null \
+      || log "collapse-duplicate-notes: PUT failed for note $TARGET_ID (continuing)"
   fi
-
-  # DELETE every other matching final note id (all except the first/oldest).
-  printf '%s\n' "$FINAL_IDS" | tail -n +2 | while IFS= read -r DEL_ID; do
-    [[ -z "$DEL_ID" ]] && continue
-    log "collapse-duplicate-notes: DELETE $ENDPOINT/$DEL_ID (duplicate final)"
-    forge_note_delete "$KIND" "$NOTE_IID" "$DEL_ID" 2> /dev/null \
-      || log "collapse-duplicate-notes: DELETE failed for note $DEL_ID (continuing)"
-  done
 else
-  log "collapse-duplicate-notes: $FINAL_COUNT final(s), nothing to collapse"
+  log "collapse-duplicate-notes: missing target id or newest body — skipping PUT (target=$TARGET_ID)"
 fi
 
-# ── Delete superseded drafts ──────────────────────────────────────────
-# A final exists (we passed the empty-check above), so any drafts from this
-# run are obsolete — the agent posted an early draft, then refined it into
-# a final. Delete the drafts to keep the issue/MR clean.
-if [[ -n "$DRAFT_IDS" ]]; then
-  DRAFT_COUNT="$(printf '%s\n' "$DRAFT_IDS" | wc -l | tr -d ' ')"
-  log "collapse-duplicate-notes: deleting $DRAFT_COUNT superseded $TYPE draft(s) (pre_id=$PRE_ID)"
-  printf '%s\n' "$DRAFT_IDS" | while IFS= read -r DEL_ID; do
-    [[ -z "$DEL_ID" ]] && continue
-    log "collapse-duplicate-notes: DELETE $ENDPOINT/$DEL_ID (superseded draft)"
-    forge_note_delete "$KIND" "$NOTE_IID" "$DEL_ID" 2> /dev/null \
-      || log "collapse-duplicate-notes: DELETE failed for note $DEL_ID (continuing)"
-  done
-fi
+# DELETE every other matching note id (all drafts + all finals except the
+# target). The target now holds the final body; the rest are redundant.
+printf '%s\n' "$ALL_IDS" | tail -n +2 | while IFS= read -r DEL_ID; do
+  [[ -z "$DEL_ID" ]] && continue
+  log "collapse-duplicate-notes: DELETE $ENDPOINT/$DEL_ID (superseded by target $TARGET_ID)"
+  forge_note_delete "$KIND" "$NOTE_IID" "$DEL_ID" 2> /dev/null \
+    || log "collapse-duplicate-notes: DELETE failed for note $DEL_ID (continuing)"
+done
 
 exit 0
