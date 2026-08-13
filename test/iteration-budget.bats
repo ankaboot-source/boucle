@@ -10,8 +10,9 @@
 #   2. a single final-attempt notice is posted on the MR when the iteration
 #      being started is the last one.
 #
-# Both are asserted on BOTH implementations — lib/boucle-ci/ and the inline
-# .gitlab-ci.yml copy — until the GitLab extraction reaches worker/reviewer.
+# Both are asserted on the extracted lib/boucle-ci/ implementation — the
+# inline .gitlab-ci.yml copy was replaced by `bin/boucle-ci <stage>`
+# (refactor 6fb09f7), so there is no inline copy to drift.
 
 setup() {
   load 'test_helper/bats-support/load'
@@ -23,27 +24,6 @@ setup() {
 @test "shared worker writes the iteration budget as N/MAX in the MR description" {
   run grep -q '## Issue #%s — iteration %s/%s' lib/boucle-ci/worker.sh
   assert_success
-}
-
-@test "inline GitLab worker writes the iteration budget as N/MAX too" {
-  run grep -q '## Issue #%s — iteration %s/%s' .gitlab-ci.yml
-  assert_success
-}
-
-@test "the inline printf passes as many arguments as it has placeholders" {
-  # A printf whose %s count and argument count disagree silently renders a
-  # truncated description — the exact failure a bare string grep would miss.
-  run python3 -c '
-import re, sys
-lines = open(".gitlab-ci.yml", encoding="utf-8").read().splitlines()
-i = next(n for n, l in enumerate(lines) if "## Issue #%s — iteration %s/%s" in l)
-n_fmt = lines[i].count("%s")
-n_args = len(re.findall(r"\"\$[^\"]*\"", lines[i + 1]))
-print(n_fmt, n_args)
-'
-  assert_success
-  # 11 placeholders, 11 arguments.
-  assert_output "11 11"
 }
 
 @test "the rendered description shows the budget, not a bare iteration number" {
@@ -67,11 +47,6 @@ print(n_fmt, n_args)
   assert_success
 }
 
-@test "inline GitLab worker writes the Final attempt block in the MR description" {
-  run grep -q 'Final attempt' .gitlab-ci.yml
-  assert_success
-}
-
 @test "shared worker gates the Final attempt block on the last iteration" {
   # The block must be conditional on the iteration being the last one, never
   # written unconditionally on every run.
@@ -79,18 +54,13 @@ print(n_fmt, n_args)
   assert_output "1"
 }
 
-@test "inline GitLab worker gates the Final attempt block the same way" {
-  run bash -c "grep -B2 'Final attempt' .gitlab-ci.yml | grep -c 'ITERATION\" -eq \"\$MR_MAX_ITER'"
-  assert_output "1"
-}
-
 @test "the reviewer no longer posts a separate Final attempt notice" {
   # The warning moved into the MR description (written by the worker); the
-  # reviewer must not post a duplicate forge note.
+  # reviewer must not post a duplicate forge note. The inline .gitlab-ci.yml
+  # copy was replaced by `bin/boucle-ci reviewer` (refactor 6fb09f7), so the
+  # extracted reviewer.sh is the only copy to check.
   run grep -q 'Final attempt' lib/boucle-ci/reviewer.sh
   assert_failure
-  run grep -q 'Final attempt' .gitlab-ci.yml
-  assert_success
 }
 
 @test "the notice fires on the last iteration only" {

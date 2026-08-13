@@ -316,9 +316,15 @@ source_gates() {
   assert_failure
 }
 
-@test "convergence: .gitlab-ci.yml sources lib/boucle-ci/gates.sh" {
-  run grep -nE 'source .*lib/boucle-ci/gates\.sh' .gitlab-ci.yml
-  assert_success
+@test "convergence: the extracted stage files source lib/boucle-ci/gates.sh" {
+  # The inline .gitlab-ci.yml jobs were replaced by `bin/boucle-ci <stage>`
+  # (refactor 6fb09f7), so the gate functions are now sourced by the
+  # extracted stage files — convergence is structural, there is no inline
+  # copy to drift. Every stage that uses the gates must source gates.sh.
+  for stage in dispatch doctor catchup e2e; do
+    run grep -qE 'source .*lib/boucle-ci/gates\.sh' "lib/boucle-ci/$stage.sh"
+    assert_success
+  done
 }
 
 @test "convergence: lib/boucle-ci/gates.sh defines the gate functions at top-level" {
