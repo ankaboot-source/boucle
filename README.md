@@ -109,7 +109,14 @@ back what you did:
 git submodule add https://github.com/ankaboot-source/boucle .boucle
 
 # 2. Configure everything (idempotent — safe to re-run)
+#
+# GitLab (auto-detects host and project from the origin remote):
 .boucle/bin/setup --non-interactive
+#
+# GitHub (mono-user — the common case, no separate bot account):
+.boucle/bin/setup --non-interactive --forge github --mono-user --bot-token "$(gh auth token)"
+#   The PAT needs `repo` + `workflow` scopes. `gh auth token` gives you one
+#   if you are already logged in via `gh auth login`.
 ```
 
 `bin/setup` configures the forge (GitLab CI/CD variables or GitHub Actions
@@ -124,16 +131,18 @@ environment variable — and only if your deploy target is Cloudflare.
 
 ### After install
 
-1. Add `BOUCLE_LLM_API_KEY` as a **masked** CI/CD variable (project →
-   Settings → CI/CD → Variables). It is never handled by setup so it never
-   crosses a conversation, a log, or a shell history.
+1. Add `BOUCLE_LLM_API_KEY` as a **masked** secret:
+   - **GitLab:** project → Settings → CI/CD → Variables (masked).
+   - **GitHub:** project → Settings → Secrets and variables → Actions → New secret.
+   It is never handled by setup so it never crosses a conversation, a log,
+   or a shell history.
 2. **Runners: nothing to do.** boucle's jobs run untagged, so your forge's
    shared runners pick them up — GitLab.com and GitHub-hosted work out of the
    box, as do most self-managed instances that expose shared runners. Bring
    your own runner only if you want to; see
    [Advanced — dedicated runners](#advanced--dedicated-runners).
-3. Create a GitLab issue with the `boucle:triage` label — or assign an
-   existing issue to the boucle bot.
+3. Create an issue with the `boucle:triage` label — or assign an existing
+   issue to the boucle bot.
 
 From there, the pipeline takes over. You only answer the human prompts:
 spec validation and MR approval. The `doctor` job (a scheduled
