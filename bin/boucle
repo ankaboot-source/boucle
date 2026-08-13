@@ -217,6 +217,28 @@ cmd_status() {
   echo "Label:    boucle:$label"
   echo "Assignee: $assignee"
 
+  # Branch URL on the forge (for live diff consultation).
+  local branch="boucle/$iid"
+  local forge_host="${BOUCLE_FORGE_HOST:-}"
+  local project_path="${BOUCLE_PROJECT_PATH:-}"
+  local branch_url=""
+  if [ -n "$forge_host" ] && [ -n "$project_path" ]; then
+    case "${BOUCLE_FORGE:-gitlab}" in
+      github)
+        branch_url="https://$forge_host/$project_path/tree/$branch"
+        ;;
+      *)
+        branch_url="https://$forge_host/$project_path/-/tree/$branch"
+        ;;
+    esac
+  fi
+  if [ -n "$branch_url" ]; then
+    echo "Branch:   $branch"
+    echo "Branch URL: $branch_url"
+  else
+    echo "Branch:   $branch"
+  fi
+
   # MR status (if any).
   local mr_iid
   mr_iid=$(forge_mr_lookup_by_branch "boucle/$iid" "opened" 2>/dev/null || echo "")
