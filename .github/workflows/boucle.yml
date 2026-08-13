@@ -198,6 +198,10 @@ jobs:
   # consumers (forge prelude order, missing BOUCLE_*/CI_DEFAULT_BRANCH exports,
   # shim drift, S4 helpers present).
   engine-smoke:
+    # Only run on the engine repo itself (ankaboot-source/boucle), never on
+    # consumers — the smoke test sources bin/forge/common.sh directly, which
+    # only exists at the engine root, not inside the .boucle/ submodule.
+    if: github.repository == 'ankaboot-source/boucle'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -248,7 +252,8 @@ jobs:
         id: dispatch
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
-          bin/boucle-ci dispatch
+          [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
+          $BOUCLE_HOME/bin/boucle-ci dispatch
           if [ -f .boucle-issue ]; then
             echo "issue-iid=$(cat .boucle-issue)" >> "$GITHUB_OUTPUT"
             echo "role=triage" >> "$GITHUB_OUTPUT"
@@ -271,7 +276,8 @@ jobs:
           BOUCLE_ISSUE: ${{ needs.dispatch.outputs.issue-iid }}
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
-          bin/boucle-ci triage
+          [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
+          $BOUCLE_HOME/bin/boucle-ci triage
       # Agent transcript (#33). if: always() is the point — a failed run is
       # exactly the one whose transcript gets read. bin/jc redacts secrets
       # from the log before every exit path, so this is safe to upload.
@@ -320,7 +326,8 @@ jobs:
           BOUCLE_STATE_CACHE: ${{ runner.temp }}/boucle-state
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
-          bin/boucle-ci worker
+          [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
+          $BOUCLE_HOME/bin/boucle-ci worker
       - name: Upload agent transcript
         if: always()
         uses: actions/upload-artifact@v4
@@ -358,7 +365,8 @@ jobs:
           BOUCLE_ITERATION: ${{ github.event.inputs.BOUCLE_ITERATION || '1' }}
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
-          bin/boucle-ci reviewer
+          [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
+          $BOUCLE_HOME/bin/boucle-ci reviewer
       - name: Upload agent transcript
         if: always()
         uses: actions/upload-artifact@v4
@@ -392,7 +400,8 @@ jobs:
           BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE }}
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
-          bin/boucle-ci merger
+          [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
+          $BOUCLE_HOME/bin/boucle-ci merger
 
   # ── post-merge: poll deploy, trigger e2e ──────────────────────────────────────
   post-merge:
@@ -411,7 +420,8 @@ jobs:
           BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE }}
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
-          bin/boucle-ci post-merge
+          [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
+          $BOUCLE_HOME/bin/boucle-ci post-merge
 
   # ── catchup: close issue after merge, cascade parent ─────────────────────────
   catchup:
@@ -428,7 +438,8 @@ jobs:
       - name: Catchup
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
-          bin/boucle-ci catchup
+          [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
+          $BOUCLE_HOME/bin/boucle-ci catchup
 
   # ── deploy: build + deploy to Cloudflare Pages (on push to default) ───────────
   deploy:
@@ -447,7 +458,8 @@ jobs:
       - name: Deploy
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
-          bin/boucle-ci deploy
+          [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
+          $BOUCLE_HOME/bin/boucle-ci deploy
 
   # ── e2e: verify on live/preview URL ───────────────────────────────────────────
   e2e:
@@ -467,7 +479,8 @@ jobs:
           BOUCLE_LIVE_URL: ${{ github.event.inputs.BOUCLE_LIVE_URL }}
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
-          bin/boucle-ci e2e
+          [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
+          $BOUCLE_HOME/bin/boucle-ci e2e
       - name: Upload agent transcript
         if: always()
         uses: actions/upload-artifact@v4
@@ -493,4 +506,5 @@ jobs:
       - name: Doctor
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
-          bin/boucle-ci doctor
+          [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
+          $BOUCLE_HOME/bin/boucle-ci doctor
