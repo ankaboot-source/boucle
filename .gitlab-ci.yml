@@ -4411,6 +4411,15 @@ doctor:
       # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
       set +o pipefail
       RECOVERED=0
+      # The doctor uses $CI_PROJECT_ID throughout, but on some runners/configs
+      # the GitLab predefined CI_PROJECT_ID can be unset (observed on framagit
+      # 2026-08: the doctor's first API call hit /projects//issues → 404,
+      # jq then crashed on "Cannot index string with string 'iid'"). The
+      # before_script already exports BOUCLE_PROJECT_ID (which falls back to
+      # CI_PROJECT_ID); use it as a safety net so the doctor never calls the
+      # API with an empty project id.
+      : "${CI_PROJECT_ID:=${BOUCLE_PROJECT_ID:-}}"
+      export CI_PROJECT_ID
       # Shared gate functions (check_sibling_gate, check_file_gate,
       # maybe_unblock_dependents) — single source of truth in
       # lib/boucle-ci/gates.sh (the default before_script sources lib/boucle.sh
