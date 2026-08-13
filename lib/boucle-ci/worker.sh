@@ -153,6 +153,12 @@ $(echo "$triage_comment" | sed -n '/^## Analysis/,/^## /p' | head -n -1 | tail -
 ## Acceptance criteria
 $(echo "$triage_comment" | sed -n '/^## Draft acceptance criteria/,/^## /p' | head -n -1 | tail -n +2)
 
+## Must-haves
+$(echo "$triage_comment" | sed -n '/^## Must-haves/,/^## /p' | head -n -1 | tail -n +2)
+
+## Spec delta
+(none yet — record amendments here as ADDED/MODIFIED/REMOVED with source)
+
 ## Approach
 (to be determined by worker)
 
@@ -379,8 +385,15 @@ EOF
   if [ -n "${BOUCLE_BUILD_CMD:-}" ]; then
     local build_log build_rc
     build_log=$(mktemp)
-    (eval "$BOUCLE_BUILD_CMD") > "$build_log" 2>&1
-    build_rc=$?
+    # Guard against set -e: without `|| build_rc=$?`, a non-zero build exit
+    # kills the shell BEFORE `build_rc=$?` executes, so the build gate's
+    # error handling (re-trigger worker, write build-feedback.md) NEVER
+    # fires — the job fails with a plain exit 1 and the issue is stranded.
+    # Observed on a consumer (2026-08): WASM OOM in @astrojs/compiler
+    # killed the worker job, the Instagram embed fix was lost, and the
+    # issue sat at boucle:working with no re-trigger.
+    (eval "$BOUCLE_BUILD_CMD") > "$build_log" 2>&1 || build_rc=$?
+    build_rc=${build_rc:-0}
     if [ "$build_rc" -ne 0 ]; then
       echo "FAIL: BOUCLE_BUILD_CMD exited $build_rc — feeding build error to next iteration." >&2
       tail -c 4000 "$build_log" 2> /dev/null | sed 's/\x1b\[[0-9;]*m//g' > ".boucle-state/$BOUCLE_ISSUE/build-feedback.md" 2> /dev/null || true
@@ -443,8 +456,10 @@ EOF
 
   if boucle_worker_should_deploy; then
     deploy_log=$(mktemp)
-    (eval "$BOUCLE_DEPLOY_CMD") > "$deploy_log" 2>&1
-    deploy_rc=$?
+    # Same set -e guard as the build subshell above — without `|| deploy_rc=$?`,
+    # a non-zero deploy exit kills the shell before the error handling runs.
+    (eval "$BOUCLE_DEPLOY_CMD") > "$deploy_log" 2>&1 || deploy_rc=$?
+    deploy_rc=${deploy_rc:-0}
     preview_url=$(grep -oE "$BOUCLE_DEPLOY_URL_REGEX" "$deploy_log" | head -1)
     if [ "$deploy_rc" -ne 0 ] && [ -n "$preview_url" ]; then
       echo "WARN: deploy exited non-zero ($deploy_rc) but emitted a preview URL — proceeding" >&2
