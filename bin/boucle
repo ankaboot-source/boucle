@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# bin/boucle — interactive harness CLI for boucle issues.
+#
+# Lets a human take over an issue (pause), work in their agent CLI, and hand
+# it back to the loop (resume/restart). Also provides read-only commands
+# (status, check, log) for inspecting issue state.
+#
+# Sources lib/boucle.sh and bin/forge/common.sh — calls existing primitives.
+# No new label, no new agent runtime.
+#
+# Usage:
+#   boucle pause <iid>       # human takes over, loop goes silent
+#   boucle resume <iid>       # loop resumes the flow
+#   boucle restart <iid>      # loop takes the issue from scratch
+#   boucle status <iid>       # forge label + state.md + iterations.md
+#   boucle check <iid>        # file-gate, deps, siblings
+#   boucle log <iid>          # agent-output.log (last run trace)
+
+set -euo pipefail
+
+# ── Resolve BOUCLE_HOME ──────────────────────────────────────────────────
+BOUCLE_HOME="${BOUCLE_HOME:-$(cd "$(dirname "$0")/.." && pwd)}"
+
+# ── Source the engine + forge abstraction ────────────────────────────────
+# shellcheck disable=SC1091
+source "$BOUCLE_HOME/lib/boucle.sh"
+# shellcheck disable=SC1091
+source "$BOUCLE_HOME/bin/forge/common.sh"
+forge_init
+
+# ── Helpers ──────────────────────────────────────────────────────────────
+
+# Print the current boucle detail label for an issue (e.g. "working", "human").
+# Empty if no boucle: label is set.
+current_label() {
+  local iid="$1"
+  forge_issue_labels_get "$iid" 2>/dev/null \
+    | tr ',' '\n' \
+    | grep '^boucle:' \
+    | grep -v '^boucle::' \
+    | head -1 \
+    | sed 's/^boucle://'
+}
+
+# Print the current gross label (e.g. "bot", "human"). Empty in mono-user mode.
+current_gross() {
+  local iid="$1"
+  forge_issue_labels_get "$iid" 2>/dev/null \
+    | tr ',' '\n' \
+    | grep '^boucle::status::' \
+    | head -1 \
+    | sed 's/^boucle::status:://'
+}
+
+# Print "open" or "closed" for an issue.
+issue_state() {
+  local iid="$1"
+  forge_issue_get "$iid" 2>/dev/null | jq -r '.state // "unknown"'
+}
+
+# ── pause <iid> ──────────────────────────────────────────────────────────
+#
+# Human takes over. Sets boucle:human, saves the previous state, posts a
+# comment with the interactive marker.
+cmd_pause() {
+  local iid="${1:?usage: boucle pause <iid>}"
+
+  local state
+  state=$(issue_state "$iid")
+  if [ "$state" = "closed" ]; then
+    echo "ERROR: issue #$iid is closed — cannot take over." >&2
+    exit 1
+  fi
+
+  local label gross
+  label=$(current_label "$iid")
+  gross=$(current_gross "$iid")
+
+  if [ "$label" = "human" ]; then
+    echo "Issue #$iid is already paused (boucle:human). Nothing to do."
+    return 0
+  fi
+
+  # Save the previous state for resume to restore.
+  mkdir -p ".boucle-state/$iid"
+  local saved_at
+  saved_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  cat > ".boucle-state/$iid/pre-interactive.json" << EOF
+{"label":"$label","gross":"$gross","saved_at":"$saved_at"}
+EOF
+
+  # Transition to boucle:human (assigns to the human via set_boucle_label).
+  set_boucle_label "$iid" "boucle:human" "boucle::status::human"
+
+  # Post the pause comment with the interactive marker.
+  local msg
+  msg=$(cat << EOF
+<!-- boucle:interactive v=1 -->
+
+Issue paused by the human for interactive intervention.
+
+Previous state: \`boucle:$label\`
+
+Run \`boucle resume $iid\` to hand back to the loop, or \`boucle restart $iid\` to start from scratch.
+EOF
+)
+  forge_issue_note "$iid" "$(stamp_agent_marker "$msg")"
+
+  echo "✓ Issue #$iid paused (was: boucle:$label)"
+  echo "  Branch: boucle/$iid"
+  echo "  Run \`boucle check $iid\` before coding to verify no file conflicts."
+}
+
+# ── Main dispatch ────────────────────────────────────────────────────────
+case "${1:-}" in
+  pause)  shift; cmd_pause "$@" ;;
+  *) echo "Usage: boucle <pause|resume|restart|status|check|log> <iid>" >&2; exit 1 ;;
+esac
