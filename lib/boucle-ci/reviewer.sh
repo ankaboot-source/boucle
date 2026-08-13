@@ -425,7 +425,9 @@ boucle_ci_reviewer() {
     fi
   fi
 
-  # Collapse duplicate reviewer verdicts (agent may post a v2; CI replaces the first).
+  # Collapse duplicate reviewer verdicts: replace the draft in place (PUT the
+  # final verdict body onto the draft's note id so the #note_<id> anchor stays
+  # stable) and delete redundant copies. Agent may post a v2; CI replaces the first.
   "$BOUCLE_HOME"/bin/collapse-duplicate-notes reviewer "$BOUCLE_PROJECT_ID" "$MR_IID" "$PRE_RUN_VERDICT_ID" "$BOUCLE_FORGE_HOST" "$MR_HEAD"
 
   # ── Obligations gate (mechanical, no LLM) ─────────────────────────

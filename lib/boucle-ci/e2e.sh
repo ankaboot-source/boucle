@@ -160,7 +160,9 @@ boucle_ci_e2e() {
     fi
   fi
 
-  # Collapse duplicate e2e verdicts (agent may post a v2; CI replaces the first).
+  # Collapse duplicate e2e verdicts: replace the draft in place (PUT the
+  # final verdict body onto the draft's note id so the #note_<id> anchor stays
+  # stable) and delete redundant copies. Agent may post a v2; CI replaces the first.
   "$BOUCLE_HOME"/bin/collapse-duplicate-notes e2e "$BOUCLE_PROJECT_ID" "$BOUCLE_ISSUE" "$PRE_RUN_VERDICT_ID" "$BOUCLE_FORGE_HOST"
 
   case "$VERDICT" in
