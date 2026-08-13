@@ -258,8 +258,26 @@ forge_mr_lookup_by_branch() {
   esac
   local encoded
   encoded=$(printf '%s' "$branch" | jq -sRr @uri)
-  # GitHub requires "owner:branch" format for the head filter
+  # GitHub requires "owner:branch" format for the head filter.
   local owner="${BOUCLE_PROJECT_ID%%/*}"
+  # Prefix matching for the protocol key "boucle/<digits>": the ACTUAL worker
+  # branch is "boucle/<iid>-<slug>" (readable, deterministic), so an exact
+  # head match on the bare key would miss it. When the arg is a bare
+  # boucle/<digits> key, first try the exact match (backward compat with
+  # legacy branches), then fall back to listing PRs and filtering by prefix.
+  if printf '%s' "$branch" | grep -qE '^boucle/[0-9]+$'; then
+    local exact
+    exact=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?head=$owner:$encoded&state=$state&per_page=1" 2> /dev/null \
+      | jq -r '.[0].number // empty' 2> /dev/null || true)
+    if [ -n "$exact" ]; then
+      echo "$exact"
+      return 0
+    fi
+    # No exact match — list PRs in the requested state and filter by prefix.
+    _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?state=$state&per_page=100" 2> /dev/null \
+      | jq -r --arg prefix "$branch" '[.[] | select(.head.ref | startswith($prefix))] | first | .number // empty' 2> /dev/null || true
+    return 0
+  fi
   _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?head=$owner:$encoded&state=$state&per_page=1" 2> /dev/null \
     | jq -r '.[0].number // empty' 2> /dev/null || true
 }
@@ -291,6 +309,13 @@ forge_mr_close() {
   local mr_iid="$1"
   _gh_api_silent -X PATCH "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid" \
     -f state=closed
+}
+
+forge_branch_delete() {
+  local branch="$1"
+  local encoded
+  encoded=$(printf '%s' "$branch" | jq -sRr @uri)
+  _gh_api_silent -X DELETE "/repos/$BOUCLE_PROJECT_ID/git/refs/heads/$encoded"
 }
 
 # ── Note reactions ────────────────────────────────────────────────────────

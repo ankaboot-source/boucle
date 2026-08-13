@@ -1726,6 +1726,32 @@ atomic.
       existing lesson covers the interactive handoff (the nearest, #55,
       covers marker-based self-recognition in the loop itself).
 
+70. **Worker branches MUST be deleted after merge and named readably**
+    - ❌ DO NOT leave merged worker branches on the remote — they
+      proliferate and clutter the branch list. Observed on a consumer:
+      20+ `boucle/<iid>` branches accumulated with no cleanup.
+    - ❌ DO NOT name worker branches `boucle/<iid>` alone — the IID is
+      meaningless to a human scanning the branch list. `boucle/79` tells
+      nothing; `boucle/79-fusion-allies-logo-nidal` is self-documenting.
+    - ✅ DO: name branches `boucle/<iid>-<slug>` where `<slug>` is
+      derived deterministically from the issue title (lowercase,
+      kebab-case, max 40 chars). The `<iid>` prefix keeps the protocol
+      identifier stable for lookups (prefix match on `boucle/<iid>`).
+    - ✅ DO: delete the branch after a successful merge (merger) or
+      after catchup closes the issue. Best-effort: a failed deletion
+      logs a warning but does not fail the job — the branch is stale
+      but harmless.
+    - ✅ DO: keep `boucle/<iid>` as the lookup key in
+      `forge_mr_lookup_by_branch` — the slug may change if the issue
+      title is edited, so lookups MUST prefix-match on `boucle/<iid>`,
+      not exact-match the full branch name.
+    - Admission: class — any worker branch that survives its merge and
+      any branch name that requires the human to look up the IID to
+      understand; recurrence — new consumers accumulate branches
+      without cleanup and the natural naming instinct is `boucle/<iid>`
+      (shorter); stable — no line numbers, no transient values;
+      distinct — no existing lesson covers branch lifecycle.
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.

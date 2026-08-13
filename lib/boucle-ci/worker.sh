@@ -84,7 +84,7 @@ boucle_ci_worker() {
   echo "[boucle] retry strategy=$retry_strategy previous_outcome=${prev_outcome:-none} reset=$want_reset"
 
   # ── Branch checkout ──────────────────────────────────────────────
-  BRANCH="boucle/$BOUCLE_ISSUE"
+  BRANCH=$(boucle_branch_name "$BOUCLE_ISSUE")
   DISCARDED_SHA=""
   DISCARDED_TAG=""
   if git show-ref --verify --quiet "refs/heads/$BRANCH"; then

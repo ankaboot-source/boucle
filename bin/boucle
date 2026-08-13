@@ -106,8 +106,10 @@ EOF
 )
   forge_issue_note "$iid" "$(stamp_agent_marker "$msg")"
 
+  local branch
+  branch=$(boucle_branch_name "$iid")
   echo "✓ Issue #$iid paused (was: boucle:$label)"
-  echo "  Branch: boucle/$iid"
+  echo "  Branch: $branch"
   echo "  Run \`boucle check $iid\` before coding to verify no file conflicts."
 }
 
@@ -129,8 +131,9 @@ cmd_resume() {
   prev_label=$(jq -r '.label' "$pre_file")
   prev_gross=$(jq -r '.gross' "$pre_file")
 
-  # Detect commits ahead on boucle/<iid>.
-  local branch="boucle/$iid"
+  # Detect commits ahead on the worker branch (prefix match on boucle/<iid>).
+  local branch
+  branch=$(boucle_branch_name "$iid")
   local default_branch="${BOUCLE_DEFAULT_BRANCH:-master}"
   local commits_ahead=0
   if git rev-parse --verify "$branch" >/dev/null 2>&1; then
@@ -218,7 +221,8 @@ cmd_status() {
   echo "Assignee: $assignee"
 
   # Branch URL on the forge (for live diff consultation).
-  local branch="boucle/$iid"
+  local branch
+  branch=$(boucle_branch_name "$iid")
   local branch_url
   branch_url=$(forge_branch_url "$branch" 2>/dev/null || echo "")
   echo "Branch:   $branch"
@@ -226,7 +230,8 @@ cmd_status() {
     echo "Branch URL: $branch_url"
   fi
 
-  # MR status (if any).
+  # MR status (if any). Lookup uses the protocol key boucle/<iid> —
+  # forge_mr_lookup_by_branch prefix-matches so boucle/<iid>-<slug> is found.
   local mr_iid
   mr_iid=$(forge_mr_lookup_by_branch "boucle/$iid" "opened" 2>/dev/null || echo "")
   if [ -n "$mr_iid" ]; then
@@ -352,7 +357,9 @@ cmd_check() {
 
   echo ""
   if [ "$all_clear" -eq 1 ]; then
-    echo "→ Safe to work on boucle/$iid"
+    local branch
+    branch=$(boucle_branch_name "$iid")
+    echo "→ Safe to work on $branch"
   else
     echo "→ NOT safe — resolve the issues above before starting work"
   fi
