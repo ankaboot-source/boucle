@@ -733,9 +733,15 @@ else
 
   # ── GitHub: fallback provider variables ───────────────────────────────
 
-  # BOUCLE_FALLBACK_PROVIDER
-  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FALLBACK_PROVIDER --repo \"$PROJECT_ID\" --body \"${BOUCLE_FALLBACK_PROVIDER:-}\" 2>/dev/null"
-  log_pass "BOUCLE_FALLBACK_PROVIDER set to '${BOUCLE_FALLBACK_PROVIDER:-}' (vars) — ${BOUCLE_FALLBACK_PROVIDER:-fallback disabled by default; set a provider + BOUCLE_FALLBACK_API_KEY to enable}"
+  # BOUCLE_FALLBACK_PROVIDER — GitHub rejects empty variable values (HTTP 422),
+  # so skip the variable entirely when unset; the engine treats a missing
+  # variable the same as an empty one (fallback disabled by default).
+  if [ -n "${BOUCLE_FALLBACK_PROVIDER:-}" ]; then
+    run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FALLBACK_PROVIDER --repo \"$PROJECT_ID\" --body \"$BOUCLE_FALLBACK_PROVIDER\" 2>/dev/null"
+    log_pass "BOUCLE_FALLBACK_PROVIDER set to '$BOUCLE_FALLBACK_PROVIDER' (vars)"
+  else
+    log_skip "BOUCLE_FALLBACK_PROVIDER (empty — fallback disabled by default; set a provider + BOUCLE_FALLBACK_API_KEY to enable)"
+  fi
 
   # BOUCLE_FALLBACK_MODEL_TRIAGE
   run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FALLBACK_MODEL_TRIAGE --repo \"$PROJECT_ID\" --body \"${BOUCLE_FALLBACK_MODEL_TRIAGE:-glm-5.2}\" 2>/dev/null"
