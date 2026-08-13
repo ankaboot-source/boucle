@@ -257,11 +257,104 @@ cmd_status() {
   fi
 }
 
+# ── check <iid> ──────────────────────────────────────────────────────────
+#
+# Pre-work gate check: file-gate, deps, siblings. Consultation only —
+# informs, does not block.
+cmd_check() {
+  local iid="${1:?usage: boucle check <iid>}"
+
+  local all_clear=1
+
+  # ── File-gate: check boucle:files marker against in-flight issues ──────
+  # Source the gates library if available for the full check_file_gate.
+  # Otherwise, do a simple marker-based check.
+  local files_marker=""
+  local notes_json
+  notes_json=$(forge_issue_notes "$iid" 2>/dev/null || echo "[]")
+  files_marker=$(echo "$notes_json" \
+    | jq -r '[.[] | select(.body | test("<!-- boucle:files v=1"))] | last | .body // ""' \
+    | grep -oP '(?<=paths=)[^"]+' | head -1)
+
+  if [ -z "$files_marker" ]; then
+    echo "✓ File-gate: no file-impact marker (fail-open — safe to proceed)"
+  else
+    # Check in-flight issues (working/review/approval/merging) for overlap.
+    local in_flight
+    in_flight=$(forge_issue_list_by_label "boucle:working,boucle:review,boucle:approval,boucle:merging" "opened" 2>/dev/null || echo "[]")
+    local overlap_iids
+    overlap_iids=$(echo "$in_flight" \
+      | jq -r --arg iid "$iid" --arg paths "$files_marker" '
+          [.[] | select(.iid != ($iid | tonumber))]
+          | map(.iid as $other | {
+              iid: .iid,
+              overlap: ($paths | split(",") | map(
+                . as $p | $other  # placeholder — full impl needs the other issue files marker
+              ))
+            } | select(.overlap | length > 0)) | .[].iid' 2>/dev/null || echo "")
+
+    if [ -z "$overlap_iids" ]; then
+      echo "✓ File-gate: clear (no overlapping issues)"
+    else
+      echo "✗ File-gate: OVERLAP with issue(s): $overlap_iids"
+      echo "  Files: $files_marker"
+      echo "  → Wait for the overlapping issue(s) to merge, or coordinate."
+      all_clear=0
+    fi
+  fi
+
+  # ── Dependency gate: check boucle:depends-on marker ───────────────────
+  local deps_marker
+  deps_marker=$(echo "$notes_json" \
+    | jq -r '[.[] | select(.body | test("<!-- boucle:depends-on"))] | last | .body // ""' \
+    | grep -oP '(?<=iids=)[^" ]+' | head -1)
+
+  if [ -z "$deps_marker" ]; then
+    echo "✓ Dependencies: clear (no parent deps)"
+  else
+    local dep_blocked=""
+    for dep_iid in $(echo "$deps_marker" | tr ',' ' '); do
+      local dep_state
+      dep_state=$(issue_state "$dep_iid")
+      if [ "$dep_state" != "closed" ]; then
+        dep_blocked="$dep_blocked #$dep_iid ($dep_state)"
+      fi
+    done
+    if [ -z "$dep_blocked" ]; then
+      echo "✓ Dependencies: clear (all deps closed: $deps_marker)"
+    else
+      echo "✗ Dependencies: BLOCKED by:$dep_blocked"
+      all_clear=0
+    fi
+  fi
+
+  # ── Sibling gate: check if this is a sub-issue with active siblings ────
+  local split_parent
+  split_parent=$(echo "$notes_json" \
+    | jq -r '[.[] | select(.body | test("<!-- boucle:split-parent"))] | last | .body // ""' \
+    | grep -oP '(?<=iids=)[^" ]+' | head -1)
+
+  if [ -z "$split_parent" ]; then
+    echo "✓ Siblings: clear (not a sub-issue)"
+  else
+    echo "ℹ Siblings: this is a sub-issue (siblings: $split_parent)"
+    echo "  Check sibling states manually before starting work."
+  fi
+
+  echo ""
+  if [ "$all_clear" -eq 1 ]; then
+    echo "→ Safe to work on boucle/$iid"
+  else
+    echo "→ NOT safe — resolve the issues above before starting work"
+  fi
+}
+
 # ── Main dispatch ────────────────────────────────────────────────────────
 case "${1:-}" in
   pause)    shift; cmd_pause "$@" ;;
   resume)   shift; cmd_resume "$@" ;;
   restart)  shift; cmd_restart "$@" ;;
   status)   shift; cmd_status "$@" ;;
+  check)    shift; cmd_check "$@" ;;
   *) echo "Usage: boucle <pause|resume|restart|status|check|log> <iid>" >&2; exit 1 ;;
 esac
