@@ -245,7 +245,9 @@ boucle_ci_triage() {
     exit 0
   fi
 
-  # Collapse duplicate triage comments (agent may post a v2; CI replaces the first).
+  # Collapse duplicate triage comments: replace the draft in place (PUT the
+  # final body onto the draft's note id so the #note_<id> anchor stays stable)
+  # and delete redundant copies. Agent may post a v2; CI replaces the first.
   # NOTE: bin/collapse-duplicate-notes is fully forge-agnostic (uses the
   # forge_* contract: forge_issue_notes / forge_issue_note_update /
   # forge_note_delete) since the GitHub-support port.

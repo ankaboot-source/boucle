@@ -125,35 +125,43 @@ setup() {
 }
 
 # ── Draft cleanup behavior (the fix) ──────────────────────────────────
-# When a final exists, all drafts from the same run must be deleted.
-# When no final exists, drafts must be left untouched (fallback promotes them).
+# When a final exists, the draft is REPLACED IN PLACE: the final body is
+# PUT onto the draft's note id (so the #note_<id> anchor stays stable),
+# then the redundant final note is deleted. When no final exists, drafts
+# must be left untouched (the log-scraping fallback promotes them).
 
-@test "draft+final: draft is selected for deletion when final exists" {
+@test "draft+final: draft is the target (oldest id), final is the source body" {
   # Simulate: agent posted draft (id=1), then final (id=2).
-  # FINAL_IDS should contain [2], DRAFT_IDS should contain [1].
+  # TARGET_ID = oldest = 1 (the draft). NEWEST_FINAL_ID = 2.
+  # The final body is PUT onto note id 1; note id 2 is then deleted.
   mock_notes='[
     {"id": 1, "body": "<!-- boucle:draft role=triage -->\n\n## Disposition\nNEEDS-INFO"},
     {"id": 2, "body": "<!-- boucle:triage v=1 -->\n\n## TL;DR\nShort.\n\n## Disposition\nREADY"}
   ]'
   final_ids="$(printf '%s' "$mock_notes" | jq -r '.[] | select(.body | test("<!-- boucle:triage")) | select(.body | test("(?m)^## TL;DR")) | select(.body | test("(?m)^## Disposition")) | select(.id > 0) | .id' | sort -n)"
   draft_ids="$(printf '%s' "$mock_notes" | jq -r '.[] | select(.body | test("<!-- boucle:draft role=triage")) | select(.id > 0) | .id' | sort -n)"
-  # Final exists → drafts should be deleted
+  # Final exists → draft is the replace-in-place target
   [ -n "$final_ids" ]
   [ -n "$draft_ids" ]
   [ "$final_ids" = "2" ]
   [ "$draft_ids" = "1" ]
+  # ALL_IDS = oldest→newest, deduped; TARGET_ID = head = 1 (the draft)
+  all_ids="$(printf '%s\n' "$final_ids" "$draft_ids" | grep -E '^[0-9]+$' | sort -n | awk '!seen[$0]++')"
+  target_id="$(printf '%s\n' "$all_ids" | head -n1)"
+  [ "$target_id" = "1" ]
 }
 
-@test "draft-only (no final): draft is NOT deleted (fallback will promote it)" {
+@test "draft-only (no final): draft is NOT touched (fallback will promote it)" {
   # Simulate: agent posted only a draft, exhausted steps before final.
   # FINAL_IDS should be empty, DRAFT_IDS should contain [1].
-  # Script must exit without deleting drafts.
+  # Script must exit without PUTting or DELETEing drafts (no final body
+  # to replace them with; the log-scraping fallback promotes them).
   mock_notes='[
     {"id": 1, "body": "<!-- boucle:draft role=triage -->\n\n## Disposition\nNEEDS-INFO"}
   ]'
   final_ids="$(printf '%s' "$mock_notes" | jq -r '.[] | select(.body | test("<!-- boucle:triage")) | select(.body | test("(?m)^## TL;DR")) | select(.body | test("(?m)^## Disposition")) | select(.id > 0) | .id' | sort -n)"
   draft_ids="$(printf '%s' "$mock_notes" | jq -r '.[] | select(.body | test("<!-- boucle:draft role=triage")) | select(.id > 0) | .id' | sort -n)"
-  # No final → drafts must NOT be deleted
+  # No final → drafts must NOT be touched
   [ -z "$final_ids" ]
   [ -n "$draft_ids" ]
   [ "$draft_ids" = "1" ]
@@ -174,8 +182,10 @@ setup() {
   [ -z "$final_ids" ]
 }
 
-@test "multiple drafts + final: all drafts selected for deletion" {
+@test "multiple drafts + final: oldest draft is the replace-in-place target" {
   # Simulate: agent posted draft (id=1), draft v2 (id=2), then final (id=3).
+  # TARGET_ID = oldest = 1 (the first draft). The final body is PUT onto
+  # note id 1; notes 2 and 3 are deleted. The #note_1 anchor stays stable.
   mock_notes='[
     {"id": 1, "body": "<!-- boucle:draft role=reviewer -->\n\n## Verdict\nUNCERTAIN"},
     {"id": 2, "body": "<!-- boucle:draft role=reviewer -->\n\n## Verdict\nPASS"},
@@ -184,10 +194,18 @@ setup() {
   final_ids="$(printf '%s' "$mock_notes" | jq -r '.[] | select(.body | test("<!-- boucle:verdict")) | select(.body | test("role=reviewer")) | select(.body | test("abc123")) | select(.id > 0) | .id' | sort -n)"
   draft_ids="$(printf '%s' "$mock_notes" | jq -r '.[] | select(.body | test("<!-- boucle:draft role=reviewer")) | select(.id > 0) | .id' | sort -n)"
   [ "$final_ids" = "3" ]
-  # Both drafts should be selected for deletion
   [ "$(printf '%s\n' "$draft_ids" | wc -l | tr -d ' ')" = "2" ]
   printf '%s\n' "$draft_ids" | grep -qx 1
   printf '%s\n' "$draft_ids" | grep -qx 2
+  # ALL_IDS = 1,2,3 oldest→newest; TARGET_ID = 1 (oldest draft)
+  all_ids="$(printf '%s\n' "$final_ids" "$draft_ids" | grep -E '^[0-9]+$' | sort -n | awk '!seen[$0]++')"
+  target_id="$(printf '%s\n' "$all_ids" | head -n1)"
+  [ "$target_id" = "1" ]
+  # DELETE list = all except target = 2,3
+  del_ids="$(printf '%s\n' "$all_ids" | tail -n +2)"
+  [ "$(printf '%s\n' "$del_ids" | wc -l | tr -d ' ')" = "2" ]
+  printf '%s\n' "$del_ids" | grep -qx 2
+  printf '%s\n' "$del_ids" | grep -qx 3
 }
 
 @test "draft from different role is NOT deleted" {
