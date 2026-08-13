@@ -110,7 +110,7 @@ env:
   BOUCLE_BUILD_CMD: ${{ vars.BOUCLE_BUILD_CMD || 'npm run build' }}
   BOUCLE_DEPLOY_CMD: ${{ vars.BOUCLE_DEPLOY_CMD || 'npx wrangler pages deploy public --project-name=$BOUCLE_DEPLOY_PROJECT' }}
   BOUCLE_PREVIEW_PROPAGATION_WAIT: ${{ vars.BOUCLE_PREVIEW_PROPAGATION_WAIT || '60' }}
-  BOUCLE_LLM_BASE_URL: ${{ secrets.BOUCLE_LLM_BASE_URL }}
+  BOUCLE_LLM_BASE_URL: ${{ vars.BOUCLE_LLM_BASE_URL || 'https://ollama.com/v1' }}
   BOUCLE_LLM_API_KEY: ${{ secrets.BOUCLE_LLM_API_KEY }}
   BOUCLE_FALLBACK_PROVIDER: ${{ vars.BOUCLE_FALLBACK_PROVIDER || '' }}
   BOUCLE_DND_ENABLED: ${{ vars.BOUCLE_DND_ENABLED || 'false' }}
