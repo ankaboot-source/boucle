@@ -331,35 +331,20 @@ Mono-user is the **default** when no `--bot-id` is given — one account
 carries the issues, the MRs, the approvals and boucle's own actions. This is
 the common case on GitHub, where nothing provisions a bot account for you.
 
-**Why the mode has to exist.** boucle normally recognises its own writes by
-the actor: dispatch discards any webhook whose author is the bot. Point that
-at your own account and the guard discards *your* actions too — opening an
-issue, replying on `boucle:needs-info`, approving a spec. The loop goes
-quiet, with no error anywhere. Mono-user swaps the actor check for an
-invisible `<!-- boucle:agent -->` marker that boucle appends to every comment
-it posts, so it recognises its own writes without asking who acted.
-`bin/doctor` fails loudly if you land in the broken configuration by
-accident.
+**The cost: notifications degrade.** The forge signals "it's your turn" by
+changing an issue's assignee — but the issue is already yours, so nothing is
+emitted. And forges do not notify you about your own activity by default.
 
-**The cost: notifications degrade.** This is accepted, not fixed.
-
-- The forge signals "it's your turn" by *changing* an issue's assignee. The
-  issue is already yours, so nothing is emitted.
-- Every action the loop takes runs under your token, and forges do not
-  notify you about your own activity by default.
-
-So enable own-activity notifications once, or you will hear nothing:
+Enable own-activity notifications once, or you will hear nothing:
 
 | Forge | Setting |
 | --- | --- |
 | GitHub | Settings → Notifications → **Include your own updates** |
 | GitLab | Preferences → Notifications → **Receive notifications about your own activity** |
 
-Both are account-wide, so expect noise from the loop's routine comments.
-GitHub's per-organization email routing and inbox `reason:` filters help
-contain it; repository Watch levels keep unrelated repos quiet. None of this
-is as clean as a dedicated identity — **prefer a bot or service account when
-you can**, and treat mono-user as the fallback.
+Both are account-wide, so expect noise. **Prefer a bot or service account
+when you can** — see the [bot user](#the-bot-user) section for how to set one
+up. Mono-user is the fallback.
 
 ### Advanced — dedicated runners
 
