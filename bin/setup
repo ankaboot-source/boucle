@@ -252,6 +252,10 @@ echo ""
 # numeric project ID; on GitHub it is "owner/repo".
 export BOUCLE_PROJECT_ID="$PROJECT_ID"
 
+# Export BOUCLE_TOKEN so the forge helpers (_gh_api, _gl_api) can authenticate.
+# The --bot-token arg seeds BOT_TOKEN; the forge helpers read BOUCLE_TOKEN.
+export BOUCLE_TOKEN="$BOT_TOKEN"
+
 # Dry-run wrapper
 run() {
   if [ "$DRY_RUN" = "true" ]; then
