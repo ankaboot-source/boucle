@@ -3510,11 +3510,11 @@ merger:
       set_boucle_label "$BOUCLE_ISSUE" "boucle:merging" "boucle::status::bot"
 
       # Find the MR for this issue (prefix match on the protocol key
-      # boucle/<iid> — the actual branch is boucle/<iid>-<slug>).
-      MR_IID=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?state=opened" \
-        | jq -r '.[] | select(.source_branch | startswith("boucle/'"$BOUCLE_ISSUE"'")) | .iid' | head -1)
-
-      if [ -z "$MR_IID" ]; then
+      # boucle/<iid> — the actual branch may be boucle/<iid> or
+      # boucle/<iid>-<slug>).
+      MR_DATA=$(glab api --hostname $BOUCLE_FORGE_HOST "/projects/$CI_PROJECT_ID/merge_requests?state=opened" \
+        | jq -c '[.[] | select(.source_branch | startswith("boucle/'"$BOUCLE_ISSUE"'"))] | first // empty' 2>/dev/null)
+      if [ -z "$MR_DATA" ] || [ "$MR_DATA" = "null" ]; then
         echo "FAIL: no open MR found for issue #$BOUCLE_ISSUE (branch boucle/$BOUCLE_ISSUE)" >&2
         # Note BEFORE the terminal label — never a muted boucle:human.
         if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Merger could not find an open MR for branch boucle/$BOUCLE_ISSUE. Human intervention needed."; then
@@ -3524,6 +3524,12 @@ merger:
         set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
         exit 1
       fi
+      MR_IID=$(echo "$MR_DATA" | jq -r '.iid')
+      # Use the actual source_branch from the MR — not boucle_branch_name
+      # which may generate boucle/<iid>-<slug> while the actual branch is
+      # still boucle/<iid> (legacy branches pre-slug, or a title edit that
+      # changed the slug). The MR is the source of truth for the branch name.
+      BRANCH=$(echo "$MR_DATA" | jq -r '.source_branch')
 
       # Refresh $CI_DEFAULT_BRANCH so we rebase onto the latest (another MR may have just
       # merged — the resource_group guarantees we're the only merger running,
@@ -3531,7 +3537,6 @@ merger:
       # Also fetch the MR branch itself — CI clones with --depth=1 and only the
       # ref that triggered the pipeline ($CI_DEFAULT_BRANCH for merger role), so the MR
       # branch ref is NOT present in the local clone by default.
-      BRANCH=$(boucle_branch_name "$BOUCLE_ISSUE")
       git fetch origin $CI_DEFAULT_BRANCH "$BRANCH"
       boucle_deepen_rebase_fetch
 
