@@ -607,6 +607,42 @@ boucle_mono_user() {
   [ -n "${BOUCLE_MONO_USER:-}" ] && [ "${BOUCLE_MONO_USER}" != "false" ]
 }
 
+# boucle_branch_name <iid>
+#
+# Deterministic readable worker branch name: boucle/<iid>-<slug>. The slug is
+# derived from the issue title (lowercase, kebab-case, max 40 chars, truncated
+# at a word boundary when possible). The <iid> prefix keeps the protocol
+# identifier stable for lookups — forge_mr_lookup_by_branch prefix-matches on
+# boucle/<iid>, so a title edit that changes the slug does not break the
+# lookup. Falls back to the legacy boucle/<iid> when the title is empty or the
+# fetch fails. MUST be deterministic: same issue → same branch name across
+# iterations.
+boucle_branch_name() {
+  local iid="$1"
+  local title slug cut
+  title=$(forge_issue_get "$iid" 2> /dev/null | jq -r '.title // empty' 2> /dev/null || echo "")
+  if [ -z "$title" ]; then
+    echo "boucle/$iid"
+    return 0
+  fi
+  # Lowercase, replace non-alphanumeric runs with '-', trim leading/trailing '-'.
+  slug=$(printf '%s' "$title" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')
+  # Truncate to 40 chars at a word boundary if possible.
+  if [ "${#slug}" -gt 40 ]; then
+    cut="${slug:0:40}"
+    # Trim back to the last '-' (word boundary) if one exists within the cut.
+    cut="${cut%-*}"
+    [ -n "$cut" ] && slug="$cut"
+  fi
+  if [ -z "$slug" ]; then
+    echo "boucle/$iid"
+    return 0
+  fi
+  echo "boucle/$iid-$slug"
+}
+
 # set_boucle_label <iid> <new_detail_label> <gross_status_label>
 #
 # Preserve non-boucle: labels, strip old boucle: detail + boucle::status::*

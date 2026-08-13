@@ -135,6 +135,16 @@ boucle_ci_catchup() {
   close_issue "$BOUCLE_ISSUE"
   echo "Catchup: closed issue #$BOUCLE_ISSUE"
 
+  # Post-merge branch cleanup: delete the worker branch. Best-effort — a
+  # failed deletion logs a warning but does not fail the job. lesson #68.
+  local branch
+  branch=$(boucle_branch_name "$BOUCLE_ISSUE")
+  if ! forge_branch_delete "$branch"; then
+    echo "WARN: could not delete branch $branch after catchup close (stale but harmless)" >&2
+  else
+    echo "Deleted worker branch $branch after catchup close"
+  fi
+
   # Cascade: if this is a sub-issue, close the parent when all siblings are closed.
   maybe_close_parent "$BOUCLE_ISSUE"
   # Unblock dependents: if this sub-issue was a dependency of a sibling,
