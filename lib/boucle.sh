@@ -1075,6 +1075,15 @@ boucle_resolve_live_url() {
     return
   fi
 
+  # Priority 3b: declarative GitHub Pages — the site is served from the
+  # gh-pages branch at https://<owner>.github.io/<repo>/. Like GitLab CE
+  # there is no per-branch preview, so the reviewer falls back to diff
+  # review; the e2e checks the canonical URL.
+  if [ "${BOUCLE_DEPLOY_PROVIDER:-}" = "github-pages" ]; then
+    echo "$(boucle_github_pages_url)"
+    return
+  fi
+
   # Priority 4-5: self mode only — extract from deploy log or fallback
   if boucle_is_self_deploy; then
     if [ -n "$deploy_log" ] && [ -f "$deploy_log" ]; then
@@ -1094,6 +1103,14 @@ boucle_resolve_live_url() {
 #   deploy command — e.g. GitLab Pages declarative mode where
 #   BOUCLE_DEPLOY_CMD is empty and the forge serves the site itself).
 boucle_worker_should_deploy() {
+  # GitHub Pages declarative mode: the worker itself pushes the build
+  # output to the gh-pages branch (no BOUCLE_DEPLOY_CMD, no extra
+  # credentials — the bot PAT already has contents:write). Deploy must
+  # return 0 here so the SHA marker is stamped and the build output is
+  # kept; boucle_worker_deploy handles the push branch.
+  if [ "${BOUCLE_DEPLOY_PROVIDER:-}" = "github-pages" ]; then
+    return 0
+  fi
   # Skip deploy when no deploy command is configured (GitLab Pages
   # declarative / token-less mode, or a provider without a CLI). An empty
   # BOUCLE_DEPLOY_CMD must SKIP the preview deploy, never fail the worker:
@@ -1110,6 +1127,85 @@ boucle_worker_should_deploy() {
   if boucle_is_diff_review; then
     return 1
   fi
+  return 0
+}
+
+# boucle_github_pages_url
+#   Echo the canonical GitHub Pages URL for BOUCLE_PROJECT_ID
+#   (https://<owner>.github.io/<repo>/). Handles user-site repos
+#   (<owner>.github.io) which are served at the bare domain.
+boucle_github_pages_url() {
+  local owner repo
+  owner="${BOUCLE_PROJECT_ID%%/*}"
+  repo="${BOUCLE_PROJECT_ID#*/}"
+  if [ "$repo" = "$owner.github.io" ]; then
+    echo "https://$owner.github.io/"
+  else
+    echo "https://$owner.github.io/$repo/"
+  fi
+}
+
+# boucle_worker_deploy
+#   Run the preview deploy. Returns 0 on success. Sets preview_url if the
+#   deploy emitted one, else leaves it empty (reviewer falls back to diff
+#   review). Handles the github-pages provider by pushing the build output
+#   to the gh-pages branch via the existing bot credentials — no token in
+#   BOUCLE_DEPLOY_CMD, no CLOUDFLARE_* secrets required.
+#   Arguments: deploy_log path (worker) — GitHub Pages mode ignores it.
+boucle_worker_deploy() {
+  local deploy_log="$1"
+  if [ "${BOUCLE_DEPLOY_PROVIDER:-}" = "github-pages" ]; then
+    local build_out="${BOUCLE_BUILD_OUTPUT:-public}"
+    if [ ! -d "$build_out" ]; then
+      echo "FAIL: github-pages: build output $build_out missing" >&2
+      return 1
+    fi
+    echo "[boucle] GitHub Pages mode — pushing $build_out to gh-pages branch"
+    # Push the build output to gh-pages. Strategy: create an orphan branch
+    # commit containing only the build output, force-push it to gh-pages.
+    # Using a temporary worktree keeps the working tree clean and avoids
+    # touching the consumer's checked-out branch.
+    local tmp_dir gh_sha
+    tmp_dir=$(mktemp -d)
+    gh_sha=$(git rev-parse --short HEAD)
+    git -C "$tmp_dir" init -q -b gh-pages
+    cp -a "$build_out"/. "$tmp_dir"/
+    touch "$tmp_dir/.nojekyll"
+    git -C "$tmp_dir" add -A
+    git -C "$tmp_dir" -c user.email="${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}" \
+      -c user.name="${BOUCLE_BOT_USERNAME:-up-bot}" \
+      commit -qm "deploy: $gh_sha [skip ci]"
+    # Push with the bot PAT when available (same credential path the worker
+    # uses — worker.sh configures origin with the token); fall back to the
+    # checkout's origin URL (extraheader credentials) otherwise.
+    if [ -n "${BOUCLE_TOKEN:-}" ]; then
+      git -C "$tmp_dir" remote add origin "https://${BOUCLE_BOT_USERNAME:-up-bot}:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${BOUCLE_PROJECT_PATH}.git"
+    else
+      git -C "$tmp_dir" remote add origin "$(git remote get-url origin 2> /dev/null || echo "https://github.com/$BOUCLE_PROJECT_ID.git")"
+    fi
+    if ! git -C "$tmp_dir" push --force origin gh-pages > /dev/null 2>&1; then
+      echo "FAIL: github-pages: push to gh-pages branch failed" >&2
+      rm -rf "$tmp_dir"
+      return 1
+    fi
+    rm -rf "$tmp_dir"
+    echo "[boucle] GitHub Pages deployed: $(boucle_github_pages_url)"
+    return 0
+  fi
+  # Fallback: run BOUCLE_DEPLOY_CMD and extract a preview URL.
+  (eval "$BOUCLE_DEPLOY_CMD") > "$deploy_log" 2>&1
+  local rc=$?
+  local url
+  url=$(grep -oE "$BOUCLE_DEPLOY_URL_REGEX" "$deploy_log" | head -1)
+  if [ "$rc" -ne 0 ] && [ -z "$url" ]; then
+    echo "FAIL: deploy exited $rc with no preview URL" >&2
+    cat "$deploy_log" >&2
+    return 1
+  fi
+  if [ "$rc" -ne 0 ] && [ -n "$url" ]; then
+    echo "WARN: deploy exited non-zero ($rc) but emitted a preview URL — proceeding" >&2
+  fi
+  echo "$url"
   return 0
 }
 

@@ -483,19 +483,23 @@ EOF
     deploy_log=$(mktemp)
     # Same set -e guard as the build subshell above — without `|| deploy_rc=$?`,
     # a non-zero deploy exit kills the shell before the error handling runs.
-    (eval "$BOUCLE_DEPLOY_CMD") > "$deploy_log" 2>&1 || deploy_rc=$?
+    deploy_out=$(boucle_worker_deploy "$deploy_log") || deploy_rc=$?
     deploy_rc=${deploy_rc:-0}
-    preview_url=$(grep -oE "$BOUCLE_DEPLOY_URL_REGEX" "$deploy_log" | head -1)
-    if [ "$deploy_rc" -ne 0 ] && [ -n "$preview_url" ]; then
-      echo "WARN: deploy exited non-zero ($deploy_rc) but emitted a preview URL — proceeding" >&2
-    fi
-    if [ "$deploy_rc" -ne 0 ] && [ -z "$preview_url" ]; then
-      echo "FAIL: deploy exited $deploy_rc with no preview URL" >&2
-      cat "$deploy_log" >&2
-      rm -f "$deploy_log"
+    rm -f "$deploy_log"
+    if [ "$deploy_rc" -ne 0 ]; then
+      echo "FAIL: deploy failed ($deploy_rc)" >&2
       exit 1
     fi
-    rm -f "$deploy_log"
+    if [ -n "$deploy_out" ]; then
+      preview_url=$(printf '%s\n' "$deploy_out" | grep -oE "$BOUCLE_DEPLOY_URL_REGEX" | head -1)
+    fi
+    # GitHub Pages declarative mode: the worker pushed gh-pages itself and
+    # there is no per-branch preview URL — record the site URL so the MR
+    # and the reviewer know the site is live (diff review fallback).
+    if [ "${BOUCLE_DEPLOY_PROVIDER:-}" = "github-pages" ]; then
+      boucle_site_url=$(boucle_github_pages_url)
+      echo "[boucle] GitHub Pages site URL: $boucle_site_url (no per-branch preview — diff review)"
+    fi
   else
     # GitLab Pages declarative mode: the forge serves the production site
     # at $CI_PAGES_URL. Branch previews are NOT possible on CE instances —
@@ -571,9 +575,10 @@ EOF
   if [ -n "$preview_url" ]; then
     preview_line="Preview: $preview_url"
   elif [ -n "${boucle_site_url:-}" ]; then
-    # GitLab Pages declarative: no per-branch preview on CE — display the
-    # real site URL so the MR does not look like a broken duplicate.
-    preview_line="Site (GitLab Pages): $boucle_site_url — no per-branch preview; reviewed via diff"
+    # Declarative forge Pages (GitLab CE or GitHub Pages): no per-branch
+    # preview — display the real site URL so the MR does not look like a
+    # broken duplicate.
+    preview_line="Site (${BOUCLE_DEPLOY_PROVIDER:-pages}): $boucle_site_url — no per-branch preview; reviewed via diff"
   else
     # Diff-review mode (no deploy command — e.g. GitLab Pages): state it
     # plainly so the MR does not look like a broken duplicate (a blank

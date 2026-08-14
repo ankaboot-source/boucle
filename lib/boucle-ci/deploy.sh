@@ -7,6 +7,30 @@
 boucle_ci_deploy() {
   set +o pipefail
 
+  # GitHub Pages declarative mode: the post-merge deploy re-pushes the
+  # merged build to the gh-pages branch and hands e2e the canonical URL.
+  # No CLOUDFLARE_* secrets needed — the bot PAT has contents:write.
+  if [ "${BOUCLE_DEPLOY_PROVIDER:-}" = "github-pages" ]; then
+    echo "deploy: GitHub Pages mode — building and pushing to gh-pages"
+    if [ -n "${BOUCLE_BUILD_OUTPUT:-}" ] && [ -d "$BOUCLE_BUILD_OUTPUT" ] \
+      && [ -n "$(ls -A "$BOUCLE_BUILD_OUTPUT" 2> /dev/null)" ]; then
+      echo "deploy: $BOUCLE_BUILD_OUTPUT already populated (build artifact) — skipping build"
+    else
+      eval "$BOUCLE_BUILD_CMD"
+    fi
+    DEPLOY_LOG=$(mktemp)
+    boucle_worker_deploy "$DEPLOY_LOG" || {
+      rm -f "$DEPLOY_LOG"
+      echo "FAIL: GitHub Pages deploy failed" >&2
+      exit 1
+    }
+    rm -f "$DEPLOY_LOG"
+    DEPLOY_URL=$(boucle_github_pages_url)
+    echo "Deployed to $DEPLOY_URL"
+    chain_to_role "" "e2e" BOUCLE_LIVE_URL="$DEPLOY_URL"
+    return 0
+  fi
+
   # No deploy command (e.g. GitLab Pages mode / external): skip cleanly.
   # The site is served by the forge's own Pages (the pages job builds
   # and publishes it), so there is no URL to extract and no e2e chain
