@@ -147,7 +147,7 @@ Contributions to boucle must align with this line.
 - **GitLab + GitHub**: both forges are supported. GitLab remains the
   reference implementation; GitHub (GitHub Actions, `BOUCLE_FORGE=github`)
   is functional but less battle-tested.
-- **Cloudflare Pages only**: other deployment targets are planned.
+- **Cloudflare Pages only**: other deployment targets are planned. However, `BOUCLE_REVIEW_MODE=screenshot` enables token-less visual review: the worker builds locally, serves via `python3 -m http.server`, captures screenshots of impacted pages, and the reviewer grades them via vision-model descriptions guided by acceptance criteria. No deploy command, no token — ideal for GitLab CE (no per-branch Pages).
 - **codebase-memory-mcp hang in CI**: the MCP handshake can exceed the
   30-second runner window. `bin/jc` disables MCP servers in CI via
   `JCODE_RUN_MCP=0`; agents fall back to native `glob`/`grep`/`read` tools.
