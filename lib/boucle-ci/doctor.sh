@@ -559,6 +559,15 @@ boucle_ci_doctor() {
       # count-based checks and log messages below keep working.
       MR_OAPPROVED=$(forge_mr_approvals "$MR_OIID")
       [ "$MR_OAPPROVED" = "true" ] && MR_OAPPROVED=1 || MR_OAPPROVED=0
+      # In mono-user mode, there are no formal reviews — the reviewer
+      # posts a verdict PASS as a comment on the PR. Detect that as an
+      # approval signal so the doctor can merge without a native review.
+      if [ "$MR_OAPPROVED" -eq 0 ] && [ "${BOUCLE_MONO_USER:-false}" = "true" ]; then
+        MR_NOTES=$(forge_mr_notes "$MR_OIID" 2>/dev/null || echo "[]")
+        if echo "$MR_NOTES" | jq -e '[.[] | select(.body | contains("VERDICT: PASS"))] | length > 0' > /dev/null 2>&1; then
+          MR_OAPPROVED=1
+        fi
+      fi
       if [ "$MR_OSTATUS" = "mergeable" ] && [ "$MR_OAPPROVED" -gt 0 ]; then
         echo "  → #$IID ($ROLE): MR !$MR_OIID approved ($MR_OAPPROVED) + mergeable — triggering merger instead of $ROLE"
         set_boucle_label "$IID" "boucle:merging" "boucle::status::bot"
