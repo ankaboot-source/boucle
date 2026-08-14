@@ -84,6 +84,36 @@ setup() {
   assert_output ""
 }
 
+# ── dispatch_is_github_pr_comment: PR-comment routing discriminator ────
+
+@test "dispatch_is_github_pr_comment is true for a PR comment" {
+  echo '{"issue":{"number":8,"pull_request":{}}}' > "$PAYLOAD"
+  BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" run dispatch_is_github_pr_comment
+  assert_success
+}
+
+@test "dispatch_is_github_pr_comment is false for a plain-issue comment" {
+  echo '{"issue":{"number":2}}' > "$PAYLOAD"
+  BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" run dispatch_is_github_pr_comment
+  assert_failure
+}
+
+@test "dispatch_is_github_pr_comment is false when the payload is unset" {
+  BOUCLE_TRIGGER_PAYLOAD="" run dispatch_is_github_pr_comment
+  assert_failure
+}
+
+@test "dispatch_is_github_pr_comment is false when the payload is not a file" {
+  BOUCLE_TRIGGER_PAYLOAD='{"issue":{"pull_request":{}}}' run dispatch_is_github_pr_comment
+  assert_failure
+}
+
+@test "dispatch_is_github_pr_comment is false for a malformed payload" {
+  echo 'not json at all' > "$PAYLOAD"
+  BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" run dispatch_is_github_pr_comment
+  assert_failure
+}
+
 # ── Marker round-trip: what forge_issue_note writes, dispatch detects ──
 
 @test "a comment stamped by the forge layer is detected as boucle's own" {

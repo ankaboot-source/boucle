@@ -337,6 +337,14 @@ A human comment on the MR (dispatch.sh:331-359) reverts the issue to
 MR notes injected as `BOUCLE_REVIEWER_FEEDBACK`. This is the feedback channel
 that feeds human amendments forward (LESSONS.yml lesson #16, #53).
 
+On GitHub the equivalent event is an `issue_comment` on a **pull request**:
+the payload carries `.issue.number` (the PR number) with `.issue.pull_request`
+non-null. dispatch must detect this via `dispatch_is_github_pr_comment`
+(dispatch.sh:38-49) and route it to the same MR-note handler, resolving the
+PR's source branch via `forge_mr_get` (it is not in the payload). Without
+this, the PR's (empty) labels would trip the dispatch ABORT gate and human PR
+feedback could never re-trigger the worker.
+
 ### 4.7 Closed-issue guard
 
 Any webhook (note/emoji/update) on a **closed issue** is a no-op
