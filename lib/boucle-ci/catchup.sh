@@ -56,7 +56,7 @@ boucle_ci_catchup() {
     exit 1
   fi
   ISSUE_STATE=$(echo "$ISSUE_DATA" | jq -r '.state // "unknown"')
-  ISSUE_LABELS=$(echo "$ISSUE_DATA" | jq -r '.labels | join(",")')
+  ISSUE_LABELS=$(echo "$ISSUE_DATA" | jq -r '.labels | map(if type == "string" then . else .name end) | join(",")')
 
   # If the issue is already closed, nothing to catch up — idempotence.
   if [ "$ISSUE_STATE" = "closed" ]; then
