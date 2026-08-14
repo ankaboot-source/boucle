@@ -133,9 +133,9 @@ boucle_ci_catchup() {
     catchup_live_url=$(boucle_resolve_live_url "" 2>/dev/null || echo "")
     if [ -n "$catchup_live_url" ]; then
       # shfmt off  # preserve exact string content
-      local DEPLOY_NOTE_BODY="✅ Déploiement en production réussi (catch-up).
+      local DEPLOY_NOTE_BODY="✅ Successfully deployed to production (catch-up).
 
-## URL de production
+## Production URL
 $catchup_live_url
 
 ## Commit
