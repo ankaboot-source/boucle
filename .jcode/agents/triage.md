@@ -33,7 +33,9 @@ You have a knowledge graph of this codebase. Use `search_graph` and `get_archite
 - `AGENTS.md` — agent workflow rules, mandatory principles. **Read `LESSONS.yml` at startup** — scan the `title` fields to find lessons relevant to this issue. Read the full `❌`/`✅` of any matching lesson.
 - `CONTEXT.md` — project context, purpose, tech stack, constraints, ethics
 - `LOOP.md` — per-consumer loop configuration (target repo, cadence, gates, caps)
-- `README.md` — project overview and setup (for humans; contains no agent instructions)
+- `README.md` — project overview, setup, features, license (for humans; kept in sync with the code)
+- `ARCHITECTURE.md` — system architecture, component map, data flow
+- `SKILL.md` — normative skill reference (markers, labels, state machine)
 
 If a charter file exists and answers your question, do NOT ask the author — incorporate the answer into your analysis. Asking "where is the visual charter?" or "does CONTEXT.md specify X?" when the answer is at the repo root is a triage defect.
 
@@ -43,6 +45,9 @@ If a charter file exists and answers your question, do NOT ask the author — in
 - Project scope / tech stack / constraints / ethics → `CONTEXT.md`
 - Visual design / typography / layout / motion → the visual charter (consumer site, if present)
 - Loop config / cadence / gates / caps → `LOOP.md`
+- Features / setup / quick start / license / project overview → `README.md`
+- Architecture / component map / data flow → `ARCHITECTURE.md`
+- Markers / labels / state machine reference → `SKILL.md`
 If the issue touches none, write "Docs impact: none" in Analysis.
 
 **File-impact prediction.** In addition to `Docs impact:`, predict the

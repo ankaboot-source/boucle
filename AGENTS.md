@@ -160,8 +160,8 @@ stable lesson numbers.
 Boucle self-maintains its own documentation as part of the autonomous loop.
 Documentation is **code**: a doc that drifts from the system it describes is a
 bug. The four agents share the responsibility of keeping the charter docs
-(`AGENTS.md`, `CONTEXT.md`, `LOOP.md`) in sync
-with reality. `README.md` is excluded — it is for human readers, not agents.
+(`AGENTS.md`, `CONTEXT.md`, `LOOP.md`, `README.md`) in sync
+with reality.
 
 ### Distributed workflow
 
