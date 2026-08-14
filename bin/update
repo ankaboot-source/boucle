@@ -196,7 +196,7 @@ download_and_extract() {
 # (AGENTS.md §"Reference files"). After bin/update syncs the engine files into
 # ENGINE_DIR (.boucle/), these files must also be propagated to the consumer
 # root so agents find them there. Consumer-owned docs (README.md, LOOP.md,
-# CONTEXT.md, the visual charter) are NEVER overwritten — they belong to the
+# CONTEXT.md, the design charter) are NEVER overwritten — they belong to the
 # consumer project.
 #
 # The root CI file is NEVER propagated on GitLab: the consumer's root

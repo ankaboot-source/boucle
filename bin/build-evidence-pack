@@ -19,7 +19,7 @@
 #      If not in a git repo (no .git) → exit 0. If the base ref cannot be
 #      resolved via `git rev-parse --verify` → exit 0 (best-effort, never fail).
 #   4. Charters: read env BOUCLE_EVIDENCE_DOCS (comma-separated file names;
-#      default DESIGN.md,VISUAL-CHARTER.md,CONTEXT.md). For EACH doc, try
+#      default DESIGN.md,DESIGN.md,CONTEXT.md). For EACH doc, try
 #      `git show <base>:<doc>` (stderr → /dev/null). If it succeeds, take the
 #      first BOUCLE_EVIDENCE_MAX_LINES lines (default 120) EXCLUDING any
 #      leading frontmatter block (---\n...\n---) if present, and write a
@@ -33,7 +33,7 @@
 #      paths; exit non-zero only on a genuine internal bug.
 #
 # Forge controls (all optional, with defaults):
-#   BOUCLE_EVIDENCE_DOCS     — comma-separated charter file names (default: DESIGN.md,VISUAL-CHARTER.md,CONTEXT.md)
+#   BOUCLE_EVIDENCE_DOCS     — comma-separated charter file names (default: DESIGN.md,DESIGN.md,CONTEXT.md)
 #   BOUCLE_EVIDENCE_MAX_LINES— max excerpt lines per doc (default: 120)
 #   BOUCLE_DEFAULT_BRANCH    — base ref (default: ${CI_DEFAULT_BRANCH:-master})
 set -euo pipefail
@@ -74,7 +74,7 @@ HEAD_SHA="$(git -C "$CI_PROJECT_DIR" rev-parse HEAD 2> /dev/null || true)"
 mkdir -p "$STATE_DIR"
 
 # ── Charters ──────────────────────────────────────────────────────────
-DOCS="${BOUCLE_EVIDENCE_DOCS:-DESIGN.md,VISUAL-CHARTER.md,CONTEXT.md}"
+DOCS="${BOUCLE_EVIDENCE_DOCS:-DESIGN.md,DESIGN.md,CONTEXT.md}"
 MAX_LINES="${BOUCLE_EVIDENCE_MAX_LINES:-120}"
 
 # ── Write the file ─────────────────────────────────────────────────────
