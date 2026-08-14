@@ -500,7 +500,7 @@ boucle_ci_triage() {
             #    failures are diagnosable. stdout (produced PNG paths) is
             #    captured in RENDERED_PNGS as before. Lesson: never swallow
             #    render errors.
-            RENDERED_PNGS=$(NODE_PATH="$NPM_TMP/node_modules" node "$BOUCLE_WORKSPACE/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2> "$RENDER_STDERR" || true)
+            RENDERED_PNGS=$(NODE_PATH="$NPM_TMP/node_modules" node "$BOUCLE_HOME/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2> "$RENDER_STDERR" || true)
             if [ -n "$RENDERED_PNGS" ]; then
               # 4. Upload each PNG via the forge contract. The backend
               #    returns the embeddable path (GitLab: /uploads/...;

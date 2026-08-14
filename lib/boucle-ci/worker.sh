@@ -44,6 +44,22 @@ boucle_ci_worker() {
     exit 0
   fi
 
+  # ── Label-state guard (GitHub labeled-event race) ─────────────────
+  # On GitHub the workflow fires the worker on `labeled` issue events
+  # (the approval path: doctor sets boucle:todo after human validation).
+  # The same event fires for triage's OWN transitions (boucle:triage,
+  # boucle:spec-review, gate-skip flags), so a worker started by a
+  # non-todo label event MUST refuse to run or it races the triage
+  # pipeline and implements before the spec gate. Proceed only when the
+  # issue carries boucle:todo (new work / retrigger) or boucle:working
+  # (mid-flight safety-net continuation).
+  worker_labels=$(forge_issue_labels_get "$BOUCLE_ISSUE" 2> /dev/null || echo "")
+  if ! echo "$worker_labels" | tr ',' '\n' | grep -qx "boucle:todo" \
+    && ! echo "$worker_labels" | tr ',' '\n' | grep -qx "boucle:working"; then
+    echo "[boucle] Issue #$BOUCLE_ISSUE not at boucle:todo/working (labels: ${worker_labels:-none}) — labeled-event race, refusing to run."
+    exit 0
+  fi
+
   # ── Set working label ────────────────────────────────────────────
   set_boucle_label "$BOUCLE_ISSUE" "boucle:working" "boucle::status::bot"
 
@@ -433,6 +449,10 @@ EOF
   fi
 
   # ── Preview freshness marker ─────────────────────────────────────
+  # BOUCLE_BUILD_OUTPUT defaults to "public" (the .gitlab-ci.yml default);
+  # consumers on forges whose workflow does not pass the variable (GitHub
+  # Actions) would hit an unbound-variable error under set -u.
+  BOUCLE_BUILD_OUTPUT="${BOUCLE_BUILD_OUTPUT:-public}"
   local head_sha marker_html marker_txt
   head_sha=$(git rev-parse HEAD)
   if boucle_worker_should_deploy; then
