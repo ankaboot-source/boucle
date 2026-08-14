@@ -98,11 +98,15 @@ forge_issue_labels_set() {
   sorted_current=$(echo "$current" | tr ',' '\n' | sort | tr '\n' ',')
   sorted_labels=$(echo "$labels" | tr ',' '\n' | sort | tr '\n' ',')
   [ "$sorted_current" = "$sorted_labels" ] && return 0
-  # Build JSON array for GitHub API
+  # Build JSON array for GitHub API — the comma-separated list MUST be
+  # sent as a real array body. -F "labels[]=$labels" sent the whole CSV
+  # as ONE label name (HTTP 422 invalid) — the array was computed but
+  # never used. Fail-open like the GitLab backend: a label API hiccup
+  # must not kill the calling pipeline under set -e.
   local json_labels
   json_labels=$(echo "$labels" | tr ',' '\n' | jq -R . | jq -s .)
   _gh_api_silent -X PUT "/repos/$BOUCLE_PROJECT_ID/issues/$iid/labels" \
-    -F "labels[]=$labels"
+    --input - <<< "$(jq -nc --argjson l "$json_labels" '{labels: $l}')" || true
 }
 
 forge_issue_assign() {
@@ -121,9 +125,14 @@ forge_issue_close() {
 
 forge_issue_create() {
   local title="$1" description="$2" labels="${3:-}"
-  local -a args=(-X POST "/repos/$BOUCLE_PROJECT_ID/issues" -f title="$title" -f body="$description")
-  [ -n "$labels" ] && args+=(-f "labels[]=$labels")
-  _gh_api "${args[@]}" | jq -r '.number // empty' || true
+  # Labels must be sent as a JSON array (same lesson as
+  # forge_issue_labels_set: -f "labels[]=$labels" 422s on a CSV list).
+  local json_labels body
+  json_labels=$(printf '%s' "$labels" | tr -d '\n' | jq -R 'split(",") | map(select(length > 0))' 2> /dev/null || echo "[]")
+  body=$(jq -nc --arg t "$title" --arg d "$description" --argjson l "$json_labels" \
+    '{title: $t, body: $d, labels: $l}')
+  _gh_api -X POST "/repos/$BOUCLE_PROJECT_ID/issues" \
+    --input - <<< "$body" | jq -r '.number // empty' || true
 }
 
 forge_issue_reactions() {
