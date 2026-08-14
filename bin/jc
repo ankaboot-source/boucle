@@ -214,7 +214,7 @@ if [ -n "$FALLBACK_PROVIDER" ]; then
   export BOUCLE_LLM_MAX_RETRIES=0
   if [ -z "$AGENT_TIMEOUT" ]; then
     case "$ROLE" in
-      triage) AGENT_TIMEOUT="4m" ;;
+      triage) AGENT_TIMEOUT="6m" ;;
       worker) AGENT_TIMEOUT="12m" ;;
       reviewer) AGENT_TIMEOUT="12m" ;;
       e2e) AGENT_TIMEOUT="12m" ;;
