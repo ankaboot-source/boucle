@@ -1,6 +1,6 @@
 # AGENTS.md — Boucle agent guide
 
-> **Maintenance** — This document captures lessons learned, anti-patterns
+> **Maintenance** — This document captures mandatory principles. Lessons are in LESSONS.yml (machine-readable YAML, validated by bin/check-lessons). Anti-patterns
 > and operating principles for agents. **Any new lesson discovered must be
 > added here** to avoid repeating the same mistakes. See
 > [CONTEXT.md](CONTEXT.md) for the project context and tech stack.
@@ -9,7 +9,7 @@
 
 Before working on any issue, agents MUST consult these files at the repo root:
 
-- [AGENTS.md](AGENTS.md) — this document. Lessons learned and conventions.
+- [AGENTS.md](AGENTS.md) — this document. Lessons (in LESSONS.yml) and conventions.
 - [README.md](README.md) — project overview and getting started.
 - [LOOP.md](LOOP.md) — per-consumer configuration (target repo, cadence, gates, caps).
 - [CONTEXT.md](CONTEXT.md) — project context, tech stack, constraints.
@@ -31,7 +31,7 @@ See [LOOP.md](LOOP.md) for the pipeline and state machine details.
 ## MANDATORY operating principles
 
 These principles are **NON-NEGOTIABLE**. Any agent that violates them introduces a
-known recurring bug, documented in the "Lessons learned" section.
+known recurring bug, documented in LESSONS.yml.
 
 1. **Post-early rule** — The agent MUST post its comment or verdict **FIRST**, then
    refine it afterward. Step-limit waste (the agent exhausts its budget without ever
@@ -172,11 +172,11 @@ with reality. `README.md` is excluded — it is for human readers, not agents.
   to them. If the change requires updating a doc (new state, new variable, new
   agent responsibility, new seam), the worker updates the doc **in the same
   MR** as the code change. When discovering a new bug or anti-pattern, the
-  worker adds a `Lessons learned` entry here in `AGENTS.md`.
+  worker adds a lesson entry to `LESSONS.yml`.
 - **Reviewer** — Verifies two things: (1) the worker respected the charter docs
   during implementation (doc conformance), and (2) the worker updated the docs
   when required (doc completeness). On `FAIL`, the reviewer may require the
-  worker to add a `Lessons learned` entry to capture the regression.
+  worker to add a `LESSONS.yml` entry to capture the regression.
 - **E2E** — Verifies that charter docs match production reality: after
   deployment, the e2e agent confirms that the documented pipeline, agent
   responsibilities, and seams still hold.
