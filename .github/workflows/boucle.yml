@@ -34,7 +34,12 @@ on:
   pull_request_review_comment:
     types: [created]
   push:
-    branches: [$BOUCLE_DEFAULT_BRANCH]
+    # GitHub Actions does NOT expand ${{ vars }} or shell variables in the
+    # `on:` block — the trigger must reference a literal branch name. We use
+    # `github.event.repository.default_branch` as a filter inside the deploy
+    # job instead, so the workflow works regardless of the consumer's default
+    # branch name (main, master, etc.).
+    branches: [main, master]
   schedule:
     - cron: "*/10 * * * *"  # doctor runs every 10 min
   workflow_dispatch:
@@ -565,6 +570,8 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+      - name: Install dependencies
+        run: "[ -f package-lock.json ] && npm ci || true"
       - name: Deploy
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
