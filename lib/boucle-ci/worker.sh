@@ -279,10 +279,32 @@ EOF
   fi
 
   # ── Run the agent ────────────────────────────────────────────────
+  # Model/API failure retry: bin/jc exits 4 when the LLM API is
+  # unavailable or credits are exhausted. A transient outage (rate
+  # limit, brief downtime) should not immediately escalate to
+  # boucle:human — retry once before giving up.
+  # BOUCLE_WORKER_MODEL_FAILURE_RETRIES controls the retry count (default 1).
+  local model_failure_retries="${BOUCLE_WORKER_MODEL_FAILURE_RETRIES:-1}"
+  case "$model_failure_retries" in '' | *[!0-9]*) model_failure_retries=1 ;; esac
+  local attempt=0
   rc=0
-  "$BOUCLE_HOME/bin/jc" worker || rc=$?
+  while true; do
+    "$BOUCLE_HOME/bin/jc" worker || rc=$?
+    if [ "$rc" -ne 0 ] && [ "$rc" -ne 4 ]; then
+      echo "WARN: $BOUCLE_HOME/bin/jc worker exited $rc — proceeding to safety-net commit."
+      break
+    fi
+    if [ "$rc" -eq 4 ] && [ "$attempt" -lt "$model_failure_retries" ]; then
+      attempt=$((attempt + 1))
+      echo "WARN: bin/jc worker exited 4 (model/API failure) — retrying ($attempt/$model_failure_retries) after 30s..."
+      sleep 30
+      rc=0
+      continue
+    fi
+    break
+  done
   if [ "$rc" -ne 0 ]; then
-    echo "WARN: $BOUCLE_HOME/bin/jc worker exited $rc — proceeding to safety-net commit."
+    echo "WARN: $BOUCLE_HOME/bin/jc worker exited $rc after $attempt retry(s) — proceeding to safety-net commit."
   fi
 
   # ── Model/API failure detection (exit 4) ─────────────────────────
