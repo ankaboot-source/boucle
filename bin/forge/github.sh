@@ -271,9 +271,15 @@ forge_note_delete() {
 
 forge_mr_lookup_by_branch() {
   local branch="$1" state="${2:-open}"
+  # GitHub API has only open/closed/all states — no "merged".
+  # A merged PR is a closed PR with .merged == true. Normalize "merged"
+  # to "closed" and filter by .merged downstream so the merger's
+  # already-merged detection works on GitHub Actions.
+  local merged_filter=0
   case "$state" in
     opened) state="open" ;;
     closed) state="closed" ;;
+    merged) state="closed"; merged_filter=1 ;;
   esac
   local encoded
   encoded=$(printf '%s' "$branch" | jq -sRr @uri)
@@ -289,16 +295,36 @@ forge_mr_lookup_by_branch() {
     exact=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?head=$owner:$encoded&state=$state&per_page=1" 2> /dev/null \
       | jq -r '.[0].number // empty' 2> /dev/null || true)
     if [ -n "$exact" ]; then
-      echo "$exact"
-      return 0
+      # When searching for "merged", verify the PR is actually merged.
+      if [ "$merged_filter" -eq 1 ]; then
+        local is_merged
+        is_merged=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/pulls/$exact" 2> /dev/null \
+          | jq -r '.merged // false' 2>/dev/null || echo false)
+        [ "$is_merged" = "true" ] && echo "$exact" && return 0
+      else
+        echo "$exact"
+        return 0
+      fi
     fi
     # No exact match — list PRs in the requested state and filter by prefix.
-    _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?state=$state&per_page=100" 2> /dev/null \
-      | jq -r --arg prefix "$branch" '[.[] | select(.head.ref | startswith($prefix))] | first | .number // empty' 2> /dev/null || true
+    # When merged_filter=1, also filter by .merged == true.
+    if [ "$merged_filter" -eq 1 ]; then
+      _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?state=$state&per_page=100" 2> /dev/null \
+        | jq -r --arg prefix "$branch" '[.[] | select((.head.ref | startswith($prefix)) and (.merged == true))] | first | .number // empty' 2>/dev/null || true
+    else
+      _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?state=$state&per_page=100" 2> /dev/null \
+        | jq -r --arg prefix "$branch" '[.[] | select(.head.ref | startswith($prefix))] | first | .number // empty' 2>/dev/null || true
+    fi
     return 0
   fi
-  _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?head=$owner:$encoded&state=$state&per_page=1" 2> /dev/null \
-    | jq -r '.[0].number // empty' 2> /dev/null || true
+  # Non-boucle/<digits> branch — exact head match.
+  if [ "$merged_filter" -eq 1 ]; then
+    _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?head=$owner:$encoded&state=$state&per_page=1" 2> /dev/null \
+      | jq -r '[.[] | select(.merged == true)] | first | .number // empty' 2>/dev/null || true
+  else
+    _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?head=$owner:$encoded&state=$state&per_page=1" 2> /dev/null \
+      | jq -r '.[0].number // empty' 2>/dev/null || true
+  fi
 }
 
 forge_mr_merge_status() {
