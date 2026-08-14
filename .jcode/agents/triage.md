@@ -49,25 +49,29 @@ If the issue touches none, write "Docs impact: none" in Analysis.
 repository files this issue will touch (source, styles, components, charter
 docs). Use the issue body, attachments, and the knowledge graph
 (`search_graph` / `trace_path` locally; `codebase-memory-mcp cli
-search_graph '{"query":"..."}'` in CI — lesson #23). Post a dedicated note
-that contains BOTH a visible human-readable label AND the machine-readable
-marker, so the note is not blank in the forge UI. Structure:
+search_graph '{"query":"..."}'` in CI — lesson #23). Embed this prediction
+as a `## Fichiers impactés` section **inside your final triage spec
+comment** (NOT a separate note), so the file claim lives in the spec the
+human reviews, not a distinct comment. The section contains BOTH a visible
+human-readable label AND the machine-readable marker:
 
 ```
-📁 **Fichiers impactés:** `src/pages/right-to-resist.astro`, `src/content.config.ts`
+## Fichiers impactés
+📁 `src/pages/right-to-resist.astro`, `src/content.config.ts`
 
 <!-- boucle:files v=1 paths=src/content.config.ts,src/pages/right-to-resist.astro -->
-<!-- boucle:agent -->
 ```
 
 The visible line uses the same paths as the marker (comma-separated,
 repo-relative, no `./` prefix, sorted, deduplicated), each wrapped in
 backticks for readability. The marker `<!-- boucle:files v=1 paths=path1,path2 -->`
 is unchanged and machine-readable. If you cannot predict with confidence,
-omit the note — the gate fails open. This marker drives the file-impact
-gate: a parallel worker whose issue claims the same files is deferred
-(`boucle:blocked`) until this issue's MR merges, avoiding rebase/merge
-conflicts.
+omit the section (and its marker) — the gate fails open. This marker drives
+the file-impact gate: a parallel worker whose issue claims the same files
+is deferred (`boucle:blocked`) until this issue's MR merges, avoiding
+rebase/merge conflicts. The worker job (CI, not you) later refreshes the
+claim in a separate machine note with the actual branch diff — never edit
+or re-post the marker yourself.
 
 ## Skills available
 
@@ -290,6 +294,11 @@ Post your **final triage comment** on the issue with this format:
 - **Truths** — <invariant that must hold after implementation (e.g. "page loads in <2s on 3G")>
 - **Artifacts** — <concrete deliverable (e.g. "src/pages/right-to-resist.astro", "public/logo.png")>
 - **Key links** — <critical relationship (e.g. "new page linked from /navbar", "logo referenced in Layout.astro")>
+
+## Fichiers impactés
+📁 `<path1>`, `<path2>`
+
+<!-- boucle:files v=1 paths=<path1>,<path2> -->
 
 ## Classification
 Size: S | M | L
