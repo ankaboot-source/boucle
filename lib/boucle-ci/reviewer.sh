@@ -474,6 +474,29 @@ boucle_ci_reviewer() {
     fi
   fi
 
+  # ── Lesson candidate scraping (escalation only) ───────────────────
+  # At MAX_ITERATION the reviewer prompt asks the agent to emit a lesson
+  # candidate on stdout (## Lesson candidate ... ## End lesson candidate).
+  # Scrape it from the agent log into .boucle-state/<issue>/lesson-candidate.yml
+  # so the worker can validate + commit it on the next run. Never posted
+  # as a forge note — the candidate is machine food, not human-facing.
+  ITERATION="${BOUCLE_ITERATION:-1}"
+  MAX_ITER="${BOUCLE_MAX_ITERATIONS:-5}"
+  if [ "$ITERATION" -ge "$MAX_ITER" ]; then
+    AGENT_LOG="$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE/agent-output.log"
+    if [ -f "$AGENT_LOG" ]; then
+      LESSON_CANDIDATE=$(awk '
+        /^## Lesson candidate/ { found=1; next }
+        /^## End lesson candidate/ { found=0 }
+        found { print }
+      ' "$AGENT_LOG" 2> /dev/null || echo "")
+      if [ -n "$LESSON_CANDIDATE" ]; then
+        printf '%s\n' "$LESSON_CANDIDATE" > "$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE/lesson-candidate.yml"
+        echo "[boucle] Scraped lesson candidate from reviewer log → .boucle-state/$BOUCLE_ISSUE/lesson-candidate.yml"
+      fi
+    fi
+  fi
+
   # Resolve the reporter id once, before the verdict case, so every branch
   # (PASS, FAIL, UNCERTAIN) can assign the MR to the author when their
   # action is required. Handles sub-issues: uses the parent issue's author.
