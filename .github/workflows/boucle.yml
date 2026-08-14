@@ -670,7 +670,4 @@ jobs:
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
           [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
-          echo "[doctor] BOUCLE_HOME=$BOUCLE_HOME"
-          echo "[doctor] submodule SHA=$(git -C "$BOUCLE_HOME" rev-parse --short HEAD 2>/dev/null || echo none)"
-          echo "[doctor] doctor.sh has debug: $(grep -c 'mono-user: scanning' "$BOUCLE_HOME/lib/boucle-ci/doctor.sh" 2>/dev/null || echo 0)"
           $BOUCLE_HOME/bin/boucle-ci doctor
