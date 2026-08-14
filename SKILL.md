@@ -16,7 +16,7 @@
 > here fails CI red — this file is the spec, not a description.
 >
 > **Relationship to other charters:**
-> - `AGENTS.md` — contribution conventions + lessons learned (incident
+> - `AGENTS.md` — contribution conventions + mandatory principles. `LESSONS.yml` — lessons (incident
 >   catalog). Lessons that state a current protocol invariant cross-reference
 >   this file (`See SKILL.md §<id>`); the normative text lives here.
 > - `ARCHITECTURE.md` — engine implementation (code structure, forge adapters,
@@ -29,7 +29,7 @@
 ## 1. Invariants
 
 The protocol rests on ten invariants. Every agent (CI or local harness) and
-every human interacting with boucle MUST honor them. The AGENTS.md lessons are
+every human interacting with boucle MUST honor them. The LESSONS.yml lessons are
 incident catalogs that instantiate these invariants; the normative statement
 lives here.
 
@@ -37,7 +37,7 @@ lives here.
 
 Boucle lives in the forge. NEVER introduce a new frontend, a server, or a
 computer to keep running. The forge is the UI; labels are the state; comments
-are the channel. (CONTEXT.md §7, AGENTS.md lesson #55.)
+are the channel. (CONTEXT.md §7, LESSONS.yml lesson #55.)
 
 ### I2 — Label-driven state machine
 
@@ -57,21 +57,21 @@ to the next gate and parks at a human-readable state (`boucle:spec-review`,
 
 Post the comment or verdict FIRST, then refine. An incomplete draft posted is
 ALWAYS better than a refinement never posted. Step-budget waste (the agent
-exhausts its budget without posting) is bug #1. (AGENTS.md lesson #1, #2, #5.)
+exhausts its budget without posting) is bug #1. (LESSONS.yml lesson #1, #2, #5.)
 
 ### I5 — Idempotence
 
 All `bin/*` scripts and label writes MUST be idempotent. Re-running a script
 produces no additional side effects. A label PUT that does not change the label
 set is skipped (the forge records a Resource Label Event on every PUT, even a
-no-op — CONTEXT.md §8). (AGENTS.md lesson #4.)
+no-op — CONTEXT.md §8). (LESSONS.yml lesson #4.)
 
 ### I6 — SHA-anchored verdicts
 
 Reviewer and e2e verdicts MUST include the commit SHA as bare hex: no quotes, no
 whitespace, no angle brackets. Exact format:
 `<!-- boucle:verdict v=1 role=reviewer sha=abc123def456 -->`. The CI parser
-FAILS if the format is not respected. (AGENTS.md lesson #6, #41, #47.)
+FAILS if the format is not respected. (LESSONS.yml lesson #6, #41, #47.)
 
 ### I7 — Marker-based self-recognition
 
@@ -80,7 +80,7 @@ Boucle recognizes its own writes by an invisible stamp
 without the stamp is treated as a human reply and routed. This is mono-user-safe
 (when bot and human share an account, the marker discriminates; the actor does
 not). Every comment a harness posts MUST carry the stamp, or dispatch will treat
-it as a human reply and re-route. (AGENTS.md lesson #55.)
+it as a human reply and re-route. (LESSONS.yml lesson #55.)
 
 ### I8 — Doc-as-code
 
@@ -102,7 +102,7 @@ introduce a local workaround that won't be reported upstream. (CONTEXT.md §7,
 Merges are serialized via `resource_group: boucle-merge`. Each rebase is
 against a `master`/`main` that includes previously-merged MRs. NEVER
 parallelize merges — a concurrent rebase against a stale branch produces
-conflicts and race conditions. (CONTEXT.md §7, AGENTS.md lesson #8.)
+conflicts and race conditions. (CONTEXT.md §7, LESSONS.yml lesson #8.)
 
 ---
 
@@ -244,8 +244,8 @@ harness MUST use the markers correctly or dispatch will misroute its writes.
 | `<!-- boucle:diagnostic v=1 iid=N class=X trigger=Y -->` | `v=1 iid=<IID> class=<failure-class> trigger=<trigger>` | boucle.sh:475 (escalation diagnostic) | (informational — structured escalation) | Replaces the generic "human intervention needed" note with a structured diagnostic (failure class + evidence + recommended action). |
 | `<!-- boucle:schedule id=<name> -->` | `id=<schedule-name>` | boucle.sh:201 (on scheduled issues) | boucle.sh (dedup — last firing marker) | Marks a scheduled issue with its template name. Used to prevent duplicate firings across sweeps. |
 | `<!-- boucle:conflict-retry N -->` | `N=<retry-count>` | boucle.sh:1099 (on re-trigger after rebase conflict) | boucle.sh:1085 (jq parse, count retries) | Posted on each re-trigger after a rebase conflict. Bounded retry count — after N retries, the conflict is handed to the worker agent for resolution. |
-| `<!-- boucle:file-blocked v=1 on=N paths=... -->` | `v=1 on=<active-issue> paths=<overlap>` | gates.sh:106 (check_file_gate — defer on file overlap) | gates.sh:192 (unblock path, last marker) | The file-impact gate (AGENTS.md lesson #62): posted when a worker would edit files claimed by an in-flight sibling issue. The unblock path fires when the named blocker closes. |
-| `<!-- boucle:files v=1 paths=... -->` | `v=1 paths=<impacted-files>` | worker job (.gitlab-ci.yml:2619, refresh after the branch diff) | worker job (jq, find last marker) | File-impact declaration (AGENTS.md lesson #62): the triage predicts the impacted files, the worker refreshes the marker with the actual branch diff. Consumed by `check_file_gate` to defer parallel workers on overlap. |
+| `<!-- boucle:file-blocked v=1 on=N paths=... -->` | `v=1 on=<active-issue> paths=<overlap>` | gates.sh:106 (check_file_gate — defer on file overlap) | gates.sh:192 (unblock path, last marker) | The file-impact gate (LESSONS.yml lesson #62): posted when a worker would edit files claimed by an in-flight sibling issue. The unblock path fires when the named blocker closes. |
+| `<!-- boucle:files v=1 paths=... -->` | `v=1 paths=<impacted-files>` | worker job (.gitlab-ci.yml:2619, refresh after the branch diff) | worker job (jq, find last marker) | File-impact declaration (LESSONS.yml lesson #62): the triage predicts the impacted files, the worker refreshes the marker with the actual branch diff. Consumed by `check_file_gate` to defer parallel workers on overlap. |
 | `<!-- boucle:evidence-pack v=1 -->` | `v=1` | bin/build-evidence-pack (header first line of the evidence pack) | — | Marks the auto-generated evidence pack (charter doc snapshot + diff brief) attached to escalations. |
 | `<!-- boucle:allow-list v=1 user=<username> -->` | `v=1 user=<author-username>` | boucle.sh (check_allow_list_gate — rejection note) | — | Posted on an issue whose resolved human reporter is not in `BOUCLE_ALLOWED_USERS`. The issue is not accepted by the loop (no role triggered). Fail-open when the variable is unset (legacy). |
 | `<!-- boucle:interactive v=1 -->` | `v=1` | bin/boucle (cmd_pause, cmd_resume, cmd_restart — interactive harness) | — | Marks a comment posted by the interactive harness (`boucle pause`/`resume`/`restart`). Distinguishes a voluntary human takeover from a `boucle:human` escalation. Informational — dispatch does not act on it. |
@@ -264,7 +264,7 @@ harness MUST use the markers correctly or dispatch will misroute its writes.
 | `## Parent issue\n#N` | section header + issue reference | boucle.sh:699,768,774 (awk) | Resolves the parent IID from a sub-issue body. Used by `resolve_reporter_id`, `fetch-issue-attachments`, `maybe_close_parent`. |
 | `## Depends on` | section header | bin/lib/depends-on.sh:57,61 (awk fallback) | Fallback parsing of dependencies when the `<!-- boucle:depends-on -->` marker is absent. Mirrors the `## Parent issue` pattern. |
 | `## Approach` | section header in `state.md` | worker.sh:482 (sed extraction), :551 (MR description) | The worker's implementation approach, extracted from `state.md` into the MR description. The reviewer reads it to verify doc conformance. |
-| `VERDICT: PASS\|FAIL\|UNCERTAIN` | line-anchored (`^VERDICT:`) | reviewer.sh:299,320,358,363; e2e.sh (same pattern) | The verdict line. MUST be start-of-line anchored in greps (AGENTS.md lesson #41) — an unanchored grep matches shell traces containing the substring. |
+| `VERDICT: PASS\|FAIL\|UNCERTAIN` | line-anchored (`^VERDICT:`) | reviewer.sh:299,320,358,363; e2e.sh (same pattern) | The verdict line. MUST be start-of-line anchored in greps (LESSONS.yml lesson #41) — an unanchored grep matches shell traces containing the substring. |
 | `BOT_JUST_ASSIGNED` | assignee-change detection | dispatch.sh:504-539 | The real "re-queue after boucle:human" mechanism (§4.1). Detected from `.changes.assignees` on the `issue update` webhook, not from a comment. |
 | Emoji `thumbsup` | emoji award on a Note | dispatch.sh:579-587 (`BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup"`) | Spec approval. Only valid on an issue at `boucle:spec-review`, awarded on a Note (not the issue body). MR approval is the native Approve button, NOT an emoji. |
 
@@ -290,7 +290,7 @@ the `issue update` webhook fires with an assignee change. Dispatch detects
 state. This is the explicit "reopen and resume" signal.
 
 **A local harness that wants to re-queue a `boucle:human` issue MUST
-re-assign the bot, not post a comment.** (AGENTS.md lesson #11, #44.)
+re-assign the bot, not post a comment.** (LESSONS.yml lesson #11, #44.)
 
 ### 4.2 Spec approval — reply or emoji
 
@@ -335,14 +335,14 @@ Closing the MR (not merging) fires `merge_request close` (dispatch.sh:207-258):
 A human comment on the MR (dispatch.sh:331-359) reverts the issue to
 `boucle:todo` and re-runs the worker with `BOUCLE_ITERATION=verdicts+1` and the
 MR notes injected as `BOUCLE_REVIEWER_FEEDBACK`. This is the feedback channel
-that feeds human amendments forward (AGENTS.md lesson #16, #53).
+that feeds human amendments forward (LESSONS.yml lesson #16, #53).
 
 ### 4.7 Closed-issue guard
 
 Any webhook (note/emoji/update) on a **closed issue** is a no-op
 (dispatch.sh:385-411) — EXCEPT bot assignment, which is the explicit
 "reopen and resume" signal (dispatch.sh:404-412). A local harness MUST NOT
-re-trigger a closed issue by any other means. (AGENTS.md lesson #44.)
+re-trigger a closed issue by any other means. (LESSONS.yml lesson #44.)
 
 ### 4.8 Anti-loop filters (apply to ALL events)
 
@@ -422,7 +422,7 @@ and may produce conflicts with in-flight MRs.
 - **Dogfood suspended.** The engine repo no longer dogfoods on a consumer
   (urgence-palestine.fr split out). Dogfooding will resume via a dedicated test
   consumer once the engine/consumer separation is stable. Until then, the
-  62 AGENTS.md lessons remain as the incident catalog; new classes of bugs are
+  73 LESSONS.yml lessons catalog the forward-looking operating principles; new classes of bugs are
   discovered on real consumers. (CONTEXT.md §1.)
 - **Lesson numbering drift.** AGENTS.md has duplicate lesson numbers (#17,
   #22, #23, #24, #27, #28, #29, #41, #42, #47 appear twice). The doc's own rule
@@ -567,7 +567,7 @@ boucle restart <iid>  # if starting from scratch
 ## 9. Failure mode framework
 
 The invariants (§1) are the rules; this section names the *patterns* those
-rules prevent. The AGENTS.md lessons are incident catalogs that instantiate
+rules prevent. The LESSONS.yml lessons are incident catalogs that instantiate
 these patterns — the framework gives them a shared vocabulary so a new failure
 can be classified against a known class, not rediscovered from scratch.
 
