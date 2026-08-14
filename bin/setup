@@ -524,6 +524,30 @@ if [ "$FORGE" = "github" ]; then
   echo ""
 fi
 
+# ── 0a-bis. Charter docs at the consumer root ─────────────────────────
+# The engine owns reference docs (AGENTS.md, SKILL.md, ARCHITECTURE.md) that
+# agents MUST find at the repo root (AGENTS.md §"Reference files"). These are
+# engine-owned: bin/update re-syncs them on every engine bump. Consumer-owned
+# docs (README.md, LOOP.md, CONTEXT.md, the visual charter) are NEVER
+# overwritten — they belong to the consumer project.
+ENGINE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck disable=SC2206
+CHARTER_DOCS=(AGENTS.md SKILL.md ARCHITECTURE.md)
+echo "=== Charter docs ==="
+for doc in "${CHARTER_DOCS[@]}"; do
+  if [ ! -f "$ENGINE_ROOT/$doc" ]; then
+    log_skip "$doc not in engine — skipping"
+  else
+    if [ "$DRY_RUN" = "true" ]; then
+      echo "  [dry-run] copy $doc from engine"
+    else
+      cp "$ENGINE_ROOT/$doc" "$doc"
+    fi
+    log_pass "$doc copied from engine"
+  fi
+done
+echo ""
+
 # ── 0b. Consumer .gitignore — forge-agnostic ──────────────────────────
 # Per-issue state lives in .boucle-state/ at the consumer root (gitignored).
 # Never clobber an existing .gitignore — only append the entry if missing.

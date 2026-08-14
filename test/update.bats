@@ -192,3 +192,44 @@ setup() {
   assert_success
   assert_output --partial ".boucle-version"
 }
+
+# ── Consumer root file propagation ─────────────────────────────────────
+
+@test "propagate_consumer_root_files is a no-op when ENGINE_DIR is . (dogfood)" {
+  ENGINE_DIR="." run propagate_consumer_root_files
+  assert_success
+  assert_output ""
+}
+
+@test "propagate_consumer_root_files copies charter docs to the consumer root" {
+  # shellcheck disable=SC2154
+  local tmpdir="$BATS_TEST_TMPDIR"
+  mkdir -p "$tmpdir/.boucle/.github/workflows"
+  echo "# engine AGENTS" > "$tmpdir/.boucle/AGENTS.md"
+  echo "# engine SKILL" > "$tmpdir/.boucle/SKILL.md"
+  echo "# engine ARCH" > "$tmpdir/.boucle/ARCHITECTURE.md"
+  echo "# workflow" > "$tmpdir/.boucle/.github/workflows/boucle.yml"
+  cd "$tmpdir" || return
+  ENGINE_DIR=".boucle" BOUCLE_FORGE=github run propagate_consumer_root_files
+  assert_success
+  assert_output --partial "AGENTS.md"
+  assert_output --partial "SKILL.md"
+  assert_output --partial "ARCHITECTURE.md"
+  [ -f "$tmpdir/AGENTS.md" ]
+  [ -f "$tmpdir/SKILL.md" ]
+  [ -f "$tmpdir/ARCHITECTURE.md" ]
+  [ -f "$tmpdir/.github/workflows/boucle.yml" ]
+}
+
+@test "propagate_consumer_root_files does NOT overwrite consumer-owned docs" {
+  # shellcheck disable=SC2154
+  local tmpdir="$BATS_TEST_TMPDIR"
+  mkdir -p "$tmpdir/.boucle"
+  echo "# consumer README" > "$tmpdir/README.md"
+  echo "# engine README" > "$tmpdir/.boucle/README.md"
+  cd "$tmpdir" || return
+  ENGINE_DIR=".boucle" BOUCLE_FORGE=github run propagate_consumer_root_files
+  assert_success
+  run cat "$tmpdir/README.md"
+  assert_output "# consumer README"
+}
