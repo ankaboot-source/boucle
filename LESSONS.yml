@@ -678,3 +678,12 @@
   - 'DO NOT assume the dispatch EXIT trap correctly detects whether the CURRENT run wrote `.boucle-issue`. If a previous issue-webhook dispatch wrote it and the file survived `git clean`, the trap finds
     it and doesn''t flip to exit 1 — triage runs and re-triages the issue. Observed on a consumer (2026-08): an MR-note trigger dispatch chained the worker and exited 0 without writing `.boucle-issue`;
     a stale file survived, triage ran, re-triaged the issue to `spec-review` + `status::human`, blocking the loop.'
+74:
+  title: "Build-heavy worker jobs MUST pin to docker runners with `tags: []`"
+  ✅: 'DO: add `tags: []` to the worker job in `.gitlab-ci.yml`. This restricts the job to runners with no tags (typically docker executors). The `build-site` job already uses this pattern. Shell executors
+    that have tags cannot pick up the job, preventing the WASM OOM that occurs when the build runs on a low-memory shell executor.'
+  ❌: 'DO NOT leave the worker job without a `tags` field. In GitLab CI, a job with no `tags` field can be picked up by ANY runner, including tagged shell executors with insufficient RAM. Observed on a
+    consumer (2026-08): the worker job had `image: docker.io/ankabootops/boucle-agents:latest` but no `tags` field. The shell executor (freeshell-data-runner) picked up the job, ignored the `image:` field,
+    and ran the Astro build directly on the shell host (~1GB RAM). The Go-WASM compiler (`@astrojs/compiler`) crashed with `runtime: out of memory: cannot allocate 4194304-byte block`. The build gate
+    re-triggered the worker 5 times (lesson #72), each time landing on the shell executor and OOMing, until the issue escalated to `boucle:human`. Adding `tags: []` forced the worker to run on the docker
+    runner (Atchoum), which has enough memory for the WASM compiler.'
