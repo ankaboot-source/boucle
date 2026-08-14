@@ -125,7 +125,27 @@ boucle_ci_catchup() {
   fi
 
   # Apply the terminal state ONLY after the audit note is confirmed posted.
+  # In the done branch, also post a deploy-success note with the resolved
+  # production URL BEFORE the terminal label (lesson #59: note FIRST, label
+  # SECOND — abort without the label if the note cannot be posted).
+  local catchup_live_url=""
   if [ "$TARGET" = "done" ]; then
+    catchup_live_url=$(boucle_resolve_live_url "" 2>/dev/null || echo "")
+    if [ -n "$catchup_live_url" ]; then
+      # shfmt off  # preserve exact string content
+      local DEPLOY_NOTE_BODY="✅ Déploiement en production réussi (catch-up).
+
+## URL de production
+$catchup_live_url
+
+## Commit
+${CI_COMMIT_SHA:-unknown}"
+      # shfmt on
+      if ! forge_issue_note "$BOUCLE_ISSUE" "$DEPLOY_NOTE_BODY"; then
+        echo "FAIL: could not post deploy-success note on issue #$BOUCLE_ISSUE — aborting transition." >&2
+        exit 1
+      fi
+    fi
     set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
   else
     set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
@@ -146,7 +166,7 @@ boucle_ci_catchup() {
   fi
 
   # Cascade: if this is a sub-issue, close the parent when all siblings are closed.
-  maybe_close_parent "$BOUCLE_ISSUE"
+  maybe_close_parent "$BOUCLE_ISSUE" "$catchup_live_url"
   # Unblock dependents: if this sub-issue was a dependency of a sibling,
   # check whether that sibling's deps are now all closed and trigger it.
   maybe_unblock_dependents "$BOUCLE_ISSUE"

@@ -167,12 +167,30 @@ boucle_ci_e2e() {
 
   case "$VERDICT" in
     PASS)
+      # Post a deploy-success note on the issue BEFORE the terminal label so
+      # the human sees the production URL. Lesson #59: note FIRST, label
+      # SECOND — if the note cannot be posted, abort WITHOUT the label/close
+      # so the issue stays in a retryable state (no mute state change).
+      # forge_issue_note auto-stamps the <!-- boucle:agent --> marker.
+      # shfmt off  # preserve exact string content
+      DEPLOY_NOTE_BODY="✅ Déploiement en production réussi.
+
+## URL de production
+$LIVE_URL
+
+## Commit
+${CI_COMMIT_SHA:-${MR_HEAD_SHORT:-unknown}}"
+      # shfmt on
+      if ! forge_issue_note "$BOUCLE_ISSUE" "$DEPLOY_NOTE_BODY"; then
+        echo "FAIL: could not post deploy-success note on issue #$BOUCLE_ISSUE — aborting transition (no mute state change)." >&2
+        exit 1
+      fi
       set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
       # boucle:done is a board label, not a close state — close the issue too
       close_issue "$BOUCLE_ISSUE"
       # If this issue is a sub-issue, check whether all siblings are closed
       # and close the parent when the last sub-issue completes.
-      maybe_close_parent "$BOUCLE_ISSUE"
+      maybe_close_parent "$BOUCLE_ISSUE" "$LIVE_URL"
       # Unblock dependents: if this sub-issue was a dependency of a sibling,
       # check whether that sibling's deps are now all closed and trigger it.
       maybe_unblock_dependents "$BOUCLE_ISSUE"

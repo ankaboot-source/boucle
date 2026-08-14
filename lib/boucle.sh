@@ -864,7 +864,7 @@ close_issue() {
 #   1. forge_work_item_children (hierarchy API — includes .state per child).
 #   2. Legacy split-parent marker comment (older boucle versions).
 maybe_close_parent() {
-  local child_iid="$1"
+  local child_iid="$1" live_url="${2:-}"
   # Parse parent IID from the sub-issue body ("## Parent issue\n#N — <url>")
   local child_data parent_iid
   child_data=$(forge_issue_get "$child_iid") || {
@@ -924,6 +924,23 @@ maybe_close_parent() {
     done
     if [ "$all_closed" = "true" ]; then
       echo "maybe_close_parent: all sub-issues of #$parent_iid are closed — closing parent."
+      # Post a note on the parent BEFORE closing it so the human sees the
+      # production URL. Lesson #59: note FIRST, label/close SECOND. A parent
+      # note failure is non-fatal (log + return 0) — the child is already
+      # closed and the doctor retries the parent. forge_issue_note
+      # auto-stamps the <!-- boucle:agent --> marker (lesson #55).
+      local parent_note_body
+      parent_note_body="✅ Tous les sous-issues sont résolus et déployés. Clôture de l'issue parente.
+
+## URL de production
+${live_url:-$(boucle_resolve_live_url "" 2>/dev/null || echo "non disponible")}
+
+## Sous-issues
+$(echo "$sibling_iids" | tr ',' ' ' | sed 's/\([0-9]\+\)/#\1/g')"
+      if ! forge_issue_note "$parent_iid" "$parent_note_body"; then
+        echo "WARN: could not post parent-close note on #$parent_iid — not closing parent (doctor will retry)." >&2
+        return 0
+      fi
       close_issue "$parent_iid"
     fi
     return 0
@@ -939,6 +956,26 @@ maybe_close_parent() {
     echo "maybe_close_parent: open sub-issue(s) #$open_iids — parent #$parent_iid stays open."
   else
     echo "maybe_close_parent: all sub-issues of #$parent_iid are closed — closing parent."
+    # Post a note on the parent BEFORE closing it so the human sees the
+    # production URL. Lesson #59: note FIRST, label/close SECOND. A parent
+    # note failure is non-fatal (log + return 0) — the child is already
+    # closed and the doctor retries the parent. forge_issue_note
+    # auto-stamps the <!-- boucle:agent --> marker (lesson #55).
+    # In the hierarchy path sibling_iids is set at line 899; if empty,
+    # reconstruct from children_data.
+    local parent_note_body hierarchy_siblings
+    hierarchy_siblings="${sibling_iids:-$(echo "$children_data" | jq -r '[.[] | .iid] | join(",")' 2>/dev/null)}"
+    parent_note_body="✅ Tous les sous-issues sont résolus et déployés. Clôture de l'issue parente.
+
+## URL de production
+${live_url:-$(boucle_resolve_live_url "" 2>/dev/null || echo "non disponible")}
+
+## Sous-issues
+$(echo "$hierarchy_siblings" | tr ',' ' ' | sed 's/\([0-9]\+\)/#\1/g')"
+    if ! forge_issue_note "$parent_iid" "$parent_note_body"; then
+      echo "WARN: could not post parent-close note on #$parent_iid — not closing parent (doctor will retry)." >&2
+      return 0
+    fi
     close_issue "$parent_iid"
   fi
 }
