@@ -303,8 +303,18 @@ forge_mr_lookup_by_branch() {
 
 forge_mr_merge_status() {
   local mr_iid="$1"
+  # GitHub's mergeable_state: "clean" and "unstable" mean mergeable,
+  # "dirty" means conflict, "blocked" means checks pending, "unknown"
+  # means GitHub is still computing. Normalize to the GitLab-style status
+  # the merger expects (mergeable/conflict/blocked/unknown) so the
+  # forge layer is vocabulary-agnostic.
   _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid" 2> /dev/null \
-    | jq -r '.["mergeable_state"] // "unknown"' 2> /dev/null || echo "unknown"
+    | jq -r '
+      if .mergeable_state == "clean" or .mergeable_state == "unstable" then "mergeable"
+      elif .mergeable_state == "dirty" then "conflict"
+      elif .mergeable_state == "blocked" then "blocked"
+      else (.mergeable_state // "unknown") end
+    ' 2> /dev/null || echo "unknown"
 }
 
 forge_mr_approvals() {
