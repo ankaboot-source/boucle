@@ -282,10 +282,17 @@ EOF
   # Model/API failure retry: bin/jc exits 4 when the LLM API is
   # unavailable or credits are exhausted. A transient outage (rate
   # limit, brief downtime) should not immediately escalate to
-  # boucle:human — retry once before giving up.
-  # BOUCLE_WORKER_MODEL_FAILURE_RETRIES controls the retry count (default 1).
-  local model_failure_retries="${BOUCLE_WORKER_MODEL_FAILURE_RETRIES:-1}"
-  case "$model_failure_retries" in '' | *[!0-9]*) model_failure_retries=1 ;; esac
+  # boucle:human — retry with exponential backoff + jitter before
+  # giving up.
+  # BOUCLE_WORKER_MODEL_FAILURE_RETRIES controls the retry count (default 3).
+  # BOUCLE_WORKER_MODEL_FAILURE_BASE_DELAY controls the base delay in
+  # seconds (default 15). The delay for attempt N is:
+  #   base_delay * 2^(N-1) + jitter(0..base_delay)
+  # e.g. with defaults: attempt 1 → 15-30s, attempt 2 → 30-45s, attempt 3 → 60-75s.
+  local model_failure_retries="${BOUCLE_WORKER_MODEL_FAILURE_RETRIES:-3}"
+  case "$model_failure_retries" in '' | *[!0-9]*) model_failure_retries=3 ;; esac
+  local base_delay="${BOUCLE_WORKER_MODEL_FAILURE_BASE_DELAY:-15}"
+  case "$base_delay" in '' | *[!0-9]*) base_delay=15 ;; esac
   local attempt=0
   rc=0
   while true; do
@@ -296,8 +303,14 @@ EOF
     fi
     if [ "$rc" -eq 4 ] && [ "$attempt" -lt "$model_failure_retries" ]; then
       attempt=$((attempt + 1))
-      echo "WARN: bin/jc worker exited 4 (model/API failure) — retrying ($attempt/$model_failure_retries) after 30s..."
-      sleep 30
+      # Exponential backoff: base * 2^(attempt-1), capped at 300s (5 min).
+      local exp_delay=$((base_delay * (1 << (attempt - 1))))
+      [ "$exp_delay" -gt 300 ] && exp_delay=300
+      # Jitter: random 0..base_delay seconds, added to exp_delay.
+      local jitter=$((RANDOM % (base_delay + 1)))
+      local total_delay=$((exp_delay + jitter))
+      echo "WARN: bin/jc worker exited 4 (model/API failure) — retrying ($attempt/$model_failure_retries) in ${total_delay}s (backoff=${exp_delay}s + jitter=${jitter}s)..."
+      sleep "$total_delay"
       rc=0
       continue
     fi
