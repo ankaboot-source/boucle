@@ -687,3 +687,12 @@
     and ran the Astro build directly on the shell host (~1GB RAM). The Go-WASM compiler (`@astrojs/compiler`) crashed with `runtime: out of memory: cannot allocate 4194304-byte block`. The build gate
     re-triggered the worker 5 times (lesson #72), each time landing on the shell executor and OOMing, until the issue escalated to `boucle:human`. Adding `tags: []` forced the worker to run on the docker
     runner (Atchoum), which has enough memory for the WASM compiler.'
+75:
+  title: Legitimate dispatch no-ops MUST NOT trigger the anti-accumulation trap
+  ❌: 'DO NOT use a bare `exit 0` in a dispatch no-op path (closed-issue guard, bot-event filter, chain_to_role paths, unhandled event classes) when an EXIT trap flips `exit 0` without `.boucle-issue` to
+    `exit 1`. The trap catches accidental no-ops (a code path that forgot to write `.boucle-issue`) but also every LEGITIMATE no-op — a closed-issue guard that correctly skips, a bot-event filter that
+    correctly discards, a chain_to_role that correctly triggers via API. Each legitimate no-op exits 0 → the trap flips to exit 1 → the pipeline shows FAILED. A webhook storm on a closed issue (label
+    changes, bot notes, emoji reactions) produces dozens of failed trigger pipelines that saturate the runners and block real work.'
+  ✅: 'DO: use a `dispatch_noop()` helper that writes a `.boucle-noop` marker before `exit 0`. The EXIT trap checks for BOTH `.boucle-issue` (real work) AND `.boucle-noop` (legitimate no-op) before
+    flipping to `exit 1`. Replace EVERY bare `exit 0` in dispatch with `dispatch_noop()`. Clear `.boucle-noop` at startup alongside `.boucle-issue`. This preserves the anti-accumulation property
+    (accidental no-ops still fail) while allowing legitimate no-ops to exit cleanly.'
