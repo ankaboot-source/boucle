@@ -45,6 +45,69 @@ boucle_ci_triage() {
   fi
   export BOUCLE_ISSUE="$IID"
 
+  # ── No-key detection (freeride mode) ──────────────────────────────
+  # If no LLM configuration is available, post a help message explaining
+  # how to set up a free-tier API key. The issue goes to boucle:needs-info.
+  # The user re-triggers by reacting with 👍 ❤️ 🎉 or 🚀 after adding a key.
+  if ! has_llm_config 2>/dev/null; then
+    echo "[boucle:no-key] no LLM configuration found — posting help message"
+    EXISTING_HELP=$(forge_issue_notes "$IID" 2>/dev/null \
+      | jq -r '[.[] | select(.body | contains("<!-- boucle:needs-info") and contains("reason=no-key"))] | last | .id // 0' 2>/dev/null || echo "0")
+
+    HELP_MSG=$(cat << 'HELP_EOF'
+## Boucle needs an API key to start
+
+Boucle can run on **free-tier LLM providers** — no paid account required.
+Pick one (or more), create a free API key, and add it as a CI/CD variable.
+
+### Free-tier providers
+
+| Provider | CI/CD variable | Sign up |
+|---|---|---|
+| OpenRouter | `BOUCLE_OPENROUTER_API_KEY` | https://openrouter.ai/keys |
+| NVIDIA NIM | `BOUCLE_NVIDIA_API_KEY` | https://build.nvidia.com |
+| Groq | `BOUCLE_GROQ_API_KEY` | https://console.groq.com/keys |
+| Cerebras | `BOUCLE_CEREBRAS_API_KEY` | https://cloud.cerebras.ai |
+| Zhipu (GLM) | `BOUCLE_ZHIPU_API_KEY` | https://open.bigmodel.cn |
+| Cloudflare | `BOUCLE_CLOUDFLARE_API_KEY` + `BOUCLE_CLOUDFLARE_ACCOUNT_ID` | https://dash.cloudflare.com |
+| HuggingFace | `BOUCLE_HUGGINGFACE_API_KEY` | https://huggingface.co/settings/tokens |
+| Mistral | `BOUCLE_MISTRAL_API_KEY` | https://console.mistral.ai |
+
+### How to set up
+
+1. Create a free account on one of the providers above
+2. Generate an API key
+3. Add it as a CI/CD variable in **Settings → CI/CD → Variables** (masked, protected)
+4. React to this comment with 👍 to re-trigger boucle
+
+### Want better Quality?
+
+Configure a dedicated endpoint instead:
+- `BOUCLE_LLM_BASE_URL` — your OpenAI-compatible endpoint
+- `BOUCLE_LLM_API_KEY` — your API key
+
+Free-tier models are less capable and less reliable. For production use,
+a paid provider is recommended.
+
+<!-- boucle:needs-info v=1 reason=no-key -->
+HELP_EOF
+)
+
+    if [ "$EXISTING_HELP" != "0" ] && [ -n "$EXISTING_HELP" ]; then
+      forge_issue_note_update "$IID" "$EXISTING_HELP" "$HELP_MSG" 2>/dev/null || true
+    else
+      forge_issue_note "$IID" "$HELP_MSG" 2>/dev/null || true
+    fi
+
+    REPORTER_ID=$(resolve_reporter_id "$IID" 2>/dev/null || echo "")
+    if [ -n "$REPORTER_ID" ]; then
+      forge_issue_assign "$IID" "$REPORTER_ID" 2>/dev/null || true
+    fi
+
+    set_boucle_label "$IID" "boucle:needs-info" "boucle::status::bot" 2>/dev/null || true
+    exit 0
+  fi
+
   # Label helper: preserve non-boucle labels when writing a boucle label.
   # The jq filter uses startswith("boucle:") which catches BOTH the detail
   # axis (boucle:triage) AND the gross axis (boucle::status::bot, also
@@ -407,7 +470,7 @@ boucle_ci_triage() {
           # note). Falls back to a standalone POST if the triage note cannot
           # be resolved or the PUT fails — approval detection tolerates both
           # shapes (doctor polls "React with" across all notes).
-          SPEC_MSG=$(printf '## Validation\n\nReview the **TL;DR** above. If it matches what you want:\n- React with 👍 ✅ ☑️ ✔️ 🆗 or 👌 on this comment to approve, OR\n- Reply to this issue with any comment.\nIf not, reply with corrections.')
+          SPEC_MSG=$(printf '## Validation\n\nReview the **TL;DR** above. If it matches what you want:\n- React with 👍 ❤️ 🎉 or 🚀 on this comment to approve, OR\n- Reply to this issue with any comment.\nIf not, reply with corrections.')
           TRIAGE_NOTE_ID=$(forge_issue_notes "$IID" 2> /dev/null \
             | jq -r '[.[] | select(.body | contains("<!-- boucle:triage") and contains("## TL;DR") and contains("## Disposition"))]
                             | sort_by(.created_at) | last | .id' 2> /dev/null || echo "")
