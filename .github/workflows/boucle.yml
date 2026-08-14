@@ -213,6 +213,7 @@ jobs:
     # only exists at the engine root, not inside the .boucle/ submodule.
     if: github.repository == 'ankaboot-source/boucle'
     runs-on: ubuntu-latest
+    continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     steps:
       - uses: actions/checkout@v4
         with:
@@ -240,6 +241,7 @@ jobs:
   # ── dispatch: webhook router (issues, PRs, comments, reviews) ─────────────────
   dispatch:
     runs-on: ubuntu-latest
+    continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     if: |
       github.event_name == 'issues'
       || github.event_name == 'pull_request'
@@ -290,6 +292,7 @@ jobs:
   triage:
     needs: dispatch
     runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
+    continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     if: needs.dispatch.outputs.issue-iid != ''
     timeout-minutes: 10
     steps:
@@ -337,6 +340,7 @@ jobs:
   # ── worker: implement on branch boucle/<iid> ─────────────────────────────────
   worker:
     runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
+    continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     if: |
       (github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'worker')
       || (github.event_name == 'issues' && contains(github.event.action, 'labeled') && contains(github.event.label.name, 'boucle:todo'))
@@ -404,6 +408,7 @@ jobs:
   # ── reviewer: adversarial review against preview ──────────────────────────────
   reviewer:
     runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
+    continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'reviewer'
     timeout-minutes: 30
@@ -451,6 +456,7 @@ jobs:
   # ── merger: rebase + merge PR (serial) ────────────────────────────────────────
   merger:
     runs-on: ubuntu-latest
+    continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'merger'
     timeout-minutes: 10
@@ -490,6 +496,7 @@ jobs:
   # ── post-merge: poll deploy, trigger e2e ──────────────────────────────────────
   post-merge:
     runs-on: ubuntu-latest
+    continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'post-merge'
     timeout-minutes: 30
@@ -525,6 +532,7 @@ jobs:
   # ── catchup: close issue after merge, cascade parent ─────────────────────────
   catchup:
     runs-on: ubuntu-latest
+    continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     if: |
       github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
     timeout-minutes: 5
@@ -581,6 +589,7 @@ jobs:
   # ── e2e: verify on live/preview URL ───────────────────────────────────────────
   e2e:
     runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
+    continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'e2e'
     timeout-minutes: 20
@@ -627,6 +636,7 @@ jobs:
   # ── doctor: periodic recovery (schedule) ──────────────────────────────────────
   doctor:
     runs-on: ubuntu-latest
+    continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     if: github.event_name == 'schedule'
     timeout-minutes: 5
     steps:
