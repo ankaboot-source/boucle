@@ -1640,7 +1640,7 @@ boucle_deepen_rebase_fetch() {
 # to detect the no-key condition before launching the agent.
 has_llm_config() {
   [ -n "${BOUCLE_LLM_BASE_URL:-}" ] && [ -n "${BOUCLE_LLM_API_KEY:-}" ] && return 0
-  for _key_var in BOUCLE_GROQ_API_KEY BOUCLE_OPENROUTER_API_KEY BOUCLE_NVIDIA_API_KEY \
+  for _key_var in BOUCLE_GROQ_API_KEY BOUCLE_NVIDIA_API_KEY \
     BOUCLE_CEREBRAS_API_KEY BOUCLE_ZHIPU_API_KEY BOUCLE_CLOUDFLARE_API_KEY \
     BOUCLE_HUGGINGFACE_API_KEY BOUCLE_MISTRAL_API_KEY; do
     eval "_val=\${${_key_var}:-}"
