@@ -933,7 +933,7 @@ maybe_close_parent() {
       parent_note_body="✅ All sub-issues resolved and deployed. Closing parent issue.
 
 ## Production URL
-${live_url:-$(boucle_resolve_live_url "" 2>/dev/null || echo "unavailable")}
+${live_url:-$(boucle_resolve_live_url "" 2> /dev/null || echo "unavailable")}
 
 ## Sub-issues
 $(echo "$sibling_iids" | tr ',' ' ' | sed 's/\([0-9]\+\)/#\1/g')"
@@ -964,11 +964,11 @@ $(echo "$sibling_iids" | tr ',' ' ' | sed 's/\([0-9]\+\)/#\1/g')"
     # In the hierarchy path sibling_iids is set at line 899; if empty,
     # reconstruct from children_data.
     local parent_note_body hierarchy_siblings
-    hierarchy_siblings="${sibling_iids:-$(echo "$children_data" | jq -r '[.[] | .iid] | join(",")' 2>/dev/null)}"
+    hierarchy_siblings="${sibling_iids:-$(echo "$children_data" | jq -r '[.[] | .iid] | join(",")' 2> /dev/null)}"
     parent_note_body="✅ All sub-issues resolved and deployed. Closing parent issue.
 
 ## Production URL
-${live_url:-$(boucle_resolve_live_url "" 2>/dev/null || echo "unavailable")}
+${live_url:-$(boucle_resolve_live_url "" 2> /dev/null || echo "unavailable")}
 
 ## Sub-issues
 $(echo "$hierarchy_siblings" | tr ',' ' ' | sed 's/\([0-9]\+\)/#\1/g')"

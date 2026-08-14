@@ -347,7 +347,7 @@ Readiness: 54/100  (1 blocker(s), 0 degraded, 2 advisory)
 |---|---|---:|
 | **blocker** | The loop cannot complete | −40 |
 | **degraded** | Works, silently wrong (an inert fallback, a re-trigger that fires mid-job) | −15 |
-| **advisory** | Worth knowing (a UTC quiet window, a missing visual charter) | −3 |
+| **advisory** | Worth knowing (a UTC quiet window, a missing design charter) | −3 |
 
 Blockers dominate on purpose: a repository that cannot complete a loop must
 not score well because everything else is tidy. A blocker exits non-zero, so

@@ -177,9 +177,9 @@ run_config_audit() {
   # The worker reads the charter before any UI work.
   if [ -x "${BOUCLE_HOME}/bin/check-design-charter" ]; then
     if "${BOUCLE_HOME}/bin/check-design-charter" > /dev/null 2>&1; then
-      pass "visual charter is valid"
+      pass "design charter is valid"
     else
-      audit_advisory "the visual charter is missing or incomplete" \
+      audit_advisory "the design charter is missing or incomplete" \
         "Run ${BOUCLE_HOME}/bin/check-design-charter for details. UI work will fall back to generic design defaults."
     fi
   fi
