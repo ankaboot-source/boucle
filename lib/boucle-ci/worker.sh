@@ -728,8 +728,15 @@ ${screenshot_urls}"
     "$BOUCLE_ISSUE" "$ITERATION" "$mr_max_iter" "$final_attempt_block" "$preview_line" "${commit_summary:-(no commits)}" "${approach:-(not recorded)}" "$cost_block" "$BOUCLE_ISSUE" "$commit_count" "$ITERATION" "$mr_max_iter" "$(boucle_deploy_mode)" "$(boucle_review_mode)")
 
   # ── File-impact marker refresh (F1 guard) ─────────────────────────
-  # Refresh the <!-- boucle:files v=1 paths=... --> marker note with the
-  # actual branch diff. Skipped when the branch has no commits ahead (e.g.
+  # Refresh the <!-- boucle:files v=1 paths=... --> marker with the actual
+  # branch diff. The triage agent embeds the marker inside its spec comment
+  # (the `## Fichiers impactés` section); the refresh MUST NOT target that
+  # spec note — updating it with a marker-only body would destroy the
+  # human-visible spec. Instead, target the newest marker note that is NOT
+  # a triage spec comment (a prior refresh note); if none exists, post a
+  # new standalone marker note. The gate (parse_files_marker) picks the
+  # newest marker note across all notes, so the refresh supersedes the
+  # triage prediction. Skipped when the branch has no commits ahead (e.g.
   # after an adaptive reset) to preserve the last non-empty claim mid-flight
   # — a parallel worker would otherwise start into the same files.
   if [ "${BOUCLE_FILE_GATE:-true}" != "false" ]; then
@@ -740,8 +747,10 @@ ${screenshot_urls}"
       if [ -n "$refresh_paths" ]; then
         local marker_body existing_note_id
         marker_body="<!-- boucle:files v=1 paths=$refresh_paths -->"
+        # Newest files-marker note that is NOT the triage spec comment
+        # (excludes bodies carrying `boucle:triage` or `boucle:draft role=triage`).
         existing_note_id=$(forge_issue_notes "$BOUCLE_ISSUE" 2> /dev/null \
-          | jq -r '[.[] | select(.body | contains("<!-- boucle:files v=1"))] | sort_by(.created_at) | last | .id // empty' 2> /dev/null)
+          | jq -r '[.[] | select(.body | contains("<!-- boucle:files v=1")) | select(.body | test("boucle:triage v=1|boucle:draft role=triage") | not)] | sort_by(.created_at) | last | .id // empty' 2> /dev/null)
         if [ -n "$existing_note_id" ]; then
           forge_issue_note_update "$BOUCLE_ISSUE" "$existing_note_id" "$marker_body" \
             || echo "[boucle] WARN: marker note update failed — leaving stale marker (fail-open)"
