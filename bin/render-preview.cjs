@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 // bin/render-preview.cjs — renders preview.html → one PNG per viewport
 // Called by the triage CI job's visual-preview block (opt-in, exceptional).
-// Usage: NODE_PATH=/tmp/node_modules node bin/render-preview.cjs <input.html> <output.png>
+// Usage: NODE_PATH=/tmp/node_modules node bin/render-preview.cjs <input.html|http(s)://url> <output.png>
+// The input may be a local HTML file (rendered via file://) or an http(s)://
+// URL (e.g. a page served by `python3 -m http.server`), which is navigated to
+// directly.
 //
 // Viewports come from BOUCLE_PREVIEW_VIEWPORTS (comma-separated WxH,
 // default "390x844,1440x900" — one phone, one desktop). The human approving
@@ -71,7 +74,7 @@ async function main() {
   const produced = [];
   try {
     const page = await browser.newPage();
-    const url = 'file://' + path.resolve(input);
+    const url = /^https?:\/\//i.test(input) ? input : 'file://' + path.resolve(input);
     for (const vp of viewports) {
       const target = `${stem}-${vp.width}x${vp.height}${ext}`;
       try {

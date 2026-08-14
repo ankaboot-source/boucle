@@ -929,10 +929,20 @@ Verify content fidelity: the issue body below is the original spec. Check that t
       # mode with an empty BOUCLE_DEPLOY_CMD): the CI injected the MR diff
       # and check suites into BOUCLE_MR_DIFF / BOUCLE_MR_CHECKS. The
       # reviewer must grade against those instead of a deployed preview.
+      # Screenshot mode: the worker captured screenshots of impacted pages
+      # and describe-images --criteria generated per-criterion verdicts
+      # (MET/NOT MET/UNCLEAR) in .image-descriptions.md. The reviewer
+      # grades against those text descriptions, not a deployed URL.
       if [ -z "${BOUCLE_PREVIEW_URL:-}" ]; then
-        prompt="${prompt}
+        if [ "$(boucle_review_mode)" = "screenshot" ]; then
+          prompt="${prompt}
+SCREENSHOT review mode (no deployed preview URL). The worker captured screenshots of the impacted pages and uploaded them to the MR. The vision model has reviewed each screenshot against the acceptance criteria — its per-criterion verdicts (MET/NOT MET/UNCLEAR with justifications) are in the image descriptions section below. Grade each acceptance criterion against those descriptions. Also review the MR diff (\$BOUCLE_MR_DIFF) for code quality. Note in your verdict that this was a screenshot review (no deployed preview).
+"
+        else
+          prompt="${prompt}
 NO preview URL is available (diff review mode). Grade the MR against \$BOUCLE_MR_DIFF (the MR diff, injected by CI) and \$BOUCLE_MR_CHECKS (the check suites). Verify each criterion against the code in the diff, not a deployed site. Note in your verdict that this was a diff review (no preview deploy).
 "
+        fi
       fi
       if [ -n "${BOUCLE_EVIDENCE_PACK:-}" ]; then
         prompt="${prompt}

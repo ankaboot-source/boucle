@@ -1008,7 +1008,8 @@ boucle_deploy_mode() {
 }
 
 # boucle_review_mode
-#   Echo the current review mode ("preview" or "diff"). Default: "preview".
+#   Echo the current review mode ("preview", "diff", or "screenshot").
+#   Default: "preview".
 boucle_review_mode() {
   echo "${BOUCLE_REVIEW_MODE:-preview}"
 }
@@ -1035,6 +1036,19 @@ boucle_is_preview_review() {
 #   Returns 0 (true) if BOUCLE_REVIEW_MODE is "diff", 1 (false) otherwise.
 boucle_is_diff_review() {
   [ "$(boucle_review_mode)" = "diff" ]
+}
+
+# boucle_is_screenshot_review
+#   Returns 0 (true) if BOUCLE_REVIEW_MODE is "screenshot", 1 (false) otherwise.
+#   Screenshot mode: the worker builds the site, serves it locally
+#   (python3 -m http.server), captures screenshots of impacted pages via
+#   puppeteer/chromium, uploads them to the MR. The reviewer receives the
+#   screenshots as text descriptions (via describe-images with criteria)
+#   instead of probing a deployed preview URL. No deploy command, no token,
+#   no CDN propagation wait. Ideal for GitLab CE (no per-branch Pages) or
+#   any token-less setup where visual review still matters.
+boucle_is_screenshot_review() {
+  [ "$(boucle_review_mode)" = "screenshot" ]
 }
 
 # boucle_resolve_live_url [deploy_log]
@@ -1125,6 +1139,12 @@ boucle_worker_should_deploy() {
   fi
   # Skip deploy in diff review mode (no preview needed)
   if boucle_is_diff_review; then
+    return 1
+  fi
+  # Skip deploy in screenshot review mode — the worker captures screenshots
+  # locally (python3 -m http.server + puppeteer) instead of deploying a
+  # preview. No BOUCLE_DEPLOY_CMD, no token, no CDN.
+  if boucle_is_screenshot_review; then
     return 1
   fi
   return 0
