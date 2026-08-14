@@ -202,13 +202,16 @@
     the system action — so the ACTOR guard passes, but the note is NOT a human reply. Without a system-note filter, creating an issue + assigning the bot in the same form fires BOTH an `issue` webhook (open
     → triage) AND a `note` webhook (system "assigned to @up-bot" → triage again), double-triggering triage. The triage job has no `resource_group` (BOUCLE_ISSUE is not available at pipeline eval time),
     so the two pipelines run in parallel → congestion.
+35:
+  pruned: true
+  reason: pruned in 96c462f — was a one-off bug (MR-note dispatch passing BOUCLE_ITERATION), code fix prevents recurrence
 36:
   title: Approach MUST use bullet points AND be filled (not placeholder)
   ✅:
   - 'DO: write the Approach as 3-6 bullet points (`- item`), one per aspect of the implementation. Each bullet cites the charter doc section it conforms to (e.g. "Conforms to the visual charter §2 — sharp
     corners via `--radius-sharp`"). Bullet points and blank lines render properly in GitLab markdown.'
   - 'DO: the worker MUST fill the Approach section with 2-5 sentences explaining the implementation approach and citing the specific charter doc sections it conformed to (`worker.md` step 8). The CI extraction
-    (`APPROACH=$(sed -n ''/^## Approach/,/^## /p'' state.md ...`) now falls back to an explicit note when the section is still the placeholder, so the MR description is never the literal seed text.'
+    (`APPROACH=$(sed -n ''/^## Approach/,/^## /p'' state.md...`) now falls back to an explicit note when the section is still the placeholder, so the MR description is never the literal seed text.'
   ❌:
   - DO NOT write the `## Approach` section as a paragraph of 2-5 sentences. GitLab markdown renders single newlines (soft breaks) as spaces, so a paragraph becomes an unreadable wall of text in the MR description.
     The worker prompt said "Write 2-5 sentences" — the worker wrote one long paragraph, and the MR description was a single 500-char block with no visual structure.
@@ -242,6 +245,9 @@
   - 'DO NOT include consumer-identifying information in upstream (boucle) contributions — PRs, issues, commits, branch names, or any artifact visible on the upstream repo. The upstream boucle repo is shared/public;
     consumer project information is private. This includes:'
   - DO NOT write "fixes from work on <consumer-name>" or "found on <consumer-domain>" in PR descriptions. This leaks the consumer identity to anyone reading the upstream repo.
+39:
+  pruned: true
+  reason: pruned in 96c462f — was a one-off discovery (sync skills to consumers), code fix in SYNC_PATHS prevents recurrence
 40:
   title: Split bookkeeping MUST be atomic and label-first
   ✅: 'DO: set the `boucle:split` label FIRST (dispatch and doctor stop re-triaging even if later steps fail), then post ONE merged comment containing both the human-readable list and the `<!-- boucle:split-parent
@@ -263,8 +269,8 @@
     + `$ ` PS4 prompt) in `agent-output.log`. A trace line like `[0m$ [0mglab mr note 36 --message "VERDICT: PASS"` contains the substring `VERDICT: PASS` — an unanchored grep matches it inside the trace,
     and the log-scraping fallback posts the trace as a verdict note. The result: a malformed note (containing shell trace output) appears on the MR, and CI may parse a phantom VERDICT from a command the
     agent echoed but never actually posted as a real verdict.'
-  - 'DO NOT assume the awk `^VERDICT:` exit guard is sufficient. The awk exits on `^VERDICT:` (start-of-line), but the trace line starts with `[0m$` (ANSI reset + PS4), so awk keeps printing past it. The
-    downstream `grep -qiE ''VERDICT: ...''` validation then matches the substring inside the trace line — because it is NOT anchored.'
+  - DO NOT assume the awk `^VERDICT:` exit guard is sufficient. The awk exits on `^VERDICT:` (start-of-line), but the trace line starts with `[0m$` (ANSI reset + PS4), so awk keeps printing past it. The
+    downstream `grep -qiE 'VERDICT:...'` validation then matches the substring inside the trace line — because it is NOT anchored.
   - 'DO NOT use an unanchored awk regex like `$0 ~ "<!-- boucle:verdict v=1 role=reviewer sha=... -->"` to detect the start of a drafted verdict in `agent-output.log`. When an agent exhausts its step budget
     mid-draft, its stdout often contains meta-instructions to itself that quote the marker in prose. An unanchored `$0 ~` matches the marker substring inside that prose sentence, sets `found=1`, and the
     awk scrapes everything from the prose line through the trailing `VERDICT: PASS` — promoting a self-referential draft into a real verdict note.'
@@ -282,14 +288,14 @@
 43:
   title: Never use `UNCERTAIN|*)` as a case catch-all
   ✅: 'DO: use `UNCERTAIN)` (no `|*`) as an explicit branch for the genuine UNCERTAIN verdict. Let empty VERDICT fall through the `case` without side effects, and handle it exclusively in the post-case assertion
-    (`if [ -z "$VERDICT" ]; then ... re-trigger or escalate`). The assertion already has the iteration logic (`iter < MAX_ITER` → re-trigger, else → escalate to human with MR assignment + note). This applies
-    to BOTH the reviewer job and the e2e job — they share the same `case "$VERDICT" in ... UNCERTAIN|*) ... esac` + `if [ -z "$VERDICT" ]` pattern.'
+    (`if [ -z "$VERDICT" ]; then... re-trigger or escalate`). The assertion already has the iteration logic (`iter < MAX_ITER` → re-trigger, else → escalate to human with MR assignment + note). This applies
+    to BOTH the reviewer job and the e2e job — they share the same `case "$VERDICT" in... UNCERTAIN|*)... esac` + `if [ -z "$VERDICT" ]` pattern.'
   ❌:
   - 'DO NOT use `UNCERTAIN|*)` as the catch-all branch in a bash `case` statement that switches on `$VERDICT`. In bash, `*)` matches the empty string, so when the agent posted no verdict (step-exhausted,
     crashed, or only a draft with no `VERDICT:` line), `VERDICT` is empty and the `UNCERTAIN|*)` branch fires — prematurely escalating to `boucle:human`, assigning the MR to the human, and posting the "unparsable"
     note. This happens BEFORE the post-case assertion (which would have re-triggered the reviewer/e2e for another attempt). The result: the MR is assigned to the human while the re-triggered reviewer is
-    still running, and 3 duplicate "unparsable" notes appear on the issue (one per iteration, because each iteration''s case block fires the catch-all before the assertion re-triggers). This was MR !40
-    on a consumer repo: the reviewer posted only drafts on iterations 1-2, the catch-all fired each time, and the human saw "assigned mid-review" + a cascade of failed trigger pipelines.'
+    still running, and 3 duplicate "unparsable" notes appear on the issue (one per iteration, because each iteration''s case block fires the catch-all before the assertion re-triggers). This was: the reviewer
+    posted only drafts on iterations 1-2, the catch-all fired each time, and the human saw "assigned mid-review" + a cascade of failed trigger pipelines.'
   - 'DO NOT conflate "genuinely UNCERTAIN verdict" (agent posted `VERDICT: UNCERTAIN`) with "no verdict found" (agent posted nothing parsable). These are two different conditions requiring different actions:
     UNCERTAIN is a terminal human escalation; empty VERDICT is a retryable failure that should re-trigger the agent.'
 44:
@@ -319,10 +325,9 @@
   ❌:
   - DO NOT detect a draft triage/reviewer comment by grepping the body for the word "DRAFT". The word "DRAFT" can legitimately appear in website content being triaged (e.g. a draft page the author wants
     reviewed), so a body-text grep produces false positives.
-  - 'DO NOT post a first-pass draft with the FINAL marker (`<!-- boucle:triage v=1 -->` or `<!-- boucle:verdict v=1 ... -->`). The CI parser acts immediately on the final marker — it sets the disposition
-    label, assigns the issue/MR, and pauses the loop before the agent can refine. The refinement is wasted. This was issue #42 on a consumer repo: the triage agent posted a NEEDS-INFO draft with the final
-    `<!-- boucle:triage v=1 -->` marker, the CI immediately set `boucle:needs-info` + `boucle::status::human` and assigned the issue to the reporter, before the agent could post its refined comment with
-    the actual blocking questions.'
+  - 'DO NOT post a first-pass draft with the FINAL marker (`<!-- boucle:triage v=1 -->` or `<!-- boucle:verdict v=1... -->`). The CI parser acts immediately on the final marker — it sets the disposition
+    label, assigns the issue/MR, and pauses the loop before the agent can refine. The refinement is wasted. This was: the triage agent posted a NEEDS-INFO draft with the final `<!-- boucle:triage v=1 -->`
+    marker, the CI immediately set `boucle:needs-info` + `boucle::status::human` and assigned the issue to the reporter, before the agent could post its refined comment with the actual blocking questions.'
 46:
   title: Preserve instructed content
   ✅:
@@ -419,16 +424,16 @@
   ❌:
   - 'DO NOT let a port/rewrite of the CI engine remove the MR feedback lookup (`MR_FOR_FEEDBACK` + `BOUCLE_REVIEWER_FEEDBACK` in the worker and reviewer jobs) while leaving the orphaned `export BOUCLE_MR_IID="$MR_FOR_FEEDBACK"`
     + `fetch-mr-attachments` call behind. The failure is indistinguishable from a first run: every worker iteration logs "BOUCLE_MR_IID is empty (no MR on first run)" while an MR is open and accumulating
-    human comments. MR !59 on a consumer repo: after the jcode port (`.boucle-version 13316ff`, synced 2026-08-06) all 6+ worker iterations re-ran blind — the human''s "il faut un exemple d''article" and
-    3 mockup images never reached the worker, which re-implemented the same component ~20 times without ever creating the requested example article. The reviewer (which kept its own channel) FAILed repeatedly
-    citing the human request, one PASS validated the unaddressed amendment, the iteration cap escalated to `boucle:human`, and the old engine''s per-run `git reset --hard` left the MR empty (`commits_status`)
-    for the merger/doctor to loop on.'
+    human comments.: after the jcode port (`.boucle-version 13316ff`, synced 2026-08-06) all 6+ worker iterations re-ran blind — the human''s "il faut un exemple d''article" and 3 mockup images never reached
+    the worker, which re-implemented the same component ~20 times without ever creating the requested example article. The reviewer (which kept its own channel) FAILed repeatedly citing the human request,
+    one PASS validated the unaddressed amendment, the iteration cap escalated to `boucle:human`, and the old engine''s per-run `git reset --hard` left the MR empty (`commits_status`) for the merger/doctor
+    to loop on.'
   - 'DO NOT rely on the lookup living in only one place. `.gitlab-ci.yml` is replaced wholesale by engine syncs (`chore: sync boucle engine to <sha>` = `cp -r`), so a guard embedded only in that file dies
     with the regression it guards.'
   - DO NOT fetch MR notes as text-only (`.body` field) and silently drop embedded `/uploads/...` image links. A reviewer or human who attaches a screenshot of a bug or a mockup to an MR comment has their
     text passed to the worker but the image is invisible — the worker cannot see the very evidence that prompted the feedback.
 55:
-  title: "Recognise boucle's own writes by a stamp, never by the actor's\n    identity"
+  title: "Recognise boucle's own writes by a stamp, never by the actor's\n identity"
   ✅:
   - 'DO: See [SKILL.md](SKILL.md) §I7 (Marker-based self-recognition).'
   - 'DO: keep the guard identical in every copy of the routing while the CI paths remain unconverged. A guard that lands in one copy and not the other breaks that path silently.'
@@ -442,14 +447,14 @@
 56:
   title: User-facing notes MUST NOT contain literal env var names
   ✅:
-  - 'DO: pass the value as a `printf` argument instead of embedding the name in the format string: `printf ''... onto %s ...'' ... "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}"`. The note then
-    shows the actual branch name (`master`, `main`, ...).'
+  - 'DO: pass the value as a `printf` argument instead of embedding the name in the format string: `printf ''... onto %s...''... "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}"`. The note then
+    shows the actual branch name (`master`, `main`,...).'
   - 'DO: when a note/message is duplicated across engine copies (`.gitlab-ci.yml` inline + `lib/boucle-ci/*.sh`), grep ALL copies for the same message before fixing — a fix in one copy alone leaves the
     bug live on the other path.'
   ❌:
-  - 'DO NOT interpolate an env var inside a single-quoted `printf` format string and expect it to expand. `printf ''... onto $CI_DEFAULT_BRANCH ...''` posts the literal text `$CI_DEFAULT_BRANCH` to the
-    issue/MR — the human sees a raw variable name in the note. The reviewer PASS approval message did exactly this: "The merger will then rebase the MR onto $CI_DEFAULT_BRANCH" appeared verbatim on a consumer
-    issue instead of the real branch name.'
+  - 'DO NOT interpolate an env var inside a single-quoted `printf` format string and expect it to expand. `printf ''... onto $CI_DEFAULT_BRANCH...''` posts the literal text `$CI_DEFAULT_BRANCH` to the issue/MR
+    — the human sees a raw variable name in the note. The reviewer PASS approval message did exactly this: "The merger will then rebase the MR onto $CI_DEFAULT_BRANCH" appeared verbatim on a consumer issue
+    instead of the real branch name.'
   - DO NOT "preserve" such a literal with a `shellcheck disable=SC2016` comment on the assumption that the literal was intended. When the reviewer job was ported from `.gitlab-ci.yml` into `lib/boucle-ci/reviewer.sh`,
     the literal `$CI_DEFAULT_BRANCH` was copied as `$BOUCLE_DEFAULT_BRANCH` and locked in with a SC2016 disable — cementing the bug in BOTH engine copies instead of fixing it.
 57:
@@ -494,7 +499,7 @@
     note (progress notes like "🔄 re-running") must append `|| true` EXPLICITLY — never rely on the helper swallowing for them.'
   - 'DO: apply the same pattern to the INLINE copies (`.gitlab-ci.yml` jobs) and the extracted copies (`lib/boucle-ci/*.sh`) — the two copies must stay in sync (lesson #56 greps ALL copies).'
   ❌:
-  - 'DO NOT post an escalation/catchup note with a `... > /dev/null 2>&1 || true` swallow (helpers) or a bare `glab api ... notes ... > /dev/null` (inline jobs) and set the terminal label (`boucle:human`
+  - 'DO NOT post an escalation/catchup note with a `... > /dev/null 2>&1 || true` swallow (helpers) or a bare `glab api... notes... > /dev/null` (inline jobs) and set the terminal label (`boucle:human`
     / `boucle:done`) regardless of whether the POST actually landed. Observed on a consumer work item (2026-08): the labels flipped to `boucle:human` at 14:55:50 while the explanation note POST was silently
     dropped — the human saw a state with no message, and had to reconstruct from the CI logs WHY the issue landed on them. A terminal transition without its note is a silent failure (lesson #2) wearing
     a success label.'
@@ -524,10 +529,10 @@
   ✅: 'DO: on "open MR also exists", fall THROUGH to the re-trigger logic (active-pipeline check → staleness check → `chain_to_role`) instead of `continue` — the open MR is active work, so a stuck worker/reviewer
     on it MUST be recovered. Only the terminal branches (MR merged / MR closed with NO open MR) may `continue`.'
   ❌:
-  - 'DO NOT `continue` in the doctor''s stuck-issue loop when a closed (or merged) MR coexists with an open MR on the same branch. The "skipping close" branch is meant to avoid CLOSING the issue — but the
-    `continue` also skips the re-trigger logic below, stranding the issue at `boucle:working` forever. Observed on a consumer (2026-08): issue #55 had a closed MR from a previous iteration (!59) plus the
-    current open MR (!93); the doctor logged "closed MR exists but an open MR also exists — skipping close" every 10 minutes and never re-triggered the stuck worker. With `BOUCLE_MAX_PARALLEL_ISSUES=1`
-    the stranded issue occupied the single worker slot, so a second queued issue (`boucle:todo`) was never started either — two issues blocked by one `continue`.'
+  - DO NOT `continue` in the doctor's stuck-issue loop when a closed (or merged) MR coexists with an open MR on the same branch. The "skipping close" branch is meant to avoid CLOSING the issue — but the
+    `continue` also skips the re-trigger logic below, stranding the issue at `boucle:working` forever. Observed on a consumer (2026-08):had a closed MR from a previous iteration (!59) plus the current open
+    MR (!93); the doctor logged "closed MR exists but an open MR also exists — skipping close" every 10 minutes and never re-triggered the stuck worker. With `BOUCLE_MAX_PARALLEL_ISSUES=1` the stranded
+    issue occupied the single worker slot, so a second queued issue (`boucle:todo`) was never started either — two issues blocked by one `continue`.
   - 'DO NOT fix only one copy. The guard lives in BOTH the extracted `lib/boucle-ci/doctor.sh` and the inline doctor job in `.gitlab-ci.yml`, in TWO branches each (merged-MR and closed-MR). A fix in one
     copy leaves the bug live on the other (lesson #56 greps ALL copies).'
 62:
@@ -539,14 +544,14 @@
   - DO NOT launch a worker whose issue claims files already claimed by an in-flight issue — the branches will conflict at rebase/merge and burn the conflict-retry budget.
   - DO NOT clear a file-impact claim when an adaptive reset empties the branch — the claim must survive a `git reset --hard` so a parallel worker does not start into the same files mid-flight.
 63:
-  title: "Semantic rebase conflicts MUST be resolved by the agent — a blind\n    abort+retry never sees the conflict"
+  title: "Semantic rebase conflicts MUST be resolved by the agent — a blind\n abort+retry never sees the conflict"
   ✅: 'DO: hand the conflicted tree to the agent (`boucle_worker_rebase_conflict`): it resolves the markers with judgment (default branch as base, re-apply the issue''s goal, or declare the goal superseded),
     `git add`s, and may complete the rebase itself (`rebase --continue`/`--skip` for cascading and emptied commits). The verdict is the TREE STATE, not the agent''s exit code — it may exhaust its step budget
     right after resolving. Re-run the agent when a later rebase commit hits a NEW conflict (bounded), and wrap each invocation in `timeout` so a slow agent cannot eat the whole job timeout before the build/push.'
   ❌:
   - 'DO NOT let the worker''s rebase-conflict handler abort + re-trigger when `BOUCLE_CONFLICT_FEEDBACK` is set — the agent never sees the conflicted tree, so a semantic conflict (two designs for the same
-    file, a sibling merging the same feature) re-conflicts identically on every retry. Observed on a consumer MR !88 (2026-08): 5 mechanical retries, zero agent runs, then escalation — the retry budget
-    just re-attempts the same failing rebase.'
+    file, a sibling merging the same feature) re-conflicts identically on every retry. Observed on a consumer (2026-08): 5 mechanical retries, zero agent runs, then escalation — the retry budget just re-attempts
+    the same failing rebase.'
   - DO NOT define a gate function inline in ONE job (`check_dependencies_and_gate` in dispatch) and call it from another (triage) — `command not found` (127) makes `if ! cmd` TRUE, so the "blocked" branch
     fires and the worker is NEVER chained (issue stays at boucle:todo with no worker pipeline). Shared functions live in `lib/boucle.sh` (sourced by all jobs via the default before_script), and their dependencies
     (`depends-on.sh`) are sourced BEFORE the call site.
@@ -578,8 +583,8 @@
     inline copies drifted to `./bin/`.
   - 'DO NOT assume a missing script is harmless because the call is "best-effort". `collapse-duplicate-notes` is invoked WITHOUT `|| true` in the inline reviewer/e2e jobs, so its failure aborts the whole
     job — the verdict `case` block (PASS/FAIL/UNCERTAIN) is never reached, the issue label is never advanced, and the doctor re-triggers the reviewer every 10 min. The reviewer posts a fresh verdict each
-    time (the agent runs before the crash), so the MR accumulates dozens of identical PASS/FAIL verdicts while the issue stays pinned at `boucle:review` forever. Observed on a consumer (2026-08): MR !100
-    had 28 identical PASS verdicts, MR !101 had 29 identical FAIL verdicts, all on the same SHA, all because `./bin/collapse-duplicate-notes` crashed the job before the `case` block.'
+    time (the agent runs before the crash), so the MR accumulates dozens of identical PASS/FAIL verdicts while the issue stays pinned at `boucle:review` forever. Observed on a consumer (2026-08): had 28
+    identical PASS verdicts, had 29 identical FAIL verdicts, all on the same SHA, all because `./bin/collapse-duplicate-notes` crashed the job before the `case` block.'
 66:
   title: Git identity MUST be configurable, never hardcoded to a consumer
   ✅:
@@ -592,16 +597,16 @@
   - 'DO NOT hardcode a consumer-specific email (e.g. `bot@ankaboot.dev`) in `git config user.email` across the engine. The engine ships to multiple consumers, each with its own forge instance, bot account,
     and email domain. A hardcoded email attributes the bot''s commits to a consumer that is not theirs — observed on a consumer MR: 6 `chore(boucle):` commits displayed the upstream maintainer''s email
     as the author because `bin/update` preserved the clone''s inherited git identity (the human''s) and `worker.sh`/`merger.sh` hardcoded the upstream email as committer.'
-  - DO NOT preserve the clone's inherited git identity in `bin/update`. On a CI runner the clone inherits the human's `user.name`/`user.email`, so a `git config user.email > /dev/null 2>&1 || git config
-    ...` guard leaves the human's identity as the commit author. The self-update commit is the bot's work, not the human's.
+  - DO NOT preserve the clone's inherited git identity in `bin/update`. On a CI runner the clone inherits the human's `user.name`/`user.email`, so a `git config user.email > /dev/null 2>&1 || git config...`
+    guard leaves the human's identity as the commit author. The self-update commit is the bot's work, not the human's.
 67:
   title: Self-update MUST NOT run on worker branches
   ✅: 'DO: gate the self-update on `[ "${CI_COMMIT_BRANCH:-}" = "${CI_DEFAULT_BRANCH:-master}" ]` in EVERY `before_script` copy (default, dispatch, merger, catchup). The self-update is a housekeeping operation
     that belongs on the default branch, not on a feature/worker branch. On a trigger pipeline (worker/reviewer) `CI_COMMIT_BRANCH` is the source branch (`boucle/<iid>`), so the gate skips the self-update;
     on a push pipeline to the default branch the existing `BOUCLE_PIPELINE_SOURCE != "push"` guard already skips it (feedback-loop avoidance).'
   ❌: 'DO NOT let `bin/update` (the engine self-update) run in the `before_script` of a job that is checked out on a worker branch (`boucle/<iid>`). The self-update commits engine-sync work (`chore(boucle):
-    auto-update`, `chore(boucle): fix bin/update`) onto the worker''s MR branch — polluting the MR with commits that are not the issue''s work. Observed on a consumer MR !105: 6 `chore(boucle):` commits
-    landed on `boucle/79`, inflating the MR to 274 changes and making it look like the worker produced engine-bootstrap work instead of the issue''s feature.'
+    auto-update`, `chore(boucle): fix bin/update`) onto the worker''s MR branch — polluting the MR with commits that are not the issue''s work. Observed on a consumer: 6 `chore(boucle):` commits landed
+    on `boucle/79`, inflating the MR to 274 changes and making it look like the worker produced engine-bootstrap work instead of the issue''s feature.'
 68:
   title: Doctor MUST scan boucle:merging for stuck mergers
   ✅:
@@ -612,8 +617,8 @@
     push was in flight, the timeout fired mid-transfer). The doctor timeout MUST also be at least 10m — the doctor''s scan is API-heavy and can timeout on a slow forge before finishing.'
   ❌: 'DO NOT let an issue sit at `boucle:merging` forever after a merger failure (runner timeout, network "remote end hung up unexpectedly", TLS handshake timeout, runner crash). The doctor scanned `boucle:working`,
     `boucle:review`, `boucle:blocked`, `boucle:human`, `boucle:approval` — but NOT `boucle:merging`. A failed merger left the issue stranded at `boucle:merging` with no recovery path: no webhook re-triggers
-    it (the MR is already approved, so no `approved` webhook fires again), and the doctor never scanned the label. Observed on a consumer (2026-08): MR !106 was approved + `mergeable` but the merger timed
-    out at 5m during `git push --force` ("the remote end hung up unexpectedly" on framagit). The issue sat at `boucle:merging` for 2+ hours with no recovery, blocking the single worker slot (`BOUCLE_MAX_PARALLEL_ISSUES=1`)
+    it (the MR is already approved, so no `approved` webhook fires again), and the doctor never scanned the label. Observed on a consumer (2026-08): was approved + `mergeable` but the merger timed out at
+    5m during `git push --force` ("the remote end hung up unexpectedly" on framagit). The issue sat at `boucle:merging` for 2+ hours with no recovery, blocking the single worker slot (`BOUCLE_MAX_PARALLEL_ISSUES=1`)
     and stalling all other queued issues.'
 69:
   title: Interactive mode — a local harness can take over an issue and hand it back
@@ -640,7 +645,7 @@
   - 'DO NOT leave merged worker branches on the remote — they proliferate and clutter the branch list. Observed on a consumer: 20+ `boucle/<iid>` branches accumulated with no cleanup.'
   - DO NOT name worker branches `boucle/<iid>` alone — the IID is meaningless to a human scanning the branch list. `boucle/79` tells nothing; `boucle/79-fusion-allies-logo-nidal` is self-documenting.
 71:
-  title: "Dispatch MUST route human comments from every idle state and\n    handle slug-named branches"
+  title: "Dispatch MUST route human comments from every idle state and\n handle slug-named branches"
   ✅:
   - 'DO: the dispatch label-routing block MUST include a case for `boucle:human`: when a non-bot note arrives on an issue at `boucle:human`, set `SHOULD_WORK=true` so the worker re-runs with the human''s
     feedback. This treats a human comment as "I want the loop to continue with my amendments" — which is the human''s expectation. The worker will pick up the issue notes (including the new comment) via
@@ -649,10 +654,10 @@
     and `boucle/79-slug` (current). Grep ALL branch-regex sites after any branch-naming change: dispatch (MR event path + MR note path), `forge_mr_lookup_by_branch` (already prefix-matched), and any new
     site that parses branch names.'
   ❌:
-  - 'DO NOT omit a routing case for `boucle:human` in the dispatch label-routing block. A human who comments on an issue at `boucle:human` expects the loop to pick up their feedback and re-run — the comment
+  - DO NOT omit a routing case for `boucle:human` in the dispatch label-routing block. A human who comments on an issue at `boucle:human` expects the loop to pick up their feedback and re-run — the comment
     is silently dropped instead, because the routing only handles `boucle:triage`, `boucle:needs-info`, `boucle:todo`, and `boucle:spec-review`. The human then re-posts on the MR, re-posts on the parent
-    issue, and escalates to the maintainer — none of which triggers the loop. Observed on a consumer (2026-08): issue #79 sat at `boucle:human` for hours while the human posted amendments on both the issue
-    and the MR; the issue comments were dropped, and the MR comments on the slug-named branch were also dropped (see below).'
+    issue, and escalates to the maintainer — none of which triggers the loop. Observed on a consumer (2026-08):sat at `boucle:human` for hours while the human posted amendments on both the issue and the
+    MR; the issue comments were dropped, and the MR comments on the slug-named branch were also dropped (see below).
   - 'DO NOT use a `$`-anchored regex like `^boucle/\([0-9]\+\)$` to extract the issue IID from a worker branch name. Lesson #70 introduced `boucle/<iid>-<slug>` branches, but the dispatch branch-extraction
     regex was not updated — it only matches the bare `boucle/<iid>` form. A human comment on an MR whose branch is `boucle/79-fusion-des-sections-alli-s-et` is silently dropped with "not a boucle branch,
     skipping". The `forge_mr_lookup_by_branch` was updated to prefix-match (lesson #70), but the dispatch regex was missed — a regression introduced in the same commit that changed the naming.'
@@ -666,7 +671,7 @@
     logic never ran. The worker''s commit was never pushed. The issue sat at `boucle:working` with no re-trigger.'
 73:
   title: File-based state artifacts MUST be cleared at stage startup
-  ✅: 'DO: `rm -f .boucle-issue` at the START of `boucle_ci_dispatch`, immediately after the EXIT trap is set. Apply the same pattern to any stage that uses a file-based guard.'
+  ✅: 'DO: `rm -f.boucle-issue` at the START of `boucle_ci_dispatch`, immediately after the EXIT trap is set. Apply the same pattern to any stage that uses a file-based guard.'
   ❌:
   - DO NOT rely on the GitLab runner's `git clean` to remove file-based state artifacts (`.boucle-issue`) between runs. A stale artifact from a previous run causes the current run's guards to make incorrect
     decisions.
