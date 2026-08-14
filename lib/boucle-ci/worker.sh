@@ -441,7 +441,7 @@ EOF
     # deploy follows (the marker + deploy need it); clean it only when no
     # deploy is planned, so it does not dirty the tree on non-deploy runs.
     rm -f ".boucle-state/$BOUCLE_ISSUE/build-feedback.md" 2> /dev/null || true
-    if ! boucle_worker_should_deploy; then
+    if ! boucle_worker_should_deploy && ! boucle_is_screenshot_review; then
       [ -n "${BOUCLE_BUILD_OUTPUT:-}" ] && [ -d "$BOUCLE_BUILD_OUTPUT" ] && rm -rf "$BOUCLE_BUILD_OUTPUT" 2> /dev/null || true
     fi
   else
@@ -516,6 +516,115 @@ EOF
     fi
   fi
 
+  # ── Screenshot review mode ─────────────────────────────────────────
+  # When BOUCLE_REVIEW_MODE=screenshot, the worker builds the site, serves
+  # it locally (python3 -m http.server — zero dependencies, available on
+  # every CI runner), captures screenshots of impacted pages via puppeteer/
+  # chromium (reusing bin/render-preview.cjs with HTTP URL support), and
+  # uploads them as MR attachments. The reviewer then receives the
+  # screenshots as text descriptions (via describe-images --criteria) —
+  # no deployed preview URL, no token, no CDN propagation wait.
+  # Fail-open: a screenshot failure degrades to diff review, never blocks
+  # the loop.
+  local screenshot_urls=""
+  if boucle_is_screenshot_review && [ -d "$BOUCLE_BUILD_OUTPUT" ]; then
+    echo "[boucle] Screenshot review mode — capturing impacted pages..."
+    local server_pid server_port server_ready
+    server_port=8099
+    # Start a static file server on the build output. python3 is available
+    # on every CI runner (GitLab shell executors, GitHub ubuntu-latest).
+    # --directory is supported on Python 3.7+ (2018+).
+    python3 -m http.server "$server_port" --directory "$BOUCLE_BUILD_OUTPUT" >/dev/null 2>&1 &
+    server_pid=$!
+    # Give the server a moment to bind. A short poll loop is more reliable
+    # than a fixed sleep — it starts shooting as soon as the port is open.
+    server_ready=false
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      if curl -s -o /dev/null "http://localhost:${server_port}/" 2>/dev/null; then
+        server_ready=true
+        break
+      fi
+      sleep 0.5
+    done
+    if [ "$server_ready" = "true" ]; then
+      # Determine the impacted page path from the branch diff (same logic
+      # as preview_url_for_changed_files, but we need the path alone).
+      local impacted_path=""
+      impacted_path=$(preview_url_for_changed_files "http://localhost:${server_port}" \
+        | sed "s|http://localhost:${server_port}||")
+      [ -z "$impacted_path" ] && impacted_path="/"
+      echo "[boucle] Screenshotting: $impacted_path"
+
+      # Install puppeteer-core + @sparticuz/chromium (same as triage).
+      local npm_tmp render_stderr
+      npm_tmp="/tmp/npm-screenshot-${CI_JOB_ID:-$$}"
+      render_stderr="$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE/screenshot-stderr.log"
+      mkdir -p "$(dirname "$render_stderr")"
+      if npm install --prefix "$npm_tmp" puppeteer-core @sparticuz/chromium >/dev/null 2>&1; then
+        local screenshot_png
+        screenshot_png="$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE/screenshot.png"
+        # render-preview.cjs now supports HTTP URLs — pass the full
+        # localhost URL so puppeteer navigates to the served page.
+        local rendered_pngs
+        rendered_pngs=$(NODE_PATH="$npm_tmp/node_modules" node "$BOUCLE_HOME/bin/render-preview.cjs" \
+          "http://localhost:${server_port}${impacted_path}" "$screenshot_png" 2>"$render_stderr" || true)
+        if [ -n "$rendered_pngs" ]; then
+          # Upload each PNG to the forge and collect embeddable URLs.
+          local png_bytes=0
+          local png_max="${BOUCLE_IMAGE_TOTAL_MAX_BYTES:-52428800}"
+          while IFS= read -r png; do
+            [ -s "$png" ] || continue
+            local png_size
+            png_size=$(wc -c < "$png" 2>/dev/null || echo 0)
+            if [ "$((png_bytes + png_size))" -gt "$png_max" ]; then
+              echo "[boucle] WARN: screenshot $(basename "$png") skipped — would exceed BOUCLE_IMAGE_TOTAL_MAX_BYTES"
+              continue
+            fi
+            local img_path
+            img_path=$(forge_attachment_upload "$BOUCLE_ISSUE" "$png" "$(basename "$png")" 2>/dev/null || true)
+            if [ -n "$img_path" ]; then
+              png_bytes=$((png_bytes + png_size))
+              local dims label width
+              dims=$(basename "$png" .png | sed 's/^.*-//')
+              width=${dims%%x*}
+              case "$width" in
+                '' | *[!0-9]*) label="$dims" ;;
+                *)
+                  if [ "$width" -lt 600 ]; then
+                    label="📱 Mobile ($dims)"
+                  elif [ "$width" -lt 1024 ]; then
+                    label="📲 Tablet ($dims)"
+                  else
+                    label="🖥️ Desktop ($dims)"
+                  fi
+                  ;;
+              esac
+              screenshot_urls="${screenshot_urls}**${label}**
+
+![Screenshot ${dims}](${img_path})
+
+"
+            fi
+          done <<< "$rendered_pngs"
+          echo "[boucle] Screenshots captured and uploaded (${png_bytes} bytes)"
+        else
+          echo "[boucle] WARN: screenshot render failed — falling back to diff review"
+          if [ -s "$render_stderr" ]; then
+            echo "[boucle:screenshot-stderr] last 20 lines:"
+            tail -n 20 "$render_stderr" | sed 's/^/[boucle:screenshot-stderr] /' >&2
+          fi
+        fi
+      else
+        echo "[boucle] WARN: could not install puppeteer/chromium — falling back to diff review"
+      fi
+    else
+      echo "[boucle] WARN: local HTTP server did not start — falling back to diff review"
+    fi
+    # Always kill the server, even on failure paths.
+    kill "$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
+  fi
+
   # ── Preview URL deep-link ────────────────────────────────────────
   if [ -n "$preview_url" ]; then
     preview_url=$(preview_url_for_changed_files "$preview_url")
@@ -576,6 +685,13 @@ EOF
   local preview_line=""
   if [ -n "$preview_url" ]; then
     preview_line="Preview: $preview_url"
+  elif [ -n "$screenshot_urls" ]; then
+    # Screenshot review mode: screenshots were captured and uploaded.
+    # Embed them directly in the MR description so the human and the
+    # reviewer see them inline.
+    preview_line="### Screenshots (screenshot review mode)
+
+${screenshot_urls}"
   elif [ -n "${boucle_site_url:-}" ]; then
     # Declarative forge Pages (GitLab CE or GitHub Pages): no per-branch
     # preview — display the real site URL so the MR does not look like a

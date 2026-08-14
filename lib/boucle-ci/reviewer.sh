@@ -178,16 +178,25 @@ boucle_ci_reviewer() {
   # Describe image attachments using a vision model so the reviewer gets
   # visual context as text without swapping its model.
   # Forge controls: BOUCLE_VISION_ROUTING, BOUCLE_VISION_MODEL, BOUCLE_VISION_ROLES.
-  "$BOUCLE_HOME"/bin/describe-images reviewer || echo "[boucle] WARN: image description failed — continuing without descriptions"
+  # In screenshot review mode, use --criteria so the vision model answers
+  # the acceptance criteria from state.md (not a generic description) —
+  # the reviewer model can't read images, so the description must be
+  # guided by what the reviewer actually needs to verify.
+  if boucle_is_screenshot_review; then
+    "$BOUCLE_HOME"/bin/describe-images reviewer --criteria || echo "[boucle] WARN: image description failed — continuing without descriptions"
+  else
+    "$BOUCLE_HOME"/bin/describe-images reviewer || echo "[boucle] WARN: image description failed — continuing without descriptions"
+  fi
 
   export BOUCLE_PREVIEW_URL="$PREVIEW_URL"
 
   # ── Diff review mode ─────────────────────────────────────────────
-  # When BOUCLE_REVIEW_MODE=diff (or no preview URL could be extracted),
-  # run code-review mode: review the PR diff, wait for check suites.
+  # When BOUCLE_REVIEW_MODE=diff (or no preview URL could be extracted
+  # and we're not in screenshot mode), run code-review mode: review the
+  # PR diff, wait for check suites. Screenshot mode has its own path below.
   export BOUCLE_MR_DIFF=""
   export BOUCLE_MR_CHECKS=""
-  if boucle_is_diff_review || [ -z "$PREVIEW_URL" ]; then
+  if boucle_is_diff_review || { [ -z "$PREVIEW_URL" ] && ! boucle_is_screenshot_review; }; then
     echo "[boucle] Diff review mode — gathering PR diff and check suites..."
     # Fetch the MR diff
     BOUCLE_MR_DIFF=$(forge_mr_diff "$MR_IID" | head -c 5000 || echo "")
