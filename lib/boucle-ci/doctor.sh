@@ -18,6 +18,8 @@ boucle_ci_doctor() {
   # under set -eo pipefail. Without pipefail, the var is just empty (which
   # we handle).
   set +o pipefail
+  echo "[doctor] code version: $(git -C "${BOUCLE_HOME:-.}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  echo "[doctor] mono_user=${BOUCLE_MONO_USER:-false} project=${BOUCLE_PROJECT_ID:-unset}"
   RECOVERED=0
   # Emoji reactions that count as spec approval — canonical set only.
   # The forge backends normalize via forge_reaction_canonical, so only
