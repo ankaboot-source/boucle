@@ -22,7 +22,15 @@
 #   BOUCLE_VISION_TIMEOUT  — per-image timeout (default: 120s)
 set -euo pipefail
 
-ROLE="${1:?usage: bin/describe-images <role>}"
+ROLE="${1:?usage: bin/describe-images <role> [--criteria]}"
+# Criteria-guided mode: enabled via a second CLI arg `--criteria` or the env
+# var BOUCLE_DESCRIBE_MODE=criteria. When enabled, the vision model answers
+# the acceptance criteria from state.md instead of giving a generic
+# description. Falls back to the generic prompt when no criteria are found.
+CRITERIA_MODE=0
+if [ "${2:-}" = "--criteria" ] || [ "${BOUCLE_DESCRIBE_MODE:-}" = "criteria" ]; then
+  CRITERIA_MODE=1
+fi
 ISSUE="${BOUCLE_ISSUE:-}"
 CI_PROJECT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
 # State dir MUST match the fetchers (fetch-issue-attachments /
@@ -34,6 +42,35 @@ CI_PROJECT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
 # the submodule, so state must never ride along with the engine.
 STATE_DIR="$CI_PROJECT_DIR/.boucle-state/$ISSUE"
 DESC_FILE="$STATE_DIR/.image-descriptions.md"
+
+# ── Acceptance criteria extraction (criteria mode) ───────────────────
+# Reads the `## Acceptance criteria` section from state.md and extracts the
+# unchecked `- [ ]` lines. Returns them one per line. If no section or no
+# unchecked criteria are found, returns nothing (caller falls back to the
+# generic prompt).
+extract_criteria() {
+  local state_file="$STATE_DIR/state.md"
+  [ -f "$state_file" ] || return 0
+  sed -n '/^## Acceptance criteria/,/^## /p' "$state_file" \
+    | grep '^- \[ \]' \
+    | sed 's/^- \[ \] //'
+}
+
+# Build the criteria-guided prompt for a single image. Uses the extracted
+# criteria (numbered) plus the generic visual-summary request.
+build_criteria_prompt() {
+  local img="$1"
+  local criteria="$2"
+  local numbered=""
+  local i=1
+  local line
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    numbered="${numbered}${i}. ${line}"$'\n'
+    i=$((i + 1))
+  done <<< "$criteria"
+  printf 'You are a vision model reviewing a screenshot of a web page. Below are acceptance criteria that the implementation must satisfy. For EACH criterion, answer whether it is MET, NOT MET, or UNCLEAR based on what you see in the screenshot. Be specific and reference what you observe.\n\nAcceptance criteria:\n%s\nScreenshot file: %s\n\nFor each criterion, output:\n- MET / NOT MET / UNCLEAR: <one-line justification referencing what you see>\n\nThen add a general visual summary (layout, colors, visible elements).\n' "$numbered" "$img"
+}
 
 # ── Master switch ──────────────────────────────────────────────────────
 if [ "${BOUCLE_VISION_ROUTING:-enabled}" = "disabled" ]; then
@@ -147,12 +184,24 @@ for img in "${IMAGE_FILES[@]}"; do
   echo "" >> "$DESC_FILE"
 
   # Build the description prompt. The vision model reads the image from
-  # the local path and returns a text description.
+  # the local path and returns a text description. In criteria mode, the
+  # prompt asks for per-criterion verdicts against the acceptance criteria
+  # from state.md; otherwise it uses the generic description prompt.
   DESC_PROMPT="You are a vision model. Read the image at the following local file path and describe it in detail for a developer who will use it as context to implement a web feature. Describe: visual content, colors, layout, dimensions, text content (if any), and the likely purpose (logo, photo, mockup, screenshot, pattern, icon, etc.). Be concise but complete.
 
 Image file path: ${img}
 
 Read the file at that path and describe it. Output only the description, no preamble."
+
+  if [ "$CRITERIA_MODE" -eq 1 ]; then
+    CRITERIA="$(extract_criteria)"
+    if [ -n "$CRITERIA" ]; then
+      DESC_PROMPT="$(build_criteria_prompt "$img" "$CRITERIA")"
+      echo "[describe-images] ${filename}: using criteria-guided prompt" >&2
+    else
+      echo "[describe-images] ${filename}: no acceptance criteria found in state.md — falling back to generic prompt" >&2
+    fi
+  fi
 
   # Run jcode with the vision model, capturing output.
   # Timeout per image so one hanging image doesn't block the whole run.
