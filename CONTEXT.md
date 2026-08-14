@@ -31,7 +31,7 @@ shaped the design.
 > existing mix of engine and consumer code in one repo was untenable. A
 > dedicated test consumer will be re-introduced once the engine/consumer
 > separation is stable. Until then, new classes of bugs are discovered on
-> real consumers; the 62 AGENTS.md lessons remain as the incident catalog.
+> real consumers; the 73 lessons in LESSONS.yml catalog the forward-looking operating principles.
 
 ## 2. Features
 
@@ -172,7 +172,7 @@ Contributions to boucle must align with this line.
 
 ## 9. See also
 
-- [AGENTS.md](AGENTS.md) — Agent guide, lessons learned, anti-patterns
+- [AGENTS.md](AGENTS.md) — Agent guide, mandatory principles. Lessons in LESSONS.yml
 - [README.md](README.md) — Overview, getting started, usage
 - [LOOP.md](LOOP.md) — Per-consumer configuration
 - [.jcode/UPSTREAM-FIX-WORKFLOW.md](.jcode/UPSTREAM-FIX-WORKFLOW.md) — Upstream fix workflow
