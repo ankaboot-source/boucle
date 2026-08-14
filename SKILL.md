@@ -266,7 +266,7 @@ harness MUST use the markers correctly or dispatch will misroute its writes.
 | `## Approach` | section header in `state.md` | worker.sh:482 (sed extraction), :551 (MR description) | The worker's implementation approach, extracted from `state.md` into the MR description. The reviewer reads it to verify doc conformance. |
 | `VERDICT: PASS\|FAIL\|UNCERTAIN` | line-anchored (`^VERDICT:`) | reviewer.sh:299,320,358,363; e2e.sh (same pattern) | The verdict line. MUST be start-of-line anchored in greps (LESSONS.yml lesson #41) — an unanchored grep matches shell traces containing the substring. |
 | `BOT_JUST_ASSIGNED` | assignee-change detection | dispatch.sh:504-539 | The real "re-queue after boucle:human" mechanism (§4.1). Detected from `.changes.assignees` on the `issue update` webhook, not from a comment. |
-| Emoji `thumbsup` | emoji award on a Note | dispatch.sh:579-587 (`BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup"`) | Spec approval. Only valid on an issue at `boucle:spec-review`, awarded on a Note (not the issue body). MR approval is the native Approve button, NOT an emoji. |
+| Emoji `thumbsup` `heart` `rocket` `tada` | emoji award on a Note | dispatch.sh (`BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup heart rocket tada"`) | Spec approval + needs-info re-trigger. Valid on an issue at `boucle:spec-review` (approve spec) or `boucle:needs-info` (re-trigger after action). MR approval is the native Approve button, NOT an emoji. |
 
 ---
 
@@ -296,11 +296,14 @@ re-assign the bot, not post a comment.** (LESSONS.yml lesson #11, #44.)
 
 To approve a spec (issue at `boucle:spec-review`), the human either:
 - posts a **non-bot note** on the issue (dispatch.sh:570-578), OR
-- awards a **`thumbsup` emoji** on a note (dispatch.sh:579-587, gated by
-  `BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup"`).
+- awards a **`thumbsup` `heart` `rocket` or `tada` emoji** on a note
+  (dispatch.sh, gated by `BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup heart rocket tada"`).
 
 Either triggers `chain_to_role worker`. A note by the bot account (carrying
 `<!-- boucle:agent -->`) is skipped — only human notes/emojis count.
+
+The same emoji set re-triggers triage from `boucle:needs-info` (e.g. after
+the user adds an API key following a no-key or quota-exhausted help message).
 
 ### 4.3 MR approval — native forge button
 

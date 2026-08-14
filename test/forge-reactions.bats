@@ -99,16 +99,16 @@ setup() {
 
 # ── Spec-approval constants (doctor + dispatch) ───────────────────────
 
-@test "doctor spec-approval constant is thumbsup only" {
+@test "doctor spec-approval constant includes thumbsup heart rocket tada" {
   run grep -E '^  BOUCLE_SPEC_APPROVAL_EMOJIS=' lib/boucle-ci/doctor.sh
   assert_success
-  assert_output '  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup"'
+  assert_output '  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup heart rocket tada"'
 }
 
-@test "dispatch spec-approval constant is thumbsup only" {
+@test "dispatch spec-approval constant includes thumbsup heart rocket tada" {
   run grep -E '^  BOUCLE_SPEC_APPROVAL_EMOJIS=' lib/boucle-ci/dispatch.sh
   assert_success
-  assert_output '  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup"'
+  assert_output '  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup heart rocket tada"'
 }
 
 @test "old approval emoji names are gone from lib/boucle-ci and bin/forge" {

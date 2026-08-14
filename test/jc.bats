@@ -1281,7 +1281,7 @@ probe_with_code() {
   # produce nothing. Exit 4 is the established contract: CI posts a
   # diagnostic and escalates instead of blaming the step budget.
   run bash -c "awk '/4c. Pre-flight provider probe/,/^fi$/' bin/jc | grep -cE '^ +exit 4$'"
-  assert_output "1"
+  assert_output "2"
 }
 
 @test "probe: the reactive fallback path is still present" {
