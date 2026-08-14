@@ -406,7 +406,7 @@ boucle_ci_dispatch() {
     if [ -n "$PAYLOAD_MR_NOTE_IID" ]; then
       MR_NOTE_IID="$PAYLOAD_MR_NOTE_IID"
     fi
-    if [ -n "$MR_NOTE_IID" ] && [ "$OBJECT_KIND" = "note" ]; then
+    if [ -n "${MR_NOTE_IID:-}" ] && [ "$OBJECT_KIND" = "note" ]; then
       # GitLab payload carries .merge_request.source_branch; for GitHub PR
       # comments the branch was already resolved in the normalisation
       # (MR_NOTE_SOURCE_BRANCH set there). Keep whichever is available.
@@ -414,7 +414,7 @@ boucle_ci_dispatch() {
       if [ -n "$PAYLOAD_MR_NOTE_SOURCE_BRANCH" ]; then
         MR_NOTE_SOURCE_BRANCH="$PAYLOAD_MR_NOTE_SOURCE_BRANCH"
       fi
-      MR_NOTE_ISSUE_IID=$(printf '%s' "$MR_NOTE_SOURCE_BRANCH" | sed -n 's/^boucle\/\([0-9]\+\).*/\1/p')
+      MR_NOTE_ISSUE_IID=$(printf '%s' "${MR_NOTE_SOURCE_BRANCH:-}" | sed -n 's/^boucle\/\([0-9]\+\).*/\1/p')
       if [ -z "$MR_NOTE_ISSUE_IID" ]; then
         echo "Note on MR !${MR_NOTE_IID} but source_branch '$MR_NOTE_SOURCE_BRANCH' is not a boucle branch, skipping"
         exit 0
