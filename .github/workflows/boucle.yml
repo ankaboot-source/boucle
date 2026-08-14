@@ -169,8 +169,12 @@ jobs:
   # ── check: lint + tests on push/PR to default branch ─────────────────────────
   check:
     runs-on: ubuntu-latest
+    # Only run on the engine repo (ankaboot-source/boucle) — consumers don't
+    # have a Makefile, test/ directory, or bats tests. Running `make check` on
+    # a consumer fails and sends spurious failure notifications.
     if: |
-      (github.event_name == 'push' || github.event_name == 'pull_request')
+      github.repository == 'ankaboot-source/boucle'
+      && (github.event_name == 'push' || github.event_name == 'pull_request')
       && !contains(github.event.head_commit.message, '[skip ci]')
     steps:
       # test/*.bats load bats-support/bats-assert from test/test_helper/, which
