@@ -475,6 +475,11 @@ EOF
   preview_url=""
 
   if boucle_worker_should_deploy; then
+    # GitHub Actions does not pass BOUCLE_DEPLOY_PROJECT (cf. GitLab
+    # .gitlab-ci.yml:49 which exports it empty); the deploy command
+    # references it, so default it here or the eval subshell dies on an
+    # unbound variable under set -u.
+    BOUCLE_DEPLOY_PROJECT="${BOUCLE_DEPLOY_PROJECT:-}"
     deploy_log=$(mktemp)
     # Same set -e guard as the build subshell above — without `|| deploy_rc=$?`,
     # a non-zero deploy exit kills the shell before the error handling runs.
