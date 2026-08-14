@@ -37,13 +37,13 @@ You have a knowledge graph of this codebase. Use `search_graph` and `get_archite
 - `ARCHITECTURE.md` — system architecture, component map, data flow
 - `SKILL.md` — normative skill reference (markers, labels, state machine)
 
-If a charter file exists and answers your question, do NOT ask the author — incorporate the answer into your analysis. Asking "where is the visual charter?" or "does CONTEXT.md specify X?" when the answer is at the repo root is a triage defect.
+If a charter file exists and answers your question, do NOT ask the author — incorporate the answer into your analysis. Asking "where is the design charter?" or "does CONTEXT.md specify X?" when the answer is at the repo root is a triage defect.
 
 **Docs impact assessment.** In your Analysis section, identify which charter docs this issue touches (if any). This tells the worker which docs to update alongside the code. Map the issue to docs:
 - CI pipeline / agents / bin scripts / state machine changes → `LOOP.md` (pipeline) / `AGENTS.md` (agents, lessons)
 - Agent behavior / workflow rules / new anti-patterns → `AGENTS.md`
 - Project scope / tech stack / constraints / ethics → `CONTEXT.md`
-- Visual design / typography / layout / motion → the visual charter (consumer site, if present)
+- Visual design / typography / layout / motion → the design charter (consumer site, if present)
 - Loop config / cadence / gates / caps → `LOOP.md`
 - Features / setup / quick start / license / project overview → `README.md`
 - Architecture / component map / data flow → `ARCHITECTURE.md`

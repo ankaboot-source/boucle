@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# bin/check-design-charter — validate a consumer site's visual charter file
+# bin/check-design-charter — validate a consumer site's design charter file
 # Called by the worker before any UI work (see .jcode/agents/worker.md).
 #
 # Usage:
-#   bin/check-design-charter [path/to/VISUAL-CHARTER.md]
+#   bin/check-design-charter [path/to/DESIGN.md]
 #
 # Validates the DESIGN-template structure (see .jcode/DESIGN-template.md):
 #   - required sections 1-4 present (5-7 recommended, warned only)
@@ -17,10 +17,10 @@
 #   1 — FAIL (issues found)
 #   2 — usage error or unreadable charter
 #
-# Override the default charter path with BOUCLE_CHARTER (default: VISUAL-CHARTER.md).
+# Override the default charter path with BOUCLE_CHARTER (default: DESIGN.md).
 set -u
 
-CHARTER="${1:-${BOUCLE_CHARTER:-VISUAL-CHARTER.md}}"
+CHARTER="${1:-${BOUCLE_CHARTER:-DESIGN.md}}"
 if [ ! -r "${CHARTER}" ]; then
   echo "[check-design-charter] ERROR: cannot read charter: ${CHARTER}" >&2
   exit 2

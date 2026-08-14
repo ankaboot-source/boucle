@@ -208,7 +208,7 @@
 36:
   title: Approach MUST use bullet points AND be filled (not placeholder)
   ✅:
-  - 'DO: write the Approach as 3-6 bullet points (`- item`), one per aspect of the implementation. Each bullet cites the charter doc section it conforms to (e.g. "Conforms to the visual charter §2 — sharp
+  - 'DO: write the Approach as 3-6 bullet points (`- item`), one per aspect of the implementation. Each bullet cites the charter doc section it conforms to (e.g. "Conforms to the design charter §2 — sharp
     corners via `--radius-sharp`"). Bullet points and blank lines render properly in GitLab markdown.'
   - 'DO: the worker MUST fill the Approach section with 2-5 sentences explaining the implementation approach and citing the specific charter doc sections it conformed to (`worker.md` step 8). The CI extraction
     (`APPROACH=$(sed -n ''/^## Approach/,/^## /p'' state.md...`) now falls back to an explicit note when the section is still the placeholder, so the MR description is never the literal seed text.'
@@ -216,7 +216,7 @@
   - DO NOT write the `## Approach` section as a paragraph of 2-5 sentences. GitLab markdown renders single newlines (soft breaks) as spaces, so a paragraph becomes an unreadable wall of text in the MR description.
     The worker prompt said "Write 2-5 sentences" — the worker wrote one long paragraph, and the MR description was a single 500-char block with no visual structure.
   - DO NOT leave the `## Approach` section of `state.md` as the seed placeholder `(to be determined by worker)`. The Approach section becomes the MR description's `### Approach` block, which the reviewer
-    reads to verify doc conformance (e.g. visual charter §2 and §4 citations). An empty Approach causes repeated reviewer FAIL verdicts on the same criterion, wasting the iteration budget (`BOUCLE_MAX_ITERATIONS`).
+    reads to verify doc conformance (e.g. design charter §2 and §4 citations). An empty Approach causes repeated reviewer FAIL verdicts on the same criterion, wasting the iteration budget (`BOUCLE_MAX_ITERATIONS`).
 37:
   title: Push consumer fixes upstream in the SAME session
   ✅:
