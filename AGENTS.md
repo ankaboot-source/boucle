@@ -275,6 +275,37 @@ existing data.** Mandatory order:
 A bug on a consumer project MUST be traced to its root cause in boucle and fixed
 there first.
 
+## `.boucle/` ownership — what agents can and cannot modify
+
+`.boucle/` is the **engine directory**, 100% owned by `bin/update`. Agents
+MUST NOT modify files under `.boucle/` directly. The CI guard
+`bin/check-boucle-sync` rejects any commit touching `.boucle/` that is not a bot
+`chore(boucle):` commit (produced by `bin/update`). A manual edit to `.boucle/`
+is a bug: `bin/update` will overwrite it on the next sync, silently discarding
+the change.
+
+`.boucle-state/` is **runtime state** (gitignored) — agents write there freely
+(`state.md`, `iterations.md`, etc.). It is never committed and never synced.
+
+To change **consumer config** (deploy mode, build command, review mode, ...):
+use **CI variables** (Settings → CI/CD → Variables) or the **root
+`.gitlab-ci.yml` shim** — NEVER `.boucle/.gitlab-ci.yml`.
+
+To fix an **engine bug**: fix it in the **upstream boucle repo**
+(`ankaboot-source/boucle`), then `bin/update` syncs it to consumers.
+
+```mermaid
+flowchart LR
+    A[Consumer wants a change] --> B{What kind?}
+    B -- Config (deploy mode, build cmd, review mode) --> C[CI variables or root .gitlab-ci.yml shim]
+    B -- Engine bug --> D[Fix in upstream boucle repo]
+    D --> E[bin/update syncs to consumers]
+    B -- Runtime state --> F[.boucle-state/ — write freely]
+    C --> G[NEVER .boucle/ — bin/update overwrites it]
+```
+
+See [LOOP.md](LOOP.md) for the per-consumer configuration seams.
+
 ## See also
 
 - [CONTEXT.md](CONTEXT.md) — Project context, tech stack, constraints

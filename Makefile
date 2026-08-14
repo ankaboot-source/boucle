@@ -18,10 +18,17 @@ SRC_SH := $(shell git ls-files '*.sh' '*.bash' ':!:.jcode' 2>/dev/null)
 BIN_SH := $(shell git ls-files 'bin/*' 2>/dev/null | grep -v '\.cjs$$' | grep -v '^bin/oc$$' || true)
 ALL_SH := $(strip $(SRC_SH) $(BIN_SH))
 
-.PHONY: check lint fix test install-hooks
+.PHONY: check lint fix test install-hooks check-sync
 
 # Default: run everything.
 check: lint test
+
+# Manual run of the .boucle/ sync guard. Fail-open locally: a shallow clone or
+# a repo with no CI context has no commit range to check, so a non-zero exit
+# here is informational, not a gate. CI calls bin/check-boucle-sync directly
+# (fail-closed) in the check job script block.
+check-sync:
+	@bin/check-boucle-sync || { echo "(check-boucle-sync skipped — likely shallow clone or no CI context)"; true; }
 
 # Static analysis: shellcheck + shfmt diff (no modifications) + lessons lint.
 lint:
