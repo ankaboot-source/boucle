@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# shellcheck shell=bash
+# bin/check-boucle-sync — reject unauthorized modifications to .boucle/
+#
+# .boucle/ is the ENGINE directory, 100% owned by bin/update. Only bot
+# commits (messages starting with `chore(boucle):`) are allowed to touch it.
+# Any human or agent commit that modifies .boucle/ is a bug: bin/update will
+# later overwrite it, silently discarding the change (e.g. a consumer editing
+# .boucle/.gitlab-ci.yml to switch deploy mode, then bin/update clobbering it).
+#
+# Authorized commit subjects (bot, produced by bin/update):
+#   chore(boucle): auto-update to <sha>
+#   chore(boucle): sync upstream ...
+#   chore(boucle): record initial version ...
+#   chore(boucle): auto-update ...            (broader fallback)
+#
+# Remediation channels (what to do instead of editing .boucle/):
+#   - Consumer config (deploy mode, build command, review mode, ...) → CI
+#     variables (Settings → CI/CD → Variables) or the root .gitlab-ci.yml shim.
+#   - Engine bug → fix in the upstream boucle repo, then bin/update syncs it.
+#
+# Exit codes:
+#   0 — no .boucle/ change, or every .boucle/ change is an authorized bot commit
+#   1 — at least one commit modified .boucle/ without an authorized subject
+#
+# Idempotent, read-only, no side effects. shellcheck + shfmt clean.
+set -euo pipefail
+
+# ── Authorized bot commit subjects ──────────────────────────────────────
+# bin/update produces these. Anything else touching .boucle/ is unauthorized.
+is_authorized() {
+  local subject="$1"
+  case "${subject}" in
+    "chore(boucle): auto-update to "* | \
+      "chore(boucle): sync upstream"* | \
+      "chore(boucle): record initial version"* | \
+      "chore(boucle): auto-update"*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+# ── Resolve the commit range to check ───────────────────────────────────
+# Priority: merge request → push to default branch → local/manual run.
+range=""
+if [ -n "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" ]; then
+  # On a merge request: diff against the target branch.
+  target_ref="origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
+  if git rev-parse --verify "${target_ref}" > /dev/null 2>&1; then
+    range="${target_ref}...HEAD"
+  else
+    range="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}...HEAD"
+  fi
+elif [ -n "${CI_COMMIT_BEFORE_SHA:-}" ] && [ "${CI_COMMIT_BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]; then
+  # On a push to the default branch. Guard: all-zeros / empty before-SHA means
+  # the first push of a branch — nothing to diff against, skip.
+  range="${CI_COMMIT_BEFORE_SHA}...${CI_COMMIT_SHA:-}"
+else
+  # Local/manual run (no CI vars). Guard: only 1 commit in the repo → skip.
+  if git rev-parse --verify HEAD~1 > /dev/null 2>&1; then
+    range="HEAD~1...HEAD"
+  else
+    echo "check-boucle-sync: no commit range to check (first commit or no CI context) — pass"
+    exit 0
+  fi
+fi
+
+# ── Any .boucle/ changes in the range? ──────────────────────────────────
+changed_files=$(git diff --name-only "${range}")
+boucle_files=$(printf '%s\n' "${changed_files}" | grep '^\.boucle/' || true)
+if [ -z "${boucle_files}" ]; then
+  echo "check-boucle-sync: no changes under .boucle/ — pass"
+  exit 0
+fi
+
+# ── Check every commit that touched .boucle/ ────────────────────────────
+FAIL=0
+for sha in $(git log --format=%H "${range}"); do
+  # Only consider commits that actually modified a file under .boucle/.
+  if ! git diff-tree --no-commit-id --name-only -r "${sha}" | grep -q '^\.boucle/'; then
+    continue
+  fi
+  subject=$(git log -1 --format=%s "${sha}")
+  if is_authorized "${subject}"; then
+    echo "OK: commit ${sha:0:12} (${subject}) — authorized bot update"
+  else
+    author=$(git log -1 --format='%an <%ae>' "${sha}")
+    echo "ERROR: commit ${sha:0:12} (${subject}) by ${author} modified .boucle/ without authorization" >&2
+    FAIL=1
+  fi
+done
+
+if [ "${FAIL}" -eq 1 ]; then
+  cat >&2 << 'EOF'
+
+.boucle/ is the ENGINE directory, 100% owned by bin/update. Only bot commits
+(chore(boucle): ...) may touch it — bin/update will overwrite any manual edit.
+
+To change CONSUMER config (deploy mode, build command, review mode, ...):
+  use CI variables (Settings → CI/CD → Variables) or the root .gitlab-ci.yml
+  shim — NEVER .boucle/.gitlab-ci.yml.
+
+To fix an ENGINE bug: fix it in the upstream boucle repo, then bin/update syncs
+it to consumers.
+EOF
+  echo "check-boucle-sync FAILED — unauthorized .boucle/ modification" >&2
+  exit 1
+fi
+
+echo "check-boucle-sync OK — all .boucle/ changes are authorized bot commits"
+exit 0

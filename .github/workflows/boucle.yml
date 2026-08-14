@@ -203,6 +203,11 @@ jobs:
           chmod +x "$HOME/.local/bin/shfmt"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           npm install -g "bats@${BATS_VERSION}"
+      # Reject any commit that modified .boucle/ without an authorized bot
+      # subject (chore(boucle): ...). .boucle/ is the engine dir owned by
+      # bin/update — manual edits get overwritten on the next sync.
+      - name: Check .boucle/ sync guard
+        run: bin/check-boucle-sync
       - run: make check
 
   # ── engine-smoke: dogfood the REAL bootstrap chain (issue #29) ───────────────
