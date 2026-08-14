@@ -508,11 +508,12 @@ triage:
 # ── Worker ──────────────────────────────────────────────────────────────
 worker:
   stage: work
+  # Pin to docker runners (tags: []) — the Astro compiler (Go-WASM) OOMs on
+  # small shell executors (~1GB RAM). Docker runners have enough memory.
+  # Without tags: [], a shell executor picks up the untagged job and the
+  # build crashes with "runtime: out of memory" in @astrojs/compiler.
+  tags: []
   # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
-  # The worker job runs untagged (default has no tags) — if the assigned runner is broken,
-  # the job fails instantly with runner_system_failure and the issue is stranded.
-  # retry lets GitLab reassign to another runner.
-  # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
   retry:
     max: 2
     when: runner_system_failure
