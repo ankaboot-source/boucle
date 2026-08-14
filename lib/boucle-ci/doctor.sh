@@ -18,8 +18,6 @@ boucle_ci_doctor() {
   # under set -eo pipefail. Without pipefail, the var is just empty (which
   # we handle).
   set +o pipefail
-  echo "[doctor] code version: $(git -C "${BOUCLE_HOME:-.}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-  echo "[doctor] mono_user=${BOUCLE_MONO_USER:-false} project=${BOUCLE_PROJECT_ID:-unset}"
   RECOVERED=0
   # Emoji reactions that count as spec approval — canonical set only.
   # The forge backends normalize via forge_reaction_canonical, so only
@@ -812,6 +810,15 @@ boucle_ci_doctor() {
     # — map to 0/1 so the count-based logic and messages keep working.
     APPROVED_COUNT=$(forge_mr_approvals "$MR_IID")
     [ "$APPROVED_COUNT" = "true" ] && APPROVED_COUNT=1 || APPROVED_COUNT=0
+    # In mono-user mode, there are no formal reviews — the reviewer
+    # posts a verdict PASS as a comment on the PR. Detect that as an
+    # approval signal so the doctor can merge without a native review.
+    if [ "$APPROVED_COUNT" -eq 0 ] && [ "${BOUCLE_MONO_USER:-false}" = "true" ]; then
+      MR_NOTES=$(forge_mr_notes "$MR_IID" 2>/dev/null || echo "[]")
+      if echo "$MR_NOTES" | jq -e '[.[] | select(.body | contains("VERDICT: PASS"))] | length > 0' > /dev/null 2>&1; then
+        APPROVED_COUNT=1
+      fi
+    fi
     # Guard: if the merger already escalated a SEMANTIC merge conflict on
     # this issue (boucle_escalate_merge_conflict posts a note with "Merge
     # conflict — human intervention required" and sets boucle:human), do
@@ -827,13 +834,13 @@ boucle_ci_doctor() {
       echo "  → #$IID: merger already escalated a merge conflict ($ESCALATION_NOTES note(s)) — human must resolve, skipping"
       continue
     fi
-    if [ "$APPROVED_COUNT" -gt 0 ] && { [ "$MR_MERGE_STATUS" = "mergeable" ] || [ "$MR_MERGE_STATUS" = "conflict" ]; }; then
+    if [ "$APPROVED_COUNT" -gt 0 ] && { [ "$MR_MERGE_STATUS" = "mergeable" ] || [ "$MR_MERGE_STATUS" = "conflict" ] || [ "$MR_MERGE_STATUS" = "unknown" ]; }; then
       echo "  → #$IID: MR !$MR_IID is approved ($APPROVED_COUNT) + $MR_MERGE_STATUS — triggering merger"
       set_boucle_label "$IID" "boucle:merging" "boucle::status::bot"
       chain_to_role "$IID" "merger"
       echo "  → triggered merger for #$IID"
       RECOVERED=$((RECOVERED + 1))
-    elif [ "$APPROVED_COUNT" -gt 0 ] && [ "$MR_MERGE_STATUS" != "mergeable" ]; then
+    elif [ "$APPROVED_COUNT" -gt 0 ] && [ "$MR_MERGE_STATUS" != "mergeable" ] && [ "$MR_MERGE_STATUS" != "unknown" ]; then
       # Approved but NOT mergeable (conflict/checking/blocked). Trigger
       # the merger anyway: it will rebase onto fresh $BOUCLE_DEFAULT_BRANCH.
       # On conflict the merger reverts to boucle:todo + worker (iter 1) to
