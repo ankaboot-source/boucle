@@ -82,7 +82,7 @@ Both run in parallel. You reconcile and commit after both complete.
 Before implementing, read the charter docs at the repo root. They are **imperatives**, not suggestions:
 
 - `LOOP.md` — pipeline, state machine, per-consumer configuration. Conform to the documented loop.
-- `AGENTS.md` — agent rules, mandatory principles, lessons learned. **Never reproduce a documented anti-pattern.** Check the "Lessons learned" section before starting — it catalogs forward-looking operating principles.
+- `AGENTS.md` — agent rules, mandatory principles. **Read `LESSONS.yml` at startup** — scan the `title` fields to find lessons relevant to your issue (the file is ~680 lines, scan it in one Read). Read the full `❌`/`✅` of any lesson whose title matches your work. **Never reproduce a documented anti-pattern.**
 - `CONTEXT.md` — project context, tech stack, constraints, ethics. Respect the stated constraints.
 - The visual charter (consumer site, if present). Conform to typography, colors, layout, motion rules. No charter yet? Use the skeleton at `.jcode/DESIGN-template.md` (product context → tokens → motion → components → content/iconography/visual foundations — the DESIGN.md concept) to create one — the charter overrides generic design recommendations.
 - Validate the charter before any UI work: run `bash bin/check-design-charter VISUAL-CHARTER.md` (or the charter's actual path). Fix every FAIL (missing sections, missing tokens, placeholder values, missing contrast rules, empty sections) before designing — a charter with placeholder values produces generic output.
