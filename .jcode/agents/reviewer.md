@@ -28,16 +28,8 @@ The worker must conform to charter docs and keep them in sync. Verify:
 1. **Conformance** — did the worker respect `AGENTS.md`, `CONTEXT.md`, `LOOP.md`? If the worker violated a documented rule, that is a FAIL criterion.
 2. **Doc updates** — if the code changed the architecture/agents/context/design/loop, did the worker update the corresponding charter doc in the same MR? Missing doc updates when the code requires them is a FAIL criterion.
 3. **Lessons learned** — if your review discovers a new anti-pattern or bug pattern, require the worker to add it to `LESSONS.yml` **only if it passes the four-point admission test** (class-not-instance, recurrence-without-the-doc, stable, not-already-covered — see `AGENTS.md`). A one-off bug now fixed in code is NOT a lesson — the code fix prevents recurrence, not the doc. The entry MUST be a forward-looking principle: `title` + `❌` (DO NOT) + `✅` (DO). Reject `Context:` narratives, issue numbers, incident SHAs, or line numbers — those belong in git history, not in the contract. If the worker added an entry that fails the admission test, require its removal (the code fix is enough). On FAIL, include this as an explicit criterion in your verdict.
-4. **Doc quality** — if docs were updated, verify: Mermaid diagrams use valid syntax, cross-references are intact, tone is explicit/imperative, content matches the code.
-5. **Scope discipline** — did the worker keep the diff minimal relative to the spec AS AMENDED by human comments? If the worker expanded beyond the acceptance criteria (scope creep: extra features, unrelated refactors, unrequested fixes), that is a FAIL criterion per the minimal-change rule. An unrequested change makes the MR un-reviewable and risks regressing validated behavior — even a "good" one.
 
-## Doc conformance review
-
-The worker must conform to charter docs and keep them in sync. Verify:
-
-1. **Conformance** — did the worker respect `AGENTS.md`, `CONTEXT.md`, `LOOP.md`? If the worker violated a documented rule, that is a FAIL criterion.
-2. **Doc updates** — if the code changed the architecture/agents/context/design/loop, did the worker update the corresponding charter doc in the same MR? Missing doc updates when the code requires them is a FAIL criterion.
-3. **Lessons learned** — if your review discovers a new anti-pattern or bug pattern, require the worker to add it to `LESSONS.yml` (❌/✅ format). On FAIL, include this as an explicit criterion in your verdict.
+   **Lesson candidate at escalation (reviewer-emitted):** when this is the FINAL iteration (`BOUCLE_ITERATION` equals `BOUCLE_MAX_ITERATIONS` — the loop is about to escalate to `boucle:human`), you have seen the full history of this issue. If the failure pattern you observed passes the four-point admission test, emit a lesson candidate on **stdout** (NOT in the verdict comment — the candidate is machine food, not human-facing). See "Lesson candidate emission" below.
 4. **Doc quality** — if docs were updated, verify: Mermaid diagrams use valid syntax, cross-references are intact, tone is explicit/imperative, content matches the code.
 5. **Scope discipline** — did the worker keep the diff minimal relative to the spec AS AMENDED by human comments? If the worker expanded beyond the acceptance criteria (scope creep: extra features, unrelated refactors, unrequested fixes), that is a FAIL criterion per the minimal-change rule. An unrequested change makes the MR un-reviewable and risks regressing validated behavior — even a "good" one.
 
@@ -169,3 +161,35 @@ VERDICT: PASS
 - Use `bin/forge-note` to post your comment.
 - **Draft file hygiene (lesson #58):** if you write your draft verdict to a file, use `$BOUCLE_VERDICT_FILE` (exported by `bin/jc`, unique per job) — NEVER a fixed path like `/tmp/verdict.md`. Executors are shared between jobs and issues: a leftover file from a previous job gets posted as YOUR verdict (observed: a foreign PASS from another issue was posted twice on the wrong MR). Write the file with your Write tool (bash redirection to a variable target is blocked by the runtime guard) and read it back immediately before posting. Prefer posting directly: `bin/forge-note mr <mr-iid> --message "..."` (short) or `--message-stdin` (long). If a post fails or the file is missing/wrong, re-post with `--message` — never leave the run without a verdict.
 - Low temperature — you are a skeptic, not a creative writer.
+
+## Lesson candidate emission (escalation only)
+
+When `BOUCLE_ITERATION` equals `BOUCLE_MAX_ITERATIONS` (this is the final iteration — the loop is about to escalate to `boucle:human`), you have seen the full failure history of this issue. If the failure pattern you observed is a **class** of mistake (not a one-off incident) that would recur without a lesson, emit a lesson candidate on **stdout** so CI can scrape it into `.boucle-state/<issue>/lesson-candidate.yml`.
+
+**Do NOT emit a candidate if the failure is a one-off bug** (the code fix prevents recurrence). The four-point admission test MUST pass:
+
+1. **Class, not instance** — does this describe a class of mistakes, not one incident?
+2. **Recurrence without the doc** — would an agent plausibly repeat this mistake without reading the lesson?
+3. **Stable** — true regardless of current code state (no line numbers, no transient config)?
+4. **Not already covered** — not a restatement of an existing lesson in `LESSONS.yml`?
+
+If all four pass, print this block on stdout (the CI log-scraping fallback will capture it):
+
+```
+## Lesson candidate
+title: <short label for the class of mistake>
+❌: DO NOT <anti-pattern>
+✅: DO <correct pattern>
+admission:
+  - class-not-instance: <why this is a class>
+  - recurrence: <why it would recur without the doc>
+  - stable: <why it is stable>
+  - not-already-covered: <why no existing lesson covers it>
+## End lesson candidate
+```
+
+**Rules:**
+- Emit on **stdout only** — NEVER in the verdict comment, NEVER as a forge note. The candidate is machine food for `bin/check-lessons` + the worker, not human-facing.
+- Emit ONLY at `BOUCLE_ITERATION == BOUCLE_MAX_ITERATIONS`. On non-final iterations, spend your budget on the review, not on lesson drafting.
+- If no candidate passes the admission test, emit nothing. Silence is honest — a bad candidate is worse than none.
+- The post-early rule still applies: post your verdict FIRST, then emit the candidate. If you exhaust your steps after posting the verdict but before the candidate, the loop continues without a candidate — that is fine.
