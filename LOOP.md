@@ -156,7 +156,7 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `BOUCLE_ENABLED` | `true` | Master switch: `true` or `false` (pause boucle). |
-| `BOUCLE_FORGE` | *(required)* | Active forge: `gitlab` or `github`. No default — pass as subcommand (`setup gitlab` / `setup github`) or via `--forge` / `BOUCLE_FORGE`. |
+| `BOUCLE_FORGE` | *(auto-detected)* | Active forge: `gitlab` or `github`. Auto-detected from the origin git remote (github.com → github, gitlab.com → gitlab, self-hosted via hostname heuristic or API probe). Override with a subcommand (`setup gitlab` / `setup github`), `--forge`, or `BOUCLE_FORGE`. |
 | `BOUCLE_MONO_USER` | *(empty)* | `true` when one account owns both the issues and the loop (the default when no `--bot-id` is given). Swaps the actor-based anti-loop guard for the `<!-- boucle:agent -->` marker, drops the `boucle::status::*` gross label and both assignee side effects. `false` is treated as unset. Degrades notifications — see README. |
 | `BOUCLE_SPEC_PROFILE` | `product` | Spec validation profile: `product` (default, gates Size M only), `strict` (gates all sizes), `off` (never); unknown → `product`. |
 | `BOUCLE_DND_ENABLED` | `false` | Do-Not-Disturb master switch: `true` (opt-in) or `false` (default). |

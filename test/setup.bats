@@ -86,3 +86,45 @@ setup() {
   assert_success
   assert_output "executed"
 }
+
+# ── detect_forge_from_host (extracted and run in isolation) ───────────
+# detect_forge_from_host maps a hostname to a forge name. The known SaaS
+# hosts and hostname heuristics are pure (no network); only the API-probe
+# fallback hits the network, which we don't test here.
+
+@test "bin/setup defines detect_forge_from_host function" {
+  run grep -E '^detect_forge_from_host\(\)' bin/setup
+  assert_success
+}
+
+@test "detect_forge_from_host returns github for github.com" {
+  run bash -c "source <(awk 'BEGIN{p=0} /^detect_forge_from_host\(\) \{/{p=1; print; next} p==1 && /^\}/{print; p=0; next} p==1{print}' bin/setup); detect_forge_from_host github.com"
+  assert_success
+  assert_output "github"
+}
+
+@test "detect_forge_from_host returns gitlab for gitlab.com" {
+  run bash -c "source <(awk 'BEGIN{p=0} /^detect_forge_from_host\(\) \{/{p=1; print; next} p==1 && /^\}/{print; p=0; next} p==1{print}' bin/setup); detect_forge_from_host gitlab.com"
+  assert_success
+  assert_output "gitlab"
+}
+
+@test "detect_forge_from_host returns github for github.example.com" {
+  run bash -c "source <(awk 'BEGIN{p=0} /^detect_forge_from_host\(\) \{/{p=1; print; next} p==1 && /^\}/{print; p=0; next} p==1{print}' bin/setup); detect_forge_from_host github.example.com"
+  assert_success
+  assert_output "github"
+}
+
+@test "detect_forge_from_host returns gitlab for gitlab.example.com" {
+  run bash -c "source <(awk 'BEGIN{p=0} /^detect_forge_from_host\(\) \{/{p=1; print; next} p==1 && /^\}/{print; p=0; next} p==1{print}' bin/setup); detect_forge_from_host gitlab.example.com"
+  assert_success
+  assert_output "gitlab"
+}
+
+@test "detect_forge_from_host returns empty for unrecognized host without network" {
+  # For an unrecognized host, the function falls back to an API probe.
+  # Use a host that will fail to connect (3s timeout) → empty output.
+  run bash -c "source <(awk 'BEGIN{p=0} /^detect_forge_from_host\(\) \{/{p=1; print; next} p==1 && /^\}/{print; p=0; next} p==1{print}' bin/setup); detect_forge_from_host nonexistent.invalid.test"
+  assert_success
+  assert_output ""
+}
