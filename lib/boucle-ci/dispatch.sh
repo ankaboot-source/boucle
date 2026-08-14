@@ -729,6 +729,12 @@ boucle_ci_dispatch() {
         # already claimed by an in-flight issue (prevents parallel workers
         # editing the same files from conflicting at rebase/merge).
         if check_file_gate "$IID"; then
+          # Revert to boucle:todo before chaining — the worker refuses to
+          # run on any other label (spec-review, human, etc.). Idempotent:
+          # skip the PUT when boucle:todo is already set.
+          if ! echo "$LABELS" | tr ',' '\n' | grep -qx "boucle:todo"; then
+            set_boucle_label "$IID" "boucle:todo" "boucle::status::bot"
+          fi
           echo "Triggering worker for issue #$IID (boucle:todo re-trigger)"
           chain_to_role "$IID" "worker"
         fi
