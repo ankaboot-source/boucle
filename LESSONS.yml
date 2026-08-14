@@ -1,0 +1,675 @@
+# LESSONS.yml — boucle lessons learned (machine-readable)
+# Source: AGENTS.md "Lessons learned" section (extracted + cleaned)
+# Format: every lesson has title + ❌ (DO NOT) + ✅ (DO). No Context: narratives.
+# Validation: bin/check-lessons
+# Gaps (e.g. #18) are marked pruned: true to preserve numbering (never renumber).
+# Merged lessons (e.g. #51) are marked merged_into: N with a one-line reason.
+# Cleaned by /tmp/opencode/post-process-lessons.py (oracle report)
+
+1:
+  title: Post before refining
+  ✅: 'DO: See [SKILL.md](SKILL.md) §I4 (Post-early).'
+  ❌: DO NOT refine a comment in a loop before posting it.
+2:
+  title: Detect silent failures
+  ✅: 'DO: See [SKILL.md](SKILL.md) §I4 (Post-early — silent failure is the inverse of post-early).'
+  ❌: DO NOT let a no-output agent pass silently.
+3:
+  title: No MCP in CI
+  ✅: 'DO: strip MCP in CI; use native `glob`/`grep`/`read` and the `codebase-memory-mcp cli` fallback. Every prompt that cites graph tools MUST document both interfaces.'
+  ❌: DO NOT rely on `codebase-memory-mcp` tools in CI (handshake hangs).
+4:
+  title: Idempotent label writes
+  ✅: 'DO: See [SKILL.md](SKILL.md) §I5 (Idempotence).'
+  ❌: DO NOT `PUT` a label that is already present.
+5:
+  title: Always write to stdout
+  ✅: 'DO: See [SKILL.md](SKILL.md) §I4 (Post-early — stdout is the post channel).'
+  ❌: DO NOT produce output only in memory or via tool calls.
+6:
+  title: SHA-anchored verdicts
+  ✅: 'DO: See [SKILL.md](SKILL.md) §I6 (SHA-anchored verdicts).'
+  ❌: DO NOT post a verdict without a bare-hex SHA.
+7:
+  title: Webhooks must produce work
+  ✅: 'DO: fail `dispatch` when no `.boucle-issue` is written.'
+  ❌: DO NOT let a webhook consume a runner without producing work.
+8:
+  title: Serial merges only
+  ✅: 'DO: See [SKILL.md](SKILL.md) §I10 (Serial merge).'
+  ❌: DO NOT parallelize merges (rebase against a stale `master`).
+9:
+  title: Adequate output token budget
+  ✅: 'DO: 4000 tokens for triage, matching reviewer/e2e.'
+  ❌: DO NOT cap `OUTPUT_TOKEN_MAX` below what a complete structured comment needs.
+10:
+  title: Rebase before build
+  ✅: 'DO: rebase **BEFORE** build, always.'
+  ❌: DO NOT build before rebase (`public/` dirties the tree).
+11:
+  title: Assignment is a valid trigger
+  ✅: 'DO: dispatch MUST also detect issue **assignment** to the bot.'
+  ❌: DO NOT treat only the `boucle:queued` label as a trigger.
+12:
+  title: Honor the concurrency cap
+  ✅: 'DO: let the cap defer worker triggers to prevent runner saturation and rebase races.'
+  ❌: DO NOT disable `BOUCLE_MAX_PARALLEL_ISSUES`.
+13:
+  title: Resolve parent-child via the hierarchy API
+  ✅: 'DO: use the work-items hierarchy API; check the PATCH HTTP status and on non-2xx fall back to a REST `relates_to` issue link (visible under "Linked items" on the parent); fall back to the `legacy
+    split-parent marker` comment for machine-readable recovery when neither API is available.'
+  ❌:
+  - DO NOT infer parent-child links ad hoc.
+  - DO NOT assume the hierarchy PATCH succeeded — on self-managed GitLab with `work_item_rest_api` disabled it returns 403 and the parent-child relationship becomes invisible in the UI.
+14:
+  title: Safety-net commit is CI's job
+  ✅: 'DO: CI auto-stages+commits before rebase. The agent only MUST avoid unstageable changes (binaries, local configs).'
+  ❌: DO NOT panic over a missed commit before rebase.
+15:
+  title: A worker must produce at least one commit
+  ✅: 'DO: land at least one commit per worker run; CI re-triggers or escalates otherwise.'
+  ❌: DO NOT ship an empty MR (`base_sha == head_sha`).
+16:
+  title: Feed reviewer feedback forward
+  ✅: 'DO: export all non-system MR notes as `BOUCLE_REVIEWER_FEEDBACK` and inject them into the worker prompt; address every actionable item before claiming done.'
+  ❌: DO NOT re-trigger the worker after a FAIL without passing the verdict and human MR comments to the next run.
+17:
+  title: Inherit parent-issue attachments
+  ✅:
+  - 'DO: resolve the parent IID and append its description + notes when mining `/uploads/`. One level only; gated by `BOUCLE_PARENT_ATTACHMENTS_DISABLE`.'
+  - 'DO: update title + description on every iteration via `glab mr update`.'
+  - 'DO: write a commit-SHA marker into the build, capture the deploy exit code separately, and retry-fetch the marker until the deployed SHA matches the head SHA. A stale preview FAILs the worker job.'
+  ❌:
+  - DO NOT mine only the current issue for uploads when it is a sub-issue.
+  - DO NOT reuse an existing MR on iteration 2+ with a stale description (preview URL, Approach, commit summary drift).
+  - DO NOT trust an HTTP 200 on the preview URL (swallowed exit codes, CDN cache, byte-identical builds all serve stale content).
+18:
+  pruned: true
+  reason: boucle is now public — bin/update succeeds unauthenticated
+19:
+  title: MR description not refreshed on worker re-run
+  ✅: 'DO: the worker job calls `glab mr update` on the reused MR to refresh both the title and the description (new preview URL + new Approach + new commit summary) on every iteration. The reuse branch
+    in `.gitlab-ci.yml` now updates the MR instead of silently reusing it.'
+  ❌: DO NOT reuse an existing MR on iteration 2+ without updating its description. The worker deploys to a branch-based preview URL that changes between iterations, and the MR description carries the preview
+    URL the reviewer tests against. A stale description points the reviewer at the wrong (old) URL — the reviewer may PASS a deployment that no longer exists, or FAIL a deployment that was never tested.
+20:
+  merged_into: 36
+  reason: 'Approach section formatting — same class as #36 (bullet points + non-placeholder)'
+21:
+  title: Preview stale passes HTTP-200-only assertion
+  ✅: 'DO: the worker job writes a commit-SHA marker into the build output (`__boucle_commit__.txt` + an HTML comment in `index.html`) right after the build, captures the wrangler exit code separately from
+    the URL extraction (subshell + log file, not a swallowing pipeline), and the deploy assertion fetches the marker from the preview URL with a retry loop (`BOUCLE_PREVIEW_PROPAGATION_WAIT`, default 60s,
+    5s backoff) until the deployed SHA matches the head SHA. A stale preview now FAILs the worker job instead of passing through to the reviewer.'
+  ❌: 'DO NOT trust an HTTP 200 on the preview URL as proof that the deployed content matches the head commit. Three failure modes produce a 200 with stale content: (a) the deploy step''s exit code is swallowed
+    by a `$(...) | grep | head` pipeline under `set +o pipefail`, so a failed redeploy is silently treated as success; (b) the CDN edge keeps serving cached content for seconds-to-minutes after a new deployment;
+    (c) if the build output is byte-identical to the previous iteration (Astro/Vite cache hit on the shell executor), `wrangler pages deploy` returns the same content-hash URL and the preview never updates.'
+22:
+  title: Prefer rebase over hard reset
+  ✅:
+  - 'DO: `git rebase origin/master` when worker commits exist; on conflict, `git rebase --abort` and PRESERVE the branch (hand the conflict to the bounded re-trigger path). Fall back to hard reset ONLY
+    on a true clean slate (no worker commits).'
+  - 'DO: on rebase conflict, `git rebase --abort` and PRESERVE the branch — never reset it. Hand the conflict to the bounded re-trigger path (worker iteration budget, then `boucle:human`). `git reset --hard`
+    is allowed ONLY for a true clean slate (no worker commits).'
+  - 'DO: treat `commits_status` as a worker problem, not a merger problem — recover by re-triggering the WORKER (it regenerates the MR content from the preserved `state.md`/`iterations.md`), in both the
+    merger and the doctor. Admission: class — destructive rebase-fallback reset on a committed branch; recurrence — any future backport/refactor may reintroduce a reset fallback; stable — no line numbers;
+    distinct from lesson #22 which covers the unconditional start-of-run reset (this covers the rebase-CONFLICT fallback and the recovery side).'
+  ❌:
+  - DO NOT unconditionally `git reset --hard origin/master` at the start of every worker iteration — it wipes validated commits on non-code FAILs.
+  - DO NOT fall back to `git reset --hard` when a rebase CONFLICTS on a branch that holds worker commits — the reset orphans the pushed commit, empties the MR (`detailed_merge_status=commits_status`) and
+    sends the merger/doctor into an infinite escalation loop.
+  - 'DO NOT let a rebase-fallback `git reset --hard origin/$CI_DEFAULT_BRANCH` run on a branch that contains worker commits. The commit becomes orphaned (still on the remote, but unreferenced): the MR goes
+    empty (`detailed_merge_status=commits_status`), the merger cannot fix it (nothing to rebase or merge), escalates to `boucle:human`, and the doctor re-triggers the merger forever on the same empty MR
+    — an infinite escalation loop.'
+  - DO NOT trigger the merger on an MR in `commits_status` — the merger cannot repair an empty MR; re-triggering it is precisely the infinite loop.
+23:
+  title: Document the CLI fallback for graph tools
+  ✅: 'DO: every prompt citing `search_graph`/`trace_path`/ `get_code_snippet` also documents `codebase-memory-mcp cli <tool> ''<json>''`.'
+  ❌: DO NOT reference MCP graph tools in prompts without the CI fallback.
+24:
+  title: Do not overwrite the MR description on no-changes runs
+  ✅:
+  - 'DO: update only the MR title (iteration count); leave the last successful description intact.'
+  - 'DO: decide by intent — "use this file as X" → ship-as-asset (`cp` to `public/`, reference in build); "this is what''s wrong" → inspect-for-context. Use `file <path>` for binary metadata; `cp` + reference
+    ships an image without seeing it.'
+  ❌:
+  - DO NOT replace a useful description with a "no code changes" placeholder.
+  - DO NOT frame all attachments as "inspect for context".
+25:
+  merged_into: 54
+  reason: 'MR attachment/feedback channel silently dropped by ports — same class as #54'
+26:
+  title: Attachment framing conflates "inspect for context" with "ship as asset"
+  ✅: 'DO: `bin/jc` and `worker.md` frame attachments as dual-nature. The worker decides based on the comment''s intent: "use this file as the separator" → ship-as-asset (`cp` to `public/`, reference in
+    build); "this is what''s wrong" → inspect-for-context. The worker uses `file <path>` (not `Read`) to get dimensions/metadata on binaries — `Read` on a PNG returns base64 garbage on text-only models.
+    The worker does NOT need to *see* the image to *ship* it — `cp` + reference is enough.'
+  ❌: 'DO NOT frame all attachments (issue + MR) as "Read each file to inspect them… use them as context for addressing reviewer feedback". Attachments have a **dual nature**: they may be (a) source assets
+    the user wants shipped (logos, photos, illustrations — copy to `public/` and reference in the build), OR (b) mockups/screenshots for context (reviewer feedback, bug reports — inspect for guidance, do
+    not ship). A single "use as context" framing primes the worker to *consult* the file, not to *adopt* it. When the worker cannot see the image (text-only model — `Read` on a PNG returns garbage), it
+    fabricates a substitute instead of copying the uploaded file.'
+27:
+  title: Re-scrape logs when the found verdict is stale
+  ✅: 'DO: track `VERDICT_SHA_MATCHED`; re-scrape when empty OR SHA mismatched; let a fresher SHA-anchored stdout verdict override the stale one.'
+  ❌: DO NOT gate log-scraping on `if [ -z "$VERDICT" ]` alone — a stale verdict blocks recovery of the current run's stdout.
+28:
+  title: Persist worker state across iterations
+  ✅: 'DO: persist `.boucle-state/<issue>/` to `$BOUCLE_STATE_CACHE/<issue>/` and restore it at startup; the worker reads `iterations.md` to know what was already tried. Per-issue state lives in `.boucle-state/`
+    (gitignored), NEVER in `.boucle/` — `.boucle/` is the engine submodule on consumers and `git submodule update` clobbers anything inside it.'
+  ❌: DO NOT assume `.boucle-state/<issue>/` survives between iterations (gitignored, no artifact passing, `$CI_PROJECT_DIR` may be wiped).
+29:
+  title: Distinguish API outage from step exhaustion (empty log + no activity traces)
+  ✅:
+  - 'DO: exit `4` on empty log / no agent activity → post a diagnostic naming the model, escalate to `boucle:human`, do not re-trigger.'
+  - 'DO: `is_api_down` in `bin/jc` returns "down" when the agent log is empty or contains no activity traces (tool calls, file reads, git operations, source paths, comment markers). A working agent always
+    leaves activity in its log; a dead provider leaves silence. This is provider-agnostic — it holds for any transcript format, so a working run is never false-flagged as "down". On "down", `bin/jc` exits
+    `4`, the fallback provider is tried before any human escalation, and a diagnostic comment is posted on the issue.'
+  ❌:
+  - DO NOT treat an empty worker log as "agent exhausted its step budget".
+  - DO NOT rely on error-pattern greps to decide a provider is down — a hung or dead provider produces no error lines at all, only silence, so an error-grep passes and the loop waits on a run that will
+    never produce output.
+30:
+  title: Fall back to a second provider before escalating
+  ✅:
+  - 'DO: treat persistent quota exhaustion (HTTP 429/402 or explicit quota/credit messages, detected by `is_quota_exhausted`) as a provider-down condition on the exit-4 path, gated on a non-zero run exit
+    so a successful run that merely quotes "429" is not misclassified.'
+  - 'DO: when `BOUCLE_FALLBACK_PROVIDER` is set, retry with `$BOUCLE_FALLBACK_MODEL_<ROLE>` on the exit-4 condition; mark the iteration `[FALLBACK: provider/model]`. Escalate only if the fallback also fails.
+    Each attempt is wrapped in `timeout` (per-role `AGENT_TIMEOUT`) so a hanging primary is killed before the job timeout eats the whole run — without this, the fallback block never executes because `run_with_retry`
+    never returns.'
+  ❌:
+  - DO NOT escalate to a human the moment the primary provider is down.
+  - DO NOT rely on `is_api_down` (empty log / no agent activity) as the only fallback trigger. A persistent quota error (HTTP 429/402, "you have reached your weekly usage limit") leaves activity traces
+    in the agent log, so `is_api_down` reports the provider as "up" and the loop escalates to a human instead of falling back — even though retrying cannot fix an exhausted quota.
+31:
+  title: Download uploads via the GitLab API, not the raw /uploads/ URL
+  ✅: 'DO: use `glab api --method GET "/projects/$PROJECT_ID/uploads/:secret/:filename" -H "Accept: application/octet-stream"` which returns the binary blob with proper token-based auth. Applies to both
+    `bin/fetch-issue-attachments` and `bin/fetch-mr-attachments`.'
+  ❌: 'DO NOT `curl -H "PRIVATE-TOKEN: $TOKEN" "https://$HOST/uploads/..."` to download attachments from issue/MR notes. The `/uploads/` endpoint uses cookie-based session auth — the `PRIVATE-TOKEN` header
+    is ignored and the response is a GitLab login page (HTML), not the binary blob. The worker sees `file <path>` → "HTML document" and correctly refuses to ship it, falling back to a synthetic asset.'
+32:
+  merged_into: 29
+  reason: same mechanism — detect provider downtime by examining agent log (empty + no activity traces)
+33:
+  title: Doctor MUST check active pipelines before re-triggering
+  ✅: 'DO: the doctor MUST call `issue_has_active_pipeline` (which lists active pipelines and fetches each one''s variables via `GET /projects/:id/pipelines/:pipeline_id/variables` to match `BOUCLE_ISSUE=<iid>`)
+    before every re-trigger, and MUST apply a per-issue dedup timestamp (`$BOUCLE_STATE_CACHE/doctor-triggers/ <iid>`) as a secondary backstop. `BOUCLE_STALENESS_THRESHOLD` MUST be strictly greater than
+    the longest job timeout (default 2400s vs worker/reviewer 30 min).'
+  ❌: DO NOT use issue `updated_at` as a proxy for "is a pipeline running" — it is bumped by any issue activity (bot notes, label writes), not just pipeline runs. DO NOT set `BOUCLE_STALENESS_THRESHOLD`
+    below the longest job timeout — the doctor will fire while a worker/reviewer is legitimately still running, producing parasitic duplicate triggers that queue unbounded via `resource_group`.
+34:
+  title: Dispatch MUST skip system notes
+  ✅: 'DO: the dispatch note-event handler MUST check `.object_attributes.system` and `exit 0` on system notes. The `BOT_JUST_ASSIGNED` path already handles assignment via the issue update webhook, so the
+    system note is pure redundancy. The codebase already filters `system == false` when fetching notes via the API (worker/reviewer feedback) — the webhook handler MUST apply the same filter.'
+  ❌: DO NOT treat GitLab system notes (assignee changes, label changes, branch additions) as human replies. A system note has `.object_attributes.system = true` and `.user.username` = the human who triggered
+    the system action — so the ACTOR guard passes, but the note is NOT a human reply. Without a system-note filter, creating an issue + assigning the bot in the same form fires BOTH an `issue` webhook (open
+    → triage) AND a `note` webhook (system "assigned to @up-bot" → triage again), double-triggering triage. The triage job has no `resource_group` (BOUCLE_ISSUE is not available at pipeline eval time),
+    so the two pipelines run in parallel → congestion.
+36:
+  title: Approach MUST use bullet points AND be filled (not placeholder)
+  ✅:
+  - 'DO: write the Approach as 3-6 bullet points (`- item`), one per aspect of the implementation. Each bullet cites the charter doc section it conforms to (e.g. "Conforms to the visual charter §2 — sharp
+    corners via `--radius-sharp`"). Bullet points and blank lines render properly in GitLab markdown.'
+  - 'DO: the worker MUST fill the Approach section with 2-5 sentences explaining the implementation approach and citing the specific charter doc sections it conformed to (`worker.md` step 8). The CI extraction
+    (`APPROACH=$(sed -n ''/^## Approach/,/^## /p'' state.md ...`) now falls back to an explicit note when the section is still the placeholder, so the MR description is never the literal seed text.'
+  ❌:
+  - DO NOT write the `## Approach` section as a paragraph of 2-5 sentences. GitLab markdown renders single newlines (soft breaks) as spaces, so a paragraph becomes an unreadable wall of text in the MR description.
+    The worker prompt said "Write 2-5 sentences" — the worker wrote one long paragraph, and the MR description was a single 500-char block with no visual structure.
+  - DO NOT leave the `## Approach` section of `state.md` as the seed placeholder `(to be determined by worker)`. The Approach section becomes the MR description's `### Approach` block, which the reviewer
+    reads to verify doc conformance (e.g. visual charter §2 and §4 citations). An empty Approach causes repeated reviewer FAIL verdicts on the same criterion, wasting the iteration budget (`BOUCLE_MAX_ITERATIONS`).
+37:
+  title: Push consumer fixes upstream in the SAME session
+  ✅:
+  - 'DO: See [SKILL.md](SKILL.md) §I9 (Upstream-first). When a fix lands on consumer `master`, push it upstream **in the same session**: branch from `origin/main`, cherry-pick the consumer commit(s), push
+    the branch, open a PR. This is mandatory — not optional, not "later".'
+  - 'DO: accept that consumer `master` and upstream `main` are **intentionally divergent** — consumer has consumer-specific features (`feat:` commits) that will never go upstream, and upstream has its own
+    commit history. The goal is not zero divergence but **no unpushed fixes** — every fix on consumer must have a corresponding upstream PR (merged or open).'
+  ❌:
+  - DO NOT land a fix on the consumer repo (`master`) and defer the upstream push to "later". The upstream-first workflow (`.jcode/UPSTREAM-FIX-WORKFLOW.md`) says "fix upstream FIRST, then update consumer"
+    — but in practice fixes land on consumer `master` first (that's where the work happens) and the upstream push is forgotten. This grows the divergence between consumer `master` and upstream `main` (100+
+    commits behind/ahead on a consumer repo as of 2026-08) until the two lines become unmanageable.
+  - DO NOT push consumer `master` directly to upstream (`origin/main`). The two repos use different default branches (`master` vs `main`) and have divergent histories — a direct push is non-fast-forward
+    and will be rejected (or worse, force-pushed, destroying upstream history).
+  - DO NOT trust the commit-count divergence as a measure of real drift. `bin/update` syncs upstream → consumer via `cp -r` (file replacement, not git merge), so each sync creates a new commit SHA on consumer
+    that doesn't match the upstream SHA. Git then reports upstream commits as "not present" even though their **content** is already there. Check file content, not commit count, to assess real drift.
+38:
+  title: Never leak consumer information in upstream contributions
+  ✅:
+  - 'DO: use generic language in upstream contributions: "consumer work", "a consumer repo", "discovered during consumer testing" — never the actual consumer name.'
+  - 'DO: strip consumer issue references from commit messages before cherry-picking upstream. A consumer issue `(#35)` becomes nothing or a generic `(consumer)` when pushed upstream.'
+  - 'DO: ask the human explicitly if a consumer name MUST be shared upstream for context — otherwise it stays private.'
+  - 'DO: keep the origin benchmark documented. Boucle was extracted from a real product — a static Astro site (GitLab, Cloudflare Pages). The origin-era history has been ANONYMIZED (owner decision, 2026-08):
+    all pre-extraction author/committer identities and forge references were rewritten to the maintainer''s identity in a history rewrite. The rules above protect *third-party consumers* — never re-introduce
+    consumer-identifying content in upstream contributions.'
+  ❌:
+  - 'DO NOT include consumer-identifying information in upstream (boucle) contributions — PRs, issues, commits, branch names, or any artifact visible on the upstream repo. The upstream boucle repo is shared/public;
+    consumer project information is private. This includes:'
+  - DO NOT write "fixes from work on <consumer-name>" or "found on <consumer-domain>" in PR descriptions. This leaks the consumer identity to anyone reading the upstream repo.
+40:
+  title: Split bookkeeping MUST be atomic and label-first
+  ✅: 'DO: set the `boucle:split` label FIRST (dispatch and doctor stop re-triaging even if later steps fail), then post ONE merged comment containing both the human-readable list and the `<!-- boucle:split-parent
+    iids=... -->` marker — a single POST is atomic.'
+  ❌:
+  - 'DO NOT post the human "Split into" comment, the `boucle:split-parent` marker, and the `boucle:split` label as separate steps in that order — a job failure between steps leaves a human comment without
+    its marker, so the retry re-splits: duplicate sub-issues and duplicate "Split into" comments.'
+  - 'DO NOT format the sub-issue list with `sed ''s/,/#, #/g''` — it produces `#38#, #39#, #40` (broken issue links). Use `sed ''s/,/, #/g''` → `#38, #39, #40`.'
+41:
+  title: Anchor log-scraping patterns to start-of-line (VERDICT greps + marker detection)
+  ✅:
+  - 'DO: See [SKILL.md](SKILL.md) §I6 (SHA-anchored verdicts — the anchored grep is the implementation of the invariant). The `^` anchor ensures the grep only matches a real `VERDICT:` line (posted by the
+    agent as a verdict), never a substring inside a shell trace or quoted command.'
+  - 'DO: anchor EVERY awk marker-detection pattern with `^` (start of line): `$0 ~ "^<!-- boucle:verdict v=1 role=reviewer sha=" sha " -->"` and `/^<!-- boucle:verdict v=1 role=reviewer/` and `/^<!-- boucle:draft
+    role=reviewer -->/`. A real marker is always the first token on its line; a marker quoted in prose is always preceded by other text. This applies to ALL five log-scraping fallbacks: reviewer `boucle:verdict`
+    + `boucle:draft`, e2e `boucle:verdict` + `boucle:draft`, and triage `boucle:triage` + `boucle:draft`.'
+  ❌:
+  - 'DO NOT use `grep -E ''VERDICT: (PASS|FAIL|UNCERTAIN)''` without a `^` start-of-line anchor in the verdict parsing pipeline. opencode''s bash tool traces commands with `set -x`-style output (ANSI color
+    + `$ ` PS4 prompt) in `agent-output.log`. A trace line like `[0m$ [0mglab mr note 36 --message "VERDICT: PASS"` contains the substring `VERDICT: PASS` — an unanchored grep matches it inside the trace,
+    and the log-scraping fallback posts the trace as a verdict note. The result: a malformed note (containing shell trace output) appears on the MR, and CI may parse a phantom VERDICT from a command the
+    agent echoed but never actually posted as a real verdict.'
+  - 'DO NOT assume the awk `^VERDICT:` exit guard is sufficient. The awk exits on `^VERDICT:` (start-of-line), but the trace line starts with `[0m$` (ANSI reset + PS4), so awk keeps printing past it. The
+    downstream `grep -qiE ''VERDICT: ...''` validation then matches the substring inside the trace line — because it is NOT anchored.'
+  - 'DO NOT use an unanchored awk regex like `$0 ~ "<!-- boucle:verdict v=1 role=reviewer sha=... -->"` to detect the start of a drafted verdict in `agent-output.log`. When an agent exhausts its step budget
+    mid-draft, its stdout often contains meta-instructions to itself that quote the marker in prose. An unanchored `$0 ~` matches the marker substring inside that prose sentence, sets `found=1`, and the
+    awk scrapes everything from the prose line through the trailing `VERDICT: PASS` — promoting a self-referential draft into a real verdict note.'
+42:
+  title: Merger MUST handle "Pipelines must succeed" via MWPS
+  ✅: 'DO: poll `detailed_merge_status` for up to 10 min (60×10s), tolerating `checking`/`pipeline_status_must_pass`/`pipeline_blocked` as transient states. If the pipeline is still running after the poll
+    window, switch to `merge_when_pipeline_succeeds=true` (MWPS) — GitLab merges automatically once the pipeline passes. Post a note so the human knows the merge is scheduled, and exit 0 (the deploy triggered
+    by the eventual merge + the doctor''s staleness check close the loop).'
+  ❌:
+  - DO NOT fail the merger when `detailed_merge_status` is `pipeline_status_must_pass` or `checking` after a short poll. The force-push (rebase) triggers a new pipeline on the MR branch. If the GitLab project
+    has "Pipelines must succeed" enabled, GitLab refuses to merge until that pipeline completes — and a 2-minute poll window is far too short for a full CI run. The merger fails → `boucle:human` → the MR
+    sits approved-but-unmerged even though everything is fine.
+  - DO NOT assume `merge_when_pipeline_succeeds=false` is always the right merge mode. It only works when the MR is immediately `mergeable`. When a pipeline is running, GitLab rejects the immediate merge
+    with a 405 and the merger treats the empty `merge_commit_sha` as a hard failure.
+43:
+  title: Never use `UNCERTAIN|*)` as a case catch-all
+  ✅: 'DO: use `UNCERTAIN)` (no `|*`) as an explicit branch for the genuine UNCERTAIN verdict. Let empty VERDICT fall through the `case` without side effects, and handle it exclusively in the post-case assertion
+    (`if [ -z "$VERDICT" ]; then ... re-trigger or escalate`). The assertion already has the iteration logic (`iter < MAX_ITER` → re-trigger, else → escalate to human with MR assignment + note). This applies
+    to BOTH the reviewer job and the e2e job — they share the same `case "$VERDICT" in ... UNCERTAIN|*) ... esac` + `if [ -z "$VERDICT" ]` pattern.'
+  ❌:
+  - 'DO NOT use `UNCERTAIN|*)` as the catch-all branch in a bash `case` statement that switches on `$VERDICT`. In bash, `*)` matches the empty string, so when the agent posted no verdict (step-exhausted,
+    crashed, or only a draft with no `VERDICT:` line), `VERDICT` is empty and the `UNCERTAIN|*)` branch fires — prematurely escalating to `boucle:human`, assigning the MR to the human, and posting the "unparsable"
+    note. This happens BEFORE the post-case assertion (which would have re-triggered the reviewer/e2e for another attempt). The result: the MR is assigned to the human while the re-triggered reviewer is
+    still running, and 3 duplicate "unparsable" notes appear on the issue (one per iteration, because each iteration''s case block fires the catch-all before the assertion re-triggers). This was MR !40
+    on a consumer repo: the reviewer posted only drafts on iterations 1-2, the catch-all fired each time, and the human saw "assigned mid-review" + a cascade of failed trigger pipelines.'
+  - 'DO NOT conflate "genuinely UNCERTAIN verdict" (agent posted `VERDICT: UNCERTAIN`) with "no verdict found" (agent posted nothing parsable). These are two different conditions requiring different actions:
+    UNCERTAIN is a terminal human escalation; empty VERDICT is a retryable failure that should re-trigger the agent.'
+44:
+  title: Never run the loop on a closed issue
+  ✅:
+  - 'DO: add a closed-issue guard at the START of the worker job (before `set_boucle_label boucle:working`), in the worker''s rebase-conflict re-trigger path, in the reviewer FAIL handler (before re-triggering
+    the worker), and in the dispatch issue-webhook handler (before label-based routing). Each guard fetches the issue state and exits 0 if closed.'
+  - 'DO: extend the doctor to scan `state=closed` issues with `boucle:working` or `boucle:review` labels — recover them by closing any open zombie MRs and setting `boucle:done`. This is the safety net for
+    the case where a guard was missing or bypassed.'
+  ❌:
+  - DO NOT let the worker, reviewer, or dispatch re-trigger a role on a closed issue. A closed issue is terminal — the catchup job closed it after a merge (or a human closed it manually). Running the worker
+    on a closed issue creates a zombie MR; the reviewer then FAILs the zombie MR and re-triggers the worker, which runs again on the closed issue — an infinite loop on a corpse. The doctor cannot recover
+    it because its main scan filters `state=opened`, so the closed issue with `boucle:working` is invisible.
+  - DO NOT assume the worker is safe from closure mid-run. A human can merge another MR for the same issue while a worker iteration is in flight — the catchup closes the issue, then the worker's rebase-conflict
+    handler (master advanced) re-triggers itself on the now-closed issue. The rebase-conflict re-trigger path MUST check issue state before chaining.
+  - 'DO NOT let issue webhooks (update/note/emoji) re-trigger the loop on a closed issue. Only MR webhooks had a closed-issue guard — issue webhooks did not. A label change on a closed issue (e.g. the reviewer
+    FAIL setting `boucle:todo`) fires an issue update webhook → dispatch no-ops → the EXIT trap flips exit 0 to exit 1 → a cascade of failed pipelines. The one exception is `BOT_JUST_ASSIGNED`: a human
+    assigning the bot to a closed issue is an explicit re-trigger signal (the human wants to reopen and resume work).'
+45:
+  title: Distinguish draft from final by structure, not body text
+  ✅:
+  - 'DO: use the dedicated draft marker (`<!-- boucle:draft role=triage -->` / `<!-- boucle:draft role=reviewer -->`) for first-pass drafts. The CI parser does NOT match `boucle:draft` — it only matches
+    `boucle:triage` / `boucle:verdict`. The log-scraping fallback promotes `boucle:draft` to the final marker when the agent exhausts its steps.'
+  - 'DO: make the CI parser require a STRUCTURAL section that only final comments have. For triage, the final comment starts with `## TL;DR` (per the prompt format spec); a draft only has `## Disposition`.
+    The jq filter is `select(.body | test("## TL;DR")) and select(.body | test("## Disposition"))`. This is structural (section header), not body-text — it will not false-match website content. This is
+    defense-in-depth: even if the agent uses the wrong marker, the parser won''t act on a draft that lacks `## TL;DR`.'
+  ❌:
+  - DO NOT detect a draft triage/reviewer comment by grepping the body for the word "DRAFT". The word "DRAFT" can legitimately appear in website content being triaged (e.g. a draft page the author wants
+    reviewed), so a body-text grep produces false positives.
+  - 'DO NOT post a first-pass draft with the FINAL marker (`<!-- boucle:triage v=1 -->` or `<!-- boucle:verdict v=1 ... -->`). The CI parser acts immediately on the final marker — it sets the disposition
+    label, assigns the issue/MR, and pauses the loop before the agent can refine. The refinement is wasted. This was issue #42 on a consumer repo: the triage agent posted a NEEDS-INFO draft with the final
+    `<!-- boucle:triage v=1 -->` marker, the CI immediately set `boucle:needs-info` + `boucle::status::human` and assigned the issue to the reporter, before the agent could post its refined comment with
+    the actual blocking questions.'
+46:
+  title: Preserve instructed content
+  ✅:
+  - 'DO: inject `BOUCLE_ISSUE_BODY` and `BOUCLE_ISSUE_NOTES` into the worker job (mirroring the triage job) so the worker has the instructed content and the full discussion history at hand without spending
+    steps on `glab issue view`.'
+  - 'DO: inject `BOUCLE_ISSUE_BODY` into the reviewer job so it can verify the MR content matches the original spec — a MR with placeholder videos or rewritten citations is a FAIL even if it satisfies the
+    latest amendments.'
+  - 'DO: add a "Preserve instructed content" instruction to the worker prompt stating that amendments AMEND the spec, they do NOT replace earlier preservation instructions — conciliate them.'
+  ❌:
+  - DO NOT generate placeholders for content the issue instructs. If the issue body specifies a video URL, a citation, a text, or an image, the worker MUST ship it verbatim — never a generic placeholder
+    (e.g. a Rickroll video ID `dQw4w9WgXcQ` in place of the instructed URL), never a paraphrase, never a substitute.
+  - DO NOT rewrite the instructed texts. If the issue quotes an author verbatim, the worker ships that quote — it does not summarize, paraphrase, or generate a new critique.
+  - DO NOT let later amendments override earlier preservation instructions. The feedback channel injects the latest human amendments (e.g. "fill empty spaces with the brand pattern", "single CTA") WITHOUT
+    the earlier preservation context (e.g. "keep the texts/visuals/videos already shared", "video in front, horizontal"). The worker applies the latest amendment literally and degrades the validated layout
+    — replacing the video with the brand pattern instead of filling the empty space below it.
+47:
+  title: Gate-skip transparency
+  ✅: 'DO: every gate-skip path MUST (1) post an explanatory comment naming the trigger condition (DND window with its active range, or the `boucle:autonomous` label), stating what happens next (loop continues
+    to the MR, human validates the MR), and how to disable it (the CI variable or label to remove); AND (2) apply a flag label (`boucle:dnd` / `boucle:autonomous`) that rides along to the next state via
+    `set_boucle_label` so the skip reason is visible on the board at a glance. The flag label is transient — `set_boucle_label` strips `boucle:*` labels on the next state transition, so it is a one-step
+    signal, not a persistent state.'
+  ❌:
+  - DO NOT auto-skip a gate (spec gate, approval gate, any quality gate) without leaving a visible, self-explanatory trace on the issue. A silent skip — where the loop proceeds past a gate with no comment
+    and no flag label — leaves the human unable to understand why the gate was not respected. The issue arrives at the next state with no indication of WHY the gate was bypassed, so the human cannot audit
+    the decision or disable the skip if it was unwanted.
+  - DO NOT post a terse one-liner ("spec auto-validé") as the only trace. A one-liner states WHAT happened but not WHY (which condition triggered the skip), WHAT happens next (the loop continues to the
+    MR), or HOW to disable it (the relevant CI variable or label to remove).
+48:
+  title: Capability-based model routing (vision workaround)
+  ✅: 'DO: describe image attachments via `bin/describe-images <role>` (called after `fetch-issue-attachments`/`fetch-mr-attachments`, before `bin/jc <role>`). It runs the vision model (minimax-m3) SEPARATELY
+    to describe each image as text, writes the descriptions to `.boucle-state/$ISSUE/.image-descriptions.md`, and `bin/jc` injects them into the agent prompt as text. The worker/reviewer/triage stay on
+    their default models (deepseek-v4-flash, glm-5.2) and get image context as text, not as raw binaries. Forge controls: `BOUCLE_VISION_ROUTING` (enabled/disabled), `BOUCLE_VISION_MODEL` (default minimax-m3),
+    `BOUCLE_VISION_ROLES` (default triage,worker,reviewer), `BOUCLE_VISION_TIMEOUT` (per-image, default 120s). This is a workaround for jcode issues #683 (per-role model) and #819 (capability-based routing)
+    — remove when jcode implements native capability-based routing. The old `bin/detect-vision-need` (which swapped the entire model) has been removed.'
+  ❌:
+  - DO NOT run all agents on a vision model when only some issues/MR comments contain images — 3x cost for roles that never touch images.
+  - 'DO NOT run all agents on a text-only model and accept that they crash (jcode #755) or fabricate image content when images are present.'
+  - 'DO NOT swap the worker''s entire model to a vision model (minimax-m3) when images are present — the vision model is worse at code and prone to WASM OOM crashes (`RangeError: WebAssembly.instantiate():
+    Out of memory`). The worker needs image CONTEXT, not vision capability during code generation.'
+49:
+  title: Sub-issue dependencies must be gated, not hinted
+  ✅: 'DO: gate the worker trigger on a `## Depends on` section in the sub-issue body (portable marker `<!-- boucle:depends-on iids=N,M -->`, forge-native "is this issue closed?" primitive only). Set `boucle:blocked`
+    (not `boucle:todo`) when a dep is open. Unblock via a symmetric `maybe_unblock_dependents()` when a dep closes — NOT via the doctor''s capacity scan. Detect cycles at split time and escalate to a human;
+    never let a cycle deadlock the loop silently.'
+  ❌:
+  - 'DO NOT trigger a sub-issue''s worker in parallel with its siblings when the triage declared an explicit `Depends on:` — the worker cannot express "I need sibling #N''s artifact first" and will either
+    fabricate the artifact or block silently. A dependency that is not enforced at dispatch is a dependency that does not exist.'
+  - DO NOT reuse `boucle:todo` for dependency-blocked issues. The doctor's capacity-free scan re-triggers `boucle:todo` on every slot opening, hitting the dep gate each time, wasting API calls, and re-posting
+    the blocked note.
+50:
+  title: BOUCLE_BOT_ID must be resolvable or bot reassignment silently skips
+  ✅:
+  - 'DO: seed `BOUCLE_BOT_ID` (when `--bot-id` is given) and `BOUCLE_BOT_USERNAME` (always, default `up-bot`) as CI variables in `bin/setup`.'
+  - 'DO: resolve `BOUCLE_BOT_ID` by username via the forge users API in the `default` before_script when the variable is unset, so the loop still works on consumers that never ran `--bot-id` or ran an older
+    `bin/setup`. Defense-in-depth: the fallback closes the gap even if a future consumer skips `--bot-id`.'
+  ❌:
+  - 'DO NOT let `set_boucle_label` swallow a missing `BOUCLE_BOT_ID`. Reassignment to the bot is guarded by `if [ "$gross" = "boucle::status::bot" ] && [ -n "${BOUCLE_BOT_ID:-}" ]`, and the `|| true` +
+    `2>/dev/null` swallow the skip: the issue stays assigned to the human with no log line. The detection path (has the bot posted?) has a username fallback (`up-bot`), so detection works without `BOUCLE_BOT_ID`
+    while assignment does not — a silent asymmetry.'
+  - DO NOT assume `bin/setup --bot-id <n>` creates the `BOUCLE_BOT_ID` CI variable. Older `bin/setup` added the bot as a project member but never seeded the variable, so every `boucle::status::bot` transition
+    silently skipped reassignment on consumers that even ran `--bot-id`.
+51:
+  merged_into: 22
+  reason: 'destructive reset on committed branch — same class as #22 (start-of-run + rebase-conflict fallback)'
+52:
+  title: Standalone `merge_request_event` reference required for MR pipelines
+  ✅:
+  - 'DO: keep the creation rule standalone (`- if: $CI_PIPELINE_SOURCE == "merge_request_event"`) and enforce the scoping in the job''s `script:` instead (`if [ "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" !=
+    "$CI_DEFAULT_BRANCH" ]; then exit 0; fi`).'
+  - 'DO: prefer `ci/lint` with `merge_request_pipeline=true` to verify rule evaluation, but remember it does NOT prove pipeline creation — the creation trigger is the standalone-string detection.'
+  ❌: 'DO NOT gate a GitLab rule as a COMBINED comparison, e.g. `if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "$CI_DEFAULT_BRANCH"`, when the job must run in
+    a merge-request pipeline. The CI lint accepts the combined rule (jobs evaluate correctly), but GitLab''s MR-pipeline CREATION only triggers on the standalone reference `$CI_PIPELINE_SOURCE == "merge_request_event"`
+    — with a combined rule NO pipeline is created and the job silently never runs (observed on framagit 2026-08: same branch, combined rule → no pipeline; pure rule → pipeline created instantly). A rule
+    using only MR variables (`$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`) also never creates one.'
+53:
+  title: Reviewer MUST verify every human amendment is addressed before PASS
+  ✅: 'DO: enumerate EVERY human amendment from the Prior MR discussion (comments authored by the human, not the bot''s own verdicts), verify each is addressed in the deployed code, and FAIL if any is not
+    — even when every original criterion is satisfied.'
+  ❌:
+  - 'DO NOT grade the MR against the frozen triage/issue-body acceptance criteria alone when the Prior MR discussion contains human amendments — a PASS that reports "initiale (first letter) fallback: OK"
+    while the human explicitly wrote "pas de logo basé sur la lettre" validates the exact thing the human rejected. Initials ARE letters; an amended criterion is not satisfied by the original implementation.'
+  - DO NOT report a criterion as PASS when a human amendment has changed what that criterion requires, even if the pre-amendment text is still in the issue body — the human comment wins over the frozen
+    spec.
+  - DO NOT treat human amendments as mere suggestions ("the original acceptance criteria are all satisfied, amendments not addressed") and PASS anyway — an acknowledged-but-unaddressed amendment is a FAIL.
+54:
+  title: The MR feedback/attachment channel MUST fail loud on re-runs — a port/sync can silently drop it
+  ✅:
+  - 'DO: treat an EMPTY `BOUCLE_REVIEWER_FEEDBACK` on any RE-RUN (iteration > 1) as a red flag, not a first run. The worker and reviewer before_script WARN loudly and inject a `[boucle:guard]` self-fetch
+    fallback into the feedback; `bin/jc` `build_prompt` repeats the same guard (it survives CI-file rewrites). The agent then fetches the MR notes itself instead of assuming no feedback exists.'
+  - 'DO: verify the feedback channel after every engine port/sync — a sync that rewrites the jobs must preserve the `MR_FOR_FEEDBACK` lookup, or the guard must fire.'
+  - 'DO: `bin/fetch-mr-attachments` mirrors `bin/fetch-issue-attachments` for merge requests. It mines `/uploads/` paths from MR notes (`/projects/<id>/merge_requests/<iid>/notes`), downloads them to `.boucle-state/<issue>/mr-attachments/`,
+    and exports `BOUCLE_MR_ATTACHMENTS` via `.mr-attachments.env`. `bin/jc` sources this and appends the paths to the agent prompt so the worker can `Read` reviewer/human screenshots. Gated on `MR_FOR_FEEDBACK`
+    being non-empty (no MR on first run).'
+  ❌:
+  - 'DO NOT let a port/rewrite of the CI engine remove the MR feedback lookup (`MR_FOR_FEEDBACK` + `BOUCLE_REVIEWER_FEEDBACK` in the worker and reviewer jobs) while leaving the orphaned `export BOUCLE_MR_IID="$MR_FOR_FEEDBACK"`
+    + `fetch-mr-attachments` call behind. The failure is indistinguishable from a first run: every worker iteration logs "BOUCLE_MR_IID is empty (no MR on first run)" while an MR is open and accumulating
+    human comments. MR !59 on a consumer repo: after the jcode port (`.boucle-version 13316ff`, synced 2026-08-06) all 6+ worker iterations re-ran blind — the human''s "il faut un exemple d''article" and
+    3 mockup images never reached the worker, which re-implemented the same component ~20 times without ever creating the requested example article. The reviewer (which kept its own channel) FAILed repeatedly
+    citing the human request, one PASS validated the unaddressed amendment, the iteration cap escalated to `boucle:human`, and the old engine''s per-run `git reset --hard` left the MR empty (`commits_status`)
+    for the merger/doctor to loop on.'
+  - 'DO NOT rely on the lookup living in only one place. `.gitlab-ci.yml` is replaced wholesale by engine syncs (`chore: sync boucle engine to <sha>` = `cp -r`), so a guard embedded only in that file dies
+    with the regression it guards.'
+  - DO NOT fetch MR notes as text-only (`.body` field) and silently drop embedded `/uploads/...` image links. A reviewer or human who attaches a screenshot of a bug or a mockup to an MR comment has their
+    text passed to the worker but the image is invisible — the worker cannot see the very evidence that prompted the feedback.
+55:
+  title: "Recognise boucle's own writes by a stamp, never by the actor's\n    identity"
+  ✅:
+  - 'DO: See [SKILL.md](SKILL.md) §I7 (Marker-based self-recognition).'
+  - 'DO: keep the guard identical in every copy of the routing while the CI paths remain unconverged. A guard that lands in one copy and not the other breaks that path silently.'
+  ❌:
+  - 'DO NOT post a comment with a direct API call. Every posting path MUST go through the forge note helpers (`forge_issue_note`, `forge_mr_note`, and their `_update` variants), which stamp the invisible
+    `<!-- boucle:agent -->` marker. A comment posted around them carries no marker, so dispatch cannot tell it from a human reply: on a paused state it routes, and the loop re-triggers itself.'
+  - DO NOT add a new anti-loop guard that asks "who did this?". The actor only discriminates while boucle owns a separate account. It discriminates nothing when one account owns both the issues and the
+    loop, and pointing the guard at that account makes it discard the human's own triggers — the loop then goes silent with no error anywhere, which is worse than a crash.
+  - DO NOT rely on ordering alone ("post the comment before changing the label") to keep a comment from routing. Forges do not guarantee webhook delivery order, so the label webhook can overtake the note
+    and the note lands on the new, possibly paused, state.
+56:
+  title: User-facing notes MUST NOT contain literal env var names
+  ✅:
+  - 'DO: pass the value as a `printf` argument instead of embedding the name in the format string: `printf ''... onto %s ...'' ... "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}"`. The note then
+    shows the actual branch name (`master`, `main`, ...).'
+  - 'DO: when a note/message is duplicated across engine copies (`.gitlab-ci.yml` inline + `lib/boucle-ci/*.sh`), grep ALL copies for the same message before fixing — a fix in one copy alone leaves the
+    bug live on the other path.'
+  ❌:
+  - 'DO NOT interpolate an env var inside a single-quoted `printf` format string and expect it to expand. `printf ''... onto $CI_DEFAULT_BRANCH ...''` posts the literal text `$CI_DEFAULT_BRANCH` to the
+    issue/MR — the human sees a raw variable name in the note. The reviewer PASS approval message did exactly this: "The merger will then rebase the MR onto $CI_DEFAULT_BRANCH" appeared verbatim on a consumer
+    issue instead of the real branch name.'
+  - DO NOT "preserve" such a literal with a `shellcheck disable=SC2016` comment on the assumption that the literal was intended. When the reviewer job was ported from `.gitlab-ci.yml` into `lib/boucle-ci/reviewer.sh`,
+    the literal `$CI_DEFAULT_BRANCH` was copied as `$BOUCLE_DEFAULT_BRANCH` and locked in with a SC2016 disable — cementing the bug in BOTH engine copies instead of fixing it.
+57:
+  title: A closed non-merged MR is NEVER a completion signal
+  ✅:
+  - 'DO: in the reviewer "no open MR" guard, distinguish three cases: (1) a MERGED MR exists → `boucle:done` + close (unchanged); (2) a CLOSED (not merged) MR exists AND the issue carries `boucle:review`
+    or `boucle:approval` → `boucle:done` + close (unchanged — this is the original issue-#34 loop-breaker); (3) a CLOSED (not merged) MR exists while the issue is queued for work (`boucle:todo`/`boucle:working`)
+    → post an informational note and exit 0 WITHOUT touching the issue — the worker will create a fresh MR on its next run.'
+  - 'DO: keep the guard IDENTICAL in every engine copy (`lib/boucle-ci/reviewer.sh` + the inline reviewer job in `.gitlab-ci.yml`) — a fix in one copy alone leaves the bug live on the other (a consumer
+    runs whichever copy its engine uses).'
+  ❌:
+  - 'DO NOT transition an issue to `boucle:done` + close it just because a CLOSED (but NOT merged) MR exists on its branch. The reviewer "no open MR" guard treats any closed MR as "work done" — but a human
+    closes MRs for RECOVERY too: a zombie/empty MR (0 commits, rebase-conflicted branch, worker drowned in a destructive reset) is closed so the loop can start fresh. On a consumer repo, the human closed
+    such a zombie MR, the issue was re-queued (`boucle:todo`), and 2 minutes later the reviewer guard fired — "no open MR found, but a closed MR exists" → `boucle:done` + issue closed. The recovery was
+    undone, the loop was killed, and only a manual reopen + re-queue (again) restored it.'
+  - DO NOT assume a closed MR implies the human rejected the work and wants the issue archived. "Closed" is ambiguous between "reviewed and discarded" and "stale garbage in the way of a fresh start" — only
+    a MERGE or a review-state issue (boucle:review / boucle:approval) legitimizes the done-transition.
+58:
+  title: Never draft verdicts in fixed shared temp paths
+  ✅:
+  - 'DO: `bin/jc` exports `BOUCLE_VERDICT_FILE` — a per-job unique path (`mktemp`, with a job/issue-scoped fallback) — and the reviewer/e2e/triage prompts (`.jcode/agents/*.md` + the `build_prompt` reminder)
+    instruct agents to write drafts there with their Write tool (bash redirection to a variable target is blocked by the runtime guard) and to read the file back immediately before posting. Posting directly
+    with `--message`/`--message-stdin` is preferred over any file.'
+  - 'DO: any agent whose file post fails, or who finds a missing or foreign file, MUST re-post directly with `--message` — an incomplete own verdict beats a foreign verdict (post-early rule, lesson #1).'
+  - 'DO: use `mktemp -d`/`mktemp` (unique per invocation) or a `CI_JOB_ID`-scoped path in every script and every ad-hoc command that stages a temp file or worktree — the same rule `bin/jc`''s `BOUCLE_VERDICT_FILE`
+    follows.'
+  ❌:
+  - 'DO NOT let agents draft their verdict/triage comment to a fixed path like `/tmp/verdict.md`. Shell executors are shared between jobs AND issues: a leftover file from a previous job survives, and the
+    next agent that posts `forge-note --message-file /tmp/verdict.md` ships the PREVIOUS job''s verdict as its own. Observed on a consumer MR: the reviewer''s own draft write (`cat > /tmp/verdict.md`) was
+    blocked by the runtime guard (command substitution), the file still held a keffiyeh PASS from another issue (anchored to an orphaned SHA), and the reviewer posted that foreign verdict TWICE before noticing
+    and re-posting its real one. The SHA-anchor guard (lesson #27) stopped the loop from acting on the phantom PASSes, but the MR shows three "PASS" verdicts to the human, two of them for content that was
+    never reviewed.'
+  - DO NOT rely on the agent checking a file's content before posting it — the incident shows a stale file posted without being read, twice.
+  - DO NOT limit this rule to agent drafts — ENGINE SCRIPTS and operator commands fall in the same class. A fixed `/tmp` path in `.gitlab-ci.yml`/`lib/boucle-ci/*` shared across jobs (`/tmp/subissues.parsed`,
+    `/tmp/node.tar.xz`, `/tmp/glab.tar.gz`, `/tmp/jcode.tar.gz`, `/tmp/node_modules`) lets two concurrent jobs overwrite or `rm -f` each other's in-flight file; a fixed worktree path (`git worktree add
+    /tmp/boucle-push`) collides with any other session that picks the same name, and a `worktree remove --force` on a reused path deletes a foreign session's work.
+59:
+  title: Notes of terminal transitions MUST be verified before the label
+  ✅:
+  - 'DO: See [SKILL.md](SKILL.md) §I4 (Post-early — note-before-label is the terminal-transition ordering of post-early).'
+  - 'DO: keep `forge_issue_note` / `forge_mr_note` fail-loud by contract: they return the real POST exit code and WARN on stderr on failure (never `|| true`-swallowed). Callers that genuinely want a best-effort
+    note (progress notes like "🔄 re-running") must append `|| true` EXPLICITLY — never rely on the helper swallowing for them.'
+  - 'DO: apply the same pattern to the INLINE copies (`.gitlab-ci.yml` jobs) and the extracted copies (`lib/boucle-ci/*.sh`) — the two copies must stay in sync (lesson #56 greps ALL copies).'
+  ❌:
+  - 'DO NOT post an escalation/catchup note with a `... > /dev/null 2>&1 || true` swallow (helpers) or a bare `glab api ... notes ... > /dev/null` (inline jobs) and set the terminal label (`boucle:human`
+    / `boucle:done`) regardless of whether the POST actually landed. Observed on a consumer work item (2026-08): the labels flipped to `boucle:human` at 14:55:50 while the explanation note POST was silently
+    dropped — the human saw a state with no message, and had to reconstruct from the CI logs WHY the issue landed on them. A terminal transition without its note is a silent failure (lesson #2) wearing
+    a success label.'
+  - 'DO NOT assume the note POST internals are reliable: they can fail transiently (network, token, rate limit) and the `|| true` + `>/dev/null` pattern in `forge_issue_note` / `forge_mr_note` (gitlab.sh,
+    github.sh) historically swallowed every failure code.'
+60:
+  title: An empty `BOUCLE_DEPLOY_CMD` is a valid mode, not a failure
+  ✅:
+  - 'DO: treat an empty `BOUCLE_DEPLOY_CMD` as a first-class mode: the worker skips the preview deploy, the reviewer falls back to diff review when no preview URL could be extracted, the deploy job skips
+    cleanly, and post-merge/e2e resolve the live URL to `$CI_PAGES_URL` (gitlab-pages) instead of the `pages.dev` fallback. Document the mode in LOOP.md alongside `self`/`external`.'
+  - 'DO: display the GitLab Pages URL even though the mechanics differ from Cloudflare: when `BOUCLE_DEPLOY_PROVIDER=gitlab-pages` and `$CI_PAGES_URL` is set, the worker writes `Site (GitLab Pages): $CI_PAGES_URL
+    — no per-branch preview; reviewed via diff` in the MR description instead of a blank `Preview:` line. The reviewer''s `pages.dev` extraction regex cannot match the forge''s Pages domain (frama.io/gitlab.io/...),
+    so it stays in diff review and never probes the production site as a preview.'
+  - 'DO: centralize the decision in `boucle_worker_should_deploy` (`lib/boucle.sh`) so the extracted worker gets it for free, and mirror it in the inline worker job with the identical guard.'
+  ❌:
+  - 'DO NOT let a stage `eval "$BOUCLE_DEPLOY_CMD"` unconditionally and FAIL on a missing URL. In GitLab Pages declarative mode (`BOUCLE_DEPLOY_PROVIDER=gitlab-pages`) the consumer sets `BOUCLE_DEPLOY_CMD`
+    to an empty project variable (which OVERRIDES the YAML default), so `eval ""` exits 0 with no output and every stage that asserts "no preview/URL → FAIL" dies. Observed on a consumer (2026-08): the
+    deploy job had the empty-cmd guard but the worker did not — every worker iteration pushed the MR then failed with `FAIL: no preview URL`, stranding the issue at `boucle:working` while the reviewer PASSed
+    MRs on the same commit were blocked behind it. The MR description showed a blank `Preview:` line, making the MR look like a duplicate of a sibling.'
+  - 'DO NOT port the guard to ONE copy only. The inline jobs (`.gitlab-ci.yml`) and the extracted functions (`lib/boucle-ci/*.sh`) must stay symmetric — the consumer ran the inline copy, which had no guard,
+    while the extracted one (used by the GitHub port) had the shared `boucle_worker_should_deploy` helper. A fix in one copy leaves the bug live on the other (lesson #56 greps ALL copies).'
+  - 'DO NOT ship `pages.path_prefix`-based branch previews on CE instances. Parallel deployments (`pages.path_prefix`, GitLab ≥ 17.9) are a **Premium** feature: CE accepts the keyword at CI-lint time but
+    ignores it at RUNTIME — the branch job publishes at the ROOT and clobbers the production deployment. Verified empirically on framagit (GitLab CE 19.2.1, 2026-08): lint `valid: true`, deployment created
+    with `path_prefix: null` at the site root.'
+61:
+  title: Doctor re-trigger must NOT be skipped by a stale closed MR
+  ✅: 'DO: on "open MR also exists", fall THROUGH to the re-trigger logic (active-pipeline check → staleness check → `chain_to_role`) instead of `continue` — the open MR is active work, so a stuck worker/reviewer
+    on it MUST be recovered. Only the terminal branches (MR merged / MR closed with NO open MR) may `continue`.'
+  ❌:
+  - 'DO NOT `continue` in the doctor''s stuck-issue loop when a closed (or merged) MR coexists with an open MR on the same branch. The "skipping close" branch is meant to avoid CLOSING the issue — but the
+    `continue` also skips the re-trigger logic below, stranding the issue at `boucle:working` forever. Observed on a consumer (2026-08): issue #55 had a closed MR from a previous iteration (!59) plus the
+    current open MR (!93); the doctor logged "closed MR exists but an open MR also exists — skipping close" every 10 minutes and never re-triggered the stuck worker. With `BOUCLE_MAX_PARALLEL_ISSUES=1`
+    the stranded issue occupied the single worker slot, so a second queued issue (`boucle:todo`) was never started either — two issues blocked by one `continue`.'
+  - 'DO NOT fix only one copy. The guard lives in BOTH the extracted `lib/boucle-ci/doctor.sh` and the inline doctor job in `.gitlab-ci.yml`, in TWO branches each (merged-MR and closed-MR). A fix in one
+    copy leaves the bug live on the other (lesson #56 greps ALL copies).'
+62:
+  title: Declare file impact and gate parallel workers on overlap
+  ✅: 'DO: triage predicts impacted files (`<!-- boucle:files v=1 paths=... -->` marker note); the worker job refreshes it with the actual branch diff (skipping the refresh when the branch has no commits
+    ahead, preserving the last non-empty marker); `check_file_gate` defers the worker (`boucle:blocked`) on overlap; the unblock path fires directly when the named blocker closes. Fail-open on missing marker
+    / API error.'
+  ❌:
+  - DO NOT launch a worker whose issue claims files already claimed by an in-flight issue — the branches will conflict at rebase/merge and burn the conflict-retry budget.
+  - DO NOT clear a file-impact claim when an adaptive reset empties the branch — the claim must survive a `git reset --hard` so a parallel worker does not start into the same files mid-flight.
+63:
+  title: "Semantic rebase conflicts MUST be resolved by the agent — a blind\n    abort+retry never sees the conflict"
+  ✅: 'DO: hand the conflicted tree to the agent (`boucle_worker_rebase_conflict`): it resolves the markers with judgment (default branch as base, re-apply the issue''s goal, or declare the goal superseded),
+    `git add`s, and may complete the rebase itself (`rebase --continue`/`--skip` for cascading and emptied commits). The verdict is the TREE STATE, not the agent''s exit code — it may exhaust its step budget
+    right after resolving. Re-run the agent when a later rebase commit hits a NEW conflict (bounded), and wrap each invocation in `timeout` so a slow agent cannot eat the whole job timeout before the build/push.'
+  ❌:
+  - 'DO NOT let the worker''s rebase-conflict handler abort + re-trigger when `BOUCLE_CONFLICT_FEEDBACK` is set — the agent never sees the conflicted tree, so a semantic conflict (two designs for the same
+    file, a sibling merging the same feature) re-conflicts identically on every retry. Observed on a consumer MR !88 (2026-08): 5 mechanical retries, zero agent runs, then escalation — the retry budget
+    just re-attempts the same failing rebase.'
+  - DO NOT define a gate function inline in ONE job (`check_dependencies_and_gate` in dispatch) and call it from another (triage) — `command not found` (127) makes `if ! cmd` TRUE, so the "blocked" branch
+    fires and the worker is NEVER chained (issue stays at boucle:todo with no worker pipeline). Shared functions live in `lib/boucle.sh` (sourced by all jobs via the default before_script), and their dependencies
+    (`depends-on.sh`) are sourced BEFORE the call site.
+64:
+  title: Deterministic engine messages MUST NOT be localized by consumers
+  ✅:
+  - 'DO: keep all deterministic engine messages in English upstream. If a consumer needs localized messages, the correct path is a proper i18n mechanism in the engine (a `BOUCLE_LOCALE` variable + a message
+    catalog), NOT a consumer-side patch. Until such a mechanism exists, consumers MUST accept English messages — the forge UI is the audience, and the human reading a fallback note can parse "Preview unavailable
+    (render failed)" regardless of their preferred language.'
+  - 'DO: if a consumer has already localized its engine copy, remove the patch and accept the upstream English strings. A localized fork that drifts from upstream is worse than an English message the human
+    can still act on.'
+  ❌:
+  - 'DO NOT translate the engine''s deterministic user-facing messages (fallback notes, escalation comments, status notes) into another language by patching the consumer''s `.gitlab-ci.yml` or `lib/boucle-ci/*.sh`
+    in place. A localized copy is a fork: the next `bin/update` sync (`cp -r` of SYNC_PATHS) overwrites it silently, and the consumer loses its translations with no warning. Observed on a consumer (2026-08):
+    the entire triage preview block was translated to French ("Aperçu indisponible (échec rendu) — validez sur le TL;DR"), producing a message that does not exist upstream and cannot be grepped or tested
+    against.'
+  - 'DO NOT assume a consumer-specific message is harmless because "it''s just a string". The engine''s message-parsing greps (verdict extraction, log-scraping fallbacks, marker detection) are anchored
+    on the exact upstream strings — a localized copy that changes a keyword ("Preview" → "Aperçu", "validate" → "validez") breaks every grep that references the original, and the log-scraping fallback (lesson
+    #47) cannot recover a verdict surrounded by foreign-language prose.'
+65:
+  title: Inline CI jobs MUST use `$BOUCLE_HOME/bin/`, never `./bin/`
+  ✅:
+  - 'DO: use `"$BOUCLE_HOME/bin/<script>"` in EVERY inline job call site, matching the extracted copies. `$BOUCLE_HOME` is set in the `default` before_script to `$CI_PROJECT_DIR/.boucle` (consumer) or `$CI_PROJECT_DIR`
+    (upstream), so the path resolves correctly in both environments.'
+  - 'DO: grep `.gitlab-ci.yml` for `./bin/` after any inline-job edit — a single relative path slipped in is enough to pin every issue at `boucle:review` and flood the MR with duplicate verdicts.'
+  ❌:
+  - DO NOT reference engine scripts as `./bin/<script>` in the inline jobs of `.gitlab-ci.yml`. On a consumer repo boucle is a submodule at `.boucle/`, so `$CI_PROJECT_DIR/bin/` does not exist — the call
+    dies with `No such file or directory`, the job fails with exit 1, and every step AFTER the failed call is skipped. The extracted copies (`lib/boucle-ci/*.sh`) already use `"$BOUCLE_HOME/bin/..."`; the
+    inline copies drifted to `./bin/`.
+  - 'DO NOT assume a missing script is harmless because the call is "best-effort". `collapse-duplicate-notes` is invoked WITHOUT `|| true` in the inline reviewer/e2e jobs, so its failure aborts the whole
+    job — the verdict `case` block (PASS/FAIL/UNCERTAIN) is never reached, the issue label is never advanced, and the doctor re-triggers the reviewer every 10 min. The reviewer posts a fresh verdict each
+    time (the agent runs before the crash), so the MR accumulates dozens of identical PASS/FAIL verdicts while the issue stays pinned at `boucle:review` forever. Observed on a consumer (2026-08): MR !100
+    had 28 identical PASS verdicts, MR !101 had 29 identical FAIL verdicts, all on the same SHA, all because `./bin/collapse-duplicate-notes` crashed the job before the `case` block.'
+66:
+  title: Git identity MUST be configurable, never hardcoded to a consumer
+  ✅:
+  - 'DO: use `${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}` and `${BOUCLE_BOT_USERNAME:-up-bot}` in EVERY `git config user.*` call site (`bin/update`, `worker.sh`, `merger.sh`, inline CI jobs). The fallback
+    `boucle-bot@boucle.local` is generic and never identifies a consumer. A consumer overrides `BOUCLE_BOT_EMAIL` / `BOUCLE_BOT_USERNAME` via CI variables to match its forge account. This also makes mono-user
+    mode work correctly: the single account''s identity is used consistently, not a hardcoded upstream identity.'
+  - 'DO: grep the engine for hardcoded emails after any git-identity edit — the inline `.gitlab-ci.yml` jobs and the extracted `lib/boucle-ci/*.sh` copies drift, and a fix in one copy leaves the bug live
+    on the other (lesson #56 greps ALL copies).'
+  ❌:
+  - 'DO NOT hardcode a consumer-specific email (e.g. `bot@ankaboot.dev`) in `git config user.email` across the engine. The engine ships to multiple consumers, each with its own forge instance, bot account,
+    and email domain. A hardcoded email attributes the bot''s commits to a consumer that is not theirs — observed on a consumer MR: 6 `chore(boucle):` commits displayed the upstream maintainer''s email
+    as the author because `bin/update` preserved the clone''s inherited git identity (the human''s) and `worker.sh`/`merger.sh` hardcoded the upstream email as committer.'
+  - DO NOT preserve the clone's inherited git identity in `bin/update`. On a CI runner the clone inherits the human's `user.name`/`user.email`, so a `git config user.email > /dev/null 2>&1 || git config
+    ...` guard leaves the human's identity as the commit author. The self-update commit is the bot's work, not the human's.
+67:
+  title: Self-update MUST NOT run on worker branches
+  ✅: 'DO: gate the self-update on `[ "${CI_COMMIT_BRANCH:-}" = "${CI_DEFAULT_BRANCH:-master}" ]` in EVERY `before_script` copy (default, dispatch, merger, catchup). The self-update is a housekeeping operation
+    that belongs on the default branch, not on a feature/worker branch. On a trigger pipeline (worker/reviewer) `CI_COMMIT_BRANCH` is the source branch (`boucle/<iid>`), so the gate skips the self-update;
+    on a push pipeline to the default branch the existing `BOUCLE_PIPELINE_SOURCE != "push"` guard already skips it (feedback-loop avoidance).'
+  ❌: 'DO NOT let `bin/update` (the engine self-update) run in the `before_script` of a job that is checked out on a worker branch (`boucle/<iid>`). The self-update commits engine-sync work (`chore(boucle):
+    auto-update`, `chore(boucle): fix bin/update`) onto the worker''s MR branch — polluting the MR with commits that are not the issue''s work. Observed on a consumer MR !105: 6 `chore(boucle):` commits
+    landed on `boucle/79`, inflating the MR to 274 changes and making it look like the worker produced engine-bootstrap work instead of the issue''s feature.'
+68:
+  title: Doctor MUST scan boucle:merging for stuck mergers
+  ✅:
+  - 'DO: the doctor MUST scan `boucle:merging` issues with no active pipeline for longer than STALENESS. Re-trigger the merger (it is idempotent — rebase + push + merge or MWPS). Before re-triggering, verify
+    the MR still exists and is still approved — if the human closed the MR or revoked approval while the issue sat at `boucle:merging`, escalate to `boucle:human` instead. The scan lives in BOTH the extracted
+    `lib/boucle-ci/doctor.sh` and the inline doctor job in `.gitlab-ci.yml` — a fix in one copy leaves the bug live on the other (lesson #56 greps ALL copies).'
+  - 'DO: the merger timeout MUST be at least 10m (not 5m) to accommodate `git push --force` on a congested network. The 5m timeout killed a merger that was mid-push on framagit (the rebase succeeded, the
+    push was in flight, the timeout fired mid-transfer). The doctor timeout MUST also be at least 10m — the doctor''s scan is API-heavy and can timeout on a slow forge before finishing.'
+  ❌: 'DO NOT let an issue sit at `boucle:merging` forever after a merger failure (runner timeout, network "remote end hung up unexpectedly", TLS handshake timeout, runner crash). The doctor scanned `boucle:working`,
+    `boucle:review`, `boucle:blocked`, `boucle:human`, `boucle:approval` — but NOT `boucle:merging`. A failed merger left the issue stranded at `boucle:merging` with no recovery path: no webhook re-triggers
+    it (the MR is already approved, so no `approved` webhook fires again), and the doctor never scanned the label. Observed on a consumer (2026-08): MR !106 was approved + `mergeable` but the merger timed
+    out at 5m during `git push --force` ("the remote end hung up unexpectedly" on framagit). The issue sat at `boucle:merging` for 2+ hours with no recovery, blocking the single worker slot (`BOUCLE_MAX_PARALLEL_ISSUES=1`)
+    and stalling all other queued issues.'
+69:
+  title: Interactive mode — a local harness can take over an issue and hand it back
+  ✅:
+  - 'DO: `bin/boucle` exposes six verbs (`pause`, `resume`, `restart`, `status`, `check`, `log`) that wrap the existing primitives (`set_boucle_label`, `forge_issue_note`). The human takes over with `boucle
+    pause` (sets `boucle:human`, saves state), works on `boucle/<iid>`, and hands back with `boucle resume` (detects commits ahead → `boucle:review`, else restores previous label) or `boucle restart` (fresh
+    `boucle:todo`).'
+  - 'DO: extract all message formats into `templates/*.md` files with `{{placeholders}}` — the agent CLI reads the template, fills it, and posts via `bin/forge-note`. The templates are the single source
+    of truth for the format; the shell code should read them instead of hardcoding (follow-up refactor).'
+  - 'DO: document the protocol, the excluded CI-only commands with local alternatives, and the critical rules in SKILL.md §8 "Interactive mode". The agent CLI reads this section to "speak boucle" correctly.'
+  ❌:
+  - DO NOT let a human agent CLI work on a boucle issue without a documented handoff protocol — the agent does not know the conventions (markers, state.md, branch contract, gates, templates) and will improvise,
+    breaking the loop.
+  - DO NOT post comments via raw `glab`/`gh` in interactive mode — without the `<!-- boucle:agent -->` stamp, dispatch treats the comment as a human reply and re-routes the loop (I7).
+70:
+  title: Worker branches MUST be deleted after merge and named readably
+  ✅:
+  - 'DO: name branches `boucle/<iid>-<slug>` where `<slug>` is derived deterministically from the issue title (lowercase, kebab-case, max 40 chars). The `<iid>` prefix keeps the protocol identifier stable
+    for lookups (prefix match on `boucle/<iid>`).'
+  - 'DO: delete the branch after a successful merge (merger) or after catchup closes the issue. Best-effort: a failed deletion logs a warning but does not fail the job — the branch is stale but harmless.'
+  - 'DO: keep `boucle/<iid>` as the lookup key in `forge_mr_lookup_by_branch` — the slug may change if the issue title is edited, so lookups MUST prefix-match on `boucle/<iid>`, not exact-match the full
+    branch name.'
+  ❌:
+  - 'DO NOT leave merged worker branches on the remote — they proliferate and clutter the branch list. Observed on a consumer: 20+ `boucle/<iid>` branches accumulated with no cleanup.'
+  - DO NOT name worker branches `boucle/<iid>` alone — the IID is meaningless to a human scanning the branch list. `boucle/79` tells nothing; `boucle/79-fusion-allies-logo-nidal` is self-documenting.
+71:
+  title: "Dispatch MUST route human comments from every idle state and\n    handle slug-named branches"
+  ✅:
+  - 'DO: the dispatch label-routing block MUST include a case for `boucle:human`: when a non-bot note arrives on an issue at `boucle:human`, set `SHOULD_WORK=true` so the worker re-runs with the human''s
+    feedback. This treats a human comment as "I want the loop to continue with my amendments" — which is the human''s expectation. The worker will pick up the issue notes (including the new comment) via
+    `BOUCLE_ISSUE_NOTES` and the MR notes via `BOUCLE_REVIEWER_FEEDBACK`.'
+  - 'DO: the branch-extraction regex in dispatch MUST be prefix-anchored only: `^boucle/\([0-9]\+\)` (no `$`), or equivalently `^boucle/\([0-9]\+\).*` — this extracts the IID from both `boucle/79` (legacy)
+    and `boucle/79-slug` (current). Grep ALL branch-regex sites after any branch-naming change: dispatch (MR event path + MR note path), `forge_mr_lookup_by_branch` (already prefix-matched), and any new
+    site that parses branch names.'
+  ❌:
+  - 'DO NOT omit a routing case for `boucle:human` in the dispatch label-routing block. A human who comments on an issue at `boucle:human` expects the loop to pick up their feedback and re-run — the comment
+    is silently dropped instead, because the routing only handles `boucle:triage`, `boucle:needs-info`, `boucle:todo`, and `boucle:spec-review`. The human then re-posts on the MR, re-posts on the parent
+    issue, and escalates to the maintainer — none of which triggers the loop. Observed on a consumer (2026-08): issue #79 sat at `boucle:human` for hours while the human posted amendments on both the issue
+    and the MR; the issue comments were dropped, and the MR comments on the slug-named branch were also dropped (see below).'
+  - 'DO NOT use a `$`-anchored regex like `^boucle/\([0-9]\+\)$` to extract the issue IID from a worker branch name. Lesson #70 introduced `boucle/<iid>-<slug>` branches, but the dispatch branch-extraction
+    regex was not updated — it only matches the bare `boucle/<iid>` form. A human comment on an MR whose branch is `boucle/79-fusion-des-sections-alli-s-et` is silently dropped with "not a boucle branch,
+    skipping". The `forge_mr_lookup_by_branch` was updated to prefix-match (lesson #70), but the dispatch regex was missed — a regression introduced in the same commit that changed the naming.'
+72:
+  title: Subshells that capture exit codes MUST be guarded against `set -e`
+  ✅: 'DO: guard every subshell that captures a non-zero exit code with `|| rc=$?` and initialize `rc` to 0: `(eval "$CMD") > "$log" 2>&1 || rc=$?; rc=${rc:-0}`. This pattern is already used for the agent
+    run (`"$BOUCLE_HOME/bin/jc" worker || rc=$?`) — build and deploy subshells MUST follow the same pattern.'
+  ❌: 'DO NOT write `(eval "$CMD") > "$log" 2>&1` followed by `rc=$?` on the next line. Under `set -e` (GitLab runner default, `bin/boucle-ci` starts with `set -euo pipefail`), a non-zero subshell exit kills
+    the shell BEFORE `rc=$?` executes — the error handling that depends on `rc` NEVER fires, and the job fails with a plain exit code that tells the human nothing. Observed on a consumer (2026-08): the
+    worker''s build gate (`(eval "$BOUCLE_BUILD_CMD") > "$build_log" 2>&1; build_rc=$?`) was killed by a WASM OOM in `@astrojs/compiler` before `build_rc=$?` could execute. The build gate''s re-trigger
+    logic never ran. The worker''s commit was never pushed. The issue sat at `boucle:working` with no re-trigger.'
+73:
+  title: File-based state artifacts MUST be cleared at stage startup
+  ✅: 'DO: `rm -f .boucle-issue` at the START of `boucle_ci_dispatch`, immediately after the EXIT trap is set. Apply the same pattern to any stage that uses a file-based guard.'
+  ❌:
+  - DO NOT rely on the GitLab runner's `git clean` to remove file-based state artifacts (`.boucle-issue`) between runs. A stale artifact from a previous run causes the current run's guards to make incorrect
+    decisions.
+  - 'DO NOT assume the dispatch EXIT trap correctly detects whether the CURRENT run wrote `.boucle-issue`. If a previous issue-webhook dispatch wrote it and the file survived `git clean`, the trap finds
+    it and doesn''t flip to exit 1 — triage runs and re-triages the issue. Observed on a consumer (2026-08): an MR-note trigger dispatch chained the worker and exited 0 without writing `.boucle-issue`;
+    a stale file survived, triage ran, re-triaged the issue to `spec-review` + `status::human`, blocking the loop.'

@@ -22,7 +22,7 @@ boucle_ci_worker() {
   # ── Persist .boucle-state/<issue>/ across iterations ─────────────
   # Per-issue state lives in .boucle-state/ (gitignored) — never in
   # .boucle/, which is the engine submodule on consumers (git submodule
-  # update would clobber in-flight state). AGENTS.md lesson #20: the
+  # update would clobber in-flight state). LESSONS.yml lesson #20: the
   # worker fills state.md's Approach section; the MR description reads
   # it back from the same .boucle-state/<issue>/state.md path.
   BOUCLE_STATE_CACHE="${BOUCLE_STATE_CACHE:-${HOME}/.boucle-state-cache}"
