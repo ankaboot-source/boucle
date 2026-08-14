@@ -103,6 +103,34 @@ The loop adapts automatically to an empty `BOUCLE_DEPLOY_CMD`:
 An empty `BOUCLE_DEPLOY_CMD` must NEVER fail a job — it is a valid,
 complete loop, not a misconfiguration.
 
+### GitHub Pages declarative mode (`BOUCLE_DEPLOY_PROVIDER=github-pages`)
+
+Token-less deploy path for GitHub consumers: set `BOUCLE_DEPLOY_PROVIDER=github-pages`
+and leave `BOUCLE_DEPLOY_CMD` **empty** (an empty repo variable overrides the
+workflow default). The worker pushes `$BOUCLE_BUILD_OUTPUT` to the `gh-pages`
+branch using the bot PAT (`BOUCLE_TOKEN`, which already has `contents: write` —
+**no `CLOUDFLARE_API_TOKEN` needed**), and the post-merge deploy re-pushes the
+merged build. The site is served at `https://<owner>.github.io/<repo>/`
+(see `boucle_github_pages_url`).
+
+The loop adapts automatically:
+
+- **Worker** — stamps the SHA marker, pushes the build to `gh-pages`, and
+  records the site URL; the MR description carries `Site (github-pages):
+  https://<owner>.github.io/<repo>/ — no per-branch preview; reviewed via
+  diff`.
+- **Reviewer** — sees no preview URL and falls back to **diff review**,
+  same as GitLab Pages declarative mode.
+- **Deploy job** — re-pushes the merged build to `gh-pages` (keeps
+  production in sync) and chains e2e with `BOUCLE_LIVE_URL` set to the
+  canonical site URL.
+- **Post-merge/e2e** — resolves the live URL to `boucle_github_pages_url`
+  instead of the `pages.dev` fallback.
+
+The consumer's GitHub Pages must be configured to serve from the `gh-pages`
+branch (Settings → Pages → Source: Deploy from a branch → `gh-pages` / root).
+
+
 ### Review modes (`BOUCLE_REVIEW_MODE`)
 
 | Mode | Behavior |
@@ -136,7 +164,7 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_DND_EXCLUDE_DAYS` | *(empty)* | Comma-separated weekday names never in DND (e.g. `Fri,Sat`). |
 | `BOUCLE_DEPLOY_MODE` | `self` | Deploy mode: `self` (boucle runs `BOUCLE_DEPLOY_CMD`) or `external` (consumer's own CI/CD deploys). |
 | `BOUCLE_REVIEW_MODE` | `preview` | Review mode: `preview` (tests deployed preview) or `diff` (reviews PR diff + check suites). Auto-falls back to `diff` when no preview URL could be extracted (e.g. GitLab Pages declarative mode). |
-| `BOUCLE_DEPLOY_PROVIDER` | *(empty)* | Deploy provider profile: `gitlab-pages` (declarative, token-less — leave `BOUCLE_DEPLOY_CMD` empty, live URL = `$CI_PAGES_URL`). Empty = deploy via `BOUCLE_DEPLOY_CMD`. |
+| `BOUCLE_DEPLOY_PROVIDER` | *(empty)* | Deploy provider profile: `gitlab-pages` (declarative, token-less — leave `BOUCLE_DEPLOY_CMD` empty, live URL = `$CI_PAGES_URL`) or `github-pages` (declarative, token-less — worker pushes `$BOUCLE_BUILD_OUTPUT` to `gh-pages`, live URL = `https://<owner>.github.io/<repo>/`). Empty = deploy via `BOUCLE_DEPLOY_CMD`. |
 | `BOUCLE_DEPLOY_CMD` | `npx wrangler pages deploy ...` | Deploy command (self mode). |
 | `BOUCLE_DEPLOY_URL_REGEX` | `https://[a-z0-9.-]+\.pages\.dev` | Regex to extract URL from deploy output. |
 | `BOUCLE_DEPLOY_PROJECT` | `""` | Cloudflare Pages project name (self mode). |
