@@ -38,6 +38,27 @@ case "$ENGINE_DIR" in
 esac
 VERSION_FILE="$ENGINE_DIR/.boucle-version"
 
+# ── Submodule detection ───────────────────────────────────────────────
+# When the engine is installed as a git submodule (.boucle/ is a gitlink
+# in the parent repo), the parent cannot commit individual files inside
+# .boucle/ — it can only update the submodule pointer. The tarball-based
+# file replacement (download_and_extract) is useless here: the changes
+# land inside the submodule working tree but the parent repo ignores them.
+#
+# Submodule mode: instead of extracting files, we update the submodule
+# pointer to the upstream commit SHA and commit THAT in the parent repo.
+# The next `git submodule update --recursive` (CI checkout) materializes
+# the new engine files at the pinned commit.
+is_submodule_install() {
+  [ "$ENGINE_DIR" = "." ] && return 1
+  # A submodule appears in the parent's index as mode 160000 (gitlink).
+  git ls-files --stage "$ENGINE_DIR" 2>/dev/null | grep -q '160000' 2>/dev/null
+}
+SUBMODULE_MODE=""
+if is_submodule_install; then
+  SUBMODULE_MODE="1"
+fi
+
 # Forge-conditional SYNC_PATHS: sync the CI file that matches the active forge.
 # bin/forge/ is always synced (it's under bin/). lib/ is always synced
 # (lib/boucle-ci.sh + lib/boucle-ci/ live under lib/).
@@ -299,6 +320,67 @@ main() {
 
   if [ "$dry_run" = "true" ]; then
     echo "[boucle] DRY RUN — would download and apply $upstream"
+    return 0
+  fi
+
+  # ── Submodule mode: update the pointer, not the files ──────────────
+  # When .boucle is a git submodule, the parent repo tracks it as a
+  # gitlink (160000) — individual files inside .boucle/ are invisible to
+  # the parent's git add/commit. The tarball extraction would land changes
+  # in the submodule working tree that the parent cannot commit, so they
+  # are lost on the next `git submodule update` (CI checkout).
+  #
+  # Instead: update the submodule pointer to the upstream commit SHA and
+  # commit THAT in the parent repo. The next CI checkout materializes the
+  # new engine files at the pinned commit via `git submodule update`.
+  if [ -n "$SUBMODULE_MODE" ]; then
+    echo "[boucle] submodule install — updating pointer to $upstream"
+    # The upstream version IS the commit SHA (dev mode) or tag (release
+    # mode). For release mode, resolve the tag to a commit SHA via the
+    # GitHub API so the submodule pointer is a SHA, not a tag name
+    # (git submodule pointers must be SHAs).
+    local submodule_sha="$upstream"
+    if [ "$mode" = "release" ]; then
+      submodule_sha=$(curl_with_auth -s \
+        "https://api.github.com/repos/${UPSTREAM_REPO}/git/refs/tags/$upstream" \
+        2>/dev/null | jq -r '.object.sha // empty' 2>/dev/null) || submodule_sha="$upstream"
+      # Annotated tags: the ref points to a tag object, not the commit.
+      # Resolve one level: object.type == "tag" → object.url gives the commit.
+      if [ -n "$submodule_sha" ]; then
+        local obj_type
+        obj_type=$(curl_with_auth -s \
+          "https://api.github.com/repos/${UPSTREAM_REPO}/git/tags/$submodule_sha" \
+          2>/dev/null | jq -r '.object.type // empty' 2>/dev/null) || obj_type=""
+        if [ "$obj_type" = "commit" ]; then
+          submodule_sha=$(curl_with_auth -s \
+            "https://api.github.com/repos/${UPSTREAM_REPO}/git/tags/$submodule_sha" \
+            2>/dev/null | jq -r '.object.sha // empty' 2>/dev/null) || submodule_sha="$upstream"
+        fi
+      fi
+    fi
+    if [ -z "$submodule_sha" ]; then
+      echo "[boucle] WARN: could not resolve upstream SHA, staying on current version" >&2
+      return 0
+    fi
+    # Update the submodule pointer in the parent index.
+    git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+    git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+    git update-index --cacheinfo 160000 "$submodule_sha" "$ENGINE_DIR"
+    # Also update the version file (tracked at the parent root for
+    # bin/update's own version check on the next run).
+    echo "$upstream" > "$VERSION_FILE"
+    git add "$VERSION_FILE"
+    # Propagate engine-owned docs to the consumer root (submodule files
+    # are not readable by agents at the parent root — AGENTS.md etc. must
+    # be copied out). The CI checkout materializes .boucle/ so the docs
+    # are available there, but agents read them from the parent root.
+    propagated_files=$(propagate_consumer_root_files)
+    # shellcheck disable=SC2086
+    git add $propagated_files 2>/dev/null || true
+    git commit -m "chore(boucle): auto-update submodule to $upstream" > /dev/null 2>&1 || true
+    configure_git_push
+    git push 2> /dev/null || echo "[boucle] WARN: push failed, will retry next pipeline" >&2
+    echo "[boucle] submodule updated to $upstream"
     return 0
   fi
 
