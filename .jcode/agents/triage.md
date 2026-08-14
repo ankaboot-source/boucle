@@ -30,7 +30,7 @@ You have a knowledge graph of this codebase. Use `search_graph` and `get_archite
   - `codebase-memory-mcp cli get_architecture '{"aspects":["all"]}'`
 
 **Charter files at the repo root answer most design/intent questions.** Before asking the author anything, check whether the answer already lives in one of:
-- `AGENTS.md` — agent workflow rules, constraints, lessons learned (anti-patterns)
+- `AGENTS.md` — agent workflow rules, mandatory principles. **Read `LESSONS.yml` at startup** — scan the `title` fields to find lessons relevant to this issue. Read the full `❌`/`✅` of any matching lesson.
 - `CONTEXT.md` — project context, purpose, tech stack, constraints, ethics
 - `LOOP.md` — per-consumer loop configuration (target repo, cadence, gates, caps)
 - `README.md` — project overview and setup (for humans; contains no agent instructions)
