@@ -620,7 +620,17 @@ boucle_ci_dispatch() {
     # checking whether boucle:todo was in the previous labels (before
     # this webhook event). If it was already there, this is a re-trigger
     # (body edit, note, manual label toggle) → trigger worker directly.
-    PREV_LABELS=$(jq -r '.changes.labels.previous // [] | join(",")' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+    # GitLab: .changes.labels.previous lists the labels before this event.
+    # GitHub: no .changes.labels — the labeled event carries the added
+    # label in .label.name, and any non-labeled event (comment, edit) on
+    # a boucle:todo issue means boucle:todo was already there.
+    if [ -n "$(jq -r '.changes.labels.previous // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)" ]; then
+      PREV_LABELS=$(jq -r '.changes.labels.previous | join(",")' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+    elif [ "$ACTION" = "labeled" ]; then
+      PREV_LABELS=$(jq -r 'if .label.name == "boucle:todo" then "just-added" else "boucle:todo" end' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+    else
+      PREV_LABELS="boucle:todo"
+    fi
     if echo "$PREV_LABELS" | grep -q "boucle:todo"; then
       SHOULD_WORK=true
     else
