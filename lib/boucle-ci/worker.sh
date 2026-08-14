@@ -539,7 +539,9 @@ EOF
   issue_data=$(forge_issue_get "$BOUCLE_ISSUE" 2> /dev/null || true)
   if [ -n "$issue_data" ]; then
     issue_title=$(echo "$issue_data" | jq -r '.title // empty')
-    issue_labels=$(echo "$issue_data" | jq -r '.labels | map(. | ascii_downcase) | join(",") // empty')
+    # GitHub issue labels are objects (.name), GitLab labels are strings —
+    # normalize in jq so ascii_downcase works on both backends.
+    issue_labels=$(echo "$issue_data" | jq -r '.labels | map(if type == "string" then . else .name end | ascii_downcase) | join(",") // empty')
   fi
   mr_type="feat"
   if echo "$issue_labels" | grep -qE 'bug|defect|fix'; then

@@ -148,7 +148,7 @@ maybe_unblock_dependents() {
   for sib_iid in $(echo "$sibling_iids" | tr ',' ' '); do
     [ "$sib_iid" = "$closed_iid" ] && continue
     sib_data=$(forge_issue_get "$sib_iid") || continue
-    sib_labels=$(echo "$sib_data" | jq -r '.labels | join(",")' 2> /dev/null)
+    sib_labels=$(echo "$sib_data" | jq -r '.labels | map(if type == "string" then . else .name end) | join(",")' 2> /dev/null)
     echo "$sib_labels" | grep -q "boucle:blocked" || continue
     sib_desc=$(echo "$sib_data" | jq -r '.description // empty' 2> /dev/null)
     sib_deps=$(parse_depends_on "$sib_desc")
