@@ -437,6 +437,10 @@ check:
     # Pure merge_request_event rule above must create the pipeline; this guard
     # keeps the MR gate scoped to MRs targeting the default branch.
     - if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ] && [ "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" != "$CI_DEFAULT_BRANCH" ]; then echo "check skipped (MR targets $CI_MERGE_REQUEST_TARGET_BRANCH_NAME, not default)"; exit 0; fi
+    # Reject any commit that modified .boucle/ without an authorized bot
+    # subject (chore(boucle): ...). .boucle/ is the engine dir owned by
+    # bin/update — manual edits get overwritten on the next sync.
+    - check-boucle-sync
     - make check
 
 # ── Dispatcher ──────────────────────────────────────────────────────────
