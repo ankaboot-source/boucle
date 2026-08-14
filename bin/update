@@ -170,6 +170,58 @@ download_and_extract() {
   return 0
 }
 
+# ── Consumer root file propagation ─────────────────────────────────────
+# Engine-owned reference docs that agents MUST find at the consumer repo root
+# (AGENTS.md §"Reference files"). After bin/update syncs the engine files into
+# ENGINE_DIR (.boucle/), these files must also be propagated to the consumer
+# root so agents find them there. Consumer-owned docs (README.md, LOOP.md,
+# CONTEXT.md, the visual charter) are NEVER overwritten — they belong to the
+# consumer project.
+#
+# The root CI file is NEVER propagated on GitLab: the consumer's root
+# .gitlab-ci.yml is a shim (include: local .boucle/.gitlab-ci.yml) written
+# by bin/setup. Overwriting it with the full engine pipeline recreates the
+# stale-copy bug: the self-update syncs .boucle/.gitlab-ci.yml but GitLab
+# uses the root file, which drifts and references paths that don't exist
+# outside .boucle/ (e.g. $CI_PROJECT_DIR/bin/render-preview.cjs instead of
+# $BOUCLE_HOME/bin/render-preview.cjs — the triage render-preview failure
+# class, observed on urgence-palestine.fr #85).
+#
+# On GitHub, the workflow file MUST be at the repo root — GitHub Actions
+# only reads .github/workflows/ at the root, not inside .boucle/. So the
+# workflow IS propagated.
+CONSUMER_ROOT_DOCS="AGENTS.md SKILL.md ARCHITECTURE.md"
+CONSUMER_ROOT_CI=""
+if [ "${BOUCLE_FORGE:-gitlab}" = "github" ]; then
+  CONSUMER_ROOT_CI=".github/workflows/boucle.yml"
+fi
+
+# propagate_consumer_root_files
+# Copies engine-owned docs + CI from ENGINE_DIR to the consumer root.
+# Only runs when ENGINE_DIR != "." (i.e. submodule install model, not dogfood).
+# Returns the list of propagated file paths on stdout (for git add).
+#
+# Safety net: NEVER overwrite a root .gitlab-ci.yml, even if
+# CONSUMER_ROOT_CI is accidentally re-enabled for GitLab. A root
+# .gitlab-ci.yml that is a shim (include: local .boucle/.gitlab-ci.yml)
+# MUST stay a shim — overwriting it with the full engine pipeline
+# recreates the stale-copy drift bug.
+propagate_consumer_root_files() {
+  [ "$ENGINE_DIR" = "." ] && return 0
+  local propagated=""
+  for f in $CONSUMER_ROOT_DOCS $CONSUMER_ROOT_CI; do
+    [ -z "$f" ] && continue
+    # Never overwrite a root .gitlab-ci.yml — it is a shim, not a copy.
+    [ "$f" = ".gitlab-ci.yml" ] && continue
+    if [ -f "$ENGINE_DIR/$f" ]; then
+      mkdir -p "$(dirname "$f")"
+      cp "$ENGINE_DIR/$f" "$f"
+      propagated="$propagated $f"
+    fi
+  done
+  echo "$propagated"
+}
+
 # ── Main ──────────────────────────────────────────────────────────────
 
 main() {
@@ -253,6 +305,11 @@ main() {
     return 0
   fi
 
+  # Propagate engine-owned docs + CI to the consumer root (AGENTS.md,
+  # SKILL.md, ARCHITECTURE.md, workflow). Consumer-owned docs (README.md,
+  # LOOP.md, CONTEXT.md) are NOT overwritten.
+  propagated_files=$(propagate_consumer_root_files)
+
   # Update version file
   echo "$upstream" > "$VERSION_FILE"
 
@@ -264,13 +321,13 @@ main() {
   # bot's work, not the human's — force the bot identity unconditionally.
   git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
   git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
-  # Build add paths: SYNC_PATHS prefixed with ENGINE_DIR.
+  # Build add paths: SYNC_PATHS prefixed with ENGINE_DIR + propagated root files.
   add_paths=""
   for path in $SYNC_PATHS; do
     add_paths="$add_paths $ENGINE_DIR/$path"
   done
   # shellcheck disable=SC2086 # word-splitting is intentional: add_paths is a space-separated list.
-  git add $add_paths "$VERSION_FILE"
+  git add $add_paths "$VERSION_FILE" $propagated_files
   git commit -m "chore(boucle): auto-update to $upstream" > /dev/null 2>&1 || true
   configure_git_push
   git push 2> /dev/null || echo "[boucle] WARN: push failed, will retry next pipeline" >&2
