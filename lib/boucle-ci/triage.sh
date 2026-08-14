@@ -68,7 +68,6 @@ Pick one (or more), create a free API key, and add it as a CI/CD variable.
 
 | Provider | CI/CD variable | Sign up |
 |---|---|---|
-| OpenRouter | `BOUCLE_OPENROUTER_API_KEY` | https://openrouter.ai/keys |
 | NVIDIA NIM | `BOUCLE_NVIDIA_API_KEY` | https://build.nvidia.com |
 | Groq | `BOUCLE_GROQ_API_KEY` | https://console.groq.com/keys |
 | Cerebras | `BOUCLE_CEREBRAS_API_KEY` | https://cloud.cerebras.ai |

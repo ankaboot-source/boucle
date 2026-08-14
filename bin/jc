@@ -301,7 +301,6 @@ export BOUCLE_VERDICT_FILE
 freeride_providers() {
   local role="$1"
   local catalog=(
-    "openrouter|https://openrouter.ai/api/v1|BOUCLE_OPENROUTER_API_KEY|qwen/qwen3-coder:free|moonshotai/kimi-k2.6:free|high"
     "nvidia|https://integrate.api.nvidia.com/v1|BOUCLE_NVIDIA_API_KEY|deepseek-ai/deepseek-v4-flash|deepseek-ai/deepseek-v4-pro|high"
     "groq|https://api.groq.com/openai/v1|BOUCLE_GROQ_API_KEY|qwen/qwen3-32b|openai/gpt-oss-120b|high"
     "cerebras|https://api.cerebras.ai/v1|BOUCLE_CEREBRAS_API_KEY|gpt-oss-120b|zai-glm-4.7|none"
@@ -1379,6 +1378,7 @@ if [ "${BOUCLE_QUOTA_PROBE:-true}" = "true" ] && [ "$DRY_RUN" != "true" ]; then
     FREERIDE_FAILED_LIST=""
     while IFS='|' read -r fr_p_name fr_p_url fr_p_key_env fr_p_model fr_p_thinking; do
       eval "fr_p_key=\${${fr_p_key_env}:-}"
+      # shellcheck disable=SC2154
       fr_p_status=$(probe_cached "freeride-$fr_p_name" "$fr_p_url" "$fr_p_key")
       echo "[boucle:freeride:probe] $fr_p_name: $fr_p_status" >&2
       if [ "$fr_p_status" = "ok" ]; then
@@ -1568,7 +1568,7 @@ scrub_agent_log() {
       return out s
     }
     BEGIN {
-      n = split("BOUCLE_LLM_API_KEY BOUCLE_FALLBACK_API_KEY BOUCLE_TOKEN BOUCLE_BOT_TOKEN BOUCLE_SCRUB_CF CLOUDFLARE_API_TOKEN BOUCLE_GROQ_API_KEY BOUCLE_OPENROUTER_API_KEY BOUCLE_NVIDIA_API_KEY BOUCLE_CEREBRAS_API_KEY BOUCLE_ZHIPU_API_KEY BOUCLE_CLOUDFLARE_API_KEY BOUCLE_HUGGINGFACE_API_KEY BOUCLE_MISTRAL_API_KEY", names, " ")
+      n = split("BOUCLE_LLM_API_KEY BOUCLE_FALLBACK_API_KEY BOUCLE_TOKEN BOUCLE_BOT_TOKEN BOUCLE_SCRUB_CF CLOUDFLARE_API_TOKEN BOUCLE_GROQ_API_KEY BOUCLE_NVIDIA_API_KEY BOUCLE_CEREBRAS_API_KEY BOUCLE_ZHIPU_API_KEY BOUCLE_CLOUDFLARE_API_KEY BOUCLE_HUGGINGFACE_API_KEY BOUCLE_MISTRAL_API_KEY", names, " ")
     }
     {
       line = $0
