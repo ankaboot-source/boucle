@@ -126,7 +126,7 @@ une heure, ni à quelle itération le worker en est. Le mode async est un
 choix de conception juste, mais async ≠ opaque.
 
 **F7 — Le vocabulaire d'interaction n'est pas auto-documenté.** Savoir qu'on
-approuve avec 👍 ✅ ☑️ ✔️ 🆗 👌 ou par n'importe quel commentaire, que
+approuve avec 👍 ❤️ 🎉 🚀 ou par n'importe quel commentaire, que
 `boucle:autonomous` saute le gate de spec, que `boucle:needs-info` attend une
 réponse — tout cela vit dans le README et `LOOP.md`, jamais dans l'issue
 elle-même, là où la décision se prend.
@@ -281,7 +281,7 @@ réel. Transforme F2 en argument de confiance.
 **P0.4 — Note d'instruction au gate MR.** *(effort : S ; impact : moyen)*
 *Réduit : la version initiale demandait une antisèche permanente sur chaque
 issue. Vérification faite, elle existe déjà au gate de spec —
-`lib/boucle-ci/triage.sh:318` poste « React with 👍 ✅ ☑️ ✔️ 🆗 or 👌 on this
+`lib/boucle-ci/triage.sh:318` poste « React with 👍 ❤️ 🎉 or 🚀 on this
 comment to approve, OR Reply to this issue with any comment ».*
 
 Il reste une **asymétrie** : au gate MR, le reviewer pose `boucle:approval` +
