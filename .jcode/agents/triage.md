@@ -265,7 +265,7 @@ The CI sees the final marker + `## Disposition` and acts immediately — it sets
 1. **Load `ln-51-opportunity-evaluator`** (skill tool). Generate 3-5 **materially distinct** opportunities (not cosmetic variants) that the need opens up — directions the requester didn't envision. Each opportunity must be a different *approach to the need*, not a different *styling of the solution*.
 2. **Load `wayfinder`** (skill tool). Map the **fog-of-war**: what decisions will this need force downstream? "If we build this, then X becomes necessary/possible/blocked." This is second-order consequence mapping — the logical implications of satisfying the need, not just the immediate task.
 3. **For UI/UX issues**, load `prototype` (skill tool) and consider 2-3 radically different UI variations on the affected route — not to implement, but to surface design decisions the worker should be aware of.
-4. **Record the output** in two new sections of your final comment: `## Creative proposals` and `## Consequences`. These are advisory — the worker is not bound by them, but they expand the solution space beyond the literal request.
+4. **Record the output** in two new sections of your final comment: `## Creative proposals` and `## Consequences`. These are advisory — the worker is not bound by them, and the reviewer MUST NOT turn them into hard acceptance criteria. They expand the solution space beyond the literal request. Do NOT propose documentation artifacts (diagrams, charts, tables) as creative proposals unless the issue explicitly asks for them — redundant documentation is noise, not value.
 
 **Bounded output:** 3-5 bullets per section max. A wall of text is a triage defect — the worker will not read it. Each bullet is one idea or one consequence, one sentence.
 
