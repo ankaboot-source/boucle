@@ -741,6 +741,12 @@ doctor:
   # install that pins `default: tags:` to its own runner (README "Advanced —
   # dedicated runners") does not strand the doctor behind a running worker.
   tags: []
+  # resource_group: prevents concurrent doctor runs. On shared runners
+  # (framagit, GitLab.com SaaS), the doctor schedule fires every 10 min
+  # and each run occupies a runner slot. Without this group, a slow
+  # doctor run overlaps with the next schedule and consumes 2+ slots,
+  # starving webhook-triggered dispatch/triage pipelines.
+  resource_group: boucle-doctor
   rules:
     - if: $BOUCLE_ENABLED != "true"
       when: never
