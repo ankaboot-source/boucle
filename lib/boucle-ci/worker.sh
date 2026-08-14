@@ -643,7 +643,10 @@ EOF
   local mr_iid
   mr_iid=$(forge_mr_lookup_by_branch "$BRANCH" "opened" 2> /dev/null || echo "")
   if [ -z "$mr_iid" ]; then
-    mr_iid=$(forge_mr_create "$BRANCH" "$BOUCLE_DEFAULT_BRANCH" "$mr_title" "$mr_description")
+    if ! mr_iid=$(forge_mr_create "$BRANCH" "$BOUCLE_DEFAULT_BRANCH" "$mr_title" "$mr_description"); then
+      echo "FAIL: could not create MR for $BRANCH — stopping before setting boucle:review (no PR to review)" >&2
+      exit 1
+    fi
   else
     echo "MR !$mr_iid already exists for $BRANCH — updating title/description (worker iteration $ITERATION)"
     forge_mr_update "$mr_iid" "$mr_title" "$mr_description"
