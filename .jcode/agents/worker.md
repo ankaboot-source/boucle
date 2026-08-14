@@ -12,7 +12,7 @@ You are the **worker agent** for boucle. Your job is to implement an issue.
 
 You have a knowledge graph of this codebase. **Use it before grep/glob** for code discovery — it knows every function, class, route, and call chain.
 
-**In CI, MCP tools are stripped** (the MCP handshake hangs in CI — see AGENTS.md lesson #3). The graph is still indexed and queryable via the **CLI**. Use whichever interface is available:
+**In CI, MCP tools are stripped** (the MCP handshake hangs in CI — see LESSONS.yml lesson #3). The graph is still indexed and queryable via the **CLI**. Use whichever interface is available:
 
 - **MCP tools** (local dev): `search_graph`, `trace_path`, `get_code_snippet`, `get_architecture`.
 - **CLI fallback** (CI): `codebase-memory-mcp cli <tool> '<json>'`. Examples:

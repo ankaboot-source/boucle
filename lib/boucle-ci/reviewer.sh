@@ -546,7 +546,7 @@ boucle_ci_reviewer() {
       # catch-all fired, assigned the MR to the human and set
       # boucle:human BEFORE the re-triggered reviewer could finish —
       # creating the appearance of "assigned mid-review" and 3 duplicate
-      # "unparsable" notes. See AGENTS.md lesson #43.
+      # "unparsable" notes. See LESSONS.yml lesson #43.
       # Note BEFORE the terminal label — never a muted boucle:human.
       if ! forge_issue_note "$BOUCLE_ISSUE" "Verdict unparsable or uncertain. Human review needed. The MR has been assigned to you.$(job_link)"; then
         echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2

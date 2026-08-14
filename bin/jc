@@ -187,7 +187,7 @@ REASONING_EFFORT=$(awk '/^reasoning_effort:/{sub(/^reasoning_effort:[[:space:]]*
 
 # ── Provider fallback config ───────────────────────────────────────────
 # When the primary provider is down (empty log / no agent activity = the
-# exit-4 condition, AGENTS.md lesson #29), retry with a fallback provider
+# exit-4 condition, LESSONS.yml lesson #29), retry with a fallback provider
 # before the exit-code guard runs. This lets the loop self-recover when
 # ollama-cloud is unavailable (credits exhausted, API down) instead of
 # escalating to a human. Gated by BOUCLE_FALLBACK_PROVIDER (empty = disabled).
@@ -232,13 +232,13 @@ CI_PROJECT_DIR="$BOUCLE_WORKSPACE" # backward-compat alias for existing refs
 # reserved for the engine submodule in consumer repos — keeping state out of
 # it means `git submodule update` can never clobber in-flight work. The CI
 # worker job seeds state.md/iterations.md and extracts the MR Approach from
-# the same .boucle-state/<issue>/ paths (AGENTS.md lesson #20: the worker
+# the same .boucle-state/<issue>/ paths (LESSONS.yml lesson #20: the worker
 # fills the Approach section, the MR description reads it back from here).
 STATE_DIR="$BOUCLE_WORKSPACE/.boucle-state/$ISSUE"
 STATE_FILE="$STATE_DIR/state.md"
 ITERATIONS_FILE="$STATE_DIR/iterations.md"
 
-# Verdict draft file — per-job UNIQUE (AGENTS.md lesson #58). Agents MUST
+# Verdict draft file — per-job UNIQUE (LESSONS.yml lesson #58). Agents MUST
 # NOT draft to a fixed path like /tmp/verdict.md: shell executors are
 # shared between jobs AND issues, so a leftover draft from a previous job
 # survives and gets posted as the next agent's verdict (observed on a
@@ -259,7 +259,7 @@ export BOUCLE_VERDICT_FILE
 ensure_jcode_config
 
 # ── jcode environment setup ────────────────────────────────────────────
-# Disable MCP in CI (AGENTS.md lesson #3: MCP handshake hangs).
+# Disable MCP in CI (LESSONS.yml lesson #3: MCP handshake hangs).
 # jcode has MCP support but we disable it for CI reliability.
 export JCODE_RUN_MCP="${JCODE_RUN_MCP:-0}"
 # Disable auto-poke loop (prevents jcode from re-prompting the model when
@@ -438,7 +438,7 @@ run_with_retry() {
 }
 
 # Detect "API down" condition: empty log OR no agent activity. This is the
-# exit-4 signal (AGENTS.md lesson #29): jcode exits 1 with no output when
+# exit-4 signal (LESSONS.yml lesson #29): jcode exits 1 with no output when
 # the model API is down or out of credits — no tool calls in the log, no
 # model response. Returns 0 (true) if API-down is detected, 1 (false)
 # otherwise. Role-agnostic: looks for any tool call (glab/gh for
@@ -455,7 +455,7 @@ is_api_down() {
 }
 
 # Detect persistent provider quota exhaustion (HTTP 429/402) in the agent
-# log. This is the companion of is_api_down (AGENTS.md lesson #30): a quota
+# log. This is the companion of is_api_down (LESSONS.yml lesson #30): a quota
 # error leaves activity traces (the provider's error message, sometimes tool
 # calls made before the refusal), so is_api_down alone reports "up" and the
 # fallback never triggers — retrying cannot fix an exhausted quota. Returns
@@ -809,7 +809,7 @@ Post your analysis as a comment with the boucle:triage marker. Use: bin/forge-no
       # MR comment actually address the feedback. Empty on the first run.
       local feedback
       feedback="$(trim_notes reviewer_feedback "${BOUCLE_REVIEWER_FEEDBACK:-}")"
-      # Fail-loud guard for the MR feedback channel (AGENTS.md lesson #54):
+      # Fail-loud guard for the MR feedback channel (LESSONS.yml lesson #54):
       # a port/sync can silently drop the CI-side lookup while leaving the
       # orphaned BOUCLE_MR_IID export (observed: jcode port f830644 — workers
       # re-ran blind to human MR comments for 3 days). On any RE-RUN
@@ -905,7 +905,7 @@ MERGE CONFLICT from a previous iteration: the branch conflicted when rebasing on
       local feedback
       feedback="$(filter_mr_discussion "${BOUCLE_REVIEWER_FEEDBACK:-}")"
       feedback="$(trim_notes reviewer_feedback "$feedback")"
-      # Fail-loud guard for the MR feedback channel (AGENTS.md lesson #54):
+      # Fail-loud guard for the MR feedback channel (LESSONS.yml lesson #54):
       # a port/sync can silently drop the CI-side lookup while leaving the
       # orphaned BOUCLE_MR_IID export. Check the RAW env, not the filtered
       # value: anchoring (BOUCLE_REVIEW_ANCHORING) deliberately withholds
@@ -993,7 +993,7 @@ ${BOUCLE_IMAGE_DESCRIPTIONS}
       ;;
   esac
 
-  # Verdict draft hygiene (AGENTS.md lesson #58): a fixed /tmp path on a
+  # Verdict draft hygiene (LESSONS.yml lesson #58): a fixed /tmp path on a
   # shared executor serves a PREVIOUS job's leftover draft, which the
   # agent posts as its own verdict. Remind the verdict roles of the
   # per-job unique path exported above and of the direct-post fallback.
@@ -1261,8 +1261,8 @@ print_metrics_line
 
 # ── 5b. Provider fallback (API-down recovery) ─────────────────────────
 # If the primary provider is down (empty log / no agent activity = the
-# exit-4 condition, AGENTS.md lesson #29) or its quota is exhausted
-# (persistent HTTP 429/402, AGENTS.md lesson #30), retry with the fallback
+# exit-4 condition, LESSONS.yml lesson #29) or its quota is exhausted
+# (persistent HTTP 429/402, LESSONS.yml lesson #30), retry with the fallback
 # provider before the exit-code guard runs. This lets the loop self-recover
 # when ollama-cloud is unavailable (credits exhausted, API down) instead of
 # escalating to a human. Gated by BOUCLE_FALLBACK_PROVIDER.
@@ -1371,7 +1371,7 @@ case "$ROLE" in
       # nothing actionable.
       if ! grep -qiE '(glab|gh) (issue note|mr note|api .* -X POST|api .*/notes)|bin/forge-note' "$AGENT_LOG" \
         && ! grep -qiE '<!-- boucle:(triage|verdict)' "$AGENT_LOG"; then
-        # A persistent quota error (HTTP 429/402, AGENTS.md lesson #30)
+        # A persistent quota error (HTTP 429/402, LESSONS.yml lesson #30)
         # leaves activity traces in the log but produces no comment — the
         # model never completed a run. Retrying cannot fix an exhausted
         # quota, so classify it as provider-down (exit 4) to enable the
@@ -1415,7 +1415,7 @@ case "$ROLE" in
       exit 4
     fi
     # Persistent quota errors (HTTP 429/402) on a failed run are a
-    # provider-down condition (AGENTS.md lesson #30), not a step-budget
+    # provider-down condition (LESSONS.yml lesson #30), not a step-budget
     # issue — retrying cannot fix an exhausted quota. Gated on a non-zero
     # exit so a worker that succeeded despite a transient 429 is not
     # falsely escalated.

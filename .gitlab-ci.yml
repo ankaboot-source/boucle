@@ -92,7 +92,7 @@ variables:
   BOUCLE_LLM_BASE_URL: "https://ollama.com/v1"
   # BOUCLE_LLM_API_KEY: ""  # set as masked+protected CI variable
   # Provider fallback: when the primary provider is down —
-  # empty log / no agent activity, the exit-4 condition (AGENTS.md lesson #29) —
+  # empty log / no agent activity, the exit-4 condition (LESSONS.yml lesson #29) —
   # retry with this fallback provider before escalating to a human. Empty = disabled.
   # Per-role model overrides: BOUCLE_FALLBACK_MODEL_{TRIAGE,WORKER,REVIEWER,E2E}.
   BOUCLE_FALLBACK_PROVIDER: ""
