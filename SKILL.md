@@ -210,6 +210,7 @@ harness MUST use the markers correctly or dispatch will misroute its writes.
 | `<!-- boucle:triage v=1 -->` | `v=1` (no attrs) | triage agent (final comment); draft promoted by triage.sh:178 (`sed s/draft role=triage/triage v=1/`) | triage.sh:163 (awk), collapse-duplicate-notes:71-72 (jq structural filter) | Marks a final triage comment. CI parser acts on it (sets disposition label, assigns, pauses). |
 | `<!-- boucle:draft role=triage -->` | `role=triage` | triage agent (first-pass draft) | collapse-duplicate-notes:73 (filter), triage.sh:178 (promotion source) | Marks a draft triage comment. CI parser does NOT act on drafts; log-scraping fallback promotes to final when the agent exhausts its steps. |
 | `<!-- boucle:obligations v=1 -->` | `v=1` | triage.sh:213 | (informational — marks the obligations section of a triage comment) | Marks the obligations block in a triage comment (what the human must do next). |
+| `<!-- boucle:needs-info v=1 reason=no-key -->` | `v=1 reason=no-key` | triage.sh:92 (no-LLM-key gate) | triage.sh:55 (jq filter, idempotency check) | Marks a needs-info comment posted when the LLM API key is missing. Used for idempotency: triage checks if a no-key needs-info was already posted before re-posting. |
 
 ### 3.3 Verdict markers (reviewer / e2e)
 
