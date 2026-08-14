@@ -696,3 +696,24 @@
   ✅: 'DO: use a `dispatch_noop()` helper that writes a `.boucle-noop` marker before `exit 0`. The EXIT trap checks for BOTH `.boucle-issue` (real work) AND `.boucle-noop` (legitimate no-op) before
     flipping to `exit 1`. Replace EVERY bare `exit 0` in dispatch with `dispatch_noop()`. Clear `.boucle-noop` at startup alongside `.boucle-issue`. This preserves the anti-accumulation property
     (accidental no-ops still fail) while allowing legitimate no-ops to exit cleanly.'
+76:
+  title: Worker model/API failures MUST retry before escalating to human
+  ❌: 'DO NOT immediately escalate to `boucle:human` when `bin/jc worker` exits 4 (model/API failure). A transient LLM API outage (rate limit, brief downtime, credit refill delay) should not strand an
+    issue at `boucle:human` — the human has no way to fix the API and must manually re-trigger. Observed on a consumer: 3 consecutive model failures on the same issue, each escalating to `boucle:human`,
+    each requiring manual re-triggering. The agent produced text in its log but never committed — the diagnostic was correct, but the response (immediate escalation) was wrong.'
+  ✅: 'DO: retry `bin/jc worker` once (configurable via `BOUCLE_WORKER_MODEL_FAILURE_RETRIES`, default 1) before escalating to `boucle:human`. A 30-second delay between attempts lets transient rate limits
+    clear. If the retry also fails with exit 4, then escalate as before. Set `BOUCLE_WORKER_MODEL_FAILURE_RETRIES=0` to disable the retry (legacy behavior).'
+77:
+  title: Merger MUST detect already-merged MRs before escalating to human
+  ❌: 'DO NOT escalate to `boucle:human` when no open MR is found without first checking if the MR was already merged. A human who merges a MR manually via the GitLab UI (bypassing the merger job) triggers
+    the merger webhook. The merger finds no open MR and escalates to `boucle:human`, producing a false alarm + webhook storm. Observed on a consumer: manual merges each triggered a
+    `boucle:human` escalation with "Merger could not find an open MR", requiring manual label cleanup to stop the webhook storm.'
+  ✅: 'DO: before escalating, search for a merged MR with `source_branch` starting with `boucle/<iid>`. If found, transition to `boucle:done` with a note "MR already merged" instead of `boucle:human`.
+    This handles the race condition where a human merges manually before the merger job runs.'
+78:
+  title: Doctor job MUST use a resource_group to prevent runner starvation
+  ❌: 'DO NOT run the doctor job without a `resource_group`. On shared runners (framagit, GitLab.com SaaS), the doctor schedule fires every 10 min and each run occupies a runner slot. Without a
+    resource_group, a slow doctor run (10m timeout) overlaps with the next schedule fire, consuming 2+ runner slots and starving webhook-triggered dispatch/triage pipelines. Observed on a consumer:
+    30+ min delays on trigger pipelines stuck in `waiting_for_resource` while the doctor occupied runner slots every 10 min.'
+  ✅: 'DO: add `resource_group: boucle-doctor` to the doctor job in `.gitlab-ci.yml`. This serializes doctor runs so only one is active at a time — the next schedule queues behind it. The doctor makes
+    only API calls (no build), so serialization has no throughput impact. Combined with the existing `issue_has_active_pipeline` and `doctor_should_skip_dedup` guards, this prevents runner starvation.'
