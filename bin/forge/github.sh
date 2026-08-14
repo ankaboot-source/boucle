@@ -565,20 +565,21 @@ forge_trigger_role() {
   # GitHub: trigger via workflow_dispatch API
   # POST /repos/{owner}/{repo}/actions/workflows/boucle.yml/dispatches
   # Body: {"ref": "main", "inputs": {"BOUCLE_ISSUE": "...", "BOUCLE_ROLE": "..."}}
-  local inputs="{\"BOUCLE_ISSUE\": \"$issue_iid\""
-  if [ -n "$role" ]; then
-    inputs="$inputs, \"BOUCLE_ROLE\": \"$role\""
-  fi
+  # The inputs field MUST be a JSON object. -f inputs="$inputs" sent the
+  # JSON as a STRING (HTTP 422) so every chained trigger (triage
+  # chain_to_role, doctor worker re-trigger) silently failed. Build the
+  # body with jq and stream it via --input.
+  local inputs_json
+  inputs_json=$(jq -nc --arg iid "$issue_iid" --arg role "$role" \
+    '{BOUCLE_ISSUE: $iid, BOUCLE_ROLE: $role}')
   local kv key val
   for kv in "$@"; do
     key="${kv%%=*}"
     val="${kv#*=}"
-    inputs="$inputs, \"$key\": \"$val\""
+    inputs_json=$(printf '%s' "$inputs_json" | jq -c --arg k "$key" --arg v "$val" '.[$k] = $v')
   done
-  inputs="$inputs}"
   _gh_api_silent -X POST "/repos/$BOUCLE_PROJECT_ID/actions/workflows/boucle.yml/dispatches" \
-    -f ref="${BOUCLE_DEFAULT_BRANCH:-main}" \
-    -f inputs="$inputs"
+    --input - <<< "$(jq -nc --arg ref "${BOUCLE_DEFAULT_BRANCH:-main}" --argjson inputs "$inputs_json" '{ref: $ref, inputs: $inputs}')"
 }
 
 forge_pipeline_list_active() {
