@@ -11,10 +11,15 @@ Validates:
   4. Cross-references: "lesson #N" in text → N exists as a key
   5. Duplicate detection: tokenize ❌/✅ text, compute Jaccard similarity,
      flag pairs > 0.6 overlap (potential duplicates)
+  6. No lessons in AGENTS.md: the numbered lessons section in AGENTS.md must
+     not grow — new lessons go in LESSONS.yml only. Prevents dual-maintenance
+     drift and ensures consumers (who sync .boucle/ via bin/update) never
+     hand-edit AGENTS.md with lessons that will be overwritten.
 
 Usage: bin/check-lessons [LESSONS.yml]
        bin/check-lessons --strict   (treat warnings as errors)
 """
+import os
 import re
 import sys
 import yaml
@@ -225,6 +230,46 @@ def check_duplicates(lessons):
     return warnings
 
 
+def check_agents_md(lessons):
+    """Check that AGENTS.md does not contain numbered lessons beyond the
+    historical baseline (1-11). New lessons MUST go in LESSONS.yml only.
+
+    AGENTS.md is synced to consumers via bin/update and hand-edited lessons
+    there are overwritten. The historical lessons 1-11 were the original
+    mandatory operating principles before the migration to LESSONS.yml;
+    they stay in AGENTS.md as the always-visible contract. All subsequent
+    lessons (12+) live in LESSONS.yml only.
+    """
+    errors = []
+    agents_path = 'AGENTS.md'
+    if not os.path.isfile(agents_path):
+        return errors  # Not every checkout has AGENTS.md (e.g. consumer repos)
+
+    with open(agents_path) as f:
+        content = f.read()
+
+    # Find all numbered lesson entries: lines starting with "N." followed by
+    # "**Title**" — the historical format "62. **Title** ..."
+    AGENTS_BASELINE = 11  # Lessons 1-11 are the historical mandatory principles
+    lesson_nums_in_agents = set()
+    for m in re.finditer(r'^(\d+)\.\s+\*\*', content, re.MULTILINE):
+        num = int(m.group(1))
+        if num > AGENTS_BASELINE:
+            lesson_nums_in_agents.add(num)
+
+    if lesson_nums_in_agents:
+        for num in sorted(lesson_nums_in_agents):
+            errors.append(
+                f'Lesson #{num} found in AGENTS.md (above baseline of '
+                f'{AGENTS_BASELINE}) — new lessons MUST go in LESSONS.yml '
+                f'only. AGENTS.md is synced to consumers and hand-edits '
+                f'are overwritten by bin/update. Move the lesson to '
+                f'LESSONS.yml and remove it from AGENTS.md.'
+            )
+
+    return errors
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='Validate LESSONS.yml')
@@ -248,6 +293,9 @@ def main():
     all_errors.extend(errors)
 
     errors = check_cross_refs(lessons)
+    all_errors.extend(errors)
+
+    errors = check_agents_md(lessons)
     all_errors.extend(errors)
 
     warnings = check_duplicates(lessons)
