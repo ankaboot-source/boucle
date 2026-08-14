@@ -298,7 +298,10 @@ fi
 # Export BOUCLE_DND_ACTIVE so the triage agent prompt can soften its
 # disposition (prefer READY with documented assumptions over NEEDS-INFO
 # for non-critical ambiguities) during the quiet window. 1 = active, 0 = off.
-if [ -x "$BOUCLE_WORKSPACE/bin/dnd" ] && "$BOUCLE_WORKSPACE/bin/dnd" 2> /dev/null; then
+# BOUCLE_HOME is exported by every caller (boucle-ci / lib); shellcheck
+# cannot see that, so the reference is flagged SC2154 — disable inline.
+# shellcheck disable=SC2154
+if [ -x "$BOUCLE_HOME/bin/dnd" ] && "$BOUCLE_HOME/bin/dnd" 2> /dev/null; then
   export BOUCLE_DND_ACTIVE=1
 else
   export BOUCLE_DND_ACTIVE=0
