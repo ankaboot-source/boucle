@@ -66,6 +66,9 @@ boucle_ci_reviewer() {
     # MR state and transition the issue instead.
     CLOSED_MR_IID=$(forge_mr_lookup_by_branch "boucle/$BOUCLE_ISSUE" "closed")
     MERGED_MR_IID=$(forge_mr_lookup_by_branch "boucle/$BOUCLE_ISSUE" "merged")
+    MERGED_MR_STATE=""
+    CLOSED_MR_STATE=""
+    CLOSED_MR_DATA=""
     if [ -n "$MERGED_MR_IID" ]; then
       MERGED_MR_STATE=$(forge_mr_get "$MERGED_MR_IID" | jq -r '.state // empty' 2> /dev/null || echo "")
     fi

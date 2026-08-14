@@ -397,9 +397,19 @@ forge_mr_notes() {
 
 forge_mr_create() {
   local source_branch="$1" target_branch="$2" title="$3" description="$4"
-  _gh_api -X POST "/repos/$BOUCLE_PROJECT_ID/pulls" \
+  local out number
+  out=$(GH_TOKEN="$BOUCLE_TOKEN" gh api -X POST "/repos/$BOUCLE_PROJECT_ID/pulls" \
     -f head="$source_branch" -f base="$target_branch" \
-    -f title="$title" -f body="$description" | jq -r '.number // empty' || true
+    -f title="$title" -f body="$description" 2>&1) || {
+    echo "ERROR: forge_mr_create failed: $(printf '%s' "$out" | jq -r '.message // empty' 2>/dev/null || printf '%s' "$out")" >&2
+    return 1
+  }
+  number=$(printf '%s' "$out" | jq -r '.number // empty' 2> /dev/null)
+  if [ -z "$number" ]; then
+    echo "ERROR: forge_mr_create returned no PR number (is BOUCLE_TOKEN a classic PAT with 'repo' scope?)" >&2
+    return 1
+  fi
+  echo "$number"
 }
 
 forge_mr_update() {
