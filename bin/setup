@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 # bin/setup — Day 0 infrastructure setup for boucle on a target repo.
-# Supports GitLab and GitHub. The forge is REQUIRED — pass it as a
-# subcommand (setup gitlab / setup github) or via --forge <gitlab|github>.
+# Supports GitLab and GitHub. The forge is auto-detected from the origin
+# git remote when possible (github.com → github, gitlab.com → gitlab,
+# self-hosted via hostname heuristic or API probe). Override with a
+# subcommand (setup gitlab / setup github) or --forge <gitlab|github>.
 # Idempotent: safe to run multiple times. Checks before creating.
-# Usage: bin/setup <gitlab|github> [--project <id-or-path>] [--host <forge-host>] [--bot-id <id>] [--bot-token <pat>] [--cf-token <token>] [--dry-run]
+# Usage: bin/setup [gitlab|github] [--project <id-or-path>] [--host <forge-host>] [--bot-id <id>] [--bot-token <pat>] [--cf-token <token>] [--dry-run]
 #        bin/setup --forge <gitlab|github> [other flags]   (legacy syntax)
 
 set -euo pipefail
 
 # ── Args ──────────────────────────────────────────────────────────────
 # Every flag has a BOUCLE_* env fallback so bin/setup works with zero
-# prompts (AI-agent-driven installs). The forge has NO default — it must
-# be specified (subcommand or --forge).
+# prompts (AI-agent-driven installs). The forge is auto-detected from the
+# origin git remote; override with a subcommand, --forge, or BOUCLE_FORGE.
 FORGE="${BOUCLE_FORGE:-}"
 PROJECT="${BOUCLE_PROJECT:-}"
 HOST="${BOUCLE_HOST:-}"
@@ -107,11 +109,12 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h | --help)
-      echo "Usage: bin/setup <gitlab|github> [options]"
+      echo "Usage: bin/setup [gitlab|github] [options]"
       echo "       bin/setup --forge <gitlab|github> [options]   (legacy syntax)"
       echo ""
-      echo "The forge is REQUIRED — no default. Pass it as the first arg"
-      echo "(subcommand) or via --forge / BOUCLE_FORGE."
+      echo "The forge is auto-detected from the origin git remote when possible"
+      echo "(github.com → github, gitlab.com → gitlab, self-hosted via hostname"
+      echo "heuristic or API probe). Override with a subcommand, --forge, or BOUCLE_FORGE."
       echo ""
       echo "Options:"
       echo "  --project <id-or-path>   Target project ID or path (e.g. 123456, group/project, or owner/repo)"
@@ -187,28 +190,53 @@ if [ -z "$MONO_USER" ]; then
   fi
 fi
 
-# ── Validate forge ────────────────────────────────────────────────────
-# The forge is REQUIRED — there is no default. Pass it as a subcommand
-# (setup gitlab / setup github) or via --forge / BOUCLE_FORGE.
-if [ -z "$FORGE" ]; then
-  echo "Error: forge is required. Usage: bin/setup <gitlab|github> [flags]" >&2
-  echo "       or: bin/setup --forge <gitlab|github> [flags]" >&2
-  echo "       or: export BOUCLE_FORGE=<gitlab|github> && bin/setup" >&2
-  exit 1
-fi
+# ── detect_forge_from_host — auto-detect forge type from a hostname ────
+# Resolution order:
+#   1. Known SaaS hosts: github.com → github, gitlab.com → gitlab
+#   2. Hostname heuristic: contains "github" → github, "gitlab" → gitlab
+#      (covers common self-hosted conventions like gitlab.example.com)
+#   3. API probe (no auth, 3s timeout):
+#      GitLab  /api/v4/version → 401 (endpoint exists, auth required)
+#      GitHub  /api/v3/meta    → 200 (public endpoint)
+#   4. Unrecognized → empty (caller must handle)
+detect_forge_from_host() {
+  local host="$1"
+  [ -z "$host" ] && return 0
 
-case "$FORGE" in
-  gitlab|github) ;;
-  *)
-    echo "Error: forge must be 'gitlab' or 'github' (got: $FORGE)" >&2
-    exit 1
-    ;;
-esac
+  # Known SaaS hosts
+  case "$host" in
+    github.com) echo "github"; return 0 ;;
+    gitlab.com) echo "gitlab"; return 0 ;;
+  esac
 
-# Validate required args
-# Auto-detect host + project from the origin remote when not provided,
-# so a copy/paste install works with zero values to replace.
-if [ -z "$PROJECT" ] || [ -z "$HOST" ]; then
+  # Hostname heuristic (common for self-hosted: gitlab.example.com, github.example.com)
+  case "$host" in
+    *github*) echo "github"; return 0 ;;
+    *gitlab*) echo "gitlab"; return 0 ;;
+  esac
+
+  # API probe — no auth needed, short timeout
+  local code
+  code=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "https://$host/api/v4/version" 2>/dev/null || true)
+  case "$code" in
+    200|401) echo "gitlab"; return 0 ;;
+  esac
+
+  code=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "https://$host/api/v3/meta" 2>/dev/null || true)
+  case "$code" in
+    200) echo "github"; return 0 ;;
+  esac
+
+  # Could not detect — return empty
+  return 0
+}
+
+# ── Auto-detect host + project + forge from the origin remote ──────────
+# Auto-detect from the origin git remote when not provided, so a
+# copy/paste install works with zero values to replace — including the
+# forge itself (github.com → github, gitlab.com → gitlab, self-hosted
+# detected via hostname heuristic or API probe).
+if [ -z "$PROJECT" ] || [ -z "$HOST" ] || [ -z "$FORGE" ]; then
   REMOTE_URL="$(git remote get-url origin 2> /dev/null || true)"
   if [ -n "$REMOTE_URL" ]; then
     # git@host:group/project.git  →  host, group/project
@@ -237,12 +265,40 @@ if [ -z "$PROJECT" ] || [ -z "$HOST" ]; then
     REMOTE_PATH="${REMOTE_PATH%.git}"
     [ -z "$PROJECT" ] && PROJECT="$REMOTE_PATH"
     [ -z "$HOST" ] && HOST="$REMOTE_HOST"
-    [ -n "$PROJECT" ] && [ -n "$HOST" ] \
-      && echo "Auto-detected from origin remote: project=$PROJECT host=$HOST"
+    # Auto-detect the forge from the remote host when not specified.
+    if [ -z "$FORGE" ] && [ -n "$REMOTE_HOST" ]; then
+      DETECTED_FORGE=$(detect_forge_from_host "$REMOTE_HOST")
+      if [ -n "$DETECTED_FORGE" ]; then
+        FORGE="$DETECTED_FORGE"
+      fi
+    fi
+    echo "Auto-detected from origin remote: project=$PROJECT host=$HOST${FORGE:+ forge=$FORGE}"
   fi
 fi
 
-# Default host per forge
+# ── Validate forge ────────────────────────────────────────────────────
+# The forge is auto-detected from the origin remote when possible.
+# If auto-detection failed (no remote, unrecognized host, API probe
+# failed), it must be specified explicitly: subcommand, --forge, or
+# BOUCLE_FORGE.
+if [ -z "$FORGE" ]; then
+  echo "Error: could not auto-detect the forge from the origin remote." >&2
+  echo "       Specify it explicitly:" >&2
+  echo "       bin/setup <gitlab|github> [flags]" >&2
+  echo "       bin/setup --forge <gitlab|github> [flags]" >&2
+  echo "       export BOUCLE_FORGE=<gitlab|github> && bin/setup" >&2
+  exit 1
+fi
+
+case "$FORGE" in
+  gitlab|github) ;;
+  *)
+    echo "Error: forge must be 'gitlab' or 'github' (got: $FORGE)" >&2
+    exit 1
+    ;;
+esac
+
+# Default host per forge (only when not auto-detected from the remote)
 if [ -z "$HOST" ]; then
   if [ "$FORGE" = "github" ]; then
     HOST="github.com"
