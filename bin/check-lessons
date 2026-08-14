@@ -1,0 +1,284 @@
+#!/usr/bin/env python3
+"""bin/check-lessons — validate LESSONS.yml format + detect duplicates.
+
+CI gate. Run by `make lint` and CI. Exits non-zero on any violation.
+
+Validates:
+  1. Format: every lesson has title + ❌ + ✅, OR pruned: true, OR merged_into: N
+  2. No forbidden content: issue numbers (#NN as "issue #NN"), MR numbers (!NN),
+     SHAs (40+ hex chars), line numbers ("line NN"), Context: keys
+  3. Sequential numbering: no duplicate keys, gaps allowed (pruned/merged)
+  4. Cross-references: "lesson #N" in text → N exists as a key
+  5. Duplicate detection: tokenize ❌/✅ text, compute Jaccard similarity,
+     flag pairs > 0.6 overlap (potential duplicates)
+
+Usage: bin/check-lessons [LESSONS.yml]
+       bin/check-lessons --strict   (treat warnings as errors)
+"""
+import re
+import sys
+import yaml
+from collections import defaultdict
+
+# --- Config ---
+
+SIMILARITY_THRESHOLD = 0.6  # Jaccard overlap above this → potential duplicate
+MIN_TOKENS = 3  # ignore lessons with fewer than 3 tokens (too short to compare)
+
+# Forbidden patterns in lesson text (admission test: "no issue numbers, no
+# incident SHAs, no line numbers — those live in git history")
+FORBIDDEN_PATTERNS = [
+    (r'issue\s+#\d+', 'issue number (lives in git history, not the contract)'),
+    (r'MR\s+!\d+', 'MR number (lives in git history, not the contract)'),
+    (r'\b[0-9a-f]{40,}\b', 'SHA (lives in git history, not the contract)'),
+    (r'line\s+\d+', 'line number (lives in git history, not the contract)'),
+]
+
+# Cross-reference pattern: "lesson #N" (with "lesson" prefix — bare "#N" is
+# often a GitHub/GitLab issue number, not a lesson cross-ref)
+LESSON_REF_RE = re.compile(r'lesson\s+#(\d+)')
+
+
+def load_lessons(path):
+    with open(path) as f:
+        data = yaml.safe_load(f)
+    if not isinstance(data, dict):
+        print(f'ERROR: {path} is not a YAML mapping (expected numbered lessons)')
+        sys.exit(1)
+    return data
+
+
+def tokenize(text):
+    """Split text into lowercase tokens for similarity comparison."""
+    # Remove markdown formatting, split on non-alphanumeric
+    cleaned = re.sub(r'[`*_\[\]()]', ' ', text.lower())
+    # Split on whitespace and punctuation (keep hyphenated words)
+    tokens = set(re.findall(r'[a-z][a-z0-9_-]*', cleaned))
+    # Remove very common stop words
+    stop = {'do', 'not', 'the', 'a', 'an', 'to', 'is', 'it', 'in', 'on',
+            'and', 'or', 'for', 'of', 'with', 'that', 'this', 'when',
+            'must', 'never', 'always', 'see', 'skillmd', 'lesson'}
+    return tokens - stop
+
+
+def jaccard(set_a, set_b):
+    if not set_a or not set_b:
+        return 0.0
+    intersection = set_a & set_b
+    union = set_a | set_b
+    return len(intersection) / len(union) if union else 0.0
+
+
+def check_format(lessons):
+    errors = []
+    for num, entry in sorted(lessons.items()):
+        if not isinstance(entry, dict):
+            errors.append(f'#{num}: entry is not a mapping (got {type(entry).__name__})')
+            continue
+
+        if entry.get('pruned'):
+            if 'reason' not in entry:
+                errors.append(f'#{num}: pruned lesson missing "reason"')
+            continue
+
+        if entry.get('merged_into'):
+            if 'reason' not in entry:
+                errors.append(f'#{num}: merged lesson missing "reason"')
+            target = entry['merged_into']
+            if target not in lessons:
+                errors.append(f'#{num}: merged_into #{target} but #{target} does not exist')
+            continue
+
+        # Active lesson — must have title + ❌ + ✅
+        if 'title' not in entry:
+            errors.append(f'#{num}: missing "title"')
+        if '❌' not in entry:
+            errors.append(f'#{num}: missing "❌" (DO NOT)')
+        if '✅' not in entry:
+            errors.append(f'#{num}: missing "✅" (DO)')
+
+        # Forbidden: Context: key
+        if 'Context' in entry or 'context' in entry:
+            errors.append(f'#{num}: has "Context:" key (narratives live in git history, not the contract)')
+
+    return errors
+
+
+def check_forbidden_content(lessons):
+    errors = []
+    for num, entry in sorted(lessons.items()):
+        if not isinstance(entry, dict):
+            continue
+        if entry.get('pruned') or entry.get('merged_into'):
+            continue
+
+        # Gather all text from the entry
+        texts = []
+        for key in ('title', '❌', '✅', 'note'):
+            if key in entry:
+                val = entry[key]
+                if isinstance(val, list):
+                    texts.extend(str(v) for v in val)
+                else:
+                    texts.append(str(val))
+
+        combined = ' '.join(texts)
+        for pattern, desc in FORBIDDEN_PATTERNS:
+            matches = re.findall(pattern, combined, re.IGNORECASE)
+            if matches:
+                # Exclude legitimate cross-refs: "lesson #22" is OK, "issue #34" is not
+                if pattern == r'issue\s+#\d+':
+                    # "issue #N" is forbidden
+                    errors.append(f'#{num}: contains {desc}: {matches}')
+                elif pattern == r'\b[0-9a-f]{40,}\b':
+                    errors.append(f'#{num}: contains {desc}: {matches[0][:12]}...')
+                else:
+                    errors.append(f'#{num}: contains {desc}: {matches}')
+
+    return errors
+
+
+def check_numbering(lessons):
+    errors = []
+    nums = sorted(lessons.keys())
+    if not nums:
+        errors.append('no lessons found (empty file?)')
+        return errors
+
+    # Check for gaps and report them (gaps are OK if pruned/merged)
+    expected = set(range(1, nums[-1] + 1))
+    actual = set(nums)
+    gaps = expected - actual
+    for gap in sorted(gaps):
+        if gap not in lessons:
+            # Check if it's marked pruned or merged in the YAML
+            # (it should be — if it's a true gap with no entry, that's an error)
+            errors.append(f'#{gap}: missing from YAML (gap without pruned/merged marker)')
+
+    return errors
+
+
+def check_cross_refs(lessons):
+    errors = []
+    for num, entry in sorted(lessons.items()):
+        if not isinstance(entry, dict):
+            continue
+        if entry.get('pruned') or entry.get('merged_into'):
+            continue
+
+        texts = []
+        for key in ('title', '❌', '✅'):
+            if key in entry:
+                val = entry[key]
+                if isinstance(val, list):
+                    texts.extend(str(v) for v in val)
+                else:
+                    texts.append(str(val))
+
+        combined = ' '.join(texts)
+        refs = LESSON_REF_RE.findall(combined)
+        for ref in refs:
+            ref_num = int(ref)
+            if ref_num not in lessons:
+                errors.append(f'#{num}: references #{ref_num} but #{ref_num} does not exist')
+
+    return errors
+
+
+def check_duplicates(lessons):
+    warnings = []
+    # Build token sets for each active lesson
+    token_sets = {}
+    for num, entry in sorted(lessons.items()):
+        if not isinstance(entry, dict):
+            continue
+        if entry.get('pruned') or entry.get('merged_into'):
+            continue
+
+        texts = []
+        for key in ('❌', '✅'):
+            if key in entry:
+                val = entry[key]
+                if isinstance(val, list):
+                    texts.extend(str(v) for v in val)
+                else:
+                    texts.append(str(val))
+
+        combined = ' '.join(texts)
+        tokens = tokenize(combined)
+        if len(tokens) >= MIN_TOKENS:
+            token_sets[num] = tokens
+
+    # Compare all pairs
+    nums = sorted(token_sets.keys())
+    for i, num_a in enumerate(nums):
+        for num_b in nums[i + 1:]:
+            sim = jaccard(token_sets[num_a], token_sets[num_b])
+            if sim > SIMILARITY_THRESHOLD:
+                # Get shared tokens for context
+                shared = token_sets[num_a] & token_sets[num_b]
+                warnings.append(
+                    f'#{num_a} and #{num_b}: {sim:.0%} keyword overlap '
+                    f'(shared: {", ".join(sorted(shared)[:8])})'
+                )
+
+    return warnings
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description='Validate LESSONS.yml')
+    parser.add_argument('path', nargs='?', default='LESSONS.yml')
+    parser.add_argument('--strict', action='store_true',
+                        help='treat duplicate warnings as errors')
+    args = parser.parse_args()
+
+    lessons = load_lessons(args.path)
+
+    all_errors = []
+    all_warnings = []
+
+    errors = check_format(lessons)
+    all_errors.extend(errors)
+
+    errors = check_forbidden_content(lessons)
+    all_errors.extend(errors)
+
+    errors = check_numbering(lessons)
+    all_errors.extend(errors)
+
+    errors = check_cross_refs(lessons)
+    all_errors.extend(errors)
+
+    warnings = check_duplicates(lessons)
+    all_warnings.extend(warnings)
+
+    # Report
+    active = sum(1 for v in lessons.values()
+                 if isinstance(v, dict) and not v.get('pruned') and not v.get('merged_into'))
+    pruned = sum(1 for v in lessons.values()
+                 if isinstance(v, dict) and v.get('pruned'))
+    merged = sum(1 for v in lessons.values()
+                 if isinstance(v, dict) and v.get('merged_into'))
+
+    if all_errors:
+        print(f'FAIL: {len(all_errors)} error(s)', file=sys.stderr)
+        for e in all_errors:
+            print(f'  ERROR: {e}', file=sys.stderr)
+
+    if all_warnings:
+        label = 'ERROR' if args.strict else 'WARN'
+        stream = sys.stderr if args.strict else sys.stdout
+        print(f'{label}: {len(all_warnings)} potential duplicate(s)', file=stream)
+        for w in all_warnings:
+            print(f'  {label}: {w}', file=stream)
+
+    if not all_errors and (not all_warnings or not args.strict):
+        print(f'doc-sync OK: {len(lessons)} lessons ({active} active, {pruned} pruned, {merged} merged)')
+        sys.exit(0)
+    else:
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()

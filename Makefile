@@ -23,7 +23,7 @@ ALL_SH := $(strip $(SRC_SH) $(BIN_SH))
 # Default: run everything.
 check: lint test
 
-# Static analysis: shellcheck + shfmt diff (no modifications).
+# Static analysis: shellcheck + shfmt diff (no modifications) + lessons lint.
 lint:
 	@command -v shellcheck >/dev/null 2>&1 || { echo "ERROR: shellcheck not installed (brew install shellcheck)"; exit 1; }
 	@command -v shfmt >/dev/null 2>&1 || { echo "ERROR: shfmt not installed (brew install shfmt)"; exit 1; }
@@ -33,6 +33,8 @@ lint:
 	printf '%s\n' $$files | xargs shellcheck -x --severity=warning; \
 	echo ">> shfmt -d"; \
 	printf '%s\n' $$files | xargs shfmt -d $(SHFMT_FLAGS)
+	@echo ">> check-lessons"; \
+	python3 bin/check-lessons LESSONS.yml
 
 # Apply formatting in place (local use only).
 fix:
