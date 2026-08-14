@@ -480,7 +480,7 @@ boucle_ci_doctor() {
 
   for IID in $STUCK_WORKING $STUCK_REVIEW; do
     # Determine which role to re-trigger based on the label.
-    ISSUE_LABELS=$(forge_issue_get "$IID" | jq -r '.labels | join(",")')
+    ISSUE_LABELS=$(forge_issue_get "$IID" | jq -r '.labels | map(if type == "string" then . else .name end) | join(",")')
     if echo "$ISSUE_LABELS" | grep -q "boucle:working"; then
       ROLE="worker"
     elif echo "$ISSUE_LABELS" | grep -q "boucle:review"; then
@@ -568,8 +568,13 @@ boucle_ci_doctor() {
           MR_OAPPROVED=1
         fi
       fi
-      if [ "$MR_OSTATUS" = "mergeable" ] && [ "$MR_OAPPROVED" -gt 0 ]; then
-        echo "  → #$IID ($ROLE): MR !$MR_OIID approved ($MR_OAPPROVED) + mergeable — triggering merger instead of $ROLE"
+      if [ "$MR_OAPPROVED" -gt 0 ] && { [ "$MR_OSTATUS" = "mergeable" ] || [ "$MR_OSTATUS" = "unknown" ]; }; then
+        # When approved + mergeable: trigger merger directly.
+        # When approved + unknown (GitHub hasn't computed mergeable_state
+        # yet): trigger merger anyway — it will rebase and check
+        # mergeability itself. Skipping here leaves approved PRs stuck
+        # forever because the doctor is the only one that polls.
+        echo "  → #$IID ($ROLE): MR !$MR_OIID approved ($MR_OAPPROVED) + $MR_OSTATUS — triggering merger"
         set_boucle_label "$IID" "boucle:merging" "boucle::status::bot"
         chain_to_role "$IID" "merger"
         echo "  → triggered merger for #$IID"
