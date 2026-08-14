@@ -701,8 +701,10 @@
   ❌: 'DO NOT immediately escalate to `boucle:human` when `bin/jc worker` exits 4 (model/API failure). A transient LLM API outage (rate limit, brief downtime, credit refill delay) should not strand an
     issue at `boucle:human` — the human has no way to fix the API and must manually re-trigger. Observed on a consumer: 3 consecutive model failures on the same issue, each escalating to `boucle:human`,
     each requiring manual re-triggering. The agent produced text in its log but never committed — the diagnostic was correct, but the response (immediate escalation) was wrong.'
-  ✅: 'DO: retry `bin/jc worker` once (configurable via `BOUCLE_WORKER_MODEL_FAILURE_RETRIES`, default 1) before escalating to `boucle:human`. A 30-second delay between attempts lets transient rate limits
-    clear. If the retry also fails with exit 4, then escalate as before. Set `BOUCLE_WORKER_MODEL_FAILURE_RETRIES=0` to disable the retry (legacy behavior).'
+  ✅: 'DO: retry `bin/jc worker` with exponential backoff + jitter (configurable via `BOUCLE_WORKER_MODEL_FAILURE_RETRIES`, default 3; `BOUCLE_WORKER_MODEL_FAILURE_BASE_DELAY`, default 15s) before
+    escalating to `boucle:human`. The delay for attempt N is `base_delay * 2^(N-1) + random(0..base_delay)`, capped at 300s. With defaults: attempt 1 waits 15-30s, attempt 2 waits 30-45s, attempt 3 waits
+    60-75s. The jitter prevents thundering-herd when multiple worker jobs fail simultaneously. If all retries fail with exit 4, then escalate as before. Set `BOUCLE_WORKER_MODEL_FAILURE_RETRIES=0` to
+    disable the retry (legacy behavior).'
 77:
   title: Merger MUST detect already-merged MRs before escalating to human
   ❌: 'DO NOT escalate to `boucle:human` when no open MR is found without first checking if the MR was already merged. A human who merges a MR manually via the GitLab UI (bypassing the merger job) triggers
