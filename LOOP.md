@@ -562,17 +562,23 @@ flowchart LR
 
 ### How it works
 
-- **Triage** posts a `<!-- boucle:files v=1 paths=path1,path2 -->` marker note
-  predicting the files the issue will touch (source, styles, charter docs).
-  Absent marker = no claim → fail-open (the gate passes).
+- **Triage** embeds a `<!-- boucle:files v=1 paths=path1,path2 -->` marker
+  in its spec comment (the `## Fichiers impactés` section), predicting the
+  files the issue will touch (source, styles, charter docs). The file claim
+  lives in the spec the human reviews, not a separate note. Absent marker =
+  no claim → fail-open (the gate passes).
 - **`check_file_gate`** (3rd gate, after `check_dependencies_and_gate` and
   `check_sibling_gate`) compares the issue's marker against in-flight issues'
   markers (open issues labeled `boucle:working`/`review`/`approval`/`merging`).
   Non-empty intersection → `boucle:blocked` + explanatory note; the worker is
   NOT triggered.
-- **Worker job** refreshes the marker with the actual branch diff
-  (`git diff --name-only origin/<default>...HEAD`) after each run. The refresh
-  is skipped when the branch has no commits ahead (e.g. after an adaptive
+- **Worker job** refreshes the claim in a separate machine note with the
+  actual branch diff (`git diff --name-only origin/<default>...HEAD`) after
+  each run. It targets the newest marker note that is NOT the triage spec
+  comment (updating the spec comment would destroy the human-visible spec),
+  posting a new note on the first refresh. The gate picks the newest marker
+  note, so the refresh supersedes the triage prediction. The refresh is
+  skipped when the branch has no commits ahead (e.g. after an adaptive
   reset), preserving the last non-empty claim mid-flight.
 - **`maybe_unblock_dependents`** (catchup + e2e) unblocks a file-blocked issue
   directly when the named blocker reaches `done`/`closed`.

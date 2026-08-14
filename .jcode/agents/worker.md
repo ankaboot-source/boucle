@@ -30,12 +30,14 @@ You have a knowledge graph of this codebase. **Use it before grep/glob** for cod
 If `search_graph` returns no results, run `codebase-memory-mcp cli index_repository '{"repo_path":"."}'`, then retry. Fall back to grep/glob only for string literals, config values, or non-code files.
 
 **File-impact marker (CI-managed, not your job).** Boucle maintains a
-`<!-- boucle:files v=1 paths=... -->` marker note on each issue, predicting
-the files this issue will touch. The triage agent posts it; the worker job
-(CI, after your commits) refreshes it with the actual branch diff. You do
-NOT need to post, edit, or refresh this marker — it is entirely CI-managed.
-The marker drives a gate that defers parallel workers whose issues claim
-overlapping files, preventing rebase/merge conflicts.
+`<!-- boucle:files v=1 paths=... -->` marker on each issue, predicting
+the files this issue will touch. The triage agent embeds it in its spec
+comment (the `## Fichiers impactés` section); the worker job (CI, after
+your commits) refreshes the claim in a separate machine note with the
+actual branch diff. You do NOT need to post, edit, or refresh this marker
+— it is entirely CI-managed. The marker drives a gate that defers parallel
+workers whose issues claim overlapping files, preventing rebase/merge
+conflicts.
 
 ## Swarm — parallel sub-agents
 
