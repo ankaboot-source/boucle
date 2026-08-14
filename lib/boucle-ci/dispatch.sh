@@ -50,27 +50,50 @@ dispatch_is_github_pr_comment() {
   [ "$(jq -r '.issue.pull_request != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo false)" = "true" ]
 }
 
+# dispatch_noop
+#
+# Exit 0 for a LEGITIMATE dispatch no-op (closed-issue guard, bot-event
+# filter, chain_to_role paths, unhandled event classes). Writes a
+# .boucle-noop marker so the anti-accumulation EXIT trap (which flips a
+# bare `exit 0` without .boucle-issue to `exit 1`) does NOT fail the job.
+# Every no-op path MUST call this instead of a bare `exit 0` — otherwise a
+# webhook storm on a closed issue produces dozens of failed trigger
+# pipelines that saturate the runners and block real work.
+dispatch_noop() {
+  touch .boucle-noop
+  exit 0
+}
+
 boucle_ci_dispatch() {
   # Shared gate functions (check_sibling_gate, maybe_unblock_dependents) —
   # single source of truth in lib/boucle-ci/gates.sh.
   source "$BOUCLE_HOME/lib/boucle-ci/gates.sh"
   # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script under set -eo pipefail. Without pipefail, the var is just empty (which we handle).
   set +o pipefail
-  # Anti-accumulation: if dispatch exits 0 without writing .boucle-issue,
+  # Anti-accumulation: if dispatch exits 0 without writing .boucle-issue
+  # (real work) AND without writing .boucle-noop (a legitimate no-op),
   # fail instead so downstream triage (needs: [dispatch] without optional)
   # is skipped. This prevents no-op webhook pipelines (bot events, MR
   # actions that chain via API, unhandled events) from consuming the
   # data runner while triage bootstraps only to find no work to do.
-  trap 'if [ $? -eq 0 ] && [ ! -f .boucle-issue ]; then exit 1; fi' EXIT
+  #
+  # The .boucle-noop marker distinguishes a LEGITIMATE no-op (closed-issue
+  # guard, bot-event filter, chain_to_role paths, unhandled event classes)
+  # from an ACCIDENTAL no-op (a code path that forgot to write .boucle-issue).
+  # Legitimate no-ops call dispatch_noop(), which writes the marker before
+  # exit 0; a bare `exit 0` without either marker still fails the job.
+  trap 'if [ $? -eq 0 ] && [ ! -f .boucle-issue ] && [ ! -f .boucle-noop ]; then exit 1; fi' EXIT
 
-  # Clear any stale .boucle-issue from a previous run. The file is NOT in
-  # .gitignore and survives `git clean` on some runner configurations
-  # (observed on framagit 2026-08: a previous issue-webhook dispatch wrote
-  # .boucle-issue; the next run's MR-note trigger dispatch didn't write it,
-  # but the file still existed — the EXIT trap found it and didn't flip to
-  # exit 1, so triage ran and re-triaged the issue, setting spec-review +
-  # status::human and blocking the loop).
-  rm -f .boucle-issue
+  # Clear any stale .boucle-issue / .boucle-noop from a previous run. The
+  # files are NOT in .gitignore and survive `git clean` on some runner
+  # configurations (observed on framagit 2026-08: a previous issue-webhook
+  # dispatch wrote .boucle-issue; the next run's MR-note trigger dispatch
+  # didn't write it, but the file still existed — the EXIT trap found it
+  # and didn't flip to exit 1, so triage ran and re-triaged the issue,
+  # setting spec-review + status::human and blocking the loop). The same
+  # staleness applies to .boucle-noop: a leftover marker from a previous
+  # run would let an accidental no-op pass the trap.
+  rm -f .boucle-issue .boucle-noop
 
   # Sanity-check the trigger payload before jq touches it. GitLab file-type
   # CI variables resolve to a temp file path; on shared runners
@@ -173,7 +196,7 @@ boucle_ci_dispatch() {
   NOTE_BODY=$(dispatch_note_body)
   if [ -n "$NOTE_BODY" ] && has_agent_marker "$NOTE_BODY"; then
     echo "dispatch: comment carries the boucle:agent marker — boucle's own write, skipping"
-    exit 0
+    dispatch_noop
   fi
 
   # ── Anti-loop: bot-originated events, by identity ─────────────────
@@ -191,7 +214,7 @@ boucle_ci_dispatch() {
   # merger's e2e close path can fail, leaving no fallback).
   if ! boucle_mono_user; then
     if [ "$ACTOR" = "${BOUCLE_BOT_USERNAME:-up-bot}" ] && [ "$MR_ACTION" != "merge" ]; then
-      exit 0
+      dispatch_noop
     fi
   fi
 
@@ -218,7 +241,7 @@ boucle_ci_dispatch() {
     MR_ISSUE_IID=$(printf '%s' "$SOURCE_BRANCH" | sed -n 's/^boucle\/\([0-9]\+\).*/\1/p')
     if [ -z "$MR_ISSUE_IID" ]; then
       echo "MR !${MR_IID} ($MR_ACTION) but source_branch '$SOURCE_BRANCH' is not a boucle branch, skipping"
-      exit 0
+      dispatch_noop
     fi
 
     # Global guard: if the issue is already closed, skip ALL MR webhooks.
@@ -230,7 +253,7 @@ boucle_ci_dispatch() {
       ISSUE_STATE=$(forge_issue_get "$MR_ISSUE_IID" | jq -r '.state // empty' 2> /dev/null || true)
       if [ "$ISSUE_STATE" = "closed" ]; then
         echo "boucle: issue #$MR_ISSUE_IID is closed — skipping $MR_ACTION webhook (no-op)"
-        exit 0
+        dispatch_noop
       fi
     fi
 
@@ -245,7 +268,7 @@ boucle_ci_dispatch() {
         MR_LABELS=$(forge_issue_labels_get "$MR_ISSUE_IID")
         if ! echo "$MR_LABELS" | grep -qE "boucle:(approval|human)"; then
           echo "Issue #$MR_ISSUE_IID not at boucle:approval or boucle:human (labels: $MR_LABELS) — ignoring MR approval, skipping"
-          exit 0
+          dispatch_noop
         fi
         if echo "$MR_LABELS" | grep -q "boucle:human"; then
           echo "MR !${MR_IID} approved (native GitLab approval) for issue #$MR_ISSUE_IID — human override of reviewer verdict, triggering merger"
@@ -253,7 +276,7 @@ boucle_ci_dispatch() {
           echo "MR !${MR_IID} approved (native GitLab approval) for issue #$MR_ISSUE_IID — triggering merger"
         fi
         chain_to_role "$MR_ISSUE_IID" "merger"
-        exit 0
+        dispatch_noop
         ;;
       update)
         # MR branch updated (new commits pushed by a human). Re-trigger
@@ -273,7 +296,7 @@ boucle_ci_dispatch() {
         fi
         echo "MR !${MR_IID} updated — re-triggering reviewer for issue #$MR_ISSUE_IID"
         chain_to_role "$MR_ISSUE_IID" "reviewer"
-        exit 0
+        dispatch_noop
         ;;
       close)
         # MR closed (not merged). The semantics depend on the issue's
@@ -291,7 +314,7 @@ boucle_ci_dispatch() {
         case "$CURRENT_BOUCLE" in
           boucle:done | boucle:human)
             echo "boucle: issue #$MR_ISSUE_IID is already at $CURRENT_BOUCLE (terminal) — close webhook ignored"
-            exit 0
+            dispatch_noop
             ;;
           boucle:approval)
             # User closed the MR without merging while it was awaiting
@@ -312,7 +335,7 @@ boucle_ci_dispatch() {
               echo "FAIL: escalation note could not be posted on issue #$MR_ISSUE_IID — issue already at human labels, flagging loudly (note missing)." >&2
               exit 1
             fi
-            exit 0
+            dispatch_noop
             ;;
         esac
         # Legitimate rejection: revert the issue to boucle:todo so the
@@ -326,13 +349,13 @@ boucle_ci_dispatch() {
           forge_issue_labels_set "$MR_ISSUE_IID" "${NON_BOUCLE:+$NON_BOUCLE,}boucle:todo,boucle::status::bot"
         fi
         chain_to_role "$MR_ISSUE_IID" "worker"
-        exit 0
+        dispatch_noop
         ;;
       reopen)
         # MR reopened — re-trigger the reviewer to re-review it.
         echo "MR !${MR_IID} reopened — re-triggering reviewer for issue #$MR_ISSUE_IID"
         chain_to_role "$MR_ISSUE_IID" "reviewer"
-        exit 0
+        dispatch_noop
         ;;
       unapproved)
         # Author revoked approval — revert to boucle:review and re-trigger
@@ -346,7 +369,7 @@ boucle_ci_dispatch() {
           forge_issue_labels_set "$MR_ISSUE_IID" "${NON_BOUCLE:+$NON_BOUCLE,}boucle:review,boucle::status::bot"
         fi
         chain_to_role "$MR_ISSUE_IID" "reviewer"
-        exit 0
+        dispatch_noop
         ;;
       merge)
         # A boucle/<iid> MR was merged directly (human clicked Merge in the
@@ -358,17 +381,17 @@ boucle_ci_dispatch() {
         # non-boucle branches already exited at line 174-176.
         echo "MR !${MR_IID} merged directly (action=merge) for issue #$MR_ISSUE_IID — triggering catchup"
         chain_to_role "$MR_ISSUE_IID" "catchup"
-        exit 0
+        dispatch_noop
         ;;
       open)
         # open: the worker creates the MR and chains to reviewer itself —
         # no dispatch action needed.
         echo "MR !${MR_IID} action=$MR_ACTION — handled by worker, skipping"
-        exit 0
+        dispatch_noop
         ;;
       *)
         echo "MR !${MR_IID} action=$MR_ACTION — not handled, skipping"
-        exit 0
+        dispatch_noop
         ;;
     esac
   fi
@@ -392,7 +415,7 @@ boucle_ci_dispatch() {
       NOTE_SYSTEM=$(jq -r '.object_attributes.system // false' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "false")
       if [ "$NOTE_SYSTEM" = "true" ]; then
         echo "System note (non-human) — skipping"
-        exit 0
+        dispatch_noop
       fi
     fi
     # ── Notes on a MR: human comment → re-trigger worker with feedback ──
@@ -417,7 +440,7 @@ boucle_ci_dispatch() {
       MR_NOTE_ISSUE_IID=$(printf '%s' "${MR_NOTE_SOURCE_BRANCH:-}" | sed -n 's/^boucle\/\([0-9]\+\).*/\1/p')
       if [ -z "$MR_NOTE_ISSUE_IID" ]; then
         echo "Note on MR !${MR_NOTE_IID} but source_branch '$MR_NOTE_SOURCE_BRANCH' is not a boucle branch, skipping"
-        exit 0
+        dispatch_noop
       fi
       echo "Note on MR !${MR_NOTE_IID} (issue #$MR_NOTE_ISSUE_IID) — re-triggering worker with feedback"
       # Count reviewer verdicts on the MR to determine the next iteration
@@ -439,7 +462,7 @@ boucle_ci_dispatch() {
         forge_issue_labels_set "$MR_NOTE_ISSUE_IID" "${NON_BOUCLE:+$NON_BOUCLE,}boucle:todo,boucle::status::bot"
       fi
       chain_to_role "$MR_NOTE_ISSUE_IID" "worker" "BOUCLE_ITERATION=$MR_NOTE_ITERATION"
-      exit 0
+      dispatch_noop
     fi
     IID=$(jq -r '.issue.iid // .work_item.iid // .epic.iid // .issue.number // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
   else
@@ -453,7 +476,7 @@ boucle_ci_dispatch() {
       IID="$BOUCLE_ISSUE"
     else
       echo "No issue IID in payload, skipping"
-      exit 0
+      dispatch_noop
     fi
   fi
 
@@ -490,7 +513,7 @@ boucle_ci_dispatch() {
       fi
       if [ "$GUARD_BOT_ASSIGNED" != "true" ]; then
         echo "boucle: issue #$IID is closed — skipping $OBJECT_KIND webhook (no-op on closed issue)"
-        exit 0
+        dispatch_noop
       fi
       echo "boucle: issue #$IID is closed but bot was just assigned — letting through (human re-trigger)"
     fi
@@ -507,7 +530,7 @@ boucle_ci_dispatch() {
   # MR-note events already exited above.
   if ! check_allow_list_gate "$IID"; then
     echo "dispatch: issue #$IID rejected by the allow list — skipping"
-    exit 0
+    dispatch_noop
   fi
 
   # Label helper: preserve non-boucle labels when writing a boucle label.
@@ -584,7 +607,7 @@ boucle_ci_dispatch() {
   # Do not re-triage or re-work; the doctor closes it when sub-issues complete.
   if echo "$LABELS" | grep -q "boucle:split"; then
     echo "Issue #$IID has boucle:split — waiting for sub-issues, skipping"
-    exit 0
+    dispatch_noop
   fi
 
   # Emoji reactions that count as spec approval — canonical set only.
@@ -623,7 +646,7 @@ boucle_ci_dispatch() {
   if [ "$BOT_JUST_ASSIGNED" = "true" ]; then
     if echo "$LABELS" | grep -qE 'boucle:(working|review|approval|merging|done)'; then
       echo "Issue #$IID: bot assigned but issue is at an active/terminal boucle state ($LABELS) — skipping"
-      exit 0
+      dispatch_noop
     fi
     echo "Issue #$IID: bot assigned by human — triggering triage"
     echo "$IID" > .boucle-issue
@@ -632,7 +655,7 @@ boucle_ci_dispatch() {
     fi
     # Skip the label-based routing below — triage is already triggered.
     # The triage job (needs: dispatch, optional) picks up .boucle-issue.
-    exit 0
+    dispatch_noop
   fi
 
   SHOULD_TRIAGE=false
@@ -642,7 +665,7 @@ boucle_ci_dispatch() {
   # would triage the board and the loop would start working on itself.
   if echo "$LABELS" | tr ',' '\n' | grep -qx "boucle:board"; then
     echo "Issue #$IID is the boucle status board — never dispatched."
-    exit 0
+    dispatch_noop
   fi
   if echo "$LABELS" | grep -q "boucle:triage"; then
     SHOULD_TRIAGE=true
@@ -684,7 +707,7 @@ boucle_ci_dispatch() {
       SHOULD_WORK=true
     else
       echo "boucle:todo just added (likely by triage) — worker already triggered, skipping"
-      exit 0
+      dispatch_noop
     fi
   elif echo "$LABELS" | grep -q "boucle:spec-review"; then
     # Author approved the spec (added a non-bot note to an issue that
@@ -752,9 +775,9 @@ boucle_ci_dispatch() {
         fi
       fi
     fi
-    exit 0
+    dispatch_noop
   else
     echo "No action needed for issue #$IID (labels: $LABELS)"
-    exit 0
+    dispatch_noop
   fi
 }
