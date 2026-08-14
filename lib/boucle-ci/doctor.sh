@@ -564,6 +564,7 @@ boucle_ci_doctor() {
       # approval signal so the doctor can merge without a native review.
       if [ "$MR_OAPPROVED" -eq 0 ] && [ "${BOUCLE_MONO_USER:-false}" = "true" ]; then
         MR_NOTES=$(forge_mr_notes "$MR_OIID" 2>/dev/null || echo "[]")
+        echo "  → mono-user: scanning PR #$MR_OIID notes for VERDICT: PASS ($(echo "$MR_NOTES" | jq 'length' 2>/dev/null || echo 0) notes)"
         if echo "$MR_NOTES" | jq -e '[.[] | select(.body | contains("VERDICT: PASS"))] | length > 0' > /dev/null 2>&1; then
           MR_OAPPROVED=1
         fi
