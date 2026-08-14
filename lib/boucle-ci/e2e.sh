@@ -173,9 +173,9 @@ boucle_ci_e2e() {
       # so the issue stays in a retryable state (no mute state change).
       # forge_issue_note auto-stamps the <!-- boucle:agent --> marker.
       # shfmt off  # preserve exact string content
-      DEPLOY_NOTE_BODY="✅ Déploiement en production réussi.
+      DEPLOY_NOTE_BODY="✅ Successfully deployed to production.
 
-## URL de production
+## Production URL
 $LIVE_URL
 
 ## Commit

@@ -930,12 +930,12 @@ maybe_close_parent() {
       # closed and the doctor retries the parent. forge_issue_note
       # auto-stamps the <!-- boucle:agent --> marker (lesson #55).
       local parent_note_body
-      parent_note_body="✅ Tous les sous-issues sont résolus et déployés. Clôture de l'issue parente.
+      parent_note_body="✅ All sub-issues resolved and deployed. Closing parent issue.
 
-## URL de production
-${live_url:-$(boucle_resolve_live_url "" 2>/dev/null || echo "non disponible")}
+## Production URL
+${live_url:-$(boucle_resolve_live_url "" 2>/dev/null || echo "unavailable")}
 
-## Sous-issues
+## Sub-issues
 $(echo "$sibling_iids" | tr ',' ' ' | sed 's/\([0-9]\+\)/#\1/g')"
       if ! forge_issue_note "$parent_iid" "$parent_note_body"; then
         echo "WARN: could not post parent-close note on #$parent_iid — not closing parent (doctor will retry)." >&2
@@ -965,12 +965,12 @@ $(echo "$sibling_iids" | tr ',' ' ' | sed 's/\([0-9]\+\)/#\1/g')"
     # reconstruct from children_data.
     local parent_note_body hierarchy_siblings
     hierarchy_siblings="${sibling_iids:-$(echo "$children_data" | jq -r '[.[] | .iid] | join(",")' 2>/dev/null)}"
-    parent_note_body="✅ Tous les sous-issues sont résolus et déployés. Clôture de l'issue parente.
+    parent_note_body="✅ All sub-issues resolved and deployed. Closing parent issue.
 
-## URL de production
-${live_url:-$(boucle_resolve_live_url "" 2>/dev/null || echo "non disponible")}
+## Production URL
+${live_url:-$(boucle_resolve_live_url "" 2>/dev/null || echo "unavailable")}
 
-## Sous-issues
+## Sub-issues
 $(echo "$hierarchy_siblings" | tr ',' ' ' | sed 's/\([0-9]\+\)/#\1/g')"
     if ! forge_issue_note "$parent_iid" "$parent_note_body"; then
       echo "WARN: could not post parent-close note on #$parent_iid — not closing parent (doctor will retry)." >&2
