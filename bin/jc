@@ -126,6 +126,27 @@ requires_api_key = true
 TOML
     fi
     export JCODE_HOME="$config_dir"
+  elif is_freeride_mode; then
+    mkdir -p "$config_dir"
+    local first_profile="" line name base_url key_env model thinking
+    {
+      echo '[provider]'
+      while IFS='|' read -r name base_url key_env model thinking; do
+        local profile="freeride-$name"
+        [ -z "$first_profile" ] && first_profile="$profile"
+        echo ""
+        echo "[providers.$profile]"
+        echo 'type = "openai-compatible"'
+        echo "base_url = \"$base_url\""
+        echo 'auth = "bearer"'
+        echo "api_key_env = \"$key_env\""
+        echo "default_model = \"$model\""
+        echo 'requires_api_key = true'
+      done < <(freeride_providers "$ROLE")
+      echo ""
+      echo "default_provider = \"$first_profile\""
+    } > "$config_file"
+    export JCODE_HOME="$config_dir"
   elif [ ! -f "$config_file" ]; then
     echo "[boucle] ERROR: no jcode config. Set BOUCLE_LLM_BASE_URL + BOUCLE_LLM_API_KEY," >&2
     echo "[boucle]        or pre-install ~/.jcode/config.toml on the runner." >&2
@@ -173,6 +194,21 @@ OVERRIDE_VAR="BOUCLE_MODEL_$(echo "$ROLE" | tr '[:lower:]' '[:upper:]')"
 if [ -n "${!OVERRIDE_VAR:-}" ]; then
   echo "[boucle] model override: $OVERRIDE_VAR=${!OVERRIDE_VAR} (default: $MODEL)" >&2
   MODEL="${!OVERRIDE_VAR}"
+fi
+
+# ── Freeride mode detection ───────────────────────────────────────────
+FREERIDE_MODE=0
+FREERIDE_PROVIDER_LIST=""
+if is_freeride_mode 2>/dev/null; then
+  FREERIDE_MODE=1
+  FREERIDE_PROVIDER_LIST=$(freeride_providers "$ROLE")
+  FIRST_LINE=$(echo "$FREERIDE_PROVIDER_LIST" | head -1)
+  if [ -n "$FIRST_LINE" ]; then
+    IFS='|' read -r FR_NAME FR_URL FR_KEY_ENV FR_MODEL FR_THINKING <<< "$FIRST_LINE"
+    PROVIDER_PROFILE="freeride-$FR_NAME"
+    MODEL="$FR_MODEL"
+    echo "[boucle:freeride] mode active, primary provider: $FR_NAME ($MODEL)" >&2
+  fi
 fi
 
 # Extract temperature (optional — empty means use provider default)
@@ -254,6 +290,82 @@ fi
 export BOUCLE_VERDICT_FILE
 # jcode has no SQLite DB (run mode is ephemeral), so no DB isolation needed.
 
+# ── Freeride provider catalog ─────────────────────────────────────────
+# Free-tier LLM providers. When BOUCLE_LLM_BASE_URL is not set, boucle
+# uses named provider keys (BOUCLE_GROQ_API_KEY, etc.) instead. Each
+# provider has a known base_url, default models per role, and optional
+# thinking injection. Curated from FreeLLMAPI's V25 final state.
+#
+# Mode priority: Legacy (BOUCLE_LLM_BASE_URL + BOUCLE_LLM_API_KEY) >
+# Freeride (BOUCLE_<PROVIDER>_API_KEY) > No-key (triage posts help).
+freeride_providers() {
+  local role="$1"
+  local catalog=(
+    "openrouter|https://openrouter.ai/api/v1|BOUCLE_OPENROUTER_API_KEY|qwen/qwen3-coder:free|moonshotai/kimi-k2.6:free|high"
+    "nvidia|https://integrate.api.nvidia.com/v1|BOUCLE_NVIDIA_API_KEY|deepseek-ai/deepseek-v4-flash|deepseek-ai/deepseek-v4-pro|high"
+    "groq|https://api.groq.com/openai/v1|BOUCLE_GROQ_API_KEY|qwen/qwen3-32b|openai/gpt-oss-120b|high"
+    "cerebras|https://api.cerebras.ai/v1|BOUCLE_CEREBRAS_API_KEY|gpt-oss-120b|zai-glm-4.7|none"
+    "zhipu|https://open.bigmodel.cn/api/paas/v4|BOUCLE_ZHIPU_API_KEY|glm-4.5-flash|glm-4.7-flash|thinking"
+    "cloudflare|https://api.cloudflare.com/client/v4/accounts/__CF_ACCOUNT__/ai/v1|BOUCLE_CLOUDFLARE_API_KEY|@cf/meta/llama-3.3-70b-instruct-fp8-fast|@cf/zai-org/glm-4.7-flash|none"
+    "huggingface|https://router.huggingface.co/v1|BOUCLE_HUGGINGFACE_API_KEY|deepseek-ai/DeepSeek-V4-Flash|moonshotai/Kimi-K2.6|none"
+    "mistral|https://api.mistral.ai/v1|BOUCLE_MISTRAL_API_KEY|devstral-latest|magistral-medium-latest|none"
+  )
+  local entry
+  for entry in "${catalog[@]}"; do
+    local name base_url key_env code_model reasoning_model thinking key_val model override_var
+    IFS='|' read -r name base_url key_env code_model reasoning_model thinking <<< "$entry"
+    eval "key_val=\${${key_env}:-}"
+    [ -n "$key_val" ] || continue
+    [ "$name" = "cloudflare" ] && [ -z "${BOUCLE_CLOUDFLARE_ACCOUNT_ID:-}" ] && continue
+    base_url="${base_url/__CF_ACCOUNT__/${BOUCLE_CLOUDFLARE_ACCOUNT_ID:-}}"
+    case "$role" in
+      worker|reviewer) model="$code_model" ;;
+      triage|e2e) model="$reasoning_model" ;;
+      *) model="$code_model" ;;
+    esac
+    override_var="BOUCLE_$(echo "$name" | tr '[:lower:]' '[:upper:]')_MODEL"
+    eval "model=\${${override_var}:-$model}"
+    echo "${name}|${base_url}|${key_env}|${model}|${thinking}"
+  done
+}
+
+has_llm_config() {
+  [ -n "${BOUCLE_LLM_BASE_URL:-}" ] && [ -n "${BOUCLE_LLM_API_KEY:-}" ] && return 0
+  [ -n "$(freeride_providers "$ROLE" 2>/dev/null)" ] && return 0
+  return 1
+}
+
+is_freeride_mode() {
+  [ -n "${BOUCLE_LLM_BASE_URL:-}" ] && [ -n "${BOUCLE_LLM_API_KEY:-}" ] && return 1
+  [ -n "$(freeride_providers "$ROLE" 2>/dev/null)" ] && return 0
+  return 1
+}
+
+inject_freeride_thinking() {
+  local thinking="$1"
+  case "$thinking" in
+    high)
+      export JCODE_OPENAI_REASONING_EFFORT=high
+      ;;
+    thinking)
+      local extra="${JCODE_OPENAI_EXTRA_BODY:-}"
+      if [ -n "$extra" ] && echo "$extra" | grep -qv '"thinking"'; then
+        export JCODE_OPENAI_EXTRA_BODY="${extra%,}},{\"thinking\":{\"type\":\"enabled\"}}"
+      else
+        export JCODE_OPENAI_EXTRA_BODY='{"thinking":{"type":"enabled"}}'
+      fi
+      ;;
+    none|*)
+      ;;
+  esac
+}
+
+is_agent_looping() {
+  local log="$1"
+  [ -s "$log" ] || return 1
+  sort "$log" | uniq -c | awk '$1 >= 5 { found=1 } END { exit found?0:1 }'
+}
+
 # ── Generate jcode config from env vars (no runner-host config file) ──
 # Must run AFTER model parsing (uses $MODEL) and BEFORE jcode invocation.
 ensure_jcode_config
@@ -265,10 +377,10 @@ export JCODE_RUN_MCP="${JCODE_RUN_MCP:-0}"
 # Disable auto-poke loop (prevents jcode from re-prompting the model when
 # todos are incomplete — extends the run beyond the wall-clock budget).
 export JCODE_RUN_AUTO_POKE="${JCODE_RUN_AUTO_POKE:-0}"
-# Set idle timeout to 1800s (default 180s is too short for heavy tasks,
-# and 10m is too short for sub-agent/swarm scenarios where the main agent
-# is idle while a spawned worker is doing heavy work).
-export JCODE_STREAM_IDLE_TIMEOUT_SECS="${JCODE_STREAM_IDLE_TIMEOUT_SECS:-1800}"
+# Set idle timeout to 600s (default 180s is too short for heavy tasks,
+# but 1800s is too generous for free-tier models that hang — 10 min of
+# silence means the model is stuck, not thinking).
+export JCODE_STREAM_IDLE_TIMEOUT_SECS="${JCODE_STREAM_IDLE_TIMEOUT_SECS:-600}"
 # Disable update check (avoid network call at startup in CI).
 # jcode v0.73.0 renamed JCODE_NO_UPDATE → JCODE_NO_AUTO_UPDATE
 # (crates/jcode-app-core/src/update.rs); export both so consumers pinned
@@ -292,6 +404,14 @@ fi
 # of jcode's deepseek ladder (none|low|medium|high|max).
 if [ -n "$REASONING_EFFORT" ]; then
   export JCODE_OPENAI_REASONING_EFFORT="$REASONING_EFFORT"
+fi
+
+# In freeride mode, inject thinking per provider — overrides the agent
+# file's reasoning_effort. Free-tier models are less capable; max thinking
+# compensates. Provider-specific: OpenRouter/NVIDIA/Groq use
+# reasoning_effort, Zhipu uses thinking body param.
+if [ "$FREERIDE_MODE" = "1" ] && [ -n "${FR_THINKING:-}" ]; then
+  inject_freeride_thinking "$FR_THINKING"
 fi
 
 # ── Do-Not-Disturb ─────────────────────────────────────────────────────
@@ -890,6 +1010,32 @@ MERGE CONFLICT from a previous iteration: the branch conflicted when rebasing on
 - If you cannot resolve sensibly, leave the markers and say why — the job falls back to the bounded retry path.
 "
       fi
+      # Lesson candidate from the reviewer (escalation-only path): the
+      # reviewer emits a lesson candidate on stdout at MAX_ITERATION, and
+      # reviewer.sh scrapes it to .boucle-state/<issue>/lesson-candidate.yml.
+      # Inject it into the worker prompt so the worker validates + commits it.
+      # The worker runs bin/check-lessons on a temp merged LESSONS.yml: if it
+      # passes, commit the entry in the same MR; if it fails, reject motivated
+      # on stdout. Never silently drop the candidate.
+      LESSON_CANDIDATE_FILE="$STATE_DIR/lesson-candidate.yml"
+      if [ -f "$LESSON_CANDIDATE_FILE" ]; then
+        LESSON_CANDIDATE_CONTENT=$(cat "$LESSON_CANDIDATE_FILE" 2> /dev/null || echo "")
+        if [ -n "$LESSON_CANDIDATE_CONTENT" ]; then
+          prompt="${prompt}
+Lesson candidate from the reviewer (emitted at escalation — the loop could not solve this issue automatically). The reviewer believes the failure pattern is a CLASS of mistake worth a LESSONS.yml entry. Validate it:
+
+1. Read the candidate below.
+2. Run the four-point admission test from AGENTS.md (class-not-instance, recurrence-without-the-doc, stable, not-already-covered). State on stdout which tests it passes/fails.
+3. Merge the candidate into a COPY of LESSONS.yml and run \`bin/check-lessons <copy>\`. If it passes (no format errors, no duplicate > 0.6 overlap), commit the entry to LESSONS.yml in the same MR as your code changes. Use the next available number (or reuse a pruned/merged gap if the class is identical).
+4. If it fails the admission test OR bin/check-lessons rejects it, do NOT commit it. State on stdout why (which test failed, or the check-lessons error). Remove the candidate file (\`rm .boucle-state/\${BOUCLE_ISSUE}/lesson-candidate.yml\`).
+5. Never silently drop the candidate — always say what you did with it.
+
+---
+${LESSON_CANDIDATE_CONTENT}
+---
+"
+        fi
+      fi
       ;;
     reviewer)
       # Inject the issue body (fetched by CI as BOUCLE_ISSUE_BODY) so the
@@ -995,6 +1141,29 @@ Image descriptions (generated by the vision model from attachments — use these
 ${BOUCLE_IMAGE_DESCRIPTIONS}
 ---
 "
+      fi
+      # Lesson candidate emission at escalation (reviewer-only):
+      # At MAX_ITERATION, tell the reviewer to emit a lesson candidate on
+      # stdout if the failure pattern passes the four-point admission test.
+      # CI scrapes it to .boucle-state/<issue>/lesson-candidate.yml. Never
+      # in the verdict comment — the candidate is machine food.
+      if [ "${BOUCLE_ITERATION:-1}" -ge "${BOUCLE_MAX_ITERATIONS:-5}" ]; then
+        prompt="${prompt}
+
+**Lesson candidate (escalation):** this is the final iteration (BOUCLE_ITERATION=\${BOUCLE_ITERATION} >= BOUCLE_MAX_ITERATIONS=\${BOUCLE_MAX_ITERATIONS}). The loop is about to escalate to boucle:human. If the failure pattern you observed is a CLASS of mistake (not a one-off) that would recur without a lesson, emit a lesson candidate on STDOUT (not in the verdict comment). Print this block:
+
+## Lesson candidate
+title: <short label>
+❌: DO NOT <anti-pattern>
+✅: DO <correct pattern>
+admission:
+  - class-not-instance: <why>
+  - recurrence: <why>
+  - stable: <why>
+  - not-already-covered: <why>
+## End lesson candidate
+
+Apply the four-point admission test from AGENTS.md. If no candidate passes, emit nothing — silence is honest. Post your verdict FIRST, then emit the candidate."
       fi
       ;;
     e2e)
@@ -1204,27 +1373,51 @@ probe_cached() {
 }
 
 if [ "${BOUCLE_QUOTA_PROBE:-true}" = "true" ] && [ "$DRY_RUN" != "true" ]; then
-  PRIMARY_STATUS=$(probe_cached primary "${BOUCLE_LLM_BASE_URL:-}" "${BOUCLE_LLM_API_KEY:-}")
-  if [ "$PRIMARY_STATUS" != "ok" ]; then
-    echo "[boucle:probe] primary provider unavailable ($PRIMARY_STATUS) before the run" >&2
-    FALLBACK_STATUS="unconfigured"
-    if [ -n "$FALLBACK_PROVIDER" ] && [ -n "${BOUCLE_FALLBACK_BASE_URL:-}" ]; then
-      FALLBACK_STATUS=$(probe_cached fallback "${BOUCLE_FALLBACK_BASE_URL:-}" "${BOUCLE_FALLBACK_API_KEY:-}")
-    fi
-    if [ "$FALLBACK_STATUS" = "ok" ]; then
-      # Switch BEFORE the run so the fallback attempt does not consume a
-      # run_with_retry budget on a provider already known to be down.
-      echo "[boucle:probe] switching to fallback provider ($FALLBACK_PROVIDER/$FALLBACK_MODEL) pre-emptively" >&2
-      PROVIDER_PROFILE="$FALLBACK_PROVIDER"
-      MODEL="$FALLBACK_MODEL"
-      FALLBACK_USED=1
-    else
-      # Starting the agent here would burn a runner to produce nothing.
-      # Exit 4 is the established provider-down contract: CI posts a
-      # diagnostic and escalates instead of blaming the step budget.
-      echo "[boucle] ERROR: primary provider is $PRIMARY_STATUS and fallback is $FALLBACK_STATUS — not starting the agent (exit 4)." >&2
-      echo "[boucle] No runner time is spent on a provider that cannot answer. Check the provider quota, then re-trigger." >&2
+  if [ "$FREERIDE_MODE" = "1" ]; then
+    # Freeride: probe all configured providers, select first OK.
+    FREERIDE_OK_LIST=""
+    FREERIDE_FAILED_LIST=""
+    while IFS='|' read -r fr_p_name fr_p_url fr_p_key_env fr_p_model fr_p_thinking; do
+      eval "fr_p_key=\${${fr_p_key_env}:-}"
+      fr_p_status=$(probe_cached "freeride-$fr_p_name" "$fr_p_url" "$fr_p_key")
+      echo "[boucle:freeride:probe] $fr_p_name: $fr_p_status" >&2
+      if [ "$fr_p_status" = "ok" ]; then
+        FREERIDE_OK_LIST="${FREERIDE_OK_LIST}${fr_p_name}|${fr_p_url}|${fr_p_key_env}|${fr_p_model}|${fr_p_thinking}
+"
+      else
+        FREERIDE_FAILED_LIST="${FREERIDE_FAILED_LIST}${fr_p_name}:${fr_p_status} "
+      fi
+    done <<< "$FREERIDE_PROVIDER_LIST"
+    if [ -z "$FREERIDE_OK_LIST" ]; then
+      echo "[boucle] ERROR: all freeride providers unavailable ($FREERIDE_FAILED_LIST) — not starting the agent (exit 4)." >&2
+      echo "[boucle] Add a new provider key or wait for quota reset, then re-trigger." >&2
       exit 4
+    fi
+    FIRST_OK=$(echo "$FREERIDE_OK_LIST" | head -1)
+    IFS='|' read -r FR_NAME FR_URL FR_KEY_ENV FR_MODEL FR_THINKING <<< "$FIRST_OK"
+    PROVIDER_PROFILE="freeride-$FR_NAME"
+    MODEL="$FR_MODEL"
+    inject_freeride_thinking "$FR_THINKING"
+    echo "[boucle:freeride] selected primary: $FR_NAME ($MODEL)" >&2
+    FREERIDE_ROTATION_LIST=$(echo "$FREERIDE_OK_LIST" | tail -n +2)
+  else
+    PRIMARY_STATUS=$(probe_cached primary "${BOUCLE_LLM_BASE_URL:-}" "${BOUCLE_LLM_API_KEY:-}")
+    if [ "$PRIMARY_STATUS" != "ok" ]; then
+      echo "[boucle:probe] primary provider unavailable ($PRIMARY_STATUS) before the run" >&2
+      FALLBACK_STATUS="unconfigured"
+      if [ -n "$FALLBACK_PROVIDER" ] && [ -n "${BOUCLE_FALLBACK_BASE_URL:-}" ]; then
+        FALLBACK_STATUS=$(probe_cached fallback "${BOUCLE_FALLBACK_BASE_URL:-}" "${BOUCLE_FALLBACK_API_KEY:-}")
+      fi
+      if [ "$FALLBACK_STATUS" = "ok" ]; then
+        echo "[boucle:probe] switching to fallback provider ($FALLBACK_PROVIDER/$FALLBACK_MODEL) pre-emptively" >&2
+        PROVIDER_PROFILE="$FALLBACK_PROVIDER"
+        MODEL="$FALLBACK_MODEL"
+        FALLBACK_USED=1
+      else
+        echo "[boucle] ERROR: primary provider is $PRIMARY_STATUS and fallback is $FALLBACK_STATUS — not starting the agent (exit 4)." >&2
+        echo "[boucle] No runner time is spent on a provider that cannot answer. Check the provider quota, then re-trigger." >&2
+        exit 4
+      fi
     fi
   fi
 fi
@@ -1273,24 +1466,56 @@ cat "$AGENT_LOG"
 print_metrics_line
 
 # ── 5b. Provider fallback (API-down recovery) ─────────────────────────
-# If the primary provider is down (empty log / no agent activity = the
-# exit-4 condition, LESSONS.yml lesson #29) or its quota is exhausted
-# (persistent HTTP 429/402, LESSONS.yml lesson #30), retry with the fallback
-# provider before the exit-code guard runs. This lets the loop self-recover
-# when ollama-cloud is unavailable (credits exhausted, API down) instead of
-# escalating to a human. Gated by BOUCLE_FALLBACK_PROVIDER.
-# The fallback is a transparent retry layer: if it succeeds, the exit-code
-# guard sees the fallback's output and proceeds normally; if it also fails,
-# the primary log is restored and the existing exit-3/4 logic applies.
-# Quota detection is gated on a non-zero AGENT_EXIT: a successful run may
-# legitimately quote "429"/"quota" in its output.
+# If the primary is down (empty log), quota exhausted (429/402), or the
+# agent is looping (duplicate output >5x), retry with the next provider.
+# Freeride mode: iterates through FREERIDE_ROTATION_LIST (remaining OK
+# providers from the probe). Legacy mode: tries FALLBACK_PROVIDER.
 FALLBACK_REASON=""
 if is_api_down "$AGENT_LOG"; then
   FALLBACK_REASON="empty log / no agent activity"
 elif [ "$AGENT_EXIT" -ne 0 ] && is_quota_exhausted "$AGENT_LOG"; then
   FALLBACK_REASON="persistent quota error (HTTP 429/402)"
+elif is_agent_looping "$AGENT_LOG"; then
+  FALLBACK_REASON="agent looping (duplicate output)"
 fi
-if [ -n "$FALLBACK_PROVIDER" ] && [ -n "$FALLBACK_REASON" ]; then
+
+# Freeride rotation: try each remaining OK provider in sequence.
+if [ "$FREERIDE_MODE" = "1" ] && [ -n "$FREERIDE_ROTATION_LIST" ] && [ -n "$FALLBACK_REASON" ]; then
+  echo "[boucle:freeride] primary provider ($FR_NAME) appears down ($FALLBACK_REASON) — rotating to next provider" >&2
+  cp "$AGENT_LOG" "${AGENT_LOG}.primary" 2> /dev/null || true
+  ROTATION_SUCCESS=0
+  while IFS='|' read -r rot_name rot_url rot_key_env rot_model rot_thinking; do
+    [ -z "$rot_name" ] && continue
+    echo "[boucle:freeride] trying $rot_name ($rot_model)" >&2
+    : > "$AGENT_LOG"
+    PROVIDER_PROFILE="freeride-$rot_name"
+    MODEL="$rot_model"
+    FR_NAME="$rot_name"
+    inject_freeride_thinking "$rot_thinking"
+    run_with_retry -- jcode --provider-profile "$PROVIDER_PROFILE" --model "$MODEL" --tools '*' --no-update --no-selfdev run --quiet "$PROMPT" > "$AGENT_LOG" 2>&1
+    cat "$AGENT_LOG"
+    print_metrics_line
+    if ! is_api_down "$AGENT_LOG" \
+      && ! { [ "$AGENT_EXIT" -ne 0 ] && is_quota_exhausted "$AGENT_LOG"; } \
+      && ! is_agent_looping "$AGENT_LOG"; then
+      ROTATION_SUCCESS=1
+      FALLBACK_USED=1
+      FR_THINKING="$rot_thinking"
+      echo "[boucle:freeride] provider $rot_name succeeded — continuing" >&2
+      break
+    fi
+    echo "[boucle:freeride] provider $rot_name also failed — trying next" >&2
+  done <<< "$FREERIDE_ROTATION_LIST"
+  if [ "$ROTATION_SUCCESS" = "0" ]; then
+    echo "[boucle:freeride] all providers exhausted — escalating" >&2
+    {
+      echo ""
+      echo "--- [boucle:freeride] primary attempt log ---"
+      cat "${AGENT_LOG}.primary" 2> /dev/null
+    } >> "$AGENT_LOG"
+  fi
+  rm -f "${AGENT_LOG}.primary" 2> /dev/null || true
+elif [ -n "$FALLBACK_PROVIDER" ] && [ -n "$FALLBACK_REASON" ]; then
   echo "[boucle:fallback] primary provider appears down ($FALLBACK_REASON) — retrying with $FALLBACK_PROVIDER/$FALLBACK_MODEL" >&2
   # Preserve the primary log for diagnosis, start fresh for the fallback.
   cp "$AGENT_LOG" "${AGENT_LOG}.primary" 2> /dev/null || true
@@ -1343,7 +1568,7 @@ scrub_agent_log() {
       return out s
     }
     BEGIN {
-      n = split("BOUCLE_LLM_API_KEY BOUCLE_FALLBACK_API_KEY BOUCLE_TOKEN BOUCLE_BOT_TOKEN BOUCLE_SCRUB_CF CLOUDFLARE_API_TOKEN", names, " ")
+      n = split("BOUCLE_LLM_API_KEY BOUCLE_FALLBACK_API_KEY BOUCLE_TOKEN BOUCLE_BOT_TOKEN BOUCLE_SCRUB_CF CLOUDFLARE_API_TOKEN BOUCLE_GROQ_API_KEY BOUCLE_OPENROUTER_API_KEY BOUCLE_NVIDIA_API_KEY BOUCLE_CEREBRAS_API_KEY BOUCLE_ZHIPU_API_KEY BOUCLE_CLOUDFLARE_API_KEY BOUCLE_HUGGINGFACE_API_KEY BOUCLE_MISTRAL_API_KEY", names, " ")
     }
     {
       line = $0
