@@ -46,11 +46,15 @@ boucle_ci_triage() {
   export BOUCLE_ISSUE="$IID"
 
   # ── No-key detection (freeride mode) ──────────────────────────────
-  # If no LLM configuration is available, post a help message explaining
-  # how to set up a free-tier API key. The issue goes to boucle:needs-info.
-  # The user re-triggers by reacting with 👍 ❤️ 🎉 or 🚀 after adding a key.
+  # If no LLM configuration is available (no BOUCLE_LLM_BASE_URL and no
+  # freeride provider key), post a help message explaining how to set up
+  # a free-tier API key. The issue goes to boucle:needs-info — the user
+  # re-triggers by reacting with 👍 ❤️ 🎉 or 🚀 after adding a key.
+  # This runs BEFORE attachment fetch / agent invocation to avoid wasting
+  # a runner on an issue that cannot be triaged.
   if ! has_llm_config 2>/dev/null; then
     echo "[boucle:no-key] no LLM configuration found — posting help message"
+    # Check if a help message already exists (update instead of duplicate).
     EXISTING_HELP=$(forge_issue_notes "$IID" 2>/dev/null \
       | jq -r '[.[] | select(.body | contains("<!-- boucle:needs-info") and contains("reason=no-key"))] | last | .id // 0' 2>/dev/null || echo "0")
 
@@ -80,7 +84,7 @@ Pick one (or more), create a free API key, and add it as a CI/CD variable.
 3. Add it as a CI/CD variable in **Settings → CI/CD → Variables** (masked, protected)
 4. React to this comment with 👍 to re-trigger boucle
 
-### Want better Quality?
+### Want better quality?
 
 Configure a dedicated endpoint instead:
 - `BOUCLE_LLM_BASE_URL` — your OpenAI-compatible endpoint
@@ -99,11 +103,13 @@ HELP_EOF
       forge_issue_note "$IID" "$HELP_MSG" 2>/dev/null || true
     fi
 
+    # Assign the human author (resolve via reporter pattern).
     REPORTER_ID=$(resolve_reporter_id "$IID" 2>/dev/null || echo "")
     if [ -n "$REPORTER_ID" ]; then
       forge_issue_assign "$IID" "$REPORTER_ID" 2>/dev/null || true
     fi
 
+    # Set boucle:needs-info (preserve non-boucle labels).
     set_boucle_label "$IID" "boucle:needs-info" "boucle::status::bot" 2>/dev/null || true
     exit 0
   fi

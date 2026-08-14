@@ -358,87 +358,67 @@ forge_note_reactions() {
 
 # ── Attachment upload ─────────────────────────────────────────────────────
 
-# The branch that hosts preview screenshots uploaded via the Contents API.
-# A dedicated branch keeps previews out of the default branch and out of MRs.
-# It is created on first use (idempotent: _gh_ensure_preview_branch).
-BOUCLE_PREVIEW_BRANCH="${BOUCLE_PREVIEW_BRANCH:-boucle-previews}"
-BOUCLE_PREVIEW_DIR="${BOUCLE_PREVIEW_DIR:-previews}"
-
-# _gh_ensure_preview_branch — create the previews branch from the default
-# branch if it does not exist. Idempotent: a no-op if the branch already
-# exists. Fail-open: returns 0 on any error (the upload call will fail
-# gracefully and the caller posts a fallback note).
-_gh_ensure_preview_branch() {
-  local default_branch="${BOUCLE_DEFAULT_BRANCH:-main}"
-  local host="${BOUCLE_FORGE_HOST:-github.com}"
-  # Check if the branch exists.
-  if curl -sf -H "Authorization: Bearer $BOUCLE_TOKEN" \
-       "https://api.$host/repos/$BOUCLE_PROJECT_ID/branches/$BOUCLE_PREVIEW_BRANCH" \
-       > /dev/null 2>&1; then
-    return 0
-  fi
-  # Get the default branch HEAD SHA to branch from.
-  local sha
-  sha=$(curl -sf -H "Authorization: Bearer $BOUCLE_TOKEN" \
-        "https://api.$host/repos/$BOUCLE_PROJECT_ID/branches/$default_branch" \
-        2>/dev/null | jq -r '.commit.sha // empty' 2>/dev/null) || return 0
-  [ -z "$sha" ] && return 0
-  # Create the branch.
-  curl -sf -X POST -H "Authorization: Bearer $BOUCLE_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d "{\"ref\":\"refs/heads/$BOUCLE_PREVIEW_BRANCH\",\"sha\":\"$sha\"}" \
-    "https://api.$host/repos/$BOUCLE_PROJECT_ID/git/refs" \
-    > /dev/null 2>&1 || true
-}
+# Cache the numeric repository ID (required by the uploads.github.com
+# endpoint). Resolved once per process via the REST API.
+_GH_REPO_ID_CACHE=""
 
 forge_attachment_upload() {
-  # GitHub has no issue-attachment upload API (unlike GitLab's
-  # /projects/:id/uploads). A Gist stores base64 as text/plain — the
-  # raw_url does NOT render as an image in Markdown (content-type is
-  # text/plain, not image/png). The Contents API stores binary and
-  # serves it with the correct content-type via raw.githubusercontent.com.
+  # GitHub's native attachment upload API — the same endpoint the web UI
+  # uses for drag-and-drop image attachments in issue/PR comments.
   #
-  # We upload the image to a dedicated previews branch ($BOUCLE_PREVIEW_BRANCH)
-  # under $BOUCLE_PREVIEW_DIR/<issue>/<filename>. The raw.githubusercontent.com
-  # URL renders in ![alt](url) in issue/PR comments.
+  #   POST https://uploads.github.com/user-attachments/assets
+  #     ?name=<filename>&content_type=<mime>&repository_id=<numeric>
+  #   Headers: Authorization: Bearer <PAT>, Accept: application/json,
+  #            Content-Type: <mime>
+  #   Body: raw file bytes
+  #   Response: 201 → {"url":"https://github.com/user-attachments/assets/<uuid>"}
   #
-  # Requires `repo` scope (Contents API write) — the bot PAT already has it.
-  # Fail-open: any error → return 0 with no output → caller posts fallback note.
+  # The returned URL renders in ![alt](url) in issue/PR comments — it is
+  # the same URL format GitHub's web UI produces for drag-and-drop
+  # attachments. Requires push access to the repo (the bot PAT has `repo`
+  # scope). Fail-open: any error → return 0 with no output → caller posts
+  # fallback note, never blocks the loop.
   local iid="$1" file_path="$2" filename="$3"
   [ -z "$file_path" ] || [ ! -s "$file_path" ] && return 0
   [ -z "$filename" ] && filename="$(basename "$file_path")"
 
   local host="${BOUCLE_FORGE_HOST:-github.com}"
 
-  # Ensure the previews branch exists (idempotent).
-  _gh_ensure_preview_branch || return 0
+  # Resolve the numeric repository ID (cached per process).
+  if [ -z "$_GH_REPO_ID_CACHE" ]; then
+    _GH_REPO_ID_CACHE=$(curl -sf -H "Authorization: Bearer $BOUCLE_TOKEN" \
+      "https://api.$host/repos/$BOUCLE_PROJECT_ID" \
+      2>/dev/null | jq -r '.id // empty' 2>/dev/null) || return 0
+  fi
+  [ -z "$_GH_REPO_ID_CACHE" ] && return 0
 
-  # Base64-encode the image (Contents API requires base64 content).
-  local b64
-  b64=$(base64 -w0 "$file_path" 2>/dev/null) || return 0
+  # Detect the MIME type from the file extension.
+  local mime="application/octet-stream"
+  case "$filename" in
+    *.png)  mime="image/png" ;;
+    *.jpg|*.jpeg) mime="image/jpeg" ;;
+    *.gif)  mime="image/gif" ;;
+    *.webp) mime="image/webp" ;;
+    *.svg)  mime="image/svg+xml" ;;
+    *.pdf)  mime="application/pdf" ;;
+  esac
 
-  # Upload via Contents API PUT. The path includes the issue number so
-  # previews are traceable and don't collide across issues.
-  # Use curl + JSON (not gh api -f) because gh api loses stdout in
-  # command substitution inside a function on some shells.
-  local path="$BOUCLE_PREVIEW_DIR/$iid/$filename"
-  local payload
-  payload=$(jq -cn \
-    --arg msg "boucle preview for #$iid" \
-    --arg content "$b64" \
-    --arg branch "$BOUCLE_PREVIEW_BRANCH" \
-    '{message:$msg, content:$content, branch:$branch}')
+  # Upload the raw file bytes. --data-binary preserves the exact bytes
+  # (no newline mangling like --data would do).
   local response
-  response=$(curl -sf -X PUT -H "Authorization: Bearer $BOUCLE_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d "$payload" \
-    "https://api.$host/repos/$BOUCLE_PROJECT_ID/contents/$path" 2>/dev/null) || return 0
+  response=$(curl -sf -X POST \
+    -H "Authorization: Bearer $BOUCLE_TOKEN" \
+    -H "Accept: application/json" \
+    -H "Content-Type: $mime" \
+    --data-binary "@$file_path" \
+    "https://uploads.$host/user-attachments/assets?name=$filename&content_type=$mime&repository_id=$_GH_REPO_ID_CACHE" \
+    2>/dev/null) || return 0
 
-  # Extract the download_url — the raw URL that renders in ![alt](url).
-  local raw_url
-  raw_url=$(printf '%s' "$response" | jq -r '.content.download_url // empty' 2>/dev/null) || return 0
+  # Extract the asset URL — renders in ![alt](url) in issue/PR comments.
+  local asset_url
+  asset_url=$(printf '%s' "$response" | jq -r '.url // empty' 2>/dev/null) || return 0
 
-  [ -n "$raw_url" ] && echo "$raw_url"
+  [ -n "$asset_url" ] && echo "$asset_url"
 }
 
 forge_branch_url() {
