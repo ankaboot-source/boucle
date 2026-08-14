@@ -186,18 +186,67 @@ boucle_ci_triage() {
         # Strip leading/trailing ``` fences if the agent wrapped the comment.
         DRAFTED_COMMENT=$(echo "$DRAFTED_COMMENT" | sed '/^```$/d')
         forge_issue_note "$IID" "$DRAFTED_COMMENT"
-        # Re-fetch and re-parse the now-posted comment.
-        # Same PRE_RUN_TRIAGE_ID filter: only consider comments newer than
-        # the pre-run one (the just-posted fallback comment qualifies).
-        COMMENT=$(forge_issue_notes "$IID" \
-          | jq -r --argjson pre "$PRE_RUN_TRIAGE_ID" \
-            '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## TL;DR")) | select(.body | test("## Disposition")) | select(.id > $pre)] | first | .body // ""')
+        # Parse DIRECTLY from the promoted draft. A first-pass draft has no
+        # ## TL;DR (triage.md draft format), so re-fetching through the
+        # COMMENT filter — which requires ## TL;DR — would find nothing and
+        # drop the recovered disposition.
+        COMMENT="$DRAFTED_COMMENT"
         DISPOSITION=$(echo "$COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
         SIZE=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
+        # A first-pass draft may state the size in prose ("Size M ...")
+        # instead of a ## Classification section — recover it so the spec
+        # gate still applies for M (recovery path only).
+        if [ -z "$SIZE" ]; then
+          SIZE=$(echo "$COMMENT" | grep -oiE 'Size[[:space:]]+[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
+        fi
         if [ -n "$DISPOSITION" ]; then
           echo "[boucle] Step-limit fallback succeeded: recovered disposition=$DISPOSITION size=${SIZE:-?}."
         else
           echo "[boucle] Step-limit fallback failed: drafted comment had no parsable Disposition."
+        fi
+      fi
+    fi
+  fi
+
+  # ── Posted-draft promotion (log-scrape missed) ───────────────────
+  # If the agent POSTED a first-pass draft (post-early rule) but the
+  # log-scrape above found nothing (agent-output.log absent/moved, or the
+  # draft only ever existed as the posted note), recover the disposition
+  # from the posted comment itself: promote the draft marker IN PLACE and
+  # parse it directly. The in-place update keeps the note id stable, so a
+  # promoted draft can never be promoted twice (its body no longer carries
+  # the draft marker).
+  if [ -z "$DISPOSITION" ]; then
+    DRAFT_NOTE_ID=$(forge_issue_notes "$IID" 2> /dev/null \
+      | jq -r --argjson pre "$PRE_RUN_TRIAGE_ID" \
+        '[.[] | select(.body | contains("<!-- boucle:draft role=triage -->")) | select(.body | test("## Disposition")) | select(.id > $pre)] | first | .id // ""' 2> /dev/null || echo "")
+    if [ -n "$DRAFT_NOTE_ID" ]; then
+      DRAFTED_COMMENT=$(forge_issue_note_get "$IID" "$DRAFT_NOTE_ID" 2> /dev/null \
+        | jq -r '.body // empty' 2> /dev/null)
+      if [ -n "$DRAFTED_COMMENT" ]; then
+        echo "[boucle] WARN: no boucle:triage in log — promoting posted boucle:draft (note $DRAFT_NOTE_ID) to triage."
+        DRAFTED_COMMENT=$(printf '%s' "$DRAFTED_COMMENT" | sed 's|<!-- boucle:draft role=triage -->|<!-- boucle:triage v=1 -->|')
+        if forge_issue_note_update "$IID" "$DRAFT_NOTE_ID" "$DRAFTED_COMMENT"; then
+          # Parse DIRECTLY from the promoted draft. A first-pass draft has no
+          # ## TL;DR (triage.md draft format), so re-fetching through the
+          # COMMENT filter — which requires ## TL;DR — would find nothing and
+          # drop the recovered disposition.
+          COMMENT="$DRAFTED_COMMENT"
+          DISPOSITION=$(echo "$COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
+          SIZE=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
+          # A first-pass draft may state the size in prose ("Size M ...")
+          # instead of a ## Classification section — recover it so the spec
+          # gate still applies for M (recovery path only).
+          if [ -z "$SIZE" ]; then
+            SIZE=$(echo "$COMMENT" | grep -oiE 'Size[[:space:]]+[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
+          fi
+          if [ -n "$DISPOSITION" ]; then
+            echo "[boucle] Posted-draft promotion succeeded: disposition=$DISPOSITION size=${SIZE:-?}."
+          else
+            echo "[boucle] Posted-draft promotion failed: posted draft had no parsable Disposition."
+          fi
+        else
+          echo "[boucle] Posted-draft promotion failed: note update rejected (note $DRAFT_NOTE_ID)." >&2
         fi
       fi
     fi
