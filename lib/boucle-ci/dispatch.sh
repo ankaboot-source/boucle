@@ -591,7 +591,7 @@ boucle_ci_dispatch() {
   # The webhook carries the raw GitLab award name; the backends normalize
   # via forge_reaction_canonical, so only "thumbsup" counts.
   # Must mirror the doctor job's constant — each CI job runs its own shell.
-  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup"
+  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup heart rocket tada"
 
   # Detect if the bot was just assigned to this issue (update action with
   # an assignee change). This lets a human trigger boucle by assigning the
@@ -647,9 +647,21 @@ boucle_ci_dispatch() {
   if echo "$LABELS" | grep -q "boucle:triage"; then
     SHOULD_TRIAGE=true
   elif echo "$LABELS" | grep -q "boucle:needs-info"; then
-    # Check if author replied (note event by non-bot)
+    # Re-trigger on author reply (note event by non-bot) OR on emoji
+    # reaction (thumbsup/heart/rocket/tada) on a bot note — the user
+    # signals they've taken action (e.g. added an API key after a no-key
+    # or quota-exhausted help message).
     if [ "$OBJECT_KIND" = "note" ] && [ "$ACTOR" != "${BOUCLE_BOT_USERNAME:-up-bot}" ]; then
       SHOULD_TRIAGE=true
+    elif [ "$OBJECT_KIND" = "emoji" ] && [ "$ACTOR" != "${BOUCLE_BOT_USERNAME:-up-bot}" ]; then
+      EMOJI_NAME=$(jq -r '.object_attributes.name // empty' "$BOUCLE_TRIGGER_PAYLOAD")
+      EMOJI_ACTION=$(jq -r '.object_attributes.action // empty' "$BOUCLE_TRIGGER_PAYLOAD")
+      AWARDABLE_TYPE=$(jq -r '.object_attributes.awardable_type // empty' "$BOUCLE_TRIGGER_PAYLOAD")
+      if [ "$EMOJI_ACTION" = "award" ] \
+        && [ "$AWARDABLE_TYPE" = "Note" ] \
+        && echo "$EMOJI_NAME" | grep -Eq "^($BOUCLE_SPEC_APPROVAL_EMOJIS)$"; then
+        SHOULD_TRIAGE=true
+      fi
     fi
   elif echo "$LABELS" | grep -q "boucle:todo"; then
     # If boucle:todo was just added (by triage), triage already triggered
