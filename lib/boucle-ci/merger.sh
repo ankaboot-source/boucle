@@ -171,4 +171,10 @@ boucle_ci_merger() {
   # This releases the merge lock immediately after the merge API call succeeds
   # so the next approved MR can start merging instead of waiting 2+ min
   # for the deploy to finish.
+  #
+  # Chain to post-merge so it builds + deploys + triggers e2e. Without this,
+  # the merged code never deploys (the merge commit has [skip ci], so the
+  # push trigger doesn't fire, and the post-merge job only runs on
+  # workflow_dispatch BOUCLE_ROLE=post-merge).
+  chain_to_role "$BOUCLE_ISSUE" "post-merge"
 }
