@@ -131,8 +131,11 @@ forge_issue_create() {
   json_labels=$(printf '%s' "$labels" | tr -d '\n' | jq -R 'split(",") | map(select(length > 0))' 2> /dev/null || echo "[]")
   body=$(jq -nc --arg t "$title" --arg d "$description" --argjson l "$json_labels" \
     '{title: $t, body: $d, labels: $l}')
-  _gh_api -X POST "/repos/$BOUCLE_PROJECT_ID/issues" \
-    --input - <<< "$body" | jq -r '.number // empty' || true
+  # NOTE: _gh_api adds --paginate, which gh rejects for non-GET requests
+  # ("the --paginate option is not supported for non-GET requests"). Call
+  # gh api directly, same pattern as forge_mr_create below.
+  GH_TOKEN="$BOUCLE_TOKEN" gh api -X POST "/repos/$BOUCLE_PROJECT_ID/issues" \
+    --input - <<< "$body" 2> /dev/null | jq -r '.number // empty' || true
 }
 
 forge_issue_reactions() {
