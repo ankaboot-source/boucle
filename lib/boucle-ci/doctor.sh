@@ -23,7 +23,7 @@ boucle_ci_doctor() {
   # The forge backends normalize via forge_reaction_canonical, so only
   # "thumbsup" can appear here.
   # Must mirror the dispatch job's constant — each CI job runs its own shell.
-  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup"
+  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup heart rocket tada"
   source "$BOUCLE_HOME/bin/lib/depends-on.sh" 2> /dev/null || true
   # Shared gate functions (check_sibling_gate, check_file_gate,
   # maybe_unblock_dependents) — single source of truth in lib/boucle-ci/gates.sh.
