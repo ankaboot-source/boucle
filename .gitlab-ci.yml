@@ -222,6 +222,13 @@ default:
       else
         export BOUCLE_HOME="$CI_PROJECT_DIR"
       fi
+      # Put the engine's bin/ on PATH so script references (boucle-ci,
+      # check-bootstrap.sh, ...) resolve in both dogfood (engine at root)
+      # and consumer (engine at .boucle/) layouts. Without this, the
+      # `bin/boucle-ci` relative path only works when the engine IS the
+      # repo root — a consumer with .boucle/ gets "No such file or
+      # directory".
+      export PATH="$BOUCLE_HOME/bin:$PATH"
       # Isolate jcode's config + prompt overlay per project (shared
       # runners): bin/jc writes config.toml and prompt-overlay.md under
       # JCODE_HOME, which never touches the consumer repo root or ~/.jcode.
@@ -406,6 +413,15 @@ check:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   before_script:
     - export PATH="$HOME/.local/bin:$PATH"
+    # Resolve BOUCLE_HOME so check-bootstrap.sh is on PATH in consumer
+    # layouts (engine at .boucle/) as well as dogfood (engine at root).
+    - |
+      if [ -d "$CI_PROJECT_DIR/.boucle/bin" ]; then
+        export BOUCLE_HOME="$CI_PROJECT_DIR/.boucle"
+      else
+        export BOUCLE_HOME="$CI_PROJECT_DIR"
+      fi
+      export PATH="$BOUCLE_HOME/bin:$PATH"
     # No git submodule update here: GitLab's get_sources already initialized
     # the test submodules, and tags: [] jobs can land on runners without git
     # in the job PATH (the bootstrap installs/verifies git itself).
@@ -413,7 +429,7 @@ check:
     # falls back to $HOME/.local/bin when /usr/local/bin is not writable
     # (shared shell executors, e.g. framagit's non-root runner). Fails with
     # an actionable message when a system tool (make/tar/xz/...) is missing.
-    - bin/check-bootstrap.sh
+    - check-bootstrap.sh
     - shellcheck --version
     - shfmt --version
     - bats --version
@@ -468,7 +484,7 @@ dispatch:
   # installing the rest is negligible on the pre-baked agents image and the
   # shared runner caches $HOME/.local/bin across runs.
   script:
-    - bin/boucle-ci dispatch
+    - boucle-ci dispatch
   artifacts:
     paths:
       - .boucle-issue
@@ -502,7 +518,7 @@ triage:
   variables:
     BOUCLE_ITERATION: 1
   script:
-    - bin/boucle-ci triage
+    - boucle-ci triage
   timeout: 10m
 
 # ── Worker ──────────────────────────────────────────────────────────────
@@ -537,7 +553,7 @@ worker:
       when: never
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "worker"
   script:
-    - bin/boucle-ci worker
+    - boucle-ci worker
   # Worker wall-clock cap. 30 min default — a stuck worker shouldn't hog the
   # data runner for an hour. The doctor re-triggers if the job times out and
   # the issue is still at boucle:working. Increase to 60m for heavy issues.
@@ -564,7 +580,7 @@ reviewer:
       when: never
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "reviewer"
   script:
-    - bin/boucle-ci reviewer
+    - boucle-ci reviewer
   # 30m to accommodate provider fallback: 12m primary timeout + 12m fallback
   # + 6m overhead (rebase, deploy, verdict post). At 15m the fallback only
   # got 3m after the 12m primary timeout — not enough to complete a review.
@@ -594,7 +610,7 @@ merger:
       when: never
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "merger"
   script:
-    - bin/boucle-ci merger
+    - boucle-ci merger
   timeout: 10m
 
 # ── Post-merge (deploy-wait + e2e trigger, unlocked) ───────────────────
@@ -622,7 +638,7 @@ post-merge:
     # consumer's check suites for the merged commit), which the inline copy
     # this replaces never had: on GitLab, external mode silently skipped
     # straight to e2e without waiting for the consumer's own CI.
-    - bin/boucle-ci post-merge
+    - boucle-ci post-merge
   # 30m to accommodate provider fallback: 12m primary + 12m fallback + 6m overhead.
   timeout: 30m
 
@@ -648,7 +664,7 @@ catchup:
       when: never
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "catchup"
   script:
-    - bin/boucle-ci catchup
+    - boucle-ci catchup
   timeout: 5m
 
 # ── Deploy (on push to $CI_DEFAULT_BRANCH) ─────────────────────────────────────────
@@ -684,7 +700,7 @@ deploy:
     # Actions. It skips the build when $BOUCLE_BUILD_OUTPUT is already
     # populated, which is the case here: build-site hands it over as an
     # artifact (rebuilding OOMs WASM toolchains on shell executors).
-    - bin/boucle-ci deploy
+    - boucle-ci deploy
   timeout: 10m
 
 # ── E2E (after deploy) ─────────────────────────────────────────────────
@@ -708,7 +724,7 @@ e2e:
       when: never
     - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "e2e"
   script:
-    - bin/boucle-ci e2e
+    - boucle-ci e2e
   timeout: 20m
 
 # ── Doctor (scheduled recovery) ──────────────────────────────────────────
@@ -731,7 +747,7 @@ doctor:
     # Only run on scheduled pipelines (not webhook/trigger pipelines)
     - if: $CI_PIPELINE_SOURCE == "schedule"
   script:
-    - bin/boucle-ci doctor
+    - boucle-ci doctor
   timeout: 10m
 
 # ── build-site: one build, many publishers (W1.7 + memory fix) ───────────
