@@ -88,13 +88,13 @@ setup() {
 # ── The GitLab jobs now delegate instead of duplicating ────────────────────
 
 @test "the GitLab deploy job calls the shared stage" {
-  run bash -c "sed -n '/^deploy:/,/^  timeout:/p' .gitlab-ci.yml | grep -c 'bin/boucle-ci deploy'"
+  run bash -c "sed -n '/^deploy:/,/^  timeout:/p' .gitlab-ci.yml | grep -c 'boucle-ci deploy'"
   assert_success
   assert_output "1"
 }
 
 @test "the GitLab post-merge job calls the shared stage" {
-  run bash -c "sed -n '/^post-merge:/,/^  timeout:/p' .gitlab-ci.yml | grep -c 'bin/boucle-ci post-merge'"
+  run bash -c "sed -n '/^post-merge:/,/^  timeout:/p' .gitlab-ci.yml | grep -c 'boucle-ci post-merge'"
   assert_success
   assert_output "1"
 }
