@@ -35,6 +35,21 @@ dispatch_note_body() {
   jq -r '.object_attributes.note // .comment.body // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || true
 }
 
+# dispatch_is_github_pr_comment
+#
+# True when the trigger payload is a GitHub issue_comment on a PULL REQUEST
+# (.issue.pull_request non-null). GitHub multiplexes issue comments and PR
+# comments into one event; the distinction matters because a PR comment must
+# route to the MR-note handler (with the PR's source branch), NOT the generic
+# issue path (a PR has no labels → dispatch would ABORT). False for a
+# plain-issue comment and for any non-GitHub payload. Silent on a missing or
+# non-file payload.
+dispatch_is_github_pr_comment() {
+  [ -n "${BOUCLE_TRIGGER_PAYLOAD:-}" ] || return 1
+  [ -f "$BOUCLE_TRIGGER_PAYLOAD" ] || return 1
+  [ "$(jq -r '.issue.pull_request != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo false)" = "true" ]
+}
+
 boucle_ci_dispatch() {
   # Shared gate functions (check_sibling_gate, maybe_unblock_dependents) —
   # single source of truth in lib/boucle-ci/gates.sh.
@@ -129,6 +144,16 @@ boucle_ci_dispatch() {
         ACTION=$(jq -r '.action // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
         IID=$(jq -r '.issue.number // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
         ACTOR=$(jq -r '.sender.login // .user.login // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+        # GitHub: a comment on a PULL REQUEST arrives as issue_comment with
+        # .issue.number = the PR number and .issue.pull_request non-null.
+        # It is NOT an issue comment: the MR-note handler (GitLab shape
+        # .merge_request.*) must receive the PR number + source branch, or
+        # dispatch reads the PR's (empty) labels and ABORTS — human PR
+        # feedback could never re-trigger the worker.
+        if dispatch_is_github_pr_comment; then
+          MR_NOTE_IID="$IID"
+          MR_NOTE_SOURCE_BRANCH=$(forge_mr_get "$IID" | jq -r '.head.ref // empty' 2> /dev/null || echo "")
+        fi
         ;;
       pull_request_review | pull_request_review_comment)
         OBJECT_KIND="note"
@@ -374,9 +399,21 @@ boucle_ci_dispatch() {
     # When a human comments on a boucle MR, they're reviewing it and
     # providing feedback. Re-trigger the worker so it re-runs and can
     # address the comments. Bot notes are filtered by the ACTOR guard.
-    MR_NOTE_IID=$(jq -r '.merge_request.iid // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
+    # GitLab payload: .merge_request.iid. GitHub PR comments: resolved in
+    # the normalisation (issue_comment on a PR carries .issue.number, the
+    # branch is fetched via the API — not in the payload).
+    PAYLOAD_MR_NOTE_IID=$(jq -r '.merge_request.iid // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
+    if [ -n "$PAYLOAD_MR_NOTE_IID" ]; then
+      MR_NOTE_IID="$PAYLOAD_MR_NOTE_IID"
+    fi
     if [ -n "$MR_NOTE_IID" ] && [ "$OBJECT_KIND" = "note" ]; then
-      MR_NOTE_SOURCE_BRANCH=$(jq -r '.merge_request.source_branch // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
+      # GitLab payload carries .merge_request.source_branch; for GitHub PR
+      # comments the branch was already resolved in the normalisation
+      # (MR_NOTE_SOURCE_BRANCH set there). Keep whichever is available.
+      PAYLOAD_MR_NOTE_SOURCE_BRANCH=$(jq -r '.merge_request.source_branch // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
+      if [ -n "$PAYLOAD_MR_NOTE_SOURCE_BRANCH" ]; then
+        MR_NOTE_SOURCE_BRANCH="$PAYLOAD_MR_NOTE_SOURCE_BRANCH"
+      fi
       MR_NOTE_ISSUE_IID=$(printf '%s' "$MR_NOTE_SOURCE_BRANCH" | sed -n 's/^boucle\/\([0-9]\+\).*/\1/p')
       if [ -z "$MR_NOTE_ISSUE_IID" ]; then
         echo "Note on MR !${MR_NOTE_IID} but source_branch '$MR_NOTE_SOURCE_BRANCH' is not a boucle branch, skipping"
