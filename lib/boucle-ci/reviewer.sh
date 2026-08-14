@@ -153,7 +153,7 @@ boucle_ci_reviewer() {
     MAX_ITER="${BOUCLE_MAX_ITERATIONS:-5}"
     echo "FAIL: worker shipped zero commits (MR !${MR_IID} empty — base_sha == head_sha). Re-triggering worker (iteration $((ITERATION + 1))/$MAX_ITER)." >&2
     set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-    forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker shipped zero commits (MR !${MR_IID} has empty diff). Re-running the worker (iteration $((ITERATION + 1))/$MAX_ITER).$(job_link)" || true
+    forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker shipped zero commits (PR #${MR_IID} has empty diff). Re-running the worker (iteration $((ITERATION + 1))/$MAX_ITER).$(job_link)" || true
     if [ "$ITERATION" -lt "$MAX_ITER" ]; then
       chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=$((ITERATION + 1))
     else
@@ -556,7 +556,7 @@ boucle_ci_reviewer() {
         # Final reviewer FAIL after $MAX_ITER attempts: fused into boucle:human
         # (was boucle:blocked, deleted). Configurable via BOUCLE_MAX_ITERATIONS.
         # Note BEFORE the terminal label — never a muted boucle:human.
-        ESCALATION_MSG=$(printf '⚠️ Reviewer verdict: **FAIL** after %s iterations. The loop could not satisfy the acceptance criteria automatically.\n\nThe MR has been assigned to you for manual review. Inspect [MR !%s](%s) and the reviewer verdicts, then either:\n- **Approve** the MR if the work is acceptable (the merger will rebase + merge), or\n- **Comment** with guidance and re-assign to the bot to re-trigger the worker.' "$MAX_ITER" "$MR_IID" "$MR_URL")
+        ESCALATION_MSG=$(printf '⚠️ Reviewer verdict: **FAIL** after %s iterations. The loop could not satisfy the acceptance criteria automatically.\n\nReview [PR #%s](%s) and the reviewer verdicts, then either:\n- **Approve** the PR if the work is acceptable (the merger will rebase + merge), or\n- **Comment** with guidance and re-assign to the bot to re-trigger the worker.' "$MAX_ITER" "$MR_IID" "$MR_URL")
         if ! forge_issue_note "$BOUCLE_ISSUE" "$ESCALATION_MSG"; then
           echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
           exit 1
