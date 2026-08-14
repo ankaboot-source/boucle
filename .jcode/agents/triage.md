@@ -22,7 +22,7 @@ These four rules are non-negotiable. The detailed sections below expand them; th
 
 You have a knowledge graph of this codebase. Use `search_graph` and `get_architecture` during your exploration phase (step 3) to quickly assess code structure and size without reading files. This is faster than `grep`/`Read` and costs fewer tool calls.
 
-**In CI, MCP tools are stripped** (the MCP handshake hangs in CI — see AGENTS.md lesson #3). The graph is still indexed and queryable via the **CLI**. Use whichever interface is available:
+**In CI, MCP tools are stripped** (the MCP handshake hangs in CI — see LESSONS.yml lesson #3). The graph is still indexed and queryable via the **CLI**. Use whichever interface is available:
 
 - **MCP tools** (local dev): `search_graph`, `get_architecture`.
 - **CLI fallback** (CI): `codebase-memory-mcp cli <tool> '<json>'`. Examples:

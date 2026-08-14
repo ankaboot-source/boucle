@@ -296,7 +296,7 @@ boucle_ci_triage() {
       # Model/API failure (provider down or quota exhausted). bin/jc exits 4
       # when the agent log shows no activity or persistent quota errors. A
       # provider-down re-trigger fails identically every time (doctor re-trigger
-      # loop, AGENTS.md lesson #29/#30), so post a diagnostic and escalate to
+      # loop, LESSONS.yml lesson #29/#30), so post a diagnostic and escalate to
       # the human instead — the same contract worker.sh honors.
       local agent_log_file log_snippet diagnostic_body
       agent_log_file="$BOUCLE_WORKSPACE/.boucle-state/$IID/agent-output.log"
