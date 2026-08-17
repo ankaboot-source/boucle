@@ -160,8 +160,25 @@ permissions:
 # ── Concurrency ─────────────────────────────────────────────────────────────────
 # Serial merge: only one merger job at a time (lesson #8, #10).
 # Per-issue serialization: worker/reviewer/e2e for the same issue don't overlap.
+#
+# Two separate groups, mirroring the GitLab resource_group architecture
+# (dispatch: boucle-dispatch, worker/reviewer/e2e: boucle-issue-$BOUCLE_ISSUE):
+#
+#   - workflow_dispatch (chain_to_role) → boucle-issue-<BOUCLE_ISSUE>
+#     Serializes role-specific runs (worker/reviewer/e2e) per issue, so two
+#     worker runs or two reviewer runs for the same issue queue, not overlap.
+#
+#   - webhook events (issues, issue_comment, pull_request, schedule) → boucle-dispatch-<issue|run_id>
+#     The dispatch job is a fast router; it must NOT compete with a
+#     chain_to_role workflow_dispatch for the same concurrency slot.
+#     Previously both shared one group, so the issues webhook fired by
+#     set_boucle_label (worker→review transition) could cancel the
+#     chain_to_role reviewer workflow_dispatch. The dispatch then saw
+#     boucle:review and no-op'd, leaving the reviewer untriggered and the
+#     issue stuck at boucle:review until the doctor's stuck-issue recovery
+#     fired — producing the "FAIL loops" pattern (consumer 2026-08).
 concurrency:
-  group: boucle-${{ github.event.inputs.BOUCLE_ISSUE || github.event.issue.number || github.event.pull_request.number || github.run_id }}
+  group: ${{ github.event_name == 'workflow_dispatch' && format('boucle-issue-{0}', github.event.inputs.BOUCLE_ISSUE) || format('boucle-dispatch-{0}', github.event.issue.number || github.event.pull_request.number || github.run_id) }}
   cancel-in-progress: false
 
 # ── Jobs ────────────────────────────────────────────────────────────────────────

@@ -750,3 +750,16 @@
   ✅: 'DO: follow the `BOUCLE_BOT_ID` convention (bin/forge/common.sh) — numeric on GitLab (`assignee_ids[]`), login on GitHub (`assignees[]`). `resolve_reporter_id` returns field 2 (username)
     on GitHub, field 1 (numeric id) on GitLab, so its sole consumers (`forge_issue_assign` / `forge_mr_assign`) receive a value the forge actually accepts. Any new call site that resolves a
     human for assignment MUST use `resolve_reporter_id`, not raw `.author.id`. A 200 on a rejected identifier is a silent failure — assert the assignment landed in tests.'
+
+82:
+  title: GitHub workflow_dispatch and webhook events MUST use separate concurrency groups
+  ❌: 'DO NOT put `workflow_dispatch` chain_to_role triggers and webhook events (issues, issue_comment, pull_request, schedule) in the same GitHub Actions `concurrency.group` for the same issue.
+    A role transition does TWO things near-simultaneously: `set_boucle_label` (fires a webhook → dispatch pipeline) and `chain_to_role` (fires a `workflow_dispatch` → role pipeline). With
+    `cancel-in-progress: false` and one shared group, GitHub keeps at most one queued run — the later event cancels the earlier. When the webhook wins the race, the `workflow_dispatch` is
+    cancelled, the dispatch sees the new label and no-ops (the role it expects is the one chain_to_role was supposed to trigger), and the role NEVER runs. The issue sits at the transition
+    label until the doctor''s stuck-issue recovery fires, burning one iteration per cycle — the "FAIL loops" pattern. GitLab is unaffected: dispatch uses `resource_group: boucle-dispatch` and
+    worker/reviewer/e2e use `resource_group: boucle-issue-$BOUCLE_ISSUE` — they never compete.'
+  ✅: 'DO: split the GitHub `concurrency.group` by event source, mirroring the GitLab resource_group architecture: `workflow_dispatch` events (chain_to_role) use `boucle-issue-<BOUCLE_ISSUE>`
+    so role-specific runs serialize per issue; webhook events (issues, issue_comment, pull_request, schedule) use `boucle-dispatch-<issue|run_id>` so the dispatch router runs in its own lane
+    and never cancels a pending role trigger. The dispatch is a fast, read-only router; overlapping it with a worker/reviewer is safe. The merger keeps its job-level `concurrency.group:
+    boucle-merge` (serial merge). When adding a new role or a new webhook-triggered dispatch path, verify the two event classes land in different groups — a single shared group is the bug.'
