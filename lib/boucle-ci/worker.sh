@@ -756,7 +756,7 @@ ${screenshot_urls}"
   # (dispatch re-triggers the worker without BOUCLE_ITERATION → iteration 1).
   local final_attempt_block=""
   if [ "$ITERATION" -eq "$mr_max_iter" ]; then
-    final_attempt_block=$(printf '> ⏳ **Final attempt** (%s/%s) — if this iteration does not satisfy the acceptance criteria, the loop stops and hands the MR to you (`boucle:human`) instead of retrying. Commenting now — on this MR or on the issue — still amends the spec and reaches the worker.' "$ITERATION" "$mr_max_iter")
+    final_attempt_block=$(printf '> ⏳ **Final attempt** (%s/%s) — if this iteration does not satisfy the acceptance criteria, the loop stops and hands the %s to you (`boucle:human`) instead of retrying. Commenting now — on this %s or on the issue — still amends the spec and reaches the worker.' "$ITERATION" "$mr_max_iter" "$(forge_mr_term)" "$(forge_mr_term)")
   fi
   local mr_description
   mr_description=$(printf '## Issue #%s — iteration %s/%s\n\n%s\n\n%s\n\n### What changed\n%s\n\n### Approach\n%s\n\n%s\n\n---\n_Closes #%s | %s commit(s) | boucle worker run %s/%s_ | mode: deploy=%s review=%s' \

@@ -96,6 +96,36 @@ has_agent_marker() {
   esac
 }
 
+# ── Contract: user-facing MR/PR terminology ──────────────────────────────
+#
+# GitHub calls them "Pull Requests" (#<n>); GitLab calls them "Merge Requests"
+# (!<n>). Boucle posts comments and PR/MR descriptions whose wording must
+# match the forge the human is actually looking at — a GitLab user scanning
+# the issue feed should see "MR !123", a GitHub user should see "PR #123".
+# These helpers are the SINGLE source of truth for that wording. Callers MUST
+# use them instead of hardcoding "MR" or "PR" in any user-facing string.
+#
+# forge_mr_term
+#   Echo the short noun: "PR" on GitHub, "MR" on every other forge.
+#   Use for prose: "approve the $(forge_mr_term)".
+forge_mr_term() {
+  case "${BOUCLE_FORGE:-gitlab}" in
+    github) echo "PR" ;;
+    *) echo "MR" ;;
+  esac
+}
+
+# forge_mr_ref <iid>
+#   Echo a user-facing reference token: "PR #123" on GitHub, "MR !123" on
+#   GitLab. Use for references that include the forge-native prefix.
+forge_mr_ref() {
+  local iid="$1"
+  case "${BOUCLE_FORGE:-gitlab}" in
+    github) echo "PR #${iid}" ;;
+    *) echo "MR !${iid}" ;;
+  esac
+}
+
 # ── Contract: reaction name normalization ────────────────────────────────
 #
 # forge_reaction_canonical <name>

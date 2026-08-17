@@ -87,7 +87,7 @@ boucle_ci_reviewer() {
       echo "boucle: a merged MR exists for issue #$BOUCLE_ISSUE — transitioning to boucle:done"
       set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
       close_issue "$BOUCLE_ISSUE"
-      forge_issue_note "$BOUCLE_ISSUE" "✅ Reviewer: no open MR found, but a merged MR exists for this issue. Marked boucle:done and closed."
+      forge_issue_note "$BOUCLE_ISSUE" "✅ Reviewer: no open $(forge_mr_term) found, but a merged $(forge_mr_term) exists for this issue. Marked boucle:done and closed."
     elif [ -n "$CLOSED_MR_STATE" ]; then
       # Closed WITHOUT a merge is ambiguous: it may be (a) the human
       # closed the MR mid-review (issue pinned at boucle:review — closing
@@ -105,18 +105,18 @@ boucle_ci_reviewer() {
           echo "boucle: a closed MR exists while issue #$BOUCLE_ISSUE is at review/approval — transitioning to boucle:done"
           set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
           close_issue "$BOUCLE_ISSUE"
-          forge_issue_note "$BOUCLE_ISSUE" "✅ Reviewer: no open MR found, but a closed MR exists for this issue. Marked boucle:done and closed."
+          forge_issue_note "$BOUCLE_ISSUE" "✅ Reviewer: no open $(forge_mr_term) found, but a closed $(forge_mr_term) exists for this issue. Marked boucle:done and closed."
           ;;
         *)
           echo "boucle: closed MR for issue #$BOUCLE_ISSUE is stale (not merged, issue queued for work) — leaving the issue open"
-          forge_issue_note "$BOUCLE_ISSUE" "ℹ️ Reviewer: the only MR on branch boucle/$BOUCLE_ISSUE is closed and NOT merged, while the issue is queued for work. Treating it as a stale MR — the issue stays open and a fresh MR will be created on the next worker run."
+          forge_issue_note "$BOUCLE_ISSUE" "ℹ️ Reviewer: the only $(forge_mr_term) on branch boucle/$BOUCLE_ISSUE is closed and NOT merged, while the issue is queued for work. Treating it as a stale $(forge_mr_term) — the issue stays open and a fresh $(forge_mr_term) will be created on the next worker run."
           exit 0
           ;;
       esac
     else
       echo "boucle: no MR at all for issue #$BOUCLE_ISSUE — escalating to boucle:human"
       # Note BEFORE the terminal label — never a muted boucle:human.
-      if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Reviewer: no MR found for branch boucle/$BOUCLE_ISSUE (no opened, closed, or merged MR). Escalated to **boucle:human**.$(job_link)"; then
+      if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Reviewer: no $(forge_mr_term) found for branch boucle/$BOUCLE_ISSUE (no opened, closed, or merged $(forge_mr_term)). Escalated to **boucle:human**.$(job_link)"; then
         echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
         exit 1
       fi
@@ -153,7 +153,7 @@ boucle_ci_reviewer() {
     MAX_ITER="${BOUCLE_MAX_ITERATIONS:-5}"
     echo "FAIL: worker shipped zero commits (MR !${MR_IID} empty — base_sha == head_sha). Re-triggering worker (iteration $((ITERATION + 1))/$MAX_ITER)." >&2
     set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-    forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker shipped zero commits (PR #${MR_IID} has empty diff). Re-running the worker (iteration $((ITERATION + 1))/$MAX_ITER).$(job_link)" || true
+    forge_issue_note "$BOUCLE_ISSUE" "🔄 Worker shipped zero commits ($(forge_mr_ref "$MR_IID") has empty diff). Re-running the worker (iteration $((ITERATION + 1))/$MAX_ITER).$(job_link)" || true
     if [ "$ITERATION" -lt "$MAX_ITER" ]; then
       chain_to_role "$BOUCLE_ISSUE" "worker" BOUCLE_ITERATION=$((ITERATION + 1))
     else
@@ -583,7 +583,7 @@ boucle_ci_reviewer() {
       # creating the appearance of "assigned mid-review" and 3 duplicate
       # "unparsable" notes. See LESSONS.yml lesson #43.
       # Note BEFORE the terminal label — never a muted boucle:human.
-      if ! forge_issue_note "$BOUCLE_ISSUE" "Verdict unparsable or uncertain. Human review needed. The MR has been assigned to you.$(job_link)"; then
+      if ! forge_issue_note "$BOUCLE_ISSUE" "Verdict unparsable or uncertain. Human review needed. The $(forge_mr_term) has been assigned to you.$(job_link)"; then
         echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
         exit 1
       fi
@@ -613,7 +613,7 @@ boucle_ci_reviewer() {
     else
       echo "Max iterations reached — escalating to human."
       # Note BEFORE the terminal label — never a muted boucle:human.
-      if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Reviewer agent failed to post a verdict after $MAX_ITER attempts. Human review needed. The MR has been assigned to you."; then
+      if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Reviewer agent failed to post a verdict after $MAX_ITER attempts. Human review needed. The $(forge_mr_term) has been assigned to you."; then
         echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
         exit 1
       fi

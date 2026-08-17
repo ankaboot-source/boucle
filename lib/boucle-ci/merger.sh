@@ -31,13 +31,13 @@ boucle_ci_merger() {
       MERGED_DATA=$(forge_mr_get "$MERGED_IID" 2>/dev/null || echo "")
       MERGED_SHA=$(echo "$MERGED_DATA" | jq -r '.merge_commit_sha // .merge_commit_sha // empty' 2>/dev/null)
       echo "Found merged MR !$MERGED_IID for issue #$BOUCLE_ISSUE (merge_commit=${MERGED_SHA:0:12}) — already merged, transitioning to boucle:done."
-      forge_issue_note "$BOUCLE_ISSUE" "✅ MR already merged (merge_commit ${MERGED_SHA:0:12}) — issue resolved.$(job_link)" || true
+      forge_issue_note "$BOUCLE_ISSUE" "✅ $(forge_mr_term) already merged (merge_commit ${MERGED_SHA:0:12}) — issue resolved.$(job_link)" || true
       set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::bot"
       exit 0
     fi
     echo "FAIL: no open or merged MR found for issue #$BOUCLE_ISSUE (branch boucle/$BOUCLE_ISSUE)" >&2
     # Note BEFORE the terminal label — never a muted boucle:human.
-    if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Merger could not find an open MR for branch boucle/$BOUCLE_ISSUE. Human intervention needed.$(job_link)"; then
+    if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Merger could not find an open $(forge_mr_term) for branch boucle/$BOUCLE_ISSUE. Human intervention needed.$(job_link)"; then
       echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
       exit 1
     fi
@@ -134,7 +134,7 @@ boucle_ci_merger() {
   if [ "$MWPS" = true ]; then
     forge_mr_merge "$MR_IID" --mwps
     echo "MWPS enabled for MR !${MR_IID} — the forge will merge when the pipeline succeeds."
-    forge_issue_note "$BOUCLE_ISSUE" "⏳ MR !${MR_IID} merge scheduled (merge-when-pipeline-succeeds). The forge will merge automatically once the CI pipeline passes."
+    forge_issue_note "$BOUCLE_ISSUE" "⏳ $(forge_mr_ref "$MR_IID") merge scheduled (merge-when-pipeline-succeeds). The forge will merge automatically once the CI pipeline passes."
     # MWPS merge: no merge_commit_sha yet. The deploy triggered by the
     # eventual merge will run e2e with BOUCLE_ISSUE unset (no issue
     # context). The doctor's staleness check will close the loop if the
@@ -147,7 +147,7 @@ boucle_ci_merger() {
   if [ -z "$MERGE_SHA" ]; then
     echo "FAIL: merge API call failed" >&2
     # Note BEFORE the terminal label — never a muted boucle:human.
-    if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Merger: the merge API call failed for MR !${MR_IID}. Human intervention needed.$(job_link)"; then
+    if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Merger: the merge API call failed for $(forge_mr_ref "$MR_IID"). Human intervention needed.$(job_link)"; then
       echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
       exit 1
     fi

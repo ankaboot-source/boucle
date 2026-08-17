@@ -114,7 +114,7 @@ boucle_ci_catchup() {
   # Post an audit comment (with hidden tag for idempotence/audit).
   # The MR IID isn't passed as a variable (dispatch only forwards
   # BOUCLE_ISSUE + BOUCLE_ROLE); reference the issue + branch instead.
-  AUDIT_BODY="<!-- boucle:catchup v=1 iid=$BOUCLE_ISSUE state=$CURRENT_BOUCLE target=$TARGET -->"$'\n'"🤖 Automatic catch-up — the MR on branch \`boucle/$BOUCLE_ISSUE\` was merged directly without going through the approval flow."$'\n\n'"Issue state at merge time: \`boucle:$CURRENT_BOUCLE\`."$'\n'"Issue marked \`boucle:$TARGET\` and closed."
+  AUDIT_BODY="<!-- boucle:catchup v=1 iid=$BOUCLE_ISSUE state=$CURRENT_BOUCLE target=$TARGET -->"$'\n'"🤖 Automatic catch-up — the $(forge_mr_term) on branch \`boucle/$BOUCLE_ISSUE\` was merged directly without going through the approval flow."$'\n\n'"Issue state at merge time: \`boucle:$CURRENT_BOUCLE\`."$'\n'"Issue marked \`boucle:$TARGET\` and closed."
   # The audit note is the only explanation for the transition — if it cannot
   # be posted, do NOT proceed: a boucle:human/done transition with no note is
   # a mute state change. Abort BEFORE the label + close, keeping the issue

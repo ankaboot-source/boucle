@@ -223,7 +223,7 @@ ${CI_COMMIT_SHA:-${MR_HEAD_SHORT:-unknown}}"
 
 ## Origin — E2E regression
 <!-- boucle:e2e-origin v=1 iid=$BOUCLE_ISSUE -->
-Follow-up of #$BOUCLE_ISSUE: production E2E verification failed after its MR was merged (see Trace below). This is a qualified follow-up link — NOT a parent/child relationship.
+Follow-up of #$BOUCLE_ISSUE: production E2E verification failed after its $(forge_mr_term) was merged (see Trace below). This is a qualified follow-up link — NOT a parent/child relationship.
 
 ## Trace
 $(echo "$COMMENT")
