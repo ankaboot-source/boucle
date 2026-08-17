@@ -710,7 +710,7 @@ boucle_ci_doctor() {
     MR_IID=$(forge_mr_lookup_by_branch "boucle/$IID" opened)
     if [ -z "$MR_IID" ]; then
       echo "  → #$IID: no open MR found — escalating to boucle:human (merger cannot run)"
-      if ! forge_issue_note "$IID" "⚠️ Merger stuck at boucle:merging but no open MR found for branch boucle/$IID. Human intervention needed.$(job_link)"; then
+      if ! forge_issue_note "$IID" "⚠️ Merger stuck at boucle:merging but no open $(forge_mr_term) found for branch boucle/$IID. Human intervention needed.$(job_link)"; then
         echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
         exit 1
       fi
@@ -722,7 +722,7 @@ boucle_ci_doctor() {
     [ "$APPROVED_COUNT" = "true" ] && APPROVED_COUNT=1 || APPROVED_COUNT=0
     if [ "$APPROVED_COUNT" -eq 0 ]; then
       echo "  → #$IID: MR !$MR_IID no longer approved — escalating to boucle:human (merger cannot run without approval)"
-      if ! forge_issue_note "$IID" "⚠️ Merger stuck at boucle:merging but MR !$MR_IID is no longer approved. Human intervention needed.$(job_link)"; then
+      if ! forge_issue_note "$IID" "⚠️ Merger stuck at boucle:merging but $(forge_mr_ref "$MR_IID") is no longer approved. Human intervention needed.$(job_link)"; then
         echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
         exit 1
       fi
