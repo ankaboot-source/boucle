@@ -761,10 +761,22 @@ _resolve_reporter_walk() {
 # resolve_reporter_id <iid>
 #
 # Walk up the parent-issue chain until we find a non-bot author.
-# Returns the forge user ID of the original human reporter (empty on
-# failure). Used by set_boucle_label to reassign issues to the human.
+# Returns the forge-appropriate assignment identifier for the original
+# human reporter (empty on failure). Used by set_boucle_label and the
+# triage/reviewer stages to assign issues/MRs back to the human.
+#
+# The identifier follows the same convention as BOUCLE_BOT_ID
+# (bin/forge/common.sh): numeric on GitLab (assignee_ids[]), login on
+# GitHub (assignees[]). GitHub's assignees[] REJECTS numeric user IDs —
+# it silently no-ops, so the MR/issue is never assigned. Returning the
+# login on GitHub keeps the sole consumers (forge_issue_assign /
+# forge_mr_assign) fed with a value the forge actually accepts.
 resolve_reporter_id() {
-  _resolve_reporter_walk "$1" | cut -f1
+  local field=1
+  if [ "${BOUCLE_FORGE:-}" = "github" ]; then
+    field=2
+  fi
+  _resolve_reporter_walk "$1" | cut -f"$field"
 }
 
 # resolve_reporter_username <iid>

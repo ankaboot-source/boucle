@@ -730,3 +730,23 @@
     github.event.inputs.BOUCLE_ROLE == ''triage'')))` so the triage job evaluates even when dispatch was skipped, and runs on the doctor''s workflow_dispatch re-trigger. Set `BOUCLE_ISSUE` from
     `github.event.inputs.BOUCLE_ISSUE || needs.dispatch.outputs.issue-iid` to handle both trigger paths. Also promote existing drafts BEFORE running the agent (pre-agent draft promotion in
     `lib/boucle-ci/triage.sh`) so a timeout on the re-run cannot strand the issue again — the promoted draft''s disposition is already parsed.'
+
+80:
+  title: Forge backends MUST normalise field names on BOTH read and write
+  ❌: 'DO NOT forward a caller-supplied field name straight to the forge API when the two forges name the same field differently. GitLab''s issue description field is `description`; GitHub''s is `body`.
+    `forge_issue_update <iid> "description" <value>` on GitHub sends `-f description=...` to PATCH /issues, and GitHub silently ignores unknown fields — the request returns 200, the caller logs
+    "refreshed", but nothing on the forge changes. The status board (`boucle_board_upsert`) and the triage depends-on marker both pass `description`; on the boucle.dev consumer the board was
+    created once (forge_issue_create correctly uses `body`) and then never moved again across 30+ doctor sweeps, while the log repeated "status board #34 refreshed" every run.'
+  ✅: 'DO: normalise the field name inside the forge backend so callers stay forge-agnostic. `forge_issue_get` already maps GitHub `.body` into `.description` on read; `forge_issue_update` MUST map
+    `description`→`body` on write (and leave `title` alone). Symmetry is the contract: every read-side normalisation needs a matching write-side normalisation, or the write is a silent no-op.
+    Test both backends for every field the engine reads and writes — a 200 on an unknown field is not success, it is a silent failure.'
+
+81:
+  title: User identifiers passed to forge assignment calls MUST match each forge''s accepted form
+  ❌: 'DO NOT feed a numeric forge user ID into a GitHub `assignees[]` assignment call. GitHub''s issue/PR `assignees` array accepts logins (usernames) only; a numeric `author.id` is silently
+    dropped — the PATCH returns 200-ish, `_gh_api_silent` swallows any 422, and the caller proceeds as if the MR were assigned. `resolve_reporter_id` returned `.author.id` (numeric) on every
+    forge; on GitHub that value went straight into `forge_mr_assign`/`forge_issue_assign` → `assignees[]=6049027`, which GitHub rejects. Observed on boucle.dev PR !38: reviewer verdict PASS,
+    issue moved to `boucle:approval`, but the PR was never assigned to the human — the approval gate was silently invisible to the human.'
+  ✅: 'DO: follow the `BOUCLE_BOT_ID` convention (bin/forge/common.sh) — numeric on GitLab (`assignee_ids[]`), login on GitHub (`assignees[]`). `resolve_reporter_id` returns field 2 (username)
+    on GitHub, field 1 (numeric id) on GitLab, so its sole consumers (`forge_issue_assign` / `forge_mr_assign`) receive a value the forge actually accepts. Any new call site that resolves a
+    human for assignment MUST use `resolve_reporter_id`, not raw `.author.id`. A 200 on a rejected identifier is a silent failure — assert the assignment landed in tests.'
