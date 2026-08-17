@@ -719,3 +719,14 @@
     30+ min delays on trigger pipelines stuck in `waiting_for_resource` while the doctor occupied runner slots every 10 min.'
   ✅: 'DO: add `resource_group: boucle-doctor` to the doctor job in `.gitlab-ci.yml`. This serializes doctor runs so only one is active at a time — the next schedule queues behind it. The doctor makes
     only API calls (no build), so serialization has no throughput impact. Combined with the existing `issue_has_active_pipeline` and `doctor_should_skip_dedup` guards, this prevents runner starvation.'
+79:
+  title: GitHub triage job MUST run on workflow_dispatch for doctor re-trigger
+  ❌: 'DO NOT gate the GitHub triage job on `needs.dispatch.outputs.issue-iid != ''` alone. The doctor re-triggers triage via `workflow_dispatch` with an empty `BOUCLE_ROLE` (the GitHub parity of
+    GitLab''s `chain_to_role "$IID" ""`). On GitHub, `dispatch` does not run on `workflow_dispatch`, so `needs: dispatch` skips dispatch, and the triage `if` evaluates to false — triage is skipped.
+    The doctor fires every 10 min, each `workflow_dispatch skipped`, and the issue stays stuck at `boucle:triage` forever. On GitLab this works (triage runs on `$CI_PIPELINE_SOURCE == "trigger"`
+    with empty `$BOUCLE_ROLE`); the GitHub workflow never got the equivalent condition. Observed on a consumer: triage timed out at the 10-min GitHub job limit (primary provider looping + fallback),
+    the posted drafts were never promoted, and the doctor re-trigger was silently skipped 30+ times over 6 hours.'
+  ✅: 'DO: use `if: always() && (needs.dispatch.outputs.issue-iid != '' || (github.event_name == ''workflow_dispatch'' && (github.event.inputs.BOUCLE_ROLE == '''' ||
+    github.event.inputs.BOUCLE_ROLE == ''triage'')))` so the triage job evaluates even when dispatch was skipped, and runs on the doctor''s workflow_dispatch re-trigger. Set `BOUCLE_ISSUE` from
+    `github.event.inputs.BOUCLE_ISSUE || needs.dispatch.outputs.issue-iid` to handle both trigger paths. Also promote existing drafts BEFORE running the agent (pre-agent draft promotion in
+    `lib/boucle-ci/triage.sh`) so a timeout on the re-run cannot strand the issue again — the promoted draft''s disposition is already parsed.'

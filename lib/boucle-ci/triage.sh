@@ -182,9 +182,6 @@ HELP_EOF
     echo "[boucle] INFO: no prior notes for issue #$IID (first triage run)."
   fi
 
-  # Run the agent. Use `|| rc=$?` to suppress set -e so the script
-  # continues to comment parsing even if the agent exits non-zero
-  # (step limit, crash, etc.).
   # Record the newest triage note ID BEFORE running the agent, so we can
   # distinguish a NEW triage comment (posted by this run) from OLD ones.
   # Without this, a run where the agent doesn't post a new comment would
@@ -192,6 +189,56 @@ HELP_EOF
   # a label bounce with no new question asked.
   PRE_RUN_TRIAGE_ID=$(forge_issue_notes "$IID" \
     | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## TL;DR")) | select(.body | test("## Disposition"))] | first | .id // 0')
+
+  # ── Pre-agent draft promotion (timeout safety net) ──────────────────────
+  # A previous triage run may have posted first-pass drafts (post-early
+  # rule) but timed out before triage.sh could promote them — e.g. the
+  # GitHub triage job has a 10-min timeout, and the primary provider
+  # looping + fallback can exhaust it before the post-agent promotion
+  # (below) ever runs. The drafts sit forever at boucle:triage with no
+  # final, and on GitHub the doctor's workflow_dispatch re-trigger was
+  # also skipped (fixed separately in the workflow).
+  #
+  # Promote any existing unprocessed drafts BEFORE running the agent, so
+  # a timeout on THIS run cannot strand the issue again. The agent still
+  # runs afterwards and may post a richer triage comment that supersedes
+  # the promoted draft; if it times out, the promoted draft's disposition
+  # is already parsed and the issue moves forward.
+  PRE_PROMOTED_DISPOSITION=""
+  PRE_PROMOTED_SIZE=""
+  PRE_PROMOTED_NOTE_ID=0
+  PRE_DRAFT_NOTE_ID=$(forge_issue_notes "$IID" 2> /dev/null \
+    | jq -r --argjson pre "$PRE_RUN_TRIAGE_ID" \
+      '[.[] | select(.body | contains("<!-- boucle:draft role=triage -->")) | select(.body | test("## Disposition")) | select(.id > $pre)] | first | .id // ""' 2> /dev/null || echo "")
+  if [ -n "$PRE_DRAFT_NOTE_ID" ]; then
+    PRE_DRAFTED_COMMENT=$(forge_issue_note_get "$IID" "$PRE_DRAFT_NOTE_ID" 2> /dev/null \
+      | jq -r '.body // empty' 2> /dev/null)
+    if [ -n "$PRE_DRAFTED_COMMENT" ]; then
+      echo "[boucle] Pre-agent: promoting existing draft (note $PRE_DRAFT_NOTE_ID) to triage — safety net for timeout."
+      PRE_DRAFTED_COMMENT=$(printf '%s' "$PRE_DRAFTED_COMMENT" | sed 's|<!-- boucle:draft role=triage -->|<!-- boucle:triage v=1 -->|')
+      if forge_issue_note_update "$IID" "$PRE_DRAFT_NOTE_ID" "$PRE_DRAFTED_COMMENT"; then
+        PRE_PROMOTED_NOTE_ID="$PRE_DRAFT_NOTE_ID"
+        PRE_PROMOTED_DISPOSITION=$(echo "$PRE_DRAFTED_COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
+        PRE_PROMOTED_SIZE=$(echo "$PRE_DRAFTED_COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
+        if [ -z "$PRE_PROMOTED_SIZE" ]; then
+          PRE_PROMOTED_SIZE=$(echo "$PRE_DRAFTED_COMMENT" | grep -oiE 'Size[[:space:]]+[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
+        fi
+        echo "[boucle] Pre-agent: promoted draft disposition=${PRE_PROMOTED_DISPOSITION:-?} size=${PRE_PROMOTED_SIZE:-?}."
+        # Advance PRE_RUN_TRIAGE_ID past the promoted note so the post-
+        # agent COMMENT query doesn't re-find it (it requires ## TL;DR
+        # which a draft lacks, but be explicit — the promoted note is
+        # now a triage note and could match if the agent posts ## TL;DR
+        # in a SEPARATE note that the jq `first` skips over).
+        PRE_RUN_TRIAGE_ID="$PRE_DRAFT_NOTE_ID"
+      else
+        echo "[boucle] Pre-agent: draft promotion failed (note update rejected for note $PRE_DRAFT_NOTE_ID)." >&2
+      fi
+    fi
+  fi
+
+  # Run the agent. Use `|| rc=$?` to suppress set -e so the script
+  # continues to comment parsing even if the agent exits non-zero
+  # (step limit, crash, timeout, etc.).
   rc=0
   $BOUCLE_HOME/bin/jc triage || rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -333,6 +380,18 @@ HELP_EOF
       printf '<!-- boucle:obligations v=1 -->\n'
       printf '%s\n' "$OBLIGATIONS_TEXT"
     } > "$BOUCLE_STATE_CACHE/${BOUCLE_ISSUE}/obligations.md" 2> /dev/null || true
+  fi
+
+  # If no NEW triage comment was posted by this run (agent crashed, hit
+  # step limit, or decided no new triage was needed), fall back to the
+  # pre-agent promoted disposition (if we promoted a draft before the
+  # agent ran). This is the timeout safety net: the agent timed out, but
+  # the promoted draft's disposition is already parsed and the issue can
+  # move forward instead of staying stuck at boucle:triage forever.
+  if [ -z "$DISPOSITION" ] && [ -n "$PRE_PROMOTED_DISPOSITION" ]; then
+    echo "[boucle] Post-agent parsing found no disposition — using pre-agent promoted draft (disposition=$PRE_PROMOTED_DISPOSITION)."
+    DISPOSITION="$PRE_PROMOTED_DISPOSITION"
+    SIZE="${SIZE:-$PRE_PROMOTED_SIZE}"
   fi
 
   # If no NEW triage comment was posted by this run (agent crashed, hit

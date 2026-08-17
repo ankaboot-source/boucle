@@ -302,7 +302,18 @@ jobs:
     needs: dispatch
     runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
     continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
-    if: needs.dispatch.outputs.issue-iid != ''
+    # The doctor re-triggers triage via workflow_dispatch with an empty
+    # BOUCLE_ROLE (chain_to_role "$IID" ""). On GitLab, triage runs on
+    # `trigger` with empty BOUCLE_ROLE; on GitHub, dispatch doesn't run on
+    # workflow_dispatch, so `needs: dispatch` would skip triage. `always()`
+    # lets triage evaluate its `if` even when dispatch was skipped, and the
+    # workflow_dispatch branch lets the doctor's re-trigger reach triage
+    # (GitHub parity with GitLab's `$CI_PIPELINE_SOURCE == "trigger"` rule).
+    if: |
+      always() && (
+        needs.dispatch.outputs.issue-iid != ''
+        || (github.event_name == 'workflow_dispatch' && (github.event.inputs.BOUCLE_ROLE == '' || github.event.inputs.BOUCLE_ROLE == 'triage'))
+      )
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -327,7 +338,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Triage
         env:
-          BOUCLE_ISSUE: ${{ needs.dispatch.outputs.issue-iid }}
+          BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE || needs.dispatch.outputs.issue-iid }}
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
           [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
