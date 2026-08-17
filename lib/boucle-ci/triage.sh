@@ -45,6 +45,15 @@ boucle_ci_triage() {
   fi
   export BOUCLE_ISSUE="$IID"
 
+  # ── Pickup acknowledgement (👀) ───────────────────────────────────
+  # Triage has the issue. Award 👀 NOW — before attachment fetch, image
+  # description and the agent run, all of which take minutes — so the
+  # human gets immediate feedback that their issue was picked up rather
+  # than waiting on the triage comment to know anything happened.
+  # Best-effort and idempotent (see ack_issue_taken); a re-triage
+  # re-awards nothing.
+  ack_issue_taken "$IID"
+
   # ── No-key detection (freeride mode) ──────────────────────────────
   # If no LLM configuration is available (no BOUCLE_LLM_BASE_URL and no
   # freeride provider key), post a help message explaining how to set up

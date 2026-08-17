@@ -199,6 +199,29 @@ boucle_ci_dispatch() {
     dispatch_noop
   fi
 
+  # ── Anti-loop: the pickup acknowledgement (👀) ────────────────────
+  # Triage awards 👀 on the issue it picks up (ack_issue_taken). On a
+  # project whose hook carries emoji_events (bin/setup writes it false,
+  # but an existing hook may have it on) that award fires an emoji webhook
+  # on an issue still labelled boucle:triage — and that label routes to
+  # triage unconditionally, so the loop would re-triage its own
+  # acknowledgement. The identity guard below cannot cover it: in
+  # mono-user mode ACTOR is the human on every event, boucle's own writes
+  # included.
+  #
+  # Issue-level 👀 never carries routing meaning from a human either (the
+  # spec-approval emojis are thumbsup/heart/rocket/tada on a NOTE), so
+  # discarding the event costs nothing.
+  if [ "$OBJECT_KIND" = "emoji" ]; then
+    EMOJI_AWARDABLE=$(jq -r '.object_attributes.awardable_type // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+    EMOJI_AWARDED=$(jq -r '.object_attributes.name // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+    if [ "$EMOJI_AWARDABLE" = "Issue" ] \
+      && [ "$(forge_reaction_canonical "$EMOJI_AWARDED")" = "${BOUCLE_ACK_EMOJI:-eyes}" ]; then
+      echo "dispatch: ${BOUCLE_ACK_EMOJI:-eyes} award on an issue — boucle's pickup acknowledgement, skipping"
+      dispatch_noop
+    fi
+  fi
+
   # ── Anti-loop: bot-originated events, by identity ─────────────────
   # Only meaningful when boucle has an account of its own. In mono-user
   # mode ACTOR is the human on EVERY event — the loop's and the human's

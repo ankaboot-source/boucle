@@ -643,6 +643,35 @@ boucle_branch_name() {
   echo "boucle/$iid-$slug"
 }
 
+# ── Pickup acknowledgement ──────────────────────────────────────────────
+
+# BOUCLE_ACK_EMOJI — the canonical reaction boucle awards to an issue the
+# moment a role takes charge of it. "eyes" (👀) reads the same on every
+# forge: seen, picked up, being worked on. It is deliberately OUTSIDE the
+# spec-approval set (thumbsup/heart/rocket/tada) so acknowledging an issue
+# can never be mistaken for approving its spec.
+#
+# dispatch mirrors this name in its anti-loop guard (the award fires an
+# emoji webhook of its own) — keep the two in sync.
+BOUCLE_ACK_EMOJI="eyes"
+
+# ack_issue_taken <iid>
+#
+# Award 👀 on the issue so the human sees, without opening it, that the
+# loop has picked their issue up. The first visible sign of life otherwise
+# is the triage comment, minutes later, once the agent has run.
+#
+# Idempotent by construction: re-awarding an existing reaction is rejected
+# by both forges (and swallowed by the best-effort forge_* contract), so a
+# re-triage adds nothing and — crucially — fires no second webhook.
+# Never blocks the loop: a failed award is cosmetic, the work proceeds.
+ack_issue_taken() {
+  local iid="$1"
+  [ -n "$iid" ] || return 0
+  command -v forge_issue_add_reaction > /dev/null 2>&1 || return 0
+  forge_issue_add_reaction "$iid" "$BOUCLE_ACK_EMOJI" 2> /dev/null || true
+}
+
 # set_boucle_label <iid> <new_detail_label> <gross_status_label>
 #
 # Preserve non-boucle: labels, strip old boucle: detail + boucle::status::*
