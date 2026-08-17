@@ -851,11 +851,34 @@ boucle_ci_dispatch() {
     # removed — authors now approve by replying instead. Trigger the
     # worker — it will relabel to boucle:working (replacing all boucle:
     # labels, including the stale boucle:spec-review). We do NOT strip
-    # boucle:spec-review here. dispatch_human_actor handles mono-user
-    # mode (where the human IS the bot account — issue #35).
-    if [ "$OBJECT_KIND" = "note" ] && dispatch_human_actor; then
+    # boucle:spec-review here.
+    # The spec is the AUTHOR's to approve, not any passer-by's: it is their
+    # issue, and the criteria commit them. resolve_reporter_username walks
+    # the parent chain, so a bot-created sub-issue resolves to the human who
+    # owns the parent.
+    #
+    # An EMPTY lookup means "unknown", never "not the author" — denying on an
+    # API hiccup would stall the loop, and the status quo it falls back to is
+    # the previous behaviour, not a new risk.
+    SPEC_AUTHOR=$(resolve_reporter_username "$IID" 2> /dev/null || echo "")
+    spec_approver_ok() {
+      # dispatch_human_actor handles mono-user mode (where the human IS the
+      # bot account — issue #35).
+      dispatch_human_actor || return 1
+      [ -z "$SPEC_AUTHOR" ] && {
+        echo "WARN: could not resolve the author of #$IID — accepting approval from any non-bot actor (previous behaviour)"
+        return 0
+      }
+      [ "$ACTOR" = "$SPEC_AUTHOR" ] && return 0
+      # Silently swallowing a colleague's thumbs-up is the confusing failure
+      # here: say who has to act, once.
+      echo "[boucle] spec approval from @$ACTOR ignored — #$IID is @$SPEC_AUTHOR's to approve"
+      forge_issue_note "$IID" "👀 @$ACTOR — merci, mais la validation du spec revient à l'auteur de l'issue (@$SPEC_AUTHOR). La boucle attend sa réponse." 2> /dev/null || true
+      return 1
+    }
+    if [ "$OBJECT_KIND" = "note" ] && spec_approver_ok; then
       SHOULD_WORK=true
-    elif [ "$OBJECT_KIND" = "emoji" ] && dispatch_human_actor; then
+    elif [ "$OBJECT_KIND" = "emoji" ] && spec_approver_ok; then
       EMOJI_NAME=$(jq -r '.object_attributes.name // empty' "$BOUCLE_TRIGGER_PAYLOAD")
       EMOJI_ACTION=$(jq -r '.object_attributes.action // empty' "$BOUCLE_TRIGGER_PAYLOAD")
       AWARDABLE_TYPE=$(jq -r '.object_attributes.awardable_type // empty' "$BOUCLE_TRIGGER_PAYLOAD")
