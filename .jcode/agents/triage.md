@@ -222,6 +222,8 @@ The CI sees the final marker + `## Disposition` and acts immediately — it sets
   <analysis>
   ## Draft acceptance criteria
   - [ ] <criterion>
+  ## Non-goals
+  - <what this change must NOT do>
   ## Classification
   Size: S | M | L
   ## Questions
@@ -238,10 +240,16 @@ The CI sees the final marker + `## Disposition` and acts immediately — it sets
 5. **Post your final triage comment** with the `<!-- boucle:triage v=1 -->` marker. If your refined analysis changes the disposition or criteria, the CI automatically collapses duplicate triage comments from the same run, replacing the earlier draft with your final version — so only the final analysis remains visible.
 6. Understand what the issue is actually asking for — restate it in your own words (in the Analysis section), structured via the four problem-framing lenses (§1: user segment, pain points, business context, success metrics).
 7. Draft acceptance criteria that are **verifiable by a machine or by looking at the rendered page**, using the Given/When/Then format (§2) with Happy path / Edge case / Error state / Non-functional labels.
-8. Classify the size: S (one file/component), M (a few files), L (needs splitting).
-9. Identify any **blocking questions** — derived from the 7 clarifying dimensions (§4: target user, problem, workaround, success, constraints, scope, prior art). **Cross-check each question against the Prior discussion and the charter files: if it is already answered there, it is NOT a blocking question — record the answer in Analysis instead.**
-10. If the issue is too large (size L) AND you have no blocking questions, flag it for splitting.
-11. **Run the self-review checklist (§3)** before posting your final `<!-- boucle:triage v=1 -->` comment. If any check fails, fix the comment first. A spec with weasel words is not READY.
+8. **Write the `## Non-goals` section.** Acceptance criteria say what must become true; non-goals say what must stay false. Without them the worker is graded only on what it must satisfy, so **the cheapest way to satisfy a criterion wins** — a narrow special-case that ticks the box and behaves badly everywhere else. And the reviewer has no basis to FAIL work that satisfies every criterion while doing something nobody wanted.
+
+   A good non-goal names something a reasonable implementer might actually do: "do not change the data model", "do not add a runtime dependency", "do not touch the auth flow", "do not refactor the surrounding module". Two to four is usually right.
+
+   A non-goal is NOT a criterion phrased negatively ("the page must not be slow" is a Non-functional criterion, not a non-goal). If you have nothing real to exclude, write `- (none)` rather than padding.
+
+9. Classify the size: S (one file/component), M (a few files), L (needs splitting).
+10. Identify any **blocking questions** — derived from the 7 clarifying dimensions (§4: target user, problem, workaround, success, constraints, scope, prior art). **Cross-check each question against the Prior discussion and the charter files: if it is already answered there, it is NOT a blocking question — record the answer in Analysis instead.**
+11. If the issue is too large (size L) AND you have no blocking questions, flag it for splitting.
+12. **Run the self-review checklist (§3)** before posting your final `<!-- boucle:triage v=1 -->` comment. If any check fails, fix the comment first. A spec with weasel words is not READY.
 
 **Never spend your whole budget exploring before posting. If you explore first, keep it tight and post the moment you have enough for a conservative first-pass draft.**
 
@@ -299,6 +307,10 @@ Post your **final triage comment** on the issue with this format:
 - **Truths** — <invariant that must hold after implementation (e.g. "page loads in <2s on 3G")>
 - **Artifacts** — <concrete deliverable (e.g. "src/pages/right-to-resist.astro", "public/logo.png")>
 - **Key links** — <critical relationship (e.g. "new page linked from /navbar", "logo referenced in Layout.astro")>
+
+## Non-goals
+- <something a reasonable implementer might do that this change must NOT do>
+- <a boundary: a file, subsystem, dependency or behaviour to leave alone>
 
 ## Fichiers impactés
 📁 `<path1>`, `<path2>`
