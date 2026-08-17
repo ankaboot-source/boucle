@@ -101,6 +101,12 @@ for dir in "$STATE_DIR/attachments" "$STATE_DIR/mr-attachments"; do
   while IFS= read -r -d '' f; do
     mime=$(file --mime-type -b "$f" 2> /dev/null || echo "")
     case "$mime" in
+      # SVG is text/XML, not a raster image. The vision model produces a
+      # lossy description and bin/jc then strips the path, so the agent
+      # can neither Read nor embed the actual markup (consumer issue #36:
+      # triage preview used placeholder icons instead of the shared SVGs).
+      # Keep SVGs out of the vision pipeline — agents read them as text.
+      image/svg+xml) continue ;;
       image/*) IMAGE_FILES+=("$f") ;;
     esac
   done < <(find "$dir" -maxdepth 1 -type f -print0 2> /dev/null || true)
