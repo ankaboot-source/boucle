@@ -81,6 +81,25 @@ EOF
   [ "$status" -eq 2 ]
 }
 
+@test "an explicit bad path does not lecture about consumer sites" {
+  # The caller knows what they asked for — only a BARE run gets the
+  # orientation text.
+  run bash bin/check-design-charter "${CHARTER_DIR}/missing.md"
+  refute_output --partial "CONSUMER site"
+}
+
+@test "a bare run with no charter explains this is a consumer-site tool" {
+  # The engine keeps no DESIGN.md of its own (boucle ships no UI), so a
+  # bare run in the engine checkout always lands here. A plain "cannot
+  # read charter: DESIGN.md" reads like a deleted file to restore.
+  cd "${CHARTER_DIR}"
+  run bash "${BATS_TEST_DIRNAME}/../bin/check-design-charter"
+  assert_failure
+  [ "$status" -eq 2 ]
+  assert_output --partial "CONSUMER site"
+  assert_output --partial "DESIGN-template.md"
+}
+
 # ── PASS paths ─────────────────────────────────────────────────────────
 
 @test "valid charter passes" {

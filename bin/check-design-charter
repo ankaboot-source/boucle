@@ -23,6 +23,16 @@ set -u
 CHARTER="${1:-${BOUCLE_CHARTER:-DESIGN.md}}"
 if [ ! -r "${CHARTER}" ]; then
   echo "[check-design-charter] ERROR: cannot read charter: ${CHARTER}" >&2
+  # The charter belongs to the CONSUMER site, not to the engine: boucle
+  # ships no UI and keeps no DESIGN.md of its own. Running this bare from
+  # the engine checkout therefore always lands here — say so, instead of
+  # leaving a bare "cannot read" that reads like a deleted file to restore.
+  if [ $# -eq 0 ]; then
+    echo "[check-design-charter] No charter path given, and no ${CHARTER} in $(pwd)." >&2
+    echo "[check-design-charter] This validates a CONSUMER site's design charter — pass its path:" >&2
+    echo "[check-design-charter]   bin/check-design-charter path/to/DESIGN.md   (or set BOUCLE_CHARTER)" >&2
+    echo "[check-design-charter] Start one from the template: .jcode/DESIGN-template.md" >&2
+  fi
   exit 2
 fi
 
