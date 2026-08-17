@@ -58,17 +58,23 @@ dispatch_is_github_pr_comment() {
 #
 # In mono-user mode: ALWAYS true. The human IS the bot account, so a bare
 # ACTOR != BOT_USERNAME test discards every human approval and strands the
-# issue at spec-review / needs-info / human forever (issue #35). The
-# agent-marker filter at the top of dispatch already discarded boucle's own
-# notes, and boucle never adds emoji reactions — so any event that reached
-# routing is human by construction.
+# issue at spec-review / needs-info / human forever (issue #35). Any event
+# that reaches routing is human by construction — but ONLY because the
+# guards above hold that line: the agent-marker filter discards boucle's own
+# notes, and the ack filter discards the one reaction boucle writes (the 👀
+# pickup acknowledgement from ack_issue_taken). Boucle emits no other
+# reaction. Anything that changes either of those — a new bot-written
+# reaction, a relaxed filter — puts a boucle event back on this path, where
+# mono-user mode reads it as human and #35 returns in a new costume.
 #
 # In bot mode: actor != BOUCLE_BOT_USERNAME. The top-level guard already
 # filtered bot events, but this is defense-in-depth for the merge exception
 # and any future event class that slips past the guard.
 #
 # Takes an optional actor argument (for testability); falls back to the
-# global ACTOR set at the top of boucle_ci_dispatch.
+# global ACTOR set at the top of boucle_ci_dispatch. Every in-file call site
+# uses the global, hence the SC2120 waiver.
+# shellcheck disable=SC2120
 dispatch_human_actor() {
   boucle_mono_user && return 0
   [ "${1:-${ACTOR:-}}" != "${BOUCLE_BOT_USERNAME:-}" ]
