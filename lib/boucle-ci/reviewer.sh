@@ -141,7 +141,7 @@ boucle_ci_reviewer() {
   # human amendments over the frozen criteria.
   export BOUCLE_REVIEWER_FEEDBACK
   BOUCLE_REVIEWER_FEEDBACK=$(forge_mr_notes "$MR_IID" \
-    | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | .[]' 2> /dev/null || echo "")
+    | jq -r '[.[] | select(.system == false or .system == null) | select((.body // "") | contains("<!-- boucle:state") | not) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | .[]' 2> /dev/null || echo "")
 
   # Detect empty MR (worker shipped zero commits — base_sha == head_sha).
   # Re-trigger the worker instead of running the reviewer uselessly.
@@ -266,7 +266,7 @@ boucle_ci_reviewer() {
   # the issue note — only the MR notes and issue body).
   export BOUCLE_ISSUE_NOTES
   BOUCLE_ISSUE_NOTES=$(forge_issue_notes "$BOUCLE_ISSUE" \
-    | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | reverse | .[]' 2> /dev/null || echo "")
+    | jq -r '[.[] | select(.system == false or .system == null) | select((.body // "") | contains("<!-- boucle:state") | not) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | reverse | .[]' 2> /dev/null || echo "")
   if [ -z "$BOUCLE_ISSUE_NOTES" ]; then
     echo "[boucle] INFO: no prior notes for issue #$BOUCLE_ISSUE."
   fi

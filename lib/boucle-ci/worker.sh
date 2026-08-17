@@ -33,8 +33,23 @@ boucle_ci_worker() {
       mkdir -p "$ISSUE_STATE_CACHE"
       cp -a ".boucle-state/$BOUCLE_ISSUE/." "$ISSUE_STATE_CACHE/" 2> /dev/null || true
     fi
+    # And to the forge, which is the authority. The cache dies with an
+    # ephemeral runner; the note does not.
+    boucle_state_save "$BOUCLE_ISSUE" || true
   }
   trap save_state_cache EXIT
+
+  # Cold cache (fresh or ephemeral runner) — recover from the issue note
+  # BEFORE anything reads last-outcome or iterations.md. On a warm cache
+  # this is skipped: the note said the same thing, so there is nothing to
+  # reconcile and no API call to pay for.
+  if [ ! -s "$ISSUE_STATE_CACHE/last-outcome" ] && [ ! -s "$ISSUE_STATE_CACHE/iterations.md" ]; then
+    boucle_state_restore "$BOUCLE_ISSUE" || true
+    if [ -s ".boucle/$BOUCLE_ISSUE/last-outcome" ] || [ -s ".boucle/$BOUCLE_ISSUE/iterations.md" ]; then
+      mkdir -p "$ISSUE_STATE_CACHE"
+      cp -a ".boucle/$BOUCLE_ISSUE/." "$ISSUE_STATE_CACHE/" 2> /dev/null || true
+    fi
+  fi
 
   # ── Closed-issue guard ───────────────────────────────────────────
   local worker_issue_state
@@ -211,7 +226,7 @@ EOF
   mr_for_feedback=$(forge_mr_lookup_by_branch "boucle/$BOUCLE_ISSUE" "opened" 2> /dev/null || echo "")
   if [ -n "$mr_for_feedback" ]; then
     BOUCLE_REVIEWER_FEEDBACK=$(forge_mr_notes "$mr_for_feedback" \
-      | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | .[]' 2> /dev/null || echo "")
+      | jq -r '[.[] | select(.system == false or .system == null) | select((.body // "") | contains("<!-- boucle:state") | not) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | .[]' 2> /dev/null || echo "")
   fi
 
   # ── Build feedback channel: inject previous iteration's build error ──
@@ -245,7 +260,7 @@ EOF
 
   export BOUCLE_ISSUE_NOTES
   BOUCLE_ISSUE_NOTES=$(forge_issue_notes "$BOUCLE_ISSUE" \
-    | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | reverse | .[]' 2> /dev/null || echo "")
+    | jq -r '[.[] | select(.system == false or .system == null) | select((.body // "") | contains("<!-- boucle:state") | not) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | reverse | .[]' 2> /dev/null || echo "")
   if [ -z "$BOUCLE_ISSUE_NOTES" ]; then
     echo "[boucle] INFO: no prior notes for issue #$BOUCLE_ISSUE (first worker run)."
   fi
