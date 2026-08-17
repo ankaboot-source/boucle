@@ -172,7 +172,7 @@ guard_decision() {
 
 @test "bot mode: a bot-authored event is discarded" {
   unset BOUCLE_MONO_USER
-  run guard_decision "up-bot" "update" ""
+  BOUCLE_BOT_USERNAME=up-bot run guard_decision "up-bot" "update" ""
   assert_output "1"
 }
 
