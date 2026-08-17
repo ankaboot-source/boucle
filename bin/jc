@@ -662,7 +662,11 @@ fi
 # (PDF, zip, ...) keep their paths — they are not readable as images and
 # must still be inspectable. The ship-as-asset case is covered by the
 # prompt text below (cp a described image when the issue says "use this
-# file as X").
+# file as X"). SVG is EXCLUDED from stripping: it is text/XML, not a
+# raster image, so the agent MUST be able to Read and embed its markup
+# (triage preview.html mockups, worker public/ assets). See consumer
+# issue #36 — shared SVGs were described + stripped, forcing the triage
+# to render placeholder icons instead of the real assets.
 if [ -n "$BOUCLE_IMAGE_DESCRIPTIONS" ]; then
   strip_image_paths() {
     local paths="${1:-}"
@@ -670,8 +674,11 @@ if [ -n "$BOUCLE_IMAGE_DESCRIPTIONS" ]; then
     local p
     for p in $paths; do
       case "$p" in
-        *.png | *.jpg | *.jpeg | *.gif | *.webp | *.avif | *.bmp | *.svg)
+        *.png | *.jpg | *.jpeg | *.gif | *.webp | *.avif | *.bmp)
           : # described as text above — strip from agent-visible paths
+          ;;
+        *.svg)
+          kept="$kept $p" # text/XML — keep readable so the agent can embed it
           ;;
         *)
           kept="$kept $p"
@@ -1201,6 +1208,7 @@ Draft file hygiene: if you write your draft verdict to a file, use \`\$BOUCLE_VE
     echo "- CRITICAL: Do NOT use the Read tool on ANY binary file (images/videos/PDFs/ZIPs/fonts). You are a TEXT-ONLY model: reading a binary makes the API respond '400: this model does not support image input' and the ENTIRE worker run CRASHES with zero commits — the iteration is wasted and the issue stalls. Use \`file\` for metadata, never \`Read\` for content."
     echo "- If it's a source asset (logo, photo, visual to display), copy it into the build tree (e.g. \`cp <path> public/<name>\`) and reference it in your code."
     echo "- If it's a mockup/screenshot, use it as context for the implementation (dimensions, layout hints)."
+    echo "- SVG is text (XML), not a binary image: you CAN \`Read\` it and embed its markup directly — inline it in an HTML mockup (e.g. triage preview.html) or copy it into the build tree. When the issue shares SVG assets (icons, logos), reuse their actual markup rather than generating placeholder visuals."
   fi
 
   # Append MR attachment paths (if any) so the agent knows how to handle them.
@@ -1217,6 +1225,7 @@ Draft file hygiene: if you write your draft verdict to a file, use \`\$BOUCLE_VE
     echo "- CRITICAL: Do NOT use the Read tool on ANY binary file (images/videos/PDFs/ZIPs/fonts). You are a TEXT-ONLY model: reading a binary makes the API respond '400: this model does not support image input' and the ENTIRE worker run CRASHES with zero commits — the iteration is wasted and the issue stalls. Use \`file\` for metadata, never \`Read\` for content."
     echo "- If the human explicitly says to use the file as an asset (e.g. 'use this image', 'with the attached visual', 'séparation visuelle avec le visuel ci-joint'), copy it into the build tree (e.g. \`cp <path> public/<name>\`) and reference it in your code."
     echo "- If it's a mockup/screenshot, use it as context for addressing the feedback (dimensions, layout hints)."
+    echo "- SVG is text (XML), not a binary image: you CAN \`Read\` it and embed its markup directly — inline it in an HTML mockup or copy it into the build tree. Reuse shared SVG assets rather than generating placeholder visuals."
   fi
 }
 

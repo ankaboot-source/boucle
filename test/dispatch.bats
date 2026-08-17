@@ -163,7 +163,7 @@ guard_decision() {
   if [ -n "$note_body" ] && has_agent_marker "$note_body"; then
     skipped=1
   elif ! boucle_mono_user; then
-    if [ "$actor" = "${BOUCLE_BOT_USERNAME:-up-bot}" ] && [ "$mr_action" != "merge" ]; then
+    if [ "$actor" = "${BOUCLE_BOT_USERNAME:-}" ] && [ "$mr_action" != "merge" ]; then
       skipped=1
     fi
   fi
@@ -172,7 +172,7 @@ guard_decision() {
 
 @test "bot mode: a bot-authored event is discarded" {
   unset BOUCLE_MONO_USER
-  run guard_decision "up-bot" "update" ""
+  BOUCLE_BOT_USERNAME=up-bot run guard_decision "up-bot" "update" ""
   assert_output "1"
 }
 
@@ -252,6 +252,57 @@ guard_decision() {
 @test "dispatch preserves the MR merge exception" {
   run grep -q 'MR_ACTION" != "merge"' lib/boucle-ci/dispatch.sh
   assert_success
+}
+
+# ── dispatch_human_actor: mono-user-aware human detection ─────────────
+# The per-block actor checks (spec-review, needs-info, human routing)
+# must not use a bare ACTOR != BOT_USERNAME test — in mono-user mode
+# the human IS the bot account, so that test discards every human
+# approval/reply and strands the issue at spec-review / needs-info /
+# human forever (issue #35). The marker check at the top already
+# filters boucle's own notes; dispatch_human_actor defers to it in
+# mono-user mode.
+
+@test "dispatch_human_actor is defined" {
+  run grep -q '^dispatch_human_actor()' lib/boucle-ci/dispatch.sh
+  assert_success
+}
+
+@test "dispatch_human_actor: mono-user human routes (the #35 bug)" {
+  BOUCLE_MONO_USER=true BOUCLE_BOT_USERNAME=alice \
+    run dispatch_human_actor "alice"
+  assert_success
+}
+
+@test "dispatch_human_actor: bot mode bot actor is filtered" {
+  unset BOUCLE_MONO_USER
+  BOUCLE_BOT_USERNAME=boucle-bot run dispatch_human_actor "boucle-bot"
+  assert_failure
+}
+
+@test "dispatch_human_actor: bot mode human actor routes" {
+  unset BOUCLE_MONO_USER
+  BOUCLE_BOT_USERNAME=boucle-bot run dispatch_human_actor "alice"
+  assert_success
+}
+
+@test "dispatch_human_actor: mono-user with empty BOUCLE_BOT_USERNAME routes" {
+  # No consumer-specific default — if unset, it's unset.
+  BOUCLE_MONO_USER=true BOUCLE_BOT_USERNAME="" \
+    run dispatch_human_actor "alice"
+  assert_success
+}
+
+@test "spec-review / needs-info / human routing use dispatch_human_actor" {
+  # A bare [ "$ACTOR" != ... ] on these paths is the bug that stranded #35.
+  # At least 3 call sites (needs-info, spec-review, human).
+  count=$(grep -c 'dispatch_human_actor' lib/boucle-ci/dispatch.sh)
+  [ "$count" -ge 3 ]
+}
+
+@test "dispatch.sh has no up-bot default (consumer-specific name)" {
+  run grep -n 'up-bot' lib/boucle-ci/dispatch.sh
+  assert_failure
 }
 
 # ── Marker plumbing: every posting path stamps ────────────────────────

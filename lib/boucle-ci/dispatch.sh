@@ -50,6 +50,30 @@ dispatch_is_github_pr_comment() {
   [ "$(jq -r '.issue.pull_request != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo false)" = "true" ]
 }
 
+# dispatch_human_actor [actor]
+#
+# True when the event's actor is a human (not boucle itself). Used by the
+# per-block routing checks (needs-info, spec-review, human) that gate on
+# "a human replied / reacted".
+#
+# In mono-user mode: ALWAYS true. The human IS the bot account, so a bare
+# ACTOR != BOT_USERNAME test discards every human approval and strands the
+# issue at spec-review / needs-info / human forever (issue #35). The
+# agent-marker filter at the top of dispatch already discarded boucle's own
+# notes, and boucle never adds emoji reactions — so any event that reached
+# routing is human by construction.
+#
+# In bot mode: actor != BOUCLE_BOT_USERNAME. The top-level guard already
+# filtered bot events, but this is defense-in-depth for the merge exception
+# and any future event class that slips past the guard.
+#
+# Takes an optional actor argument (for testability); falls back to the
+# global ACTOR set at the top of boucle_ci_dispatch.
+dispatch_human_actor() {
+  boucle_mono_user && return 0
+  [ "${1:-${ACTOR:-}}" != "${BOUCLE_BOT_USERNAME:-}" ]
+}
+
 # dispatch_noop
 #
 # Exit 0 for a LEGITIMATE dispatch no-op (closed-issue guard, bot-event
@@ -236,7 +260,7 @@ boucle_ci_dispatch() {
   # catchup never runs and the issue stays stuck at boucle:merging (the
   # merger's e2e close path can fail, leaving no fallback).
   if ! boucle_mono_user; then
-    if [ "$ACTOR" = "${BOUCLE_BOT_USERNAME:-up-bot}" ] && [ "$MR_ACTION" != "merge" ]; then
+    if [ "$ACTOR" = "${BOUCLE_BOT_USERNAME:-}" ] && [ "$MR_ACTION" != "merge" ]; then
       dispatch_noop
     fi
   fi
@@ -430,7 +454,7 @@ boucle_ci_dispatch() {
     # replies and must not trigger the loop — otherwise creating an
     # issue + assigning the bot in the same form fires BOTH an `issue`
     # webhook (open → triage) AND a `note` webhook (system "assigned
-    # to @up-bot" → triage again), double-triggering triage. The
+    # to @<bot>" → triage again), double-triggering triage. The
     # BOT_JUST_ASSIGNED path already handles assignment via the issue
     # update webhook, so the system note is pure redundancy. Emoji
     # events have no `system` field and are unaffected.
@@ -527,8 +551,8 @@ boucle_ci_dispatch() {
           GUARD_BOT_IN_CURRENT=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.current // [] | map(.id | tostring) | index($bid) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || GUARD_BOT_IN_CURRENT=false
           GUARD_BOT_IN_PREVIOUS=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.previous // [] | map(.id | tostring) | index($bid) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || GUARD_BOT_IN_PREVIOUS=false
         else
-          GUARD_BOT_IN_CURRENT=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.current // [] | map(.username) | index($bname) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || GUARD_BOT_IN_CURRENT=false
-          GUARD_BOT_IN_PREVIOUS=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.previous // [] | map(.username) | index($bname) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || GUARD_BOT_IN_PREVIOUS=false
+          GUARD_BOT_IN_CURRENT=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-}" '.changes.assignees.current // [] | map(.username) | index($bname) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || GUARD_BOT_IN_CURRENT=false
+          GUARD_BOT_IN_PREVIOUS=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-}" '.changes.assignees.previous // [] | map(.username) | index($bname) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || GUARD_BOT_IN_PREVIOUS=false
         fi
         if [ "$GUARD_BOT_IN_CURRENT" = "true" ] && [ "$GUARD_BOT_IN_PREVIOUS" != "true" ]; then
           GUARD_BOT_ASSIGNED=true
@@ -650,9 +674,9 @@ boucle_ci_dispatch() {
       BOT_IN_CURRENT=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.current // [] | map(.id | tostring) | index($bid) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
       BOT_IN_PREVIOUS=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.previous // [] | map(.id | tostring) | index($bid) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
     else
-      # Fallback: detect by bot username "up-bot" when BOUCLE_BOT_ID is unset
-      BOT_IN_CURRENT=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.current // [] | map(.username) | index($bname) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
-      BOT_IN_PREVIOUS=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '.changes.assignees.previous // [] | map(.username) | index($bname) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+      # Fallback: detect by bot username when BOUCLE_BOT_ID is unset
+      BOT_IN_CURRENT=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-}" '.changes.assignees.current // [] | map(.username) | index($bname) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+      BOT_IN_PREVIOUS=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-}" '.changes.assignees.previous // [] | map(.username) | index($bname) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
     fi
     if [ "$BOT_IN_CURRENT" = "true" ] && [ "$BOT_IN_PREVIOUS" != "true" ]; then
       BOT_JUST_ASSIGNED=true
@@ -693,13 +717,14 @@ boucle_ci_dispatch() {
   if echo "$LABELS" | grep -q "boucle:triage"; then
     SHOULD_TRIAGE=true
   elif echo "$LABELS" | grep -q "boucle:needs-info"; then
-    # Re-trigger on author reply (note event by non-bot) OR on emoji
+    # Re-trigger on author reply (note event by a human) OR on emoji
     # reaction (thumbsup/heart/rocket/tada) on a bot note — the user
     # signals they've taken action (e.g. added an API key after a no-key
-    # or quota-exhausted help message).
-    if [ "$OBJECT_KIND" = "note" ] && [ "$ACTOR" != "${BOUCLE_BOT_USERNAME:-up-bot}" ]; then
+    # or quota-exhausted help message). dispatch_human_actor handles
+    # mono-user mode (where the human IS the bot account).
+    if [ "$OBJECT_KIND" = "note" ] && dispatch_human_actor; then
       SHOULD_TRIAGE=true
-    elif [ "$OBJECT_KIND" = "emoji" ] && [ "$ACTOR" != "${BOUCLE_BOT_USERNAME:-up-bot}" ]; then
+    elif [ "$OBJECT_KIND" = "emoji" ] && dispatch_human_actor; then
       EMOJI_NAME=$(jq -r '.object_attributes.name // empty' "$BOUCLE_TRIGGER_PAYLOAD")
       EMOJI_ACTION=$(jq -r '.object_attributes.action // empty' "$BOUCLE_TRIGGER_PAYLOAD")
       AWARDABLE_TYPE=$(jq -r '.object_attributes.awardable_type // empty' "$BOUCLE_TRIGGER_PAYLOAD")
@@ -738,10 +763,11 @@ boucle_ci_dispatch() {
     # removed — authors now approve by replying instead. Trigger the
     # worker — it will relabel to boucle:working (replacing all boucle:
     # labels, including the stale boucle:spec-review). We do NOT strip
-    # boucle:spec-review here.
-    if [ "$OBJECT_KIND" = "note" ] && [ "$ACTOR" != "${BOUCLE_BOT_USERNAME:-up-bot}" ]; then
+    # boucle:spec-review here. dispatch_human_actor handles mono-user
+    # mode (where the human IS the bot account — issue #35).
+    if [ "$OBJECT_KIND" = "note" ] && dispatch_human_actor; then
       SHOULD_WORK=true
-    elif [ "$OBJECT_KIND" = "emoji" ] && [ "$ACTOR" != "${BOUCLE_BOT_USERNAME:-up-bot}" ]; then
+    elif [ "$OBJECT_KIND" = "emoji" ] && dispatch_human_actor; then
       EMOJI_NAME=$(jq -r '.object_attributes.name // empty' "$BOUCLE_TRIGGER_PAYLOAD")
       EMOJI_ACTION=$(jq -r '.object_attributes.action // empty' "$BOUCLE_TRIGGER_PAYLOAD")
       AWARDABLE_TYPE=$(jq -r '.object_attributes.awardable_type // empty' "$BOUCLE_TRIGGER_PAYLOAD")
@@ -758,7 +784,8 @@ boucle_ci_dispatch() {
     # boucle:human are silently ignored (the loop is paused, waiting for
     # a terminal action like MR approval or manual re-assignment). The
     # human expects their comment to be acted on, not ignored.
-    if [ "$OBJECT_KIND" = "note" ] && [ "$ACTOR" != "${BOUCLE_BOT_USERNAME:-up-bot}" ]; then
+    # dispatch_human_actor handles mono-user mode.
+    if [ "$OBJECT_KIND" = "note" ] && dispatch_human_actor; then
       SHOULD_WORK=true
     fi
   elif [ -z "$LABELS" ] || [ "$ACTION" = "open" ]; then

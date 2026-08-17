@@ -630,7 +630,11 @@ NEEDS-SPLIT" > "$LOG"
 # worker run with zero commits — consumer 2026-08, issue #55: 3 iterations
 # shipped nothing because the agent kept Reading the PNGs despite the
 # prompt instruction).
-@test "strip_image_paths: strips image extensions when descriptions exist" {
+# SVG is EXCLUDED from stripping: it is text/XML, not a raster image, so
+# the agent must be able to Read and embed its markup (consumer issue #36:
+# shared SVG icons were described + stripped, forcing the triage preview
+# to render placeholder icons instead of the real assets).
+@test "strip_image_paths: strips image extensions when descriptions exist (SVG kept)" {
   run bash -c '
     strip_image_paths() {
       local paths="${1:-}"
@@ -638,18 +642,20 @@ NEEDS-SPLIT" > "$LOG"
       local p
       for p in $paths; do
         case "$p" in
-          *.png|*.jpg|*.jpeg|*.gif|*.webp|*.avif|*.bmp|*.svg)
+          *.png|*.jpg|*.jpeg|*.gif|*.webp|*.avif|*.bmp)
             : ;;
+          *.svg)
+            kept="$kept $p" ;;
           *)
             kept="$kept $p" ;;
         esac
       done
       echo "$kept" | sed "s/^ //"
     }
-    strip_image_paths "/x/1_hero_full.png /x/2_plan.pdf /x/3_hero_without_object.png /x/mockup.jpg /x/archive.zip"
+    strip_image_paths "/x/1_hero_full.png /x/2_plan.pdf /x/3_hero_without_object.png /x/mockup.jpg /x/archive.zip /x/4_icon.svg"
   '
   assert_success
-  assert_output "/x/2_plan.pdf /x/archive.zip"
+  assert_output "/x/2_plan.pdf /x/archive.zip /x/4_icon.svg"
 }
 
 @test "strip_image_paths: keeps all paths when no descriptions (no-op)" {
@@ -663,8 +669,10 @@ NEEDS-SPLIT" > "$LOG"
       local p
       for p in $paths; do
         case "$p" in
-          *.png|*.jpg|*.jpeg|*.gif|*.webp|*.avif|*.bmp|*.svg)
+          *.png|*.jpg|*.jpeg|*.gif|*.webp|*.avif|*.bmp)
             : ;;
+          *.svg)
+            kept="$kept $p" ;;
           *)
             kept="$kept $p" ;;
         esac
@@ -674,13 +682,13 @@ NEEDS-SPLIT" > "$LOG"
     # Descriptions empty → block skipped → full list kept.
     BOUCLE_IMAGE_DESCRIPTIONS=""
     if [ -z "$BOUCLE_IMAGE_DESCRIPTIONS" ]; then
-      echo "/x/a.png /x/b.pdf"
+      echo "/x/a.png /x/b.pdf /x/c.svg"
     else
-      strip_image_paths "/x/a.png /x/b.pdf"
+      strip_image_paths "/x/a.png /x/b.pdf /x/c.svg"
     fi
   '
   assert_success
-  assert_output "/x/a.png /x/b.pdf"
+  assert_output "/x/a.png /x/b.pdf /x/c.svg"
 }
 
 @test "ensure_jcode_config: respects pre-existing config.toml when no env vars set (local dev)" {
