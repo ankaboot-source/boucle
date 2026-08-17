@@ -52,7 +52,7 @@ VERSION_FILE="$ENGINE_DIR/.boucle-version"
 is_submodule_install() {
   [ "$ENGINE_DIR" = "." ] && return 1
   # A submodule appears in the parent's index as mode 160000 (gitlink).
-  git ls-files --stage "$ENGINE_DIR" 2>/dev/null | grep -q '160000' 2>/dev/null
+  git ls-files --stage "$ENGINE_DIR" 2> /dev/null | grep -q '160000' 2> /dev/null
 }
 SUBMODULE_MODE=""
 if is_submodule_install; then
@@ -88,7 +88,7 @@ curl_with_auth() {
 # PAT (BOUCLE_TOKEN). No-op when BOUCLE_TOKEN is unset (local dev).
 configure_git_push() {
   if [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ] && [ -n "${CI_PROJECT_PATH:-}" ]; then
-    git remote set-url origin "https://${BOUCLE_BOT_USERNAME:-up-bot}:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${CI_PROJECT_PATH}.git" 2>/dev/null
+    git remote set-url origin "https://${BOUCLE_BOT_USERNAME:-up-bot}:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${CI_PROJECT_PATH}.git" 2> /dev/null
   fi
 }
 
@@ -343,18 +343,18 @@ main() {
     if [ "$mode" = "release" ]; then
       submodule_sha=$(curl_with_auth -s \
         "https://api.github.com/repos/${UPSTREAM_REPO}/git/refs/tags/$upstream" \
-        2>/dev/null | jq -r '.object.sha // empty' 2>/dev/null) || submodule_sha="$upstream"
+        2> /dev/null | jq -r '.object.sha // empty' 2> /dev/null) || submodule_sha="$upstream"
       # Annotated tags: the ref points to a tag object, not the commit.
       # Resolve one level: object.type == "tag" → object.url gives the commit.
       if [ -n "$submodule_sha" ]; then
         local obj_type
         obj_type=$(curl_with_auth -s \
           "https://api.github.com/repos/${UPSTREAM_REPO}/git/tags/$submodule_sha" \
-          2>/dev/null | jq -r '.object.type // empty' 2>/dev/null) || obj_type=""
+          2> /dev/null | jq -r '.object.type // empty' 2> /dev/null) || obj_type=""
         if [ "$obj_type" = "commit" ]; then
           submodule_sha=$(curl_with_auth -s \
             "https://api.github.com/repos/${UPSTREAM_REPO}/git/tags/$submodule_sha" \
-            2>/dev/null | jq -r '.object.sha // empty' 2>/dev/null) || submodule_sha="$upstream"
+            2> /dev/null | jq -r '.object.sha // empty' 2> /dev/null) || submodule_sha="$upstream"
         fi
       fi
     fi
@@ -376,7 +376,7 @@ main() {
     # are available there, but agents read them from the parent root.
     propagated_files=$(propagate_consumer_root_files)
     # shellcheck disable=SC2086
-    git add $propagated_files 2>/dev/null || true
+    git add $propagated_files 2> /dev/null || true
     git commit -m "chore(boucle): auto-update submodule to $upstream" > /dev/null 2>&1 || true
     configure_git_push
     git push 2> /dev/null || echo "[boucle] WARN: push failed, will retry next pipeline" >&2

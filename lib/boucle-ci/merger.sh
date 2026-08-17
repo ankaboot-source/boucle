@@ -28,8 +28,8 @@ boucle_ci_merger() {
     local MERGED_IID MERGED_DATA MERGED_SHA
     MERGED_IID=$(forge_mr_lookup_by_branch "boucle/$BOUCLE_ISSUE" "merged")
     if [ -n "$MERGED_IID" ]; then
-      MERGED_DATA=$(forge_mr_get "$MERGED_IID" 2>/dev/null || echo "")
-      MERGED_SHA=$(echo "$MERGED_DATA" | jq -r '.merge_commit_sha // .merge_commit_sha // empty' 2>/dev/null)
+      MERGED_DATA=$(forge_mr_get "$MERGED_IID" 2> /dev/null || echo "")
+      MERGED_SHA=$(echo "$MERGED_DATA" | jq -r '.merge_commit_sha // .merge_commit_sha // empty' 2> /dev/null)
       echo "Found merged MR !$MERGED_IID for issue #$BOUCLE_ISSUE (merge_commit=${MERGED_SHA:0:12}) — already merged, transitioning to boucle:done."
       forge_issue_note "$BOUCLE_ISSUE" "✅ MR already merged (merge_commit ${MERGED_SHA:0:12}) — issue resolved.$(job_link)" || true
       set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::bot"

@@ -198,7 +198,7 @@ run_config_audit() {
       *) _root="${BOUCLE_HOME:-.}" ;;
     esac
     if [ -f "$_root/.gitlab-ci.yml" ] && [ -f "$_root/.boucle/.gitlab-ci.yml" ]; then
-      if grep -q '^stages:' "$_root/.gitlab-ci.yml" 2>/dev/null; then
+      if grep -q '^stages:' "$_root/.gitlab-ci.yml" 2> /dev/null; then
         audit_degraded "root .gitlab-ci.yml is a full copy, not a shim" \
           "The self-update syncs .boucle/.gitlab-ci.yml but GitLab uses the root file. Replace the root .gitlab-ci.yml with: include: [{local: .boucle/.gitlab-ci.yml}]"
       else

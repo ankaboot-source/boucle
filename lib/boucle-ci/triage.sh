@@ -61,13 +61,14 @@ boucle_ci_triage() {
   # re-triggers by reacting with 👍 ❤️ 🎉 or 🚀 after adding a key.
   # This runs BEFORE attachment fetch / agent invocation to avoid wasting
   # a runner on an issue that cannot be triaged.
-  if ! has_llm_config 2>/dev/null; then
+  if ! has_llm_config 2> /dev/null; then
     echo "[boucle:no-key] no LLM configuration found — posting help message"
     # Check if a help message already exists (update instead of duplicate).
-    EXISTING_HELP=$(forge_issue_notes "$IID" 2>/dev/null \
-      | jq -r '[.[] | select(.body | contains("<!-- boucle:needs-info") and contains("reason=no-key"))] | last | .id // 0' 2>/dev/null || echo "0")
+    EXISTING_HELP=$(forge_issue_notes "$IID" 2> /dev/null \
+      | jq -r '[.[] | select(.body | contains("<!-- boucle:needs-info") and contains("reason=no-key"))] | last | .id // 0' 2> /dev/null || echo "0")
 
-    HELP_MSG=$(cat << 'HELP_EOF'
+    HELP_MSG=$(
+      cat << 'HELP_EOF'
 ## Boucle needs an API key to start
 
 Boucle can run on **free-tier LLM providers** — no paid account required.
@@ -103,22 +104,22 @@ a paid provider is recommended.
 
 <!-- boucle:needs-info v=1 reason=no-key -->
 HELP_EOF
-)
+    )
 
     if [ "$EXISTING_HELP" != "0" ] && [ -n "$EXISTING_HELP" ]; then
-      forge_issue_note_update "$IID" "$EXISTING_HELP" "$HELP_MSG" 2>/dev/null || true
+      forge_issue_note_update "$IID" "$EXISTING_HELP" "$HELP_MSG" 2> /dev/null || true
     else
-      forge_issue_note "$IID" "$HELP_MSG" 2>/dev/null || true
+      forge_issue_note "$IID" "$HELP_MSG" 2> /dev/null || true
     fi
 
     # Assign the human author (resolve via reporter pattern).
-    REPORTER_ID=$(resolve_reporter_id "$IID" 2>/dev/null || echo "")
+    REPORTER_ID=$(resolve_reporter_id "$IID" 2> /dev/null || echo "")
     if [ -n "$REPORTER_ID" ]; then
-      forge_issue_assign "$IID" "$REPORTER_ID" 2>/dev/null || true
+      forge_issue_assign "$IID" "$REPORTER_ID" 2> /dev/null || true
     fi
 
     # Set boucle:needs-info (preserve non-boucle labels).
-    set_boucle_label "$IID" "boucle:needs-info" "boucle::status::bot" 2>/dev/null || true
+    set_boucle_label "$IID" "boucle:needs-info" "boucle::status::bot" 2> /dev/null || true
     exit 0
   fi
 
