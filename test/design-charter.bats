@@ -93,6 +93,7 @@ EOF
   # bare run in the engine checkout always lands here. A plain "cannot
   # read charter: DESIGN.md" reads like a deleted file to restore.
   cd "${CHARTER_DIR}"
+  # shellcheck disable=SC2154
   run bash "${BATS_TEST_DIRNAME}/../bin/check-design-charter"
   assert_failure
   [ "$status" -eq 2 ]
