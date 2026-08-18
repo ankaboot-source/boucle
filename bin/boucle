@@ -34,7 +34,7 @@ forge_init
 # Empty if no boucle: label is set.
 current_label() {
   local iid="$1"
-  forge_issue_labels_get "$iid" 2>/dev/null \
+  forge_issue_labels_get "$iid" 2> /dev/null \
     | tr ',' '\n' \
     | grep '^boucle:' \
     | grep -v '^boucle::' \
@@ -45,7 +45,7 @@ current_label() {
 # Print the current gross label (e.g. "bot", "human"). Empty in mono-user mode.
 current_gross() {
   local iid="$1"
-  forge_issue_labels_get "$iid" 2>/dev/null \
+  forge_issue_labels_get "$iid" 2> /dev/null \
     | tr ',' '\n' \
     | grep '^boucle::status::' \
     | head -1 \
@@ -55,7 +55,7 @@ current_gross() {
 # Print "open" or "closed" for an issue.
 issue_state() {
   local iid="$1"
-  forge_issue_get "$iid" 2>/dev/null | jq -r '.state // "unknown"'
+  forge_issue_get "$iid" 2> /dev/null | jq -r '.state // "unknown"'
 }
 
 # ── pause <iid> ──────────────────────────────────────────────────────────
@@ -94,7 +94,8 @@ EOF
 
   # Post the pause comment with the interactive marker.
   local msg
-  msg=$(cat << EOF
+  msg=$(
+    cat << EOF
 <!-- boucle:interactive v=1 -->
 
 Issue paused by the human for interactive intervention.
@@ -103,7 +104,7 @@ Previous state: \`boucle:$label\`
 
 Run \`boucle resume $iid\` to hand back to the loop, or \`boucle restart $iid\` to start from scratch.
 EOF
-)
+  )
   forge_issue_note "$iid" "$(stamp_agent_marker "$msg")"
 
   local branch
@@ -136,8 +137,8 @@ cmd_resume() {
   branch=$(boucle_branch_name "$iid")
   local default_branch="${BOUCLE_DEFAULT_BRANCH:-master}"
   local commits_ahead=0
-  if git rev-parse --verify "$branch" >/dev/null 2>&1; then
-    commits_ahead=$(git rev-list --count "origin/$default_branch..$branch" 2>/dev/null || echo 0)
+  if git rev-parse --verify "$branch" > /dev/null 2>&1; then
+    commits_ahead=$(git rev-list --count "origin/$default_branch..$branch" 2> /dev/null || echo 0)
   fi
 
   local target_label target_msg
@@ -154,14 +155,15 @@ cmd_resume() {
 
   # Post the resume comment.
   local msg
-  msg=$(cat << EOF
+  msg=$(
+    cat << EOF
 <!-- boucle:interactive v=1 -->
 
 Loop resumed by the human.
 
 $target_msg
 EOF
-)
+  )
   forge_issue_note "$iid" "$(stamp_agent_marker "$msg")"
 
   # Clean up the saved state.
@@ -188,12 +190,13 @@ cmd_restart() {
   set_boucle_label "$iid" "boucle:todo" "boucle::status::bot"
 
   local msg
-  msg=$(cat << EOF
+  msg=$(
+    cat << EOF
 <!-- boucle:interactive v=1 -->
 
 Loop restarted from scratch (boucle:todo).
 EOF
-)
+  )
   forge_issue_note "$iid" "$(stamp_agent_marker "$msg")"
 
   # Clean up any saved interactive state.
@@ -210,7 +213,7 @@ cmd_status() {
   local iid="${1:?usage: boucle status <iid>}"
 
   local issue_json label assignee state
-  issue_json=$(forge_issue_get "$iid" 2>/dev/null || echo "{}")
+  issue_json=$(forge_issue_get "$iid" 2> /dev/null || echo "{}")
   label=$(current_label "$iid")
   state=$(echo "$issue_json" | jq -r '.state // "unknown"')
   assignee=$(echo "$issue_json" | jq -r '.assignees[0].username // .assignee.username // "unassigned"')
@@ -224,7 +227,7 @@ cmd_status() {
   local branch
   branch=$(boucle_branch_name "$iid")
   local branch_url
-  branch_url=$(forge_branch_url "$branch" 2>/dev/null || echo "")
+  branch_url=$(forge_branch_url "$branch" 2> /dev/null || echo "")
   echo "Branch:   $branch"
   if [ -n "$branch_url" ]; then
     echo "Branch URL: $branch_url"
@@ -233,10 +236,10 @@ cmd_status() {
   # MR status (if any). Lookup uses the protocol key boucle/<iid> —
   # forge_mr_lookup_by_branch prefix-matches so boucle/<iid>-<slug> is found.
   local mr_iid
-  mr_iid=$(forge_mr_lookup_by_branch "boucle/$iid" "opened" 2>/dev/null || echo "")
+  mr_iid=$(forge_mr_lookup_by_branch "boucle/$iid" "opened" 2> /dev/null || echo "")
   if [ -n "$mr_iid" ]; then
     local mr_status
-    mr_status=$(forge_mr_merge_status "$mr_iid" 2>/dev/null || echo "unknown")
+    mr_status=$(forge_mr_merge_status "$mr_iid" 2> /dev/null || echo "unknown")
     echo "MR:       !$mr_iid (status: $mr_status)"
   else
     echo "MR:       (none open)"
@@ -246,7 +249,7 @@ cmd_status() {
   local iter_file=".boucle-state/$iid/iterations.md"
   if [ -f "$iter_file" ]; then
     local iter_count
-    iter_count=$(grep -c '^### Iteration' "$iter_file" 2>/dev/null || echo 0)
+    iter_count=$(grep -c '^### Iteration' "$iter_file" 2> /dev/null || echo 0)
     echo "Iterations: $iter_count"
   else
     echo "Iterations: (no iterations.md)"
@@ -285,7 +288,7 @@ cmd_check() {
   # Otherwise, do a simple marker-based check.
   local files_marker=""
   local notes_json
-  notes_json=$(forge_issue_notes "$iid" 2>/dev/null || echo "[]")
+  notes_json=$(forge_issue_notes "$iid" 2> /dev/null || echo "[]")
   files_marker=$(echo "$notes_json" \
     | jq -r '[.[] | select(.body | test("<!-- boucle:files v=1"))] | last | .body // ""' \
     | grep -oP '(?<=paths=)[^"]+' | head -1)
@@ -295,7 +298,7 @@ cmd_check() {
   else
     # Check in-flight issues (working/review/approval/merging) for overlap.
     local in_flight
-    in_flight=$(forge_issue_list_by_label "boucle:working,boucle:review,boucle:approval,boucle:merging" "opened" 2>/dev/null || echo "[]")
+    in_flight=$(forge_issue_list_by_label "boucle:working,boucle:review,boucle:approval,boucle:merging" "opened" 2> /dev/null || echo "[]")
     local overlap_iids
     overlap_iids=$(echo "$in_flight" \
       | jq -r --arg iid "$iid" --arg paths "$files_marker" '
@@ -305,7 +308,7 @@ cmd_check() {
               overlap: ($paths | split(",") | map(
                 . as $p | $other  # placeholder — full impl needs the other issue files marker
               ))
-            } | select(.overlap | length > 0)) | .[].iid' 2>/dev/null || echo "")
+            } | select(.overlap | length > 0)) | .[].iid' 2> /dev/null || echo "")
 
     if [ -z "$overlap_iids" ]; then
       echo "✓ File-gate: clear (no overlapping issues)"
@@ -382,11 +385,32 @@ cmd_log() {
 
 # ── Main dispatch ────────────────────────────────────────────────────────
 case "${1:-}" in
-  pause)    shift; cmd_pause "$@" ;;
-  resume)   shift; cmd_resume "$@" ;;
-  restart)  shift; cmd_restart "$@" ;;
-  status)   shift; cmd_status "$@" ;;
-  check)    shift; cmd_check "$@" ;;
-  log)      shift; cmd_log "$@" ;;
-  *) echo "Usage: boucle <pause|resume|restart|status|check|log> <iid>" >&2; exit 1 ;;
+  pause)
+    shift
+    cmd_pause "$@"
+    ;;
+  resume)
+    shift
+    cmd_resume "$@"
+    ;;
+  restart)
+    shift
+    cmd_restart "$@"
+    ;;
+  status)
+    shift
+    cmd_status "$@"
+    ;;
+  check)
+    shift
+    cmd_check "$@"
+    ;;
+  log)
+    shift
+    cmd_log "$@"
+    ;;
+  *)
+    echo "Usage: boucle <pause|resume|restart|status|check|log> <iid>" >&2
+    exit 1
+    ;;
 esac

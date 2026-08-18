@@ -233,11 +233,18 @@ source_with_mock_forge() {
 
 # ── resolve_reporter_id: parent-chain walking ─────────────────────────
 # Mock forge_issue_get to simulate bot-authored sub-issues with a human parent.
+#
+# Every test here pins BOUCLE_FORGE. resolve_reporter_id is forge-aware —
+# it returns the numeric id on GitLab and the login on GitHub — so without
+# the pin these assertions silently test whichever forge the environment
+# happens to name. That is not hypothetical: the workflow exports
+# BOUCLE_FORGE=github for every job, so unpinned they passed on a
+# developer's machine (no variable → gitlab) and failed in CI.
 
 @test "resolve_reporter_id returns author id when author is human" {
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
-    BOUCLE_BOT_USERNAME=up-bot
+    BOUCLE_BOT_USERNAME=up-bot BOUCLE_FORGE=gitlab
     # Mock forge_issue_get: return a human-authored issue
     forge_issue_get() {
       printf "%s" "{\"author\":{\"id\":999,\"username\":\"human\"}}"
@@ -252,7 +259,7 @@ source_with_mock_forge() {
 @test "resolve_reporter_id walks up to parent when author is bot" {
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
-    BOUCLE_BOT_USERNAME=up-bot
+    BOUCLE_BOT_USERNAME=up-bot BOUCLE_FORGE=gitlab
     # Mock forge_issue_get: return different data based on IID
     forge_issue_get() {
       case "$1" in
@@ -275,7 +282,7 @@ source_with_mock_forge() {
 @test "resolve_reporter_id returns bot id when no parent found" {
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
-    BOUCLE_BOT_USERNAME=up-bot
+    BOUCLE_BOT_USERNAME=up-bot BOUCLE_FORGE=gitlab
     # Mock forge_issue_get: bot-authored issue with no parent link
     forge_issue_get() {
       printf "%s" "{\"author\":{\"id\":1,\"username\":\"up-bot\"},\"description\":\"No parent here\"}"
@@ -290,7 +297,7 @@ source_with_mock_forge() {
 @test "resolve_reporter_id follows e2e-origin marker when bot follow-up has no parent" {
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
-    BOUCLE_BOT_USERNAME=up-bot
+    BOUCLE_BOT_USERNAME=up-bot BOUCLE_FORGE=gitlab
     # Mock forge_issue_get: an E2E-fail follow-up (bot-authored, no parent
     # section, but with the qualified origin marker pointing to the
     # original issue whose author is the human).
@@ -315,7 +322,7 @@ source_with_mock_forge() {
 @test "resolve_reporter_id prefers parent chain over e2e-origin marker" {
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
-    BOUCLE_BOT_USERNAME=up-bot
+    BOUCLE_BOT_USERNAME=up-bot BOUCLE_FORGE=gitlab
     # Mock forge_issue_get: bot-authored issue carrying BOTH a parent
     # section and an e2e-origin marker — the parent chain must win
     # (the origin marker is only a fallback when no parent exists).
@@ -340,7 +347,7 @@ source_with_mock_forge() {
 @test "resolve_reporter_id falls back to prose line for legacy e2e follow-ups" {
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
-    BOUCLE_BOT_USERNAME=up-bot
+    BOUCLE_BOT_USERNAME=up-bot BOUCLE_FORGE=gitlab
     # Mock forge_issue_get: legacy bot-authored follow-up created BEFORE the
     # origin marker existed — only the prose intro line references the
     # original issue; that original issue is human-authored.
@@ -365,7 +372,7 @@ source_with_mock_forge() {
 @test "resolve_reporter_id walks the full chain on legacy e2e follow-ups of follow-ups" {
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
-    BOUCLE_BOT_USERNAME=up-bot
+    BOUCLE_BOT_USERNAME=up-bot BOUCLE_FORGE=gitlab
     # Mock forge_issue_get: follow-up of a follow-up, all bot-authored and
     # legacy (prose line only) — the walk must land on the ORIGINAL human
     # reporter (issue 42 -> 67 -> 49 -> human 999).
@@ -393,7 +400,7 @@ source_with_mock_forge() {
 @test "resolve_reporter_id walks multiple levels up parent chain" {
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
-    BOUCLE_BOT_USERNAME=up-bot
+    BOUCLE_BOT_USERNAME=up-bot BOUCLE_FORGE=gitlab
     # Mock forge_issue_get: walk up multiple parent levels
     forge_issue_get() {
       case "$1" in
@@ -443,7 +450,7 @@ source_with_mock_forge() {
 @test "resolve_reporter_id still returns numeric id on GitLab (assignee_ids[])" {
   run bash -c '
     BOUCLE_FORGE=gitlab BOUCLE_FORGE_HOST=framagit.org CI_PROJECT_ID=1
-    BOUCLE_BOT_USERNAME=up-bot
+    BOUCLE_BOT_USERNAME=up-bot BOUCLE_FORGE=gitlab
     forge_issue_get() {
       printf "%s" "{\"author\":{\"id\":999,\"username\":\"alice\"}}"
     }
@@ -461,7 +468,7 @@ source_with_mock_forge() {
 @test "resolve_reporter_username returns author username when author is human" {
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
-    BOUCLE_BOT_USERNAME=up-bot
+    BOUCLE_BOT_USERNAME=up-bot BOUCLE_FORGE=gitlab
     forge_issue_get() {
       printf "%s" "{\"author\":{\"id\":999,\"username\":\"alice\"}}"
     }
@@ -475,7 +482,7 @@ source_with_mock_forge() {
 @test "resolve_reporter_username walks up to parent when author is bot" {
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
-    BOUCLE_BOT_USERNAME=up-bot
+    BOUCLE_BOT_USERNAME=up-bot BOUCLE_FORGE=gitlab
     forge_issue_get() {
       case "$1" in
         42)
@@ -497,7 +504,7 @@ source_with_mock_forge() {
 @test "resolve_reporter_username returns empty on API failure" {
   run bash -c '
     BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
-    BOUCLE_BOT_USERNAME=up-bot
+    BOUCLE_BOT_USERNAME=up-bot BOUCLE_FORGE=gitlab
     forge_issue_get() { return 1; }
     source lib/boucle.sh
     result=$(resolve_reporter_username 42)

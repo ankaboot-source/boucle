@@ -442,7 +442,7 @@ boucle_escalation_diagnostic() {
     build-fail)
       class="build-failure"
       evidence="$worker_build_fails worker iteration(s) failed the build."
-      action="The worker shipped code that does not build. Check the build error in the $(forge_mr_term) discussion. If the build command is wrong, verify \`BOUCLE_BUILD_CMD\` in the consumer CI variables."
+      action="The worker shipped code that does not build. Check the build error in the $mr_term discussion. If the build command is wrong, verify \`BOUCLE_BUILD_CMD\` in the consumer CI variables."
       ;;
     rebase-conflict)
       class="rebase-conflict"
@@ -451,8 +451,8 @@ boucle_escalation_diagnostic() {
       ;;
     not-mergeable)
       class="not-mergeable"
-      evidence="$(forge_mr_term) is not mergeable after rebase."
-      action="Check the $(forge_mr_term) conflict status. The merger already attempted a rebase. Resolve the conflict manually on the branch, or re-queue with \`boucle:todo\` for a fresh worker run."
+      evidence="$mr_term is not mergeable after rebase."
+      action="Check the $mr_term conflict status. The merger already attempted a rebase. Resolve the conflict manually on the branch, or re-queue with \`boucle:todo\` for a fresh worker run."
       ;;
     exit-4)
       class="provider/quota"
@@ -523,7 +523,7 @@ boucle_notify() {
       ;;
     boucle:approval)
       event="approval"
-      waiting="Review and approve the $(forge_mr_term) (👍) or comment on it."
+      waiting="Review and approve the $mr_term (👍) or comment on it."
       ;;
     boucle:human)
       event="human"
@@ -545,6 +545,15 @@ boucle_notify() {
     echo "[boucle:notify] suppressed ($event, #$iid) — inside the DND window" >&2
     return 0
   fi
+
+  # The MR/PR wording comes from the forge layer (forge_mr_term is the
+  # single source of truth for it). Resolve it ONCE, guarded: notify is
+  # fail-open by contract — a dead webhook must never block the loop — and
+  # an unguarded call exits 127 under `set -e` whenever lib/boucle.sh is
+  # sourced without the forge backend, killing the notification before it
+  # can even warn. Same defensive shape as the forge_issue_get guard below.
+  local mr_term="MR"
+  command -v forge_mr_term > /dev/null 2>&1 && mr_term=$mr_term
 
   # Title and URL are best-effort: a notification naming only the issue
   # number still beats no notification.
@@ -641,6 +650,35 @@ boucle_branch_name() {
     return 0
   fi
   echo "boucle/$iid-$slug"
+}
+
+# ── Pickup acknowledgement ──────────────────────────────────────────────
+
+# BOUCLE_ACK_EMOJI — the canonical reaction boucle awards to an issue the
+# moment a role takes charge of it. "eyes" (👀) reads the same on every
+# forge: seen, picked up, being worked on. It is deliberately OUTSIDE the
+# spec-approval set (thumbsup/heart/rocket/tada) so acknowledging an issue
+# can never be mistaken for approving its spec.
+#
+# dispatch mirrors this name in its anti-loop guard (the award fires an
+# emoji webhook of its own) — keep the two in sync.
+BOUCLE_ACK_EMOJI="eyes"
+
+# ack_issue_taken <iid>
+#
+# Award 👀 on the issue so the human sees, without opening it, that the
+# loop has picked their issue up. The first visible sign of life otherwise
+# is the triage comment, minutes later, once the agent has run.
+#
+# Idempotent by construction: re-awarding an existing reaction is rejected
+# by both forges (and swallowed by the best-effort forge_* contract), so a
+# re-triage adds nothing and — crucially — fires no second webhook.
+# Never blocks the loop: a failed award is cosmetic, the work proceeds.
+ack_issue_taken() {
+  local iid="$1"
+  [ -n "$iid" ] || return 0
+  command -v forge_issue_add_reaction > /dev/null 2>&1 || return 0
+  forge_issue_add_reaction "$iid" "$BOUCLE_ACK_EMOJI" 2> /dev/null || true
 }
 
 # set_boucle_label <iid> <new_detail_label> <gross_status_label>

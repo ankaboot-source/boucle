@@ -594,3 +594,106 @@ extract_sibling_gate() {
   run grep -E '^check_allow_list_gate\(\)' lib/boucle.sh
   assert_success
 }
+
+# ── GitHub → GitLab MR action vocabulary ──────────────────────────────
+# The router's case arms speak GitLab (open/update/close/reopen/approved/
+# unapproved/merge). GitHub sends its own words, and passing them through
+# untranslated matched no arm — every PR webhook fell through to skip.
+
+gh_payload() {
+  echo "$1" > "$PAYLOAD"
+  export BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD"
+}
+
+@test "github: synchronize maps to the GitLab update action" {
+  # The event behind "push to boucle/<iid> → re-review" (SKILL.md §4.4).
+  gh_payload '{"action":"synchronize","pull_request":{"number":7}}'
+  run dispatch_github_mr_action pull_request
+  assert_output "update"
+}
+
+@test "github: a merged PR maps to merge, not close" {
+  # GitHub reports a merge as a close; only .pull_request.merged separates
+  # them, and the difference decides catchup vs worker re-run.
+  gh_payload '{"action":"closed","pull_request":{"number":7,"merged":true}}'
+  run dispatch_github_mr_action pull_request
+  assert_output "merge"
+}
+
+@test "github: a closed-unmerged PR maps to close" {
+  gh_payload '{"action":"closed","pull_request":{"number":7,"merged":false}}'
+  run dispatch_github_mr_action pull_request
+  assert_output "close"
+}
+
+@test "github: opened and reopened map to the GitLab words" {
+  gh_payload '{"action":"opened","pull_request":{"number":7}}'
+  run dispatch_github_mr_action pull_request
+  assert_output "open"
+  gh_payload '{"action":"reopened","pull_request":{"number":7}}'
+  run dispatch_github_mr_action pull_request
+  assert_output "reopen"
+}
+
+@test "github: an approving review maps to approved" {
+  gh_payload '{"action":"submitted","review":{"state":"approved"}}'
+  run dispatch_github_mr_action pull_request_review
+  assert_output "approved"
+}
+
+@test "github: a dismissed review maps to unapproved" {
+  gh_payload '{"action":"dismissed","review":{"state":"dismissed"}}'
+  run dispatch_github_mr_action pull_request_review
+  assert_output "unapproved"
+}
+
+@test "github: a non-approving review stays on the note path" {
+  # Review feedback must keep re-triggering the worker, so these map to
+  # empty and the caller leaves OBJECT_KIND=note.
+  gh_payload '{"action":"submitted","review":{"state":"changes_requested"}}'
+  run dispatch_github_mr_action pull_request_review
+  assert_output ""
+  gh_payload '{"action":"submitted","review":{"state":"commented"}}'
+  run dispatch_github_mr_action pull_request_review
+  assert_output ""
+}
+
+@test "github: actions with no arm map to empty" {
+  for act in ready_for_review review_requested edited; do
+    gh_payload "{\"action\":\"$act\",\"pull_request\":{\"number\":7}}"
+    run dispatch_github_mr_action pull_request
+    assert_output ""
+  done
+}
+
+@test "github: a GitLab payload is untouched by the translator" {
+  # The translator only speaks for GitHub events; a GitLab MR webhook must
+  # not be rewritten by it.
+  gh_payload '{"object_kind":"merge_request","object_attributes":{"action":"merge"}}'
+  run dispatch_github_mr_action merge_request
+  assert_output ""
+}
+
+@test "dispatch_github_mr_action is silent on a missing payload" {
+  BOUCLE_TRIGGER_PAYLOAD="$BATS_TEST_TMPDIR/nope.json" run dispatch_github_mr_action pull_request
+  assert_success
+  assert_output ""
+}
+
+# ── MR payload shape: both forges ─────────────────────────────────────
+
+@test "the MR handler reads the branch and IID from both forge shapes" {
+  # Reading only .object_attributes left every GitHub PR webhook with an
+  # empty source branch, so it exited as "not a boucle branch".
+  run grep -q 'object_attributes.source_branch // .pull_request.head.ref' lib/boucle-ci/dispatch.sh
+  assert_success
+  run grep -q 'object_attributes.iid // .pull_request.number' lib/boucle-ci/dispatch.sh
+  assert_success
+}
+
+@test "the GitHub workflow subscribes to PR synchronize" {
+  # Without it, pushes to a PR run no CI: the check stays pinned to the SHA
+  # the PR opened with.
+  run grep -qE '^\s+types:.*synchronize' .github/workflows/boucle.yml
+  assert_success
+}
