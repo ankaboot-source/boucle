@@ -32,51 +32,33 @@ never touch the engine itself.
 
 A harness made for humans, by an indie product builder for product builders.
 
-1. **End to end, from idea to shipped** — a ticket becomes a feature deployed
-   to production, and you can **amend at any moment**: comment on the issue
-   and the loop picks your feedback up, re-plans, and adjusts.
-2. **Lives in your forge** — boucle lives in your forge (GitHub/GitLab). No
-   external tool, no separate dashboard. Everything happens where you already
-   work.
+1. **End to end, amend anytime** — a ticket becomes a feature in production.
+   Comment on the issue and the loop picks it up, re-plans, adjusts. No
+   frozen specs.
+2. **Lives in your forge** — GitHub or GitLab. No external tool, no dashboard.
+   Everything happens where you already work.
 3. **Spec on mockups, result on a live preview** — you validate the spec on
-   mockups before a line of code is written, and the result on a live preview
-   with screenshots — not prose.
-4. **Deterministic and reliable** — deterministic, therefore reliable. You
-   intervene at the right moment, at the decision points.
-5. **Works while you sleep** — the agent works overnight for you. You
-   intervene only when it matters.
-6. **No UI, no CLI** — no interface to learn, no command line to master. You
-   interact through your forge: issues, comments, labels.
-7. **Fast and cheap — BYOK** — lightweight, purpose-built agents run on your
-   forge's existing CI, with your own LLM credentials. No Mac Mini, no VPS,
-   no always-on laptop. boucle ships a feature for **9.9× less** than Claude
-   Code — see [Cost](#cost).
-8. **Built on fast, modern tools — batteries included** —
-   [jcode](https://github.com/1jehuang/jcode), a standalone **Rust** binary
-   (fast startup, zero runtime dependencies), a
-   [codebase knowledge graph](https://github.com/DeusData/codebase-memory-mcp)
-   that gives agents real structural understanding of your repository instead
-   of blind grep, and a curated [skill library](.jcode/skills/) — including
-   UI/UX, design, and frontend engineering — so the agents ship polished
-   results, not just functional code.
-9. **Self-healing, self-learning loop** — a loop that learns from its
-   mistakes, self-updates, and adapts to your codebase as your project
-   advances.
-10. **Your code, your data, your tokens** — no SaaS, no middleman. The whole
-    loop runs on your forge's CI pipelines. Your code, your data, your tokens
-    stay yours.
-
-If you've lived these pain points — a daemon that dies overnight, a review
-that ships broken code, a spec that freezes the moment you approve it —
-boucle was designed for you:
-
-| Pain point | How boucle handles it |
-| --- | --- |
-| A daemon to babysit (dies silently, pollutes your disk with worktrees) | Runs on your forge's CI — nothing to install, nothing to restart |
-| Deadlocks (a bot can't review, approve, or merge its own PRs) | Label-driven state machine with no self-approval path |
-| Reviews that ship broken code (diff-scoped review passes) | Verifies *behavior*: a preview URL, screenshots, and a SHA-anchored post-deploy e2e gate |
-| Frozen specs (human comments after review never reach the worker) | Feeds every human note back into the loop — amend at any moment |
-| No budget control (token spend with no cap or visibility) | Step and iteration caps per role, plus a concurrency cap on parallel issues |
+   mockups before code is written, and the result on a live preview with
+   screenshots — not prose.
+4. **Deterministic, therefore reliable** — a label-driven state machine with
+   no self-approval path. You intervene at the decision points, not in a
+   live chat.
+5. **Works while you sleep** — runs on your forge's CI, not a daemon on your
+   laptop. Nothing to install, nothing to restart, nothing to babysit.
+6. **No UI, no CLI** — you interact through your forge: issues, comments,
+   labels. Just a 👍 to approve.
+7. **Verifies behavior, not diffs** — a preview URL, screenshots, and a
+   SHA-anchored post-deploy e2e gate. Reviews that ship broken code are a
+   thing of the past.
+8. **Fast and cheap — BYOK** — purpose-built agents on your forge's CI, with
+   your own LLM credentials. Step and iteration caps per role. 9.9× less
+   per feature than Claude Code — see [Cost](#cost).
+9. **Self-healing, self-learning** — the loop captures lessons from each run,
+   self-updates, and adapts to your codebase as your project advances.
+10. **Batteries included, yours to keep** — [jcode](https://github.com/1jehuang/jcode)
+    (Rust binary), a [codebase knowledge graph](https://github.com/DeusData/codebase-memory-mcp),
+    and a curated [skill library](.jcode/skills/) (UI/UX, design, frontend).
+    No SaaS, no middleman — your code, your data, your tokens.
 
 ## How to install
 
