@@ -69,12 +69,15 @@ boucle_ci_triage() {
 
     HELP_MSG=$(
       cat << 'HELP_EOF'
-## Boucle needs an API key to start
+## 👋 Welcome to boucle
+
+You're almost done. To start shipping your ideas in production, you just need
+to add an LLM API key — then comment or react here and the loop takes over.
+
+### 1. Add an API key
 
 Boucle can run on **free-tier LLM providers** — no paid account required.
-Pick one (or more), create a free API key, and add it as a CI/CD variable.
-
-### Free-tier providers
+Pick one, create a free API key, and add it as a CI/CD variable.
 
 | Provider | CI/CD variable | Sign up |
 |---|---|---|
@@ -86,23 +89,21 @@ Pick one (or more), create a free API key, and add it as a CI/CD variable.
 | HuggingFace | `BOUCLE_HUGGINGFACE_API_KEY` | https://huggingface.co/settings/tokens |
 | Mistral | `BOUCLE_MISTRAL_API_KEY` | https://console.mistral.ai |
 
-### How to set up
+How to set it up:
 
 1. Create a free account on one of the providers above
 2. Generate an API key
 3. Add it as a CI/CD variable in **Settings → CI/CD → Variables** (masked, protected)
 4. React to this comment with 👍 to re-trigger boucle
 
-### Want better quality?
-
-Configure a dedicated endpoint instead:
+Want better quality? Configure a dedicated endpoint instead:
 - `BOUCLE_LLM_BASE_URL` — your OpenAI-compatible endpoint
 - `BOUCLE_LLM_API_KEY` — your API key
 
 Free-tier models are less capable and less reliable. For production use,
 a paid provider is recommended.
 
-### Configure the bot user (recommended)
+### 2. Configure the bot user (recommended)
 
 Boucle acts through a dedicated **bot account** — it comments on issues,
 reassigns them, and merges approved MRs. Without one, boucle runs in
@@ -123,7 +124,7 @@ turn").
 See the [bot user guide](https://github.com/ankaboot-source/boucle#the-bot-user)
 for details.
 
-### Advanced configuration
+### 3. Advanced configuration
 
 Every other option — deploy targets (Cloudflare / GitHub / GitLab Pages,
 external CI), review modes (preview / diff / screenshot), Do-Not-Disturb,
@@ -515,17 +516,17 @@ HELP_EOF
         set_boucle_label "$IID" "boucle:human,size:l" "boucle::status::human"
       else
         # Spec-validation gate (configurable via BOUCLE_SPEC_PROFILE).
-        # Default "product" gates M, skips S. "off" never gates (legacy).
-        # "strict" gates all sizes. An unknown profile falls back to "product".
-        SPEC_PROFILE="${BOUCLE_SPEC_PROFILE:-product}"
+        # Default "strict" gates all sizes. "product" gates M, skips S.
+        # "off" never gates (legacy). An unknown profile falls back to "strict".
+        SPEC_PROFILE="${BOUCLE_SPEC_PROFILE:-strict}"
         SHOULD_GATE=false
         case "$SPEC_PROFILE" in
           off) SHOULD_GATE=false ;;
           strict) SHOULD_GATE=true ;;
           product) [ "$SIZE" = "M" ] && SHOULD_GATE=true ;;
           *)
-            echo "WARN: unknown BOUCLE_SPEC_PROFILE '$SPEC_PROFILE' — treating as product"
-            [ "$SIZE" = "M" ] && SHOULD_GATE=true
+            echo "WARN: unknown BOUCLE_SPEC_PROFILE '$SPEC_PROFILE' — treating as strict"
+            SHOULD_GATE=true
             ;;
         esac
         # Gate-skip transparency: when the spec gate is auto-validated

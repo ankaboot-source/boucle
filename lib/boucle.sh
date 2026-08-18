@@ -270,7 +270,7 @@ _Maintained by boucle. Edited in place — do not reply here; act on the linked 
 "
   local -a groups=(
     "⏳ Waiting on you|boucle:spec-review boucle:approval"
-    "🔄 In flight|boucle:working boucle:review boucle:merging"
+    "🔄 In flight|boucle:triage boucle:todo boucle:working boucle:review boucle:merging"
     "🚧 Blocked|boucle:blocked boucle:human boucle:needs-info"
     "🔗 Waiting on a dependency|boucle:depends-on"
   )

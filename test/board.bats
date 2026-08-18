@@ -38,6 +38,29 @@ STUB
   rm -f "$TMPF"
 }
 
+@test "board: triage and todo issues appear in In flight" {
+  # An issue boucle has acknowledged (boucle:triage) or queued for the worker
+  # (boucle:todo) is in flight from the human's perspective — boucle has it.
+  # Omitting them makes the board silently hide active work (#69 regression).
+  TMPF=$(mktemp); board_funcs "$TMPF"
+  run bash -c "
+    $(stub_forge)
+    source '$TMPF'
+    forge_issue_list_by_label() {
+      case \"\$1\" in
+        boucle:triage) echo '[{\"iid\":69,\"title\":\"Fix current step indicator\",\"updated_at\":\"2026-08-18T09:00:00Z\"}]' ;;
+        boucle:todo)   echo '[{\"iid\":42,\"title\":\"Add a pricing page\",\"updated_at\":\"2026-08-18T08:00:00Z\"}]' ;;
+        *) echo '[]' ;;
+      esac
+    }
+    boucle_board_render
+  "
+  assert_success
+  assert_output --partial "| #69 | Fix current step indicator | triage |"
+  assert_output --partial "| #42 | Add a pricing page | todo |"
+  rm -f "$TMPF"
+}
+
 @test "board: an empty section says so instead of rendering an empty table" {
   TMPF=$(mktemp); board_funcs "$TMPF"
   run bash -c "$(stub_forge); source '$TMPF'; boucle_board_render"
