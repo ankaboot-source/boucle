@@ -264,14 +264,26 @@ boucle_ci_doctor() {
     # Polls the award_emoji API — recovers even if the emoji webhook was
     # missed (emoji_events disabled or webhook delivery failed).
     SPEC_INVITE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("React with"))] | last | .id // 0')
+    # The reaction has to be the AUTHOR's, exactly as in the dispatch
+    # (spec_approver_ok). Accepting any non-bot reaction here would make the
+    # gate bypassable by waiting: dispatch refuses a colleague's 👍, then the
+    # next doctor sweep accepts it. An EMPTY lookup means "unknown", never
+    # "not the author" — fall back to any non-bot reactor rather than stall
+    # the loop on an API hiccup.
+    SPEC_AUTHOR=$(resolve_reporter_username "$IID" 2> /dev/null || echo "")
+    [ -n "$SPEC_AUTHOR" ] \
+      || echo "  → WARN: could not resolve the author of #$IID — accepting a reaction from any non-bot user (previous behaviour)"
     EMOJI_APPROVAL_FOUND=false
     for NOTE_ID in $LAST_TRIAGE_NOTE_ID $SPEC_INVITE_NOTE_ID; do
       [ "$NOTE_ID" = "0" ] || [ -z "$NOTE_ID" ] && continue
       # forge_note_reactions normalizes both backends to
       # {name, user.username} — the jq filter below works unchanged.
       AWARDS=$(forge_note_reactions issue "$IID" "$NOTE_ID")
-      if echo "$AWARDS" | jq -e --arg emojis "$BOUCLE_SPEC_APPROVAL_EMOJIS" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
-                [.[] | select(.user.username != $bname) | .name]
+      if echo "$AWARDS" | jq -e --arg emojis "$BOUCLE_SPEC_APPROVAL_EMOJIS" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" --arg author "$SPEC_AUTHOR" '
+                [.[]
+                  | select(.user.username != $bname)
+                  | select($author == "" or .user.username == $author)
+                  | .name]
                 | map(select(. as $n | ($emojis | split("|")) | index($n)))
                 | length > 0
             ' > /dev/null 2>&1; then

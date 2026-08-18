@@ -136,3 +136,32 @@ approver() {
   run bash -c "awk '/^_resolve_reporter_walk\(\) \{/,/^}/' lib/boucle.sh | grep -c 'Parent issue'"
   assert_output "1"
 }
+
+# ── The doctor mirrors the dispatch contract ───────────────────────────
+# LESSONS.yml lesson #83 ✅: "mirror the dispatch contract in the doctor's
+# orphan-recovery path so a missed webhook recovers to the same state."
+# Restricting approval to the author in the dispatch alone leaves the gate
+# bypassable by waiting: dispatch refuses a colleague's 👍, the next doctor
+# sweep accepts it.
+
+@test "doctor: orphan recovery resolves the author before accepting a reaction" {
+  run bash -c "awk '/Recover orphaned boucle:spec-review/,/EMOJI_APPROVAL_FOUND=false/' lib/boucle-ci/doctor.sh | grep -c 'resolve_reporter_username'"
+  assert_output "1"
+}
+
+@test "doctor: the reaction filter is scoped to the author, not any non-bot user" {
+  # The jq filter must narrow on the author in ADDITION to excluding the bot.
+  run bash -c "awk '/AWARDS=\\\$\\(forge_note_reactions/,/length > 0/' lib/boucle-ci/doctor.sh"
+  assert_success
+  assert_output --partial 'select(.user.username != $bname)'
+  assert_output --partial 'select($author == "" or .user.username == $author)'
+}
+
+@test "doctor: an unresolvable author falls back to any non-bot reactor" {
+  # Fail-open, same as the dispatch: an API hiccup must not stall the loop.
+  # The empty-author disjunct in the jq filter IS the fallback.
+  run bash -c "awk '/AWARDS=\\\$\\(forge_note_reactions/,/length > 0/' lib/boucle-ci/doctor.sh | grep -c '\\\$author == \"\"'"
+  assert_output "1"
+  run grep -q 'accepting a reaction from any non-bot user (previous behaviour)' lib/boucle-ci/doctor.sh
+  assert_success
+}

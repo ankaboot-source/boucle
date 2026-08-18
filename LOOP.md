@@ -28,7 +28,10 @@ human in the loop at decision points (spec validation, MR approval).
   `BOUCLE_SPEC_PROFILE` (default `strict`) is handed to the agent as its
   default policy; it is no longer applied to the agent's size judgment after
   the fact. Approval is the **issue author's**, by emoji reaction — a 👍 from
-  anyone else does not advance the loop, and they are told so.
+  anyone else does not advance the loop, and they are told so. The doctor's
+  orphan-recovery path applies the same restriction, or the gate would be
+  bypassable by waiting for the next sweep. Both fail open on an
+  unresolvable author: an API hiccup must not stall the loop.
 - **MR approval** — always human-gated.
 
 ## Do-Not-Disturb (DND)
