@@ -102,6 +102,35 @@ Configure a dedicated endpoint instead:
 Free-tier models are less capable and less reliable. For production use,
 a paid provider is recommended.
 
+### Configure the bot user (recommended)
+
+Boucle acts through a dedicated **bot account** — it comments on issues,
+reassigns them, and merges approved MRs. Without one, boucle runs in
+**mono-user mode** under your own account: the loop still works, but
+notifications degrade (the forge does not notify you about your own
+activity, and an issue already assigned to you never signals "it's your
+turn").
+
+- **GitLab** — `bin/setup` provisions a project service account
+  automatically. If your instance does not support it, create one manually
+  under Project → Settings → Service accounts and re-run
+  `bin/setup --bot-id <id> --bot-token <pat>`.
+- **GitHub** — create a PAT at
+  https://github.com/settings/tokens/new (scopes: `repo` + `workflow`),
+  add the bot as a collaborator on the repo, then run
+  `bin/setup github --bot-token <PAT> --bot-id <id>`.
+
+See the [bot user guide](https://github.com/ankaboot-source/boucle#the-bot-user)
+for details.
+
+### Advanced configuration
+
+Every other option — deploy targets (Cloudflare / GitHub / GitLab Pages,
+external CI), review modes (preview / diff / screenshot), Do-Not-Disturb,
+notifications, provider fallback, concurrency caps — is documented in the
+[LOOP.md reference](https://github.com/ankaboot-source/boucle/blob/main/LOOP.md)
+and the [README](https://github.com/ankaboot-source/boucle).
+
 <!-- boucle:needs-info v=1 reason=no-key -->
 HELP_EOF
     )
