@@ -42,7 +42,7 @@ shaped the design.
   verifies doc conformance and completeness, and the e2e verifies docs
   match production reality. A doc that drifts from the system it describes
   is treated as a bug.
-- **Do-Not-Disturb mode** — an **opt-in** quiet window (disabled by default; `BOUCLE_DND_ENABLED=true`, default 22:00–07:00) during which the spec-validation gate is auto-validated, letting the loop run autonomously up to the MR without contacting the human. Preserves the human's quality of life; MR approval stays human-gated. Autonomy must be explicit: opt-in globally, or per issue via the `boucle:autonomous` label. See [LOOP.md](LOOP.md) §Do-Not-Disturb (`BOUCLE_DND_*` variables).
+- **Do-Not-Disturb mode** — an **opt-in** quiet window (disabled by default; `BOUCLE_DND_ENABLED=true`, default 22:00–07:00) during which the spec-validation gate is auto-validated, letting the loop run autonomously up to the MR without contacting the human. Preserves the human's quality of life; MR approval stays human-gated (in mono-user mode via a 👍 emoji on the reviewer's PASS comment on the PR — native self-approval is unreliable when the author is the bot). Autonomy must be explicit: opt-in globally, or per issue via the `boucle:autonomous` label. See [LOOP.md](LOOP.md) §Do-Not-Disturb (`BOUCLE_DND_*` variables).
 
 ## 3. Target audience
 

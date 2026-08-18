@@ -280,6 +280,22 @@ it posts, so it recognises its own writes without asking who acted.
 `bin/doctor` fails loudly if you land in the broken configuration by
 accident.
 
+**The MR-approval gate: emoji reaction.** In mono-user mode
+the PR author IS the bot account, so forge-native self-approval is unreliable
+(GitHub blocks author self-review; GitLab is inconsistent). The MR gate
+therefore uses the same mechanism as the spec gate: the reviewer posts a
+short `👍 **this comment** to approve and merge` note **on the PR**
+(`forge_mr_note`, carrying a `<!-- boucle:approval-request v=1 -->` marker),
+and the human reacts with 👍 (or any canonical approval emoji) on that note.
+The doctor polls the note's reactions via `forge_note_reactions` and
+triggers the merger only when a non-bot user reacted. The old behavior
+treated the reviewer's VERDICT: PASS bot comment as the approval signal
+and merged with no human action — that was a regression (boucle.dev #40,
+2026-08-18) and is removed. `forge_mr_approve_instruction` returns the emoji
+instruction for mono-user on **all** forges; bot mode keeps the native
+Approve / approving-review instruction. See
+[LESSONS.yml](LESSONS.yml) lesson #85.
+
 **The cost: notifications degrade.** The forge signals "it's your turn" by
 *changing* an issue's assignee — but the issue is already yours, so nothing
 is emitted. And every action the loop takes runs under your token, so forges

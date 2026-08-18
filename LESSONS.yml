@@ -786,3 +786,13 @@
     glab/gh note API call, or a `<!-- boucle:` marker in the agent log. If it did, skip the retry: the existing note (draft or final) is already on the forge, and collapse-duplicate-notes +
     the log-scraping fallback handle draft→final promotion within the run. This is I5 (Idempotence) applied to agent re-triggers: a re-run MUST NOT produce additional side effects. The guard
     lives in `bin/jc` after the `FALLBACK_REASON` determination so it covers every trigger (api-down, quota, looping) and both fallback modes (legacy + freeride rotation).'
+
+85:
+  title: A bot-authored verdict comment MUST NOT be treated as a human approval signal
+  ❌:
+  - 'DO NOT treat a bot-authored comment (e.g. the reviewer''s VERDICT: PASS) as an approval signal and auto-merge on it. A bot comment is not a human action; merging on it removes the documented human MR-approval gate (LOOP.md: "MR approval stays human-gated"). This is especially tempting in mono-user mode, where forge-native self-approval is unreliable (GitHub blocks author self-review; GitLab is inconsistent) and a VERDICT comment looks like a convenient proxy — but it is a bot signal, not a human one.'
+  - 'DO NOT rely on forge-native self-approval (the Approve button / approving review) in mono-user mode: the PR author is the bot account, and forges do not reliably count an author''s own approval. The instruction "click Approve" is decorative in mono-user mode — it cannot fire.'
+  ✅:
+  - 'DO gate the MR merge in mono-user mode on a human emoji reaction (👍/❤️/🚀/🎉 — the same canonical set as the spec gate) on a dedicated approval-request note the reviewer posts on the PR (forge_mr_note with a `<!-- boucle:approval-request v=1 -->` marker). The doctor polls the note''s reactions via forge_note_reactions and triggers the merger only when a non-bot user reacted. This mirrors the spec gate, is forge-agnostic, and is immune to the self-approval gap.'
+  - 'DO guard the reviewer''s race-condition recovery (forge_mr_approvals poll) with `! boucle_mono_user` so it only runs in bot mode. In mono-user mode the poll is dead code (self-approval unreliable) and would short-circuit the emoji gate.'
+  - 'DO make forge_mr_approve_instruction return the emoji instruction for mono-user on ALL forges (not just GitHub), since the self-approval gap is forge-agnostic.'
