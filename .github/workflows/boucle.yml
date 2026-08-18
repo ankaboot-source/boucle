@@ -19,7 +19,12 @@ on:
   issues:
     types: [opened, reopened, edited, assigned, labeled, closed]
   pull_request:
-    types: [opened, edited, closed, reopened, ready_for_review, review_requested]
+    # `synchronize` = new commits pushed to the PR branch. Without it a PR
+    # was checked once, at open, and never again: later pushes ran no CI at
+    # all, so the check on the PR stayed pinned to the SHA it opened with.
+    # It is also the event dispatch maps to the GitLab `update` action, which
+    # re-triggers the reviewer on a revised MR (SKILL.md §4.4).
+    types: [opened, edited, closed, reopened, ready_for_review, review_requested, synchronize]
   pull_request_review:
     types: [submitted, dismissed]
   # No `edited`: boucle rewrites its own comments in place — triage via

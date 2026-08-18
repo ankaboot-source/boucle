@@ -335,6 +335,32 @@ Closing the MR (not merging) fires `merge_request close` (dispatch.sh:207-258):
 - any other (`boucle:todo`/`working`/`review`/`merging`) → revert to
   `boucle:todo` + `chain_to_role worker` (fresh start).
 
+### 4.5b MR events on GitHub — vocabulary translation
+
+§4.3–4.5 describe the MR webhooks in the **GitLab** vocabulary, which is what
+the router's `case` arms match: `open`, `update`, `close`, `reopen`,
+`approved`, `unapproved`, `merge`. GitHub sends different words, and its
+payload puts the MR under `.pull_request` rather than `.object_attributes`.
+Both are normalized in dispatch before routing — `dispatch_github_mr_action`
+for the verb, a two-shape jq filter for the branch and IID:
+
+| GitHub event + action | GitLab action | Routes to |
+|---|---|---|
+| `pull_request` `synchronize` | `update` | reviewer (§4.4) |
+| `pull_request` `closed`, `.pull_request.merged == true` | `merge` | catchup |
+| `pull_request` `closed`, not merged | `close` | §4.5 |
+| `pull_request` `opened` / `reopened` | `open` / `reopen` | §4.4 |
+| `pull_request_review` `submitted`, state `approved` | `approved` | merger (§4.3) |
+| `pull_request_review` `dismissed` | `unapproved` | reviewer |
+| any other review (commented, changes requested) | *(none)* | stays a note (§4.6) |
+| `ready_for_review`, `review_requested`, `edited` | *(none)* | skip |
+
+A merge arrives as a close on GitHub; only `.pull_request.merged` tells the two
+apart, and that bit decides catchup versus a worker re-run. `synchronize` must
+also be in the workflow's `pull_request` trigger types — without it GitHub
+never delivers the event, and a PR is checked once at open and never again on
+later pushes.
+
 ### 4.6 Comment on MR — worker re-run with feedback
 
 A human comment on the MR (dispatch.sh:331-359) reverts the issue to
