@@ -114,13 +114,13 @@ forge_issue_assign() {
   [ -z "$user_login" ] && return 0
   # GitHub uses usernames (logins) for assignment, not numeric IDs
   _gh_api_silent -X PATCH "/repos/$BOUCLE_PROJECT_ID/issues/$iid" \
-    -f "assignees[]=$user_login"
+    -f "assignees[]=$user_login" || true
 }
 
 forge_issue_close() {
   local iid="$1"
   _gh_api_silent -X PATCH "/repos/$BOUCLE_PROJECT_ID/issues/$iid" \
-    -f state=closed
+    -f state=closed || true
 }
 
 forge_issue_create() {
@@ -176,7 +176,7 @@ forge_issue_add_reaction() {
   esac
   _gh_api_silent -X POST "/repos/$BOUCLE_PROJECT_ID/issues/$iid/reactions" \
     -f content="$content" \
-    -H "Accept: application/vnd.github.squirrel-girl-preview+json"
+    -H "Accept: application/vnd.github.squirrel-girl-preview+json" || true
 }
 
 # ── Issue listing ─────────────────────────────────────────────────────────
@@ -218,7 +218,7 @@ forge_issue_update() {
   # but changes nothing: the board refreshes on paper, never on the forge.
   [ "$key" = "description" ] && key="body"
   _gh_api_silent -X PATCH "/repos/$BOUCLE_PROJECT_ID/issues/$iid" \
-    -f "$key=$value"
+    -f "$key=$value" || true
 }
 
 # ── Issue links ───────────────────────────────────────────────────────────
@@ -269,7 +269,7 @@ forge_mr_note_update() {
 forge_note_delete() {
   local kind="$1" object_iid="$2" note_id="$3"
   # GitHub uses the same endpoint for all issue/PR comments
-  _gh_api_silent -X DELETE "/repos/$BOUCLE_PROJECT_ID/issues/comments/$note_id"
+  _gh_api_silent -X DELETE "/repos/$BOUCLE_PROJECT_ID/issues/comments/$note_id" || true
 }
 
 # ── MR lookup + approvals + assign + close ────────────────────────────────
@@ -365,20 +365,20 @@ forge_mr_assign() {
   local mr_iid="$1" user_login="$2"
   [ -z "$user_login" ] && return 0
   _gh_api_silent -X PATCH "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid" \
-    -f "assignees[]=$user_login"
+    -f "assignees[]=$user_login" || true
 }
 
 forge_mr_close() {
   local mr_iid="$1"
   _gh_api_silent -X PATCH "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid" \
-    -f state=closed
+    -f state=closed || true
 }
 
 forge_branch_delete() {
   local branch="$1"
   local encoded
   encoded=$(printf '%s' "$branch" | jq -sRr @uri)
-  _gh_api_silent -X DELETE "/repos/$BOUCLE_PROJECT_ID/git/refs/heads/$encoded"
+  _gh_api_silent -X DELETE "/repos/$BOUCLE_PROJECT_ID/git/refs/heads/$encoded" || true
 }
 
 # ── Note reactions ────────────────────────────────────────────────────────
@@ -521,21 +521,29 @@ forge_mr_update() {
   local -a args=(-X PATCH "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid")
   [ -n "$title" ] && args+=(-f title="$title")
   [ -n "$description" ] && args+=(-f body="$description")
-  _gh_api_silent "${args[@]}"
+  _gh_api_silent "${args[@]}" || true
 }
 
 forge_mr_merge() {
   local mr_iid="$1"
   # Poll mergeable_state for up to 10 min (60×10s)
-  local i state
+  local i state resp sha
   for i in $(seq 1 60); do
     state=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid" | jq -r '.mergeable_state // "unknown"')
     case "$state" in
       clean | unstable)
-        # mergeable — squash merge
-        _gh_api_silent -X PUT "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid/merge" \
-          -f merge_method=squash
-        return 0
+        # mergeable — squash merge. Echo the merge commit SHA on stdout so
+        # the caller (merger.sh) can record it and chain to post-merge. An
+        # empty SHA means the PUT failed. Without echoing the SHA,
+        # MERGE_SHA was always empty and EVERY successful merge was
+        # reported as "merge API call failed".
+        resp=$(_gh_api -X PUT "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid/merge" \
+          -f merge_method=squash) || true
+        sha=$(printf '%s' "$resp" | jq -r '.sha // empty' 2> /dev/null)
+        if [ -n "$sha" ]; then
+          echo "$sha"
+          return 0
+        fi
         ;;
       blocked | dirty | unknown)
         # blocked: waiting on required reviews/checks
@@ -552,14 +560,19 @@ forge_mr_merge() {
     esac
   done
   # Still not mergeable after 10 min — try anyway and report
-  _gh_api_silent -X PUT "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid/merge" \
-    -f merge_method=squash
+  resp=$(_gh_api -X PUT "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid/merge" \
+    -f merge_method=squash) || true
+  sha=$(printf '%s' "$resp" | jq -r '.sha // empty' 2> /dev/null)
+  if [ -n "$sha" ]; then
+    echo "$sha"
+    return 0
+  fi
 }
 
 forge_mr_approve() {
   local mr_iid="$1"
   _gh_api_silent -X POST "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid/reviews" \
-    -f event=APPROVE
+    -f event=APPROVE || true
 }
 
 forge_mr_rebase() {
@@ -637,17 +650,17 @@ forge_work_item_link_parent() {
   local child_iid="$1" parent_iid="$2"
   # GitHub sub-issues API: POST /repos/{owner}/{repo}/issues/{n}/sub_issues
   # body: {"sub_issue_id": <child_number>, ...}
-  # If that fails, fall back to a comment with the marker
+  # sub_issue_id MUST be an integer — -f sends a string (422), -F sends a
+  # typed JSON value. If the API fails (not available, 403, etc.), the
+  # function returns 0 — the ## Parent issue body section is the final
+  # navigation fallback, and the split-parent marker comment is forge-agnostic.
   local child_data child_node_id
   child_data=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/issues/$child_iid") || true
   child_node_id=$(echo "$child_data" | jq -r '.node_id // empty')
   if [ -n "$child_node_id" ]; then
-    # Try sub-issues API (may not be available on all repos)
     _gh_api_silent -X POST "/repos/$BOUCLE_PROJECT_ID/issues/$parent_iid/sub_issues" \
-      -f sub_issue_id="$child_iid"
+      -F sub_issue_id="$child_iid" || true
   fi
-  # Always also post a comment marker as fallback (machine-readable)
-  # — the legacy split-parent marker is forge-agnostic
 }
 
 # ── Attachments ───────────────────────────────────────────────────────────
@@ -693,7 +706,7 @@ forge_trigger_role() {
     inputs_json=$(printf '%s' "$inputs_json" | jq -c --arg k "$key" --arg v "$val" '.[$k] = $v')
   done
   _gh_api_silent -X POST "/repos/$BOUCLE_PROJECT_ID/actions/workflows/boucle.yml/dispatches" \
-    --input - <<< "$(jq -nc --arg ref "${BOUCLE_DEFAULT_BRANCH:-main}" --argjson inputs "$inputs_json" '{ref: $ref, inputs: $inputs}')"
+    --input - <<< "$(jq -nc --arg ref "${BOUCLE_DEFAULT_BRANCH:-main}" --argjson inputs "$inputs_json" '{ref: $ref, inputs: $inputs}')" || true
 }
 
 forge_pipeline_list_active() {
@@ -819,7 +832,7 @@ forge_label_create() {
   # Check if label exists (idempotent)
   _gh_api "/repos/$BOUCLE_PROJECT_ID/labels/$name" > /dev/null 2>&1 && return 0
   _gh_api_silent -X POST "/repos/$BOUCLE_PROJECT_ID/labels" \
-    -f name="$name" -f color="$color"
+    -f name="$name" -f color="$color" || true
 }
 
 forge_label_list() {

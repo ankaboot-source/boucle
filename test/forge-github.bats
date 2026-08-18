@@ -78,3 +78,81 @@ setup() {
   assert_success
   assert_output --partial "Approve** button"
 }
+
+# ── forge_mr_merge: MUST echo the merge commit SHA on success ────────────
+# The merger (lib/boucle-ci/merger.sh) captures the output as MERGE_SHA and
+# treats an empty value as "merge API call failed" → boucle:human escalation.
+# forge_mr_merge used _gh_api_silent (discards the response) and returned 0
+# without echoing anything, so EVERY successful GitHub merge was reported as
+# a failure. The PR was actually merged, but the loop escalated to human and
+# never chained to post-merge (merged code never deployed). Observed on the
+# boucle.dev consumer: PR #51 and PR #44 both merged but reported as failed.
+
+@test "github forge_mr_merge echoes the merge commit SHA on a clean merge" {
+  run bash -c '
+    BOUCLE_PROJECT_ID="test/repo"
+    gh() {
+      [ "$1" = "api" ] || return 0
+      if [[ " $* " == *"-X PUT"* && " $* " == *"/merge"* ]]; then
+        printf "%s" "{\"sha\":\"abc123def456789\",\"merged\":true,\"message\":\"ok\"}"
+      elif [[ " $* " == *"/pulls/"* ]]; then
+        printf "%s" "{\"mergeable_state\":\"clean\"}"
+      fi
+    }
+    source bin/forge/github.sh
+    forge_mr_merge 42
+  '
+  assert_success
+  assert_output "abc123def456789"
+}
+
+@test "github forge_mr_merge echoes the SHA when unstable (checks running)" {
+  run bash -c '
+    BOUCLE_PROJECT_ID="test/repo"
+    gh() {
+      [ "$1" = "api" ] || return 0
+      if [[ " $* " == *"-X PUT"* && " $* " == *"/merge"* ]]; then
+        printf "%s" "{\"sha\":\"deadbeef\",\"merged\":true}"
+      elif [[ " $* " == *"/pulls/"* ]]; then
+        printf "%s" "{\"mergeable_state\":\"unstable\"}"
+      fi
+    }
+    source bin/forge/github.sh
+    forge_mr_merge 42
+  '
+  assert_success
+  assert_output "deadbeef"
+}
+
+@test "github forge_mr_merge echoes nothing when the merge PUT fails" {
+  run bash -c '
+    BOUCLE_PROJECT_ID="test/repo"
+    gh() {
+      [ "$1" = "api" ] || return 0
+      if [[ " $* " == *"-X PUT"* && " $* " == *"/merge"* ]]; then
+        return 1
+      elif [[ " $* " == *"/pulls/"* ]]; then
+        printf "%s" "{\"mergeable_state\":\"clean\"}"
+      fi
+    }
+    source bin/forge/github.sh
+    out=$(forge_mr_merge 42)
+    echo "out=[$out]"
+  '
+  assert_success
+  assert_output --partial "out=[]"
+}
+
+@test "github forge_mr_merge returns non-zero on a dirty (conflict) state" {
+  run bash -c '
+    BOUCLE_PROJECT_ID="test/repo"
+    gh() {
+      [ "$1" = "api" ] || return 0
+      printf "%s" "{\"mergeable_state\":\"dirty\"}"
+    }
+    source bin/forge/github.sh
+    forge_mr_merge 42
+  '
+  assert_failure
+  assert_output --partial "merge conflicts"
+}

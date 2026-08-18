@@ -372,21 +372,35 @@ forge_mr_update() {
 forge_mr_merge() {
   local mr_iid="$1"
   # Poll detailed_merge_status for up to 10 min (60×10s)
-  local i status
+  local i status resp sha
   for i in $(seq 1 60); do
     status=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid" 2> /dev/null | jq -r '.detailed_merge_status // "unknown"')
     case "$status" in
       mergeable)
-        glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/merge" \
-          -f should_remove_source_branch=true > /dev/null 2>&1 && return 0
+        # Echo the merge commit SHA on stdout so the caller (merger.sh) can
+        # record it and chain to post-merge. An empty SHA means the PUT
+        # failed. Without echoing the SHA, MERGE_SHA was always empty and
+        # EVERY successful merge was reported as "merge API call failed".
+        resp=$(glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/merge" \
+          -f should_remove_source_branch=true 2> /dev/null) || true
+        sha=$(printf '%s' "$resp" | jq -r '.merge_commit_sha // .sha // empty' 2> /dev/null)
+        if [ -n "$sha" ]; then
+          echo "$sha"
+          return 0
+        fi
         ;;
       checking | pipeline_status_must_pass | pipeline_blocked)
         sleep 10
         ;;
       *)
         # Try immediate merge, fall back to MWPS
-        glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/merge" \
-          -f should_remove_source_branch=true > /dev/null 2>&1 && return 0
+        resp=$(glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/merge" \
+          -f should_remove_source_branch=true 2> /dev/null) || true
+        sha=$(printf '%s' "$resp" | jq -r '.merge_commit_sha // .sha // empty' 2> /dev/null)
+        if [ -n "$sha" ]; then
+          echo "$sha"
+          return 0
+        fi
         sleep 10
         ;;
     esac

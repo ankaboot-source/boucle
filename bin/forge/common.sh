@@ -241,7 +241,13 @@ forge_reaction_canonical() {
 #
 # forge_mr_merge <mr_iid>
 #   Merge a MR/PR. Polls for mergeable status if needed (up to 10 min).
-#   Returns 0 on success, non-zero on hard failure.
+#   Echoes the merge commit SHA on stdout on success (may be empty if the
+#   forge defers the merge via MWPS — the caller treats empty as failure).
+#   Returns 0 on success, non-zero on hard failure (conflict, API error).
+#   The merger (lib/boucle-ci/merger.sh) captures the SHA as MERGE_SHA and
+#   treats an empty value as "merge API call failed" → boucle:human. A
+#   silent variant (discarding the response body) makes EVERY successful
+#   merge report as a failure, so the implementation MUST echo the SHA.
 #
 # forge_mr_approve <mr_iid>
 #   Approve a MR/PR (bot approval). Returns 0 on success.
