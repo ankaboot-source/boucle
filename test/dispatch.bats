@@ -300,6 +300,69 @@ guard_decision() {
   [ "$count" -ge 3 ]
 }
 
+# ── Spec-gate approval contract (A2): emoji approves, reply amends ─────
+# A human reply on a boucle:spec-review issue is NOT an approval — it is a
+# correction/amendment that re-triggers triage (so the agent re-reads the
+# human's notes and produces an updated spec for another approval round).
+# Only an emoji reaction (👍 ❤️ 🎉 🚀) approves the spec and triggers the
+# worker. Treating any reply as approval bypassed the gate whenever the
+# human replied with a correction — the opposite of the triage message's
+# "If not, reply with corrections" promise. See LESSONS.yml lesson #83.
+
+extract_spec_review_block() {
+  # Extract the `elif ... boucle:spec-review ... then ... elif human` block.
+  awk '
+    /^  elif echo "\$LABELS" \| grep -q "boucle:spec-review"; then$/ { p = 1 }
+    p == 1 { print }
+    p == 1 && /^  elif echo "\$LABELS" \| grep -q "boucle:human"/ { exit }
+    p == 1 && /^  else$/ { exit }
+  ' lib/boucle-ci/dispatch.sh
+}
+
+@test "spec-review: a human NOTE re-triggers triage (amendment), not the worker" {
+  # The note branch must set SHOULD_TRIAGE=true (re-triage with the
+  # amendment) and must NOT set SHOULD_WORK=true (the old bug: any reply
+  # approved the spec and started the worker).
+  block=$(extract_spec_review_block)
+  # Extract the note sub-branch (from the note `elif` to its closing `fi`).
+  note_branch=$(echo "$block" | awk '/OBJECT_KIND" = "note"/{f=1} f&&/^    fi$/{print; f=0} f')
+  echo "$note_branch" | grep -q 'SHOULD_TRIAGE=true'
+  # The note branch must NOT set SHOULD_WORK (the regression guard).
+  # Inverse assertion: grep exits 1 (failure) when the pattern is ABSENT.
+  run grep -q 'SHOULD_WORK=true' <<< "$note_branch"
+  assert_failure
+}
+
+@test "spec-review: a human EMOJI reaction approves and triggers the worker" {
+  # The emoji branch (canonical set only) sets SHOULD_WORK=true — the
+  # only path that starts the worker from spec-review.
+  block=$(extract_spec_review_block)
+  # Extract the emoji sub-branch (from the emoji `if` to its closing `fi`).
+  emoji_branch=$(echo "$block" | awk '/OBJECT_KIND" = "emoji"/{f=1} f&&/^    fi$/{print; f=0} f')
+  echo "$emoji_branch" | grep -q 'SHOULD_WORK=true'
+}
+
+@test "spec-review block documents the amendment-vs-approval contract" {
+  # The source MUST explain WHY a reply is not an approval, so a future
+  # edit does not silently restore the old "any reply = approval" behaviour.
+  block=$(extract_spec_review_block)
+  echo "$block" | grep -qi 'amendment\|NOT an approval\|not.*approval'
+}
+
+@test "triage validation message: a reply never approves the spec" {
+  # The human-facing validation message (triage.sh) MUST tell the human
+  # that only an emoji reaction approves, and that a reply amends the
+  # spec and re-triggers triage. The old message promised "reply with
+  # corrections" as a non-approving path that did not exist.
+  run grep -E "React with .* to approve" lib/boucle-ci/triage.sh
+  assert_success
+  # The message must NOT say a reply approves.
+  refute_output --partial "Reply to this issue with any comment"
+  # The message must state a reply amends / re-triages / never approves.
+  run grep -Ei "reply.*amend|re-?trigger.*triage|A reply never approves|triage will re-run" lib/boucle-ci/triage.sh
+  assert_success
+}
+
 @test "dispatch.sh has no up-bot default (consumer-specific name)" {
   run grep -n 'up-bot' lib/boucle-ci/dispatch.sh
   assert_failure

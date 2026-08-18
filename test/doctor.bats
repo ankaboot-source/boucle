@@ -254,3 +254,52 @@ bot_identity_section() {
   run grep -nE 'boucle:todo' lib/boucle-ci/doctor.sh
   assert_success
 }
+
+# ── Spec-gate recovery: emoji approves (worker), reply amends (triage) ──
+# The doctor recovers orphaned boucle:spec-review issues (dispatch was
+# canceled/orphaned before it could route). Mirroring the dispatch contract
+# (A2, LESSONS.yml lesson #83): an emoji reaction re-triggers the worker
+# (approval); a human reply re-triggers TRIAGE (amendment, NOT approval).
+# The old code treated any reply as approval and started the worker — the
+# gate bypass the dispatch fix closes.
+
+extract_spec_review_recovery() {
+  # Extract the "Recover orphaned boucle:spec-review issues" block.
+  awk '
+    /# ── Recover orphaned boucle:spec-review issues/ { p = 1 }
+    p == 1 { print }
+    p == 1 && /^  # ── Recover stuck boucle:triage issues/ { exit }
+  ' lib/boucle-ci/doctor.sh
+}
+
+@test "doctor spec-review recovery: emoji approval re-triggers the worker" {
+  block=$(extract_spec_review_recovery)
+  # The emoji path chains to the worker (approval → work).
+  echo "$block" | grep -q 'EMOJI_APPROVAL_FOUND'
+  echo "$block" | grep -q 'chain_to_role "\$IID" "worker"'
+}
+
+@test "doctor spec-review recovery: human reply (no emoji) re-triggers triage, NOT the worker" {
+  block=$(extract_spec_review_recovery)
+  # A human reply is an amendment → re-triage, not worker.
+  echo "$block" | grep -q 'HUMAN_REPLY_AFTER_TRIAGE'
+  echo "$block" | grep -qi 'amendment\|NOT.*approval\|re-triggering triage'
+  # The reply branch must chain to triage, not worker.
+  echo "$block" | grep -q 'chain_to_role "\$IID" "triage"'
+}
+
+@test "doctor spec-review recovery no longer treats a bare reply as approval" {
+  # The old code: `if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ] || [ "$EMOJI_APPROVAL_FOUND" = true ]`
+  # → "approved (reply=...)" → worker. That conflated amendments with
+  # approvals. The new code MUST separate the two (emoji → worker, reply →
+  # triage) and MUST NOT print "approved" for a reply-only case. Assert by
+  # inversion: grep exits 1 (failure) when the pattern is ABSENT, which is
+  # the success condition here.
+  block=$(extract_spec_review_recovery)
+  # The combined `||` predicate that treated reply-as-approval is gone.
+  run grep -q 'HUMAN_REPLY_AFTER_TRIAGE" -gt 0 \] || \[ "\$EMOJI_APPROVAL_FOUND"' <<< "$block"
+  assert_failure
+  # The "approved (reply=...)" log line is gone (a reply is not approval).
+  run grep -q 'approved (reply=' <<< "$block"
+  assert_failure
+}
