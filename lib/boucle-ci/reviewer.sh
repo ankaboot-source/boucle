@@ -182,7 +182,7 @@ boucle_ci_reviewer() {
   # the acceptance criteria from state.md (not a generic description) —
   # the reviewer model can't read images, so the description must be
   # guided by what the reviewer actually needs to verify.
-  if boucle_is_screenshot_review; then
+  if boucle_is_screenshot_review_effective; then
     "$BOUCLE_HOME"/bin/describe-images reviewer --criteria || echo "[boucle] WARN: image description failed — continuing without descriptions"
   else
     "$BOUCLE_HOME"/bin/describe-images reviewer || echo "[boucle] WARN: image description failed — continuing without descriptions"
@@ -196,7 +196,7 @@ boucle_ci_reviewer() {
   # PR diff, wait for check suites. Screenshot mode has its own path below.
   export BOUCLE_MR_DIFF=""
   export BOUCLE_MR_CHECKS=""
-  if boucle_is_diff_review || { [ -z "$PREVIEW_URL" ] && ! boucle_is_screenshot_review; }; then
+  if boucle_is_diff_review || { [ -z "$PREVIEW_URL" ] && ! boucle_is_screenshot_review_effective; }; then
     echo "[boucle] Diff review mode — gathering PR diff and check suites..."
     # Fetch the MR diff
     BOUCLE_MR_DIFF=$(forge_mr_diff "$MR_IID" | head -c 5000 || echo "")
@@ -519,7 +519,10 @@ boucle_ci_reviewer() {
       assign_mr_to_author
       # Set boucle:approval (waits for author to approve the MR natively)
       set_boucle_label "$BOUCLE_ISSUE" "boucle:approval" "boucle::status::human"
-      APPROVAL_MSG=$(printf '✅ Reviewer verdict: **PASS**. MR !%s is ready to merge.\n\nThe MR has been assigned to you for approval. To approve and merge, click the **Approve** button on [MR !%s](%s). The merger will then rebase the MR onto %s and merge it serially (avoiding conflicts with other approved MRs).' "$MR_IID" "$MR_IID" "$MR_URL" "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}")
+      local mr_ref mr_term
+      mr_ref=$(forge_mr_ref "$MR_IID")
+      mr_term=$(forge_mr_term)
+      APPROVAL_MSG=$(printf '✅ Reviewer verdict: **PASS**. %s is ready to merge.\n\nThe %s has been assigned to you for approval. To approve and merge, click the **Approve** button on [%s](%s). The merger will then rebase the %s onto %s and merge it serially (avoiding conflicts with other approved %ss).' "$mr_ref" "$mr_term" "$mr_ref" "$MR_URL" "$mr_term" "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}" "$mr_term")
       forge_issue_note "$BOUCLE_ISSUE" "$APPROVAL_MSG"
       # Race condition recovery: the human may have approved the MR
       # BEFORE the reviewer finished (the dispatch `approved` handler

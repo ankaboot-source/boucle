@@ -1539,3 +1539,18 @@ extract_notify() {
   assert_success
   refute_output --partial 'marker_body="<!--'
 }
+
+@test "reviewer: approval message uses forge-aware MR/PR wording" {
+  # The reviewer PASS note is posted as a forge comment that humans read.
+  # Hardcoding "MR !<iid>" produces GitLab wording on GitHub, where the
+  # forge-native reference is "PR #<iid>". The note MUST use forge_mr_ref /
+  # forge_mr_term so the wording matches the forge (regression: boucle.dev
+  # #69 comment talked about "MR !70" on a GitHub PR).
+  # Grep the APPROVAL_MSG block (5 lines around the assignment).
+  run bash -c "grep -n -B5 'APPROVAL_MSG=' lib/boucle-ci/reviewer.sh"
+  assert_success
+  refute_output --partial 'MR !%s'
+  refute_output --partial 'MR !${MR_IID'
+  assert_output --partial 'forge_mr_ref'
+  assert_output --partial 'forge_mr_term'
+}
