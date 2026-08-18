@@ -13,10 +13,9 @@ never touch the engine itself.
 
 - [✨ Why boucle?](#why-boucle)
 - [How to install](#how-to-install)
-  - [🚀 Quick start](#quick-start)
+  - [🚀 Quick start](#-quick-start)
   - [Prerequisite](#prerequisite)
-  - [Option 1 — copy/paste prompt](#option-1-copypaste-prompt-easiest)
-  - [Option 2 — command line](#option-2-command-line)
+  - [No terminal? Use a prompt](#no-terminal-use-a-prompt)
   - [After install](#after-install)
 - [⚙️ How it works](#how-it-works)
 - [💰 Cost](#cost)
@@ -70,6 +69,14 @@ One command, and the loop takes over.
 curl -fsSL https://ankaboot-source.github.io/boucle.dev/install.sh | bash
 ```
 
+The installer adds boucle as a git submodule (`.boucle/`) and runs
+`bin/setup`, which auto-detects your forge from the `origin` remote. Need to
+pass flags to setup (e.g. a GitHub bot token)? Pipe through `bash -s --`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ankaboot-source/boucle/main/install.sh | bash -s -- github --bot-token "<bot-PAT>" --bot-id <bot-user-id>
+```
+
 Then create an issue in your forge and tag it `boucle:triage` — the loop starts.
 
 ### Prerequisite
@@ -84,14 +91,12 @@ creates the bot (a project service account on GitLab, the PAT owner on
 GitHub) as part of the install — see [The bot user](#the-bot-user) if you
 prefer to wire in an existing account instead.
 
-Pick whichever path fits you.
+### No terminal? Use a prompt
 
-### Option 1 — copy/paste prompt (easiest)
-
-No terminal needed. Ask your coding agent (Claude Code, Cursor, …) to install
-boucle by pasting this prompt. **Nothing to replace**: the agent detects your
-GitLab/GitHub host and project from the git remote, and it works even if you are
-not already inside the target repository.
+Ask your coding agent (Claude Code, Cursor, …) to install boucle by pasting
+this prompt. **Nothing to replace**: the agent detects your GitLab/GitHub
+host and project from the git remote, and it works even if you are not
+already inside the target repository.
 
 ```text
 Install boucle on this GitLab/GitHub repository. Execute these steps and report
@@ -110,27 +115,6 @@ back what you did:
 5. git add .gitmodules .boucle .gitlab-ci.yml && git commit -m "chore: install boucle engine"
 6. Show me the URL bin/setup printed for configuring the masked API key,
    and any next steps it listed.
-```
-
-### Option 2 — command line
-
-```bash
-# 1. Add boucle as a submodule in your repo
-git submodule add https://github.com/ankaboot-source/boucle .boucle
-
-# 2. Configure everything (idempotent — safe to re-run)
-#
-# GitLab:
-.boucle/bin/setup gitlab
-#
-# GitHub — dedicated bot (recommended):
-#   Create a bot account: https://github.com/signup
-#   Create a PAT: https://github.com/settings/tokens/new (scopes: repo + workflow)
-#   Add the bot as a collaborator on your repo, then:
-.boucle/bin/setup github --bot-token "<bot-PAT>" --bot-id <bot-user-id>
-#
-# GitHub — mono-user (fallback, your own PAT, notifications degrade):
-.boucle/bin/setup github --bot-token "$(gh auth token)"
 ```
 
 ### After install
