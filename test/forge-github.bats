@@ -79,6 +79,34 @@ setup() {
   assert_output --partial "Approve** button"
 }
 
+@test "forge_mr_approve_instruction: mono-user says 👍 on ALL forges" {
+  # In mono-user mode the human IS the bot — the PR author is the approver.
+  # Neither GitHub nor GitLab reliably counts an author'"'"'s own approval, so
+  # the emoji-reaction gate on the reviewer PASS comment is the ONLY reliable
+  # human MR gate. The instruction MUST point at the emoji on BOTH forges.
+  # Regression (boucle.dev #40, 2026-08-18): the doctor auto-merged on the
+  # PASS verdict alone — the gate was decorative. The emoji is now mandatory.
+  run bash -c 'export BOUCLE_FORGE=github BOUCLE_MONO_USER=true; source bin/forge/common.sh; forge_mr_approve_instruction'
+  assert_success
+  assert_output --partial "👍"
+  refute_output --partial "approving review"
+
+  run bash -c 'export BOUCLE_FORGE=gitlab BOUCLE_MONO_USER=true; source bin/forge/common.sh; forge_mr_approve_instruction'
+  assert_success
+  assert_output --partial "👍"
+  refute_output --partial "Approve** button"
+
+  # Bot mode stays per-forge (native Approve / approving review works when
+  # the approver is a distinct account from the author).
+  run bash -c 'export BOUCLE_FORGE=github BOUCLE_MONO_USER=false; source bin/forge/common.sh; forge_mr_approve_instruction'
+  assert_success
+  assert_output --partial "approving review"
+
+  run bash -c 'export BOUCLE_FORGE=gitlab BOUCLE_MONO_USER=false; source bin/forge/common.sh; forge_mr_approve_instruction'
+  assert_success
+  assert_output --partial "Approve** button"
+}
+
 # ── forge_mr_merge: MUST echo the merge commit SHA on success ────────────
 # The merger (lib/boucle-ci/merger.sh) captures the output as MERGE_SHA and
 # treats an empty value as "merge API call failed" → boucle:human escalation.

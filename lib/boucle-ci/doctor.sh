@@ -128,6 +128,32 @@ boucle_ci_doctor() {
     echo "$pipelines" | jq -e 'type == "array" and length > 0' > /dev/null 2>&1
   }
 
+  # Poll for a 👍 (or any spec-approval emoji) reaction on the
+  # boucle:approval-request note the reviewer posted on the PR. Returns 1
+  # if a non-bot user reacted with an approval emoji, 0 otherwise. Mirrors
+  # the spec-approval emoji polling (forge_note_reactions + canonical set).
+  # Used in mono-user mode where native PR review is blocked.
+  doctor_mr_approval_emoji() {
+    local mr_iid="$1" notes approval_note_id awards
+    notes=$(forge_mr_notes "$mr_iid" 2> /dev/null || echo "[]")
+    approval_note_id=$(echo "$notes" \
+      | jq -r '[.[] | select(.body | contains("<!-- boucle:approval-request v=1 -->"))] | last | .id // 0' 2> /dev/null)
+    [ "$approval_note_id" = "0" ] || [ -z "$approval_note_id" ] && {
+      echo 0
+      return
+    }
+    awards=$(forge_note_reactions mr "$mr_iid" "$approval_note_id" 2> /dev/null || echo "[]")
+    if echo "$awards" | jq -e --arg emojis "$BOUCLE_SPEC_APPROVAL_EMOJIS" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
+              [.[] | select(.user.username != $bname) | .name]
+              | map(select(. as $n | ($emojis | split("|")) | index($n)))
+              | length > 0
+          ' > /dev/null 2>&1; then
+      echo 1
+    else
+      echo 0
+    fi
+  }
+
   # Doctor-side dedup: track the last time the doctor triggered each
   # issue in $BOUCLE_STATE_CACHE/doctor-triggers/<iid>. Skip re-trigger
   # if the doctor already triggered this issue within the STALENESS
@@ -587,15 +613,12 @@ boucle_ci_doctor() {
       # count-based checks and log messages below keep working.
       MR_OAPPROVED=$(forge_mr_approvals "$MR_OIID")
       [ "$MR_OAPPROVED" = "true" ] && MR_OAPPROVED=1 || MR_OAPPROVED=0
-      # In mono-user mode, there are no formal reviews — the reviewer
-      # posts a verdict PASS as a comment on the PR. Detect that as an
-      # approval signal so the doctor can merge without a native review.
+      # In mono-user mode, there are no formal reviews — the human approves
+      # by reacting 👍 on the boucle:approval-request note the reviewer
+      # posted on the PR. Poll that note's reactions. The old auto-detect
+      # of the PASS verdict merged without a human signal — removed.
       if [ "$MR_OAPPROVED" -eq 0 ] && [ "${BOUCLE_MONO_USER:-false}" = "true" ]; then
-        MR_NOTES=$(forge_mr_notes "$MR_OIID" 2> /dev/null || echo "[]")
-        echo "  → mono-user: MR_OIID=$MR_OIID notes_len=${#MR_NOTES} first100=${MR_NOTES:0:100}"
-        if echo "$MR_NOTES" | jq -e '[.[] | select(.body | contains("VERDICT: PASS"))] | length > 0' > /dev/null 2>&1; then
-          MR_OAPPROVED=1
-        fi
+        MR_OAPPROVED=$(doctor_mr_approval_emoji "$MR_OIID")
       fi
       if [ "$MR_OAPPROVED" -gt 0 ] && { [ "$MR_OSTATUS" = "mergeable" ] || [ "$MR_OSTATUS" = "unknown" ]; }; then
         # When approved + mergeable: trigger merger directly.
@@ -838,14 +861,12 @@ boucle_ci_doctor() {
     # — map to 0/1 so the count-based logic and messages keep working.
     APPROVED_COUNT=$(forge_mr_approvals "$MR_IID")
     [ "$APPROVED_COUNT" = "true" ] && APPROVED_COUNT=1 || APPROVED_COUNT=0
-    # In mono-user mode, there are no formal reviews — the reviewer
-    # posts a verdict PASS as a comment on the PR. Detect that as an
-    # approval signal so the doctor can merge without a native review.
+    # In mono-user mode, the human approves by reacting 👍 on the
+    # boucle:approval-request note the reviewer posted on the PR. Poll that
+    # note's reactions. The old auto-detect of the PASS verdict merged without
+    # a human signal — removed.
     if [ "$APPROVED_COUNT" -eq 0 ] && [ "${BOUCLE_MONO_USER:-false}" = "true" ]; then
-      MR_NOTES=$(forge_mr_notes "$MR_IID" 2> /dev/null || echo "[]")
-      if echo "$MR_NOTES" | jq -e '[.[] | select(.body | contains("VERDICT: PASS"))] | length > 0' > /dev/null 2>&1; then
-        APPROVED_COUNT=1
-      fi
+      APPROVED_COUNT=$(doctor_mr_approval_emoji "$MR_IID")
     fi
     # Guard: if the merger already escalated a SEMANTIC merge conflict on
     # this issue (boucle_escalate_merge_conflict posts a note with "Merge

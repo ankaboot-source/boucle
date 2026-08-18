@@ -1727,3 +1727,93 @@ extract_notify() {
   assert_output --partial 'forge_mr_approve_instruction'
   refute_output --partial 'click the **Approve** button'
 }
+
+@test "reviewer PASS: posts an approval-request note on the PR (not just the issue)" {
+  # In mono-user mode on GitHub, self-review is blocked — the human approves
+  # with a 👍 reaction on the PR. The reviewer MUST post a short note ON THE
+  # PR (forge_mr_note) carrying the boucle:approval-request marker, so the
+  # doctor can find it by marker and poll its reactions.
+  run bash -c "grep -n -A3 'forge_mr_note \"\$MR_IID\"' lib/boucle-ci/reviewer.sh | grep -E 'approval-request'"
+  assert_success
+}
+
+@test "doctor: mono-user approval polls reactions on the PR approval-request note (no auto-merge on VERDICT: PASS)" {
+  # The old doctor auto-detected VERDICT: PASS in PR notes and merged — no
+  # human signal. The new contract: poll for a 👍 reaction on the
+  # boucle:approval-request note, and MUST NOT treat VERDICT: PASS alone
+  # as an approval signal.
+  # (1) No jq filter uses VERDICT: PASS as an approval trigger.
+  run bash -c "grep -nE 'jq.*VERDICT: PASS|select.*VERDICT: PASS' lib/boucle-ci/doctor.sh"
+  assert_failure
+  # (2) The doctor has a helper that polls reactions on the approval-request note.
+  run bash -c "awk '/doctor_mr_approval_emoji\\(\\) \\{/,/^  \\}/' lib/boucle-ci/doctor.sh | grep forge_note_reactions"
+  assert_success
+}
+
+# ── Mono-user MR-approval gate (emoji-reaction) ───────────────────────
+# Regression suite for boucle.dev #40 (2026-08-18): in mono-user mode the
+# doctor auto-merged on the reviewer'"'"'s PASS verdict comment alone — no
+# human ever approved. The human MR gate documented in LOOP.md ("MR approval
+# stays human-gated") was silently removed. These tests pin the fix: the
+# gate is a 👍 emoji on the reviewer'"'"s approval-request note on the PR,
+# polled by the doctor — the same mechanism as the spec gate.
+
+@test "reviewer: PASS message branches by mono-user mode (emoji vs Approve)" {
+  # The PASS message MUST tell the human which action approves the merge:
+  #  - mono-user: react with 👍 on the PASS comment (self-approval unreliable)
+  #  - bot mode: click Approve / submit an approving review (native, works)
+  run bash -c "grep -n 'boucle_mono_user' lib/boucle-ci/reviewer.sh"
+  assert_success
+  assert_output --partial 'boucle_mono_user'
+}
+
+@test "reviewer: race-condition recovery is skipped in mono-user mode" {
+  # The race-recovery block polls forge_mr_approvals to catch a human who
+  # approved the MR BEFORE the reviewer PASSed. In mono-user mode, native
+  # self-approval is unreliable, so polling it is dead code AND would
+  # short-circuit the new emoji gate. The block MUST be guarded by
+  # `! boucle_mono_user` so it only runs in bot mode.
+  run bash -c "awk '/MR_APPROVED=.*forge_mr_approvals/,/fi/' lib/boucle-ci/reviewer.sh | grep -c 'boucle_mono_user'"
+  assert_success
+  refute_output "0"
+}
+
+@test "reviewer: posts approval-request note on the PR in mono-user mode" {
+  # The reviewer MUST post a note ON THE PR (forge_mr_note) carrying the
+  # boucle:approval-request marker in mono-user mode, so the doctor can
+  # find it by marker and poll its reactions for the 👍.
+  run bash -c "grep -n 'boucle:approval-request' lib/boucle-ci/reviewer.sh"
+  assert_success
+  assert_output --partial 'boucle:approval-request'
+  run bash -c "grep -n 'forge_mr_note' lib/boucle-ci/reviewer.sh"
+  assert_success
+}
+
+@test "doctor: no VERDICT PASS auto-approve block remains" {
+  # The old mono-user recovery treated the reviewer'"'"'s PASS verdict bot
+  # comment as the approval signal and merged with no human action. The
+  # string "VERDICT: PASS" must NOT appear anywhere in doctor.sh — not in
+  # code, not in comments.
+  run bash -c "grep -c 'VERDICT: PASS' lib/boucle-ci/doctor.sh"
+  assert_success
+  assert_output "0"
+}
+
+@test "doctor: doctor_mr_approval_emoji helper polls forge_note_reactions" {
+  # The new human MR gate: the doctor polls the approval-request note on
+  # the PR for a canonical approval emoji via forge_note_reactions.
+  run bash -c "awk '/doctor_mr_approval_emoji\(\) \{/,/^  \}/' lib/boucle-ci/doctor.sh | grep forge_note_reactions"
+  assert_success
+  assert_output --partial 'forge_note_reactions'
+}
+
+@test "doctor: mono-user recovery calls doctor_mr_approval_emoji (not VERDICT detect)" {
+  # Both recovery paths (boucle:working/review and boucle:human/approval)
+  # MUST call doctor_mr_approval_emoji in mono-user mode, not the old
+  # jq VERDICT: PASS detection.
+  run bash -c "grep -n 'doctor_mr_approval_emoji' lib/boucle-ci/doctor.sh"
+  assert_success
+  # At least 3 lines: 1 definition + 2 call sites.
+  count=$(/usr/bin/grep -c 'doctor_mr_approval_emoji' lib/boucle-ci/doctor.sh)
+  [ "$count" -ge 3 ] || { echo "expected >=3, got $count"; false; }
+}

@@ -525,16 +525,30 @@ boucle_ci_reviewer() {
       approve_instr=$(forge_mr_approve_instruction)
       APPROVAL_MSG=$(printf '✅ Reviewer verdict: **PASS**. %s is ready to merge.\n\nThe %s has been assigned to you for approval. To approve and merge, %s [%s](%s). The merger will then rebase the %s onto %s and merge it serially (avoiding conflicts with other approved %ss).' "$mr_ref" "$mr_term" "$approve_instr" "$mr_ref" "$MR_URL" "$mr_term" "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}" "$mr_term")
       forge_issue_note "$BOUCLE_ISSUE" "$APPROVAL_MSG"
+      # Post an approval-request note ON THE PR so the doctor can poll for
+      # a 👍 reaction. In mono-user mode on GitHub, self-review is blocked,
+      # so the human approves by reacting 👍 on this note. The marker lets
+      # the doctor find it reliably across runs. Skipped when not in
+      # mono-user mode — native review/approval is the signal there.
+      if boucle_mono_user; then
+        local pr_approval_note
+        pr_approval_note=$(printf '👍 **this comment** to approve and merge.\n\nThe merger will rebase onto `%s` and merge serially.\n\n<!-- boucle:approval-request v=1 -->' "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}")
+        forge_mr_note "$MR_IID" "$pr_approval_note" \
+          || echo "[boucle] WARN: PR approval-request note post failed (fail-open — the issue note still tells the human what to do)"
+      fi
       # Race condition recovery: the human may have approved the MR
       # BEFORE the reviewer finished (the dispatch `approved` handler
       # silently skips when the issue is at boucle:review, not
-      # boucle:approval). Check if the MR is already approved natively
-      # — if so, trigger the merger immediately instead of waiting for
-      # an approval webhook that was already silently dropped.
-      MR_APPROVED=$(forge_mr_approvals "$MR_IID")
-      if [ "$MR_APPROVED" = "true" ]; then
-        echo "MR !${MR_IID} was already approved ($MR_APPROVED) before reviewer PASS — triggering merger (race condition recovery)"
-        forge_trigger_role "$BOUCLE_ISSUE" "merger"
+      # boucle:approval). In bot mode, check native forge approval and
+      # trigger the merger if already approved. In mono-user mode, skip —
+      # native self-approval is unreliable and the emoji scan (doctor) is
+      # the gate.
+      if ! boucle_mono_user; then
+        MR_APPROVED=$(forge_mr_approvals "$MR_IID")
+        if [ "$MR_APPROVED" = "true" ]; then
+          echo "MR !${MR_IID} was already approved ($MR_APPROVED) before reviewer PASS — triggering merger (race condition recovery)"
+          forge_trigger_role "$BOUCLE_ISSUE" "merger"
+        fi
       fi
       ;;
     FAIL)

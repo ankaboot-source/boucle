@@ -131,9 +131,17 @@ forge_mr_ref() {
 #   "To approve and merge, $(forge_mr_approve_instruction) [PR #70](url)."
 #   GitHub has no "Approve" button — approval is via an approving code review.
 forge_mr_approve_instruction() {
+  # Mono-user mode: the human IS the bot account, so native self-approval
+  # is unreliable (GitHub blocks author self-review; GitLab is inconsistent).
+  # The MR gate is a 👍 emoji on the reviewer PASS comment on the PR,
+  # polled by the doctor. Applies on ALL forges in mono-user mode.
+  if [ "${BOUCLE_MONO_USER:-false}" = "true" ]; then
+    echo "react with 👍 on the reviewer **PASS** comment for"
+    return
+  fi
   case "${BOUCLE_FORGE:-gitlab}" in
     github) echo "submit an **approving review** on" ;;
-    *) echo "click the **Approve** button on" ;;
+    *)      echo "click the **Approve** button on" ;;
   esac
 }
 
