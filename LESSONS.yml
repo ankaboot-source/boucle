@@ -796,3 +796,22 @@
   - 'DO gate the MR merge in mono-user mode on a human emoji reaction (👍/❤️/🚀/🎉 — the same canonical set as the spec gate) on a dedicated approval-request note the reviewer posts on the PR (forge_mr_note with a `<!-- boucle:approval-request v=1 -->` marker). The doctor polls the note''s reactions via forge_note_reactions and triggers the merger only when a non-bot user reacted. This mirrors the spec gate, is forge-agnostic, and is immune to the self-approval gap.'
   - 'DO guard the reviewer''s race-condition recovery (forge_mr_approvals poll) with `! boucle_mono_user` so it only runs in bot mode. In mono-user mode the poll is dead code (self-approval unreliable) and would short-circuit the emoji gate.'
   - 'DO make forge_mr_approve_instruction return the emoji instruction for mono-user on ALL forges (not just GitHub), since the self-approval gap is forge-agnostic.'
+86:
+  title: Non-note forge backend functions MUST be best-effort (return 0) under set -e
+  ❌:
+  - 'DO NOT leave an unguarded `_gh_api_silent` (or `glab api`) call as the last statement of a forge backend function whose contract is best-effort. `bin/jc` enables `set -euo pipefail`, so a non-zero
+    return from ANY function in the call chain exits the entire pipeline immediately. The GitLab backend guards every state-mutating call with `|| true`; the GitHub backend historically did not —
+    `forge_work_item_link_parent`, `forge_trigger_role`, `forge_issue_assign`, `forge_issue_close`, `forge_mr_merge`, `forge_mr_approve`, `forge_branch_delete`, `forge_label_create`, and others all
+    returned the raw API exit code. A single transient API error (404 on the sub-issues endpoint, 403 on workflow_dispatch, network timeout) crashes the calling job and skips every remaining operation
+    in the loop.'
+  - 'DO NOT confuse this with lesson #59 (note functions are fail-loud by contract). `forge_issue_note` / `forge_mr_note` return the real POST exit code so callers can detect a dropped human-visible
+    message — that is correct. The best-effort contract applies to state-mutating and infra functions (assign, close, link, trigger, merge, approve, delete, label-create) where a transient failure
+    MUST NOT prevent the remaining sub-issues from being created, the remaining labels from being set, or the remaining chain-to-role triggers from firing.'
+  ✅:
+  - 'DO: append `|| true` to every `_gh_api_silent` / `glab api` call inside non-note forge functions, OR return 0 explicitly at the function exit. Match the GitLab backend pattern: every state-mutating
+    call is `|| true`-guarded. The function''s caller never sees a non-zero return, so `set -e` never fires. When adding a new function to a forge backend, check: does this function mutate state that
+    the loop can survive losing (assign, close, link, trigger)? If yes, it is best-effort — guard every API call. If it posts a human-visible message, it is fail-loud (lesson #59) — return the real
+    exit code and let the caller append `|| true` explicitly.'
+  - 'DO: also add `|| true` at the CALL SITE in `lib/boucle-ci/*.sh` for belt-and-suspenders — even if the forge function is correctly guarded, a future refactor might remove the guard. The triage
+    split loop (`forge_work_item_link_parent "$NEW_IID" "$PARENT_IID" || true`, `chain_to_role "$NEW_IID" "" || true`) is the canonical example: a crash here creates only the first sub-issue and
+    silently drops the rest, with no error visible to the human.'

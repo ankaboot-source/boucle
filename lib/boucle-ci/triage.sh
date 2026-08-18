@@ -848,7 +848,7 @@ HELP_EOF
       # Extract parent context (title + URL) for the sub-issue body
       PARENT_DATA=$(forge_issue_get "$IID")
       PARENT_TITLE=$(echo "$PARENT_DATA" | jq -r '.title')
-      PARENT_URL=$(echo "$PARENT_DATA" | jq -r '.web_url')
+      PARENT_URL=$(echo "$PARENT_DATA" | jq -r '.web_url // .html_url // ""')
       PARENT_IID="$IID"
 
       CREATED_IIDS=""
@@ -924,7 +924,7 @@ HELP_EOF
                 # failed with BOUCLE_BOT_ID set; forge_issue_assign is
                 # best-effort per the contract, so that abort is dropped.
                 if [ -n "${BOUCLE_BOT_ID:-}" ]; then
-                  forge_issue_assign "$NEW_IID" "$BOUCLE_BOT_ID"
+                  forge_issue_assign "$NEW_IID" "$BOUCLE_BOT_ID" || true
                 fi
                 # Set the parent via the forge contract. The backend
                 # tries the work-items hierarchy API first (real
@@ -935,10 +935,10 @@ HELP_EOF
                 # a REST relates_to issue link (visible under
                 # "Linked items" on the parent). Final fallback: the
                 # ## Parent issue body text provides navigation.
-                forge_work_item_link_parent "$NEW_IID" "$PARENT_IID"
+                forge_work_item_link_parent "$NEW_IID" "$PARENT_IID" || true
                 # Trigger triage directly via trigger API (bot-created issues would
                 # hit the anti-loop guard in dispatch because ACTOR=up-bot).
-                chain_to_role "$NEW_IID" ""
+                chain_to_role "$NEW_IID" "" || true
               else
                 echo "  → FAIL to create sub-issue: ${NEW_IID:-empty response from forge_issue_create}" >&2
                 PARSE_FAILURES=$((PARSE_FAILURES + 1))
@@ -1077,7 +1077,7 @@ HELP_EOF
         # by maybe_close_parent's legacy fallback path when the hierarchy
         # API is unavailable (feature flag disabled on self-managed GitLab).
         SPLIT_MSG=$(printf 'Split into: #%s.\n\nParent stays open until all sub-issues close. The loop closes this parent automatically when the last sub-issue completes.\n\n<!-- boucle:split-parent iids=%s -->' "$(echo "$CREATED_IIDS" | sed 's/,/, #/g')" "$CREATED_IIDS")
-        forge_issue_note "$IID" "$SPLIT_MSG"
+        forge_issue_note "$IID" "$SPLIT_MSG" || true
         echo "Split parent #$IID into $SUBISSUE_COUNT sub-issue(s): $CREATED_IIDS (parent marked boucle:split)"
         if [ "$PARSE_FAILURES" -gt 0 ]; then
           echo "WARN: $PARSE_FAILURES sub-issue(s) failed to create"
