@@ -43,12 +43,20 @@ extract_func_body() {
 
 # build_prompt calls trim_notes, so both must be extracted together or the
 # sourced snippet hits "command not found" and silently drops the notes.
+# It also calls forge_aware_prompt (bin/jc) and boucle_review_mode
+# (lib/boucle.sh); both are pure echo-shaped helpers, so extract the first
+# and source the second from the library rather than stubbing either —
+# a stub would let a real change to their behaviour pass unnoticed.
 # Usage: extract_prompt_funcs <outfile>
 extract_prompt_funcs() {
   local tmp tmp2
   tmp=$(mktemp)
   tmp2=$(mktemp)
-  extract_func_body trim_notes "$1"
+  awk '/^boucle_review_mode\(\) \{/{p=1} p{print} p&&/^}/{exit}' lib/boucle.sh > "$1"
+  extract_func forge_aware_prompt "$tmp2"
+  cat "$tmp2" >> "$1"
+  extract_func_body trim_notes "$tmp2"
+  cat "$tmp2" >> "$1"
   # filter_mr_discussion embeds a multi-line awk program whose { } braces
   # break extract_func_body's brace counting — use the simple extractor
   # (it stops at the first column-0 `}`; the awk body is indented).

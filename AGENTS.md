@@ -86,25 +86,6 @@ known recurring bug, documented in LESSONS.yml.
     cross-references. **NEVER** let docs drift from code — a doc that
     describes a system that no longer exists is a bug.
 
-12. **Name the authority before enforcing it** — Any change that adds a gate,
-    a validation step, a persisted field, or a "verify before acting" check on
-    an agent-driven action MUST answer, in one sentence in its MR description:
-
-    > What is the authority for this action, and why is it not the agent's own
-    > structured output?
-
-    If the honest answer is "the agent's output, but we don't trust it", make
-    the agent's output **more structured** instead of building an inference
-    layer on top of infra state. Infra signals are for drift detection, not
-    for authority.
-
-    The failure this prevents: deriving a decision from *(what the agent said
-    × a config policy)* rather than from what the agent actually decided. The
-    decision then belongs to neither — it cannot be read off the agent's
-    output, and it cannot be read off the config. **NEVER** add a config knob
-    that reinterprets an agent's judgment; change what the agent is asked to
-    emit.
-
 ## Lessons learned (forward-looking operating principles)
 
 Each entry below is a **contract** that every agent and CI step MUST honor

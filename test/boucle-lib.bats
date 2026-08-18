@@ -1632,9 +1632,12 @@ print('OK' if any('boucle' in c for c in allow) else 'MISSING: %s' % allow)
   assert_output "1"
 }
 
-@test "authority: the rule is in the operating principles, not buried" {
-  run grep -q 'Name the authority before enforcing it' AGENTS.md
+@test "authority: the rule is in the lessons contract, not buried" {
+  # LESSONS.yml, not AGENTS.md: bin/check-lessons rejects lessons above the
+  # historical baseline in AGENTS.md, because bin/update overwrites it on
+  # consumers.
+  run grep -q 'Name the authority before enforcing it' LESSONS.yml
   assert_success
-  run grep -q 'why is it not the agent' AGENTS.md
+  run grep -q 'why is it not the agent' LESSONS.yml
   assert_success
 }

@@ -493,7 +493,7 @@ HELP_EOF
         # AUTHORITY: the `Validation:` field the triage agent emitted.
         #
         # It used to be (LLM size judgment x BOUCLE_SPEC_PROFILE) -> gate,
-        # which is the inference-on-agent-output trap AGENTS.md principle 12
+        # which is the inference-on-agent-output trap LESSONS.yml lesson #83
         # names: the decision belonged to neither the agent nor the config,
         # and could be read off neither. The profile is now handed to the
         # agent in its prompt (bin/jc) and the agent emits the decision.
