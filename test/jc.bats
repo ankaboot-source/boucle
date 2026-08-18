@@ -41,8 +41,11 @@ extract_func_body() {
   ' bin/jc > "$2"
 }
 
-# build_prompt calls trim_notes, so both must be extracted together or the
-# sourced snippet hits "command not found" and silently drops the notes.
+# build_prompt calls trim_notes, forge_aware_prompt (bin/jc) and
+# boucle_review_mode (lib/boucle.sh), so all must be extracted together
+# or the sourced snippet hits "command not found" and silently drops
+# output. boucle_review_mode is stubbed (it just echoes BOUCLE_REVIEW_MODE)
+# because the extractor reads bin/jc, not lib/boucle.sh.
 # Usage: extract_prompt_funcs <outfile>
 extract_prompt_funcs() {
   local tmp tmp2
@@ -56,9 +59,14 @@ extract_prompt_funcs() {
   extract_func filter_mr_discussion "$tmp2"
   cat "$tmp2" >> "$1"
   rm -f "$tmp2"
+  extract_func forge_aware_prompt "$tmp2"
+  cat "$tmp2" >> "$1"
+  rm -f "$tmp2"
   extract_func build_prompt "$tmp"
   cat "$tmp" >> "$1"
   rm -f "$tmp"
+  # Stub: boucle_review_mode lives in lib/boucle.sh, not bin/jc.
+  printf 'boucle_review_mode() { echo "${BOUCLE_REVIEW_MODE:-preview}"; }\n' >> "$1"
 }
 
 # ── Syntax ────────────────────────────────────────────────────────────
