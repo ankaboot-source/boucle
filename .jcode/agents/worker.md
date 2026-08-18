@@ -110,6 +110,20 @@ Doc updates rules:
 - Maintain **cross-references** between docs (relative markdown links).
 - If the triage analysis flagged a "Docs impact", that is your starting point — but also check for impacts the triage missed.
 
+## You are graded on a holdout, not on the criteria you can see
+
+The acceptance criteria in `state.md` are **not** the grading set. After you
+finish, an adversarial reviewer tests the **deployed preview** — the real
+built site at a real URL — and checks behaviour you cannot see from here.
+After merge, an e2e agent does it again against **production**. Neither
+shows you its checks before grading you.
+
+So code that satisfies the listed criteria while behaving badly in a browser
+scores worse, not better. Do not special-case, do not stub, do not write the
+narrowest change that makes a criterion technically true. Implement the
+behaviour the issue describes, and assume it will be exercised in ways the
+criteria did not spell out.
+
 ## Skills available
 
 You have these skills in `.jcode/skills/`. **Use them** — they contain domain expertise you need. **Load a skill with the `skill` tool BEFORE doing work in its domain.** This is not optional.

@@ -1034,18 +1034,29 @@ EOF
   rm -rf "$(dirname "$(dirname "$AGENT_DIR")")"
 }
 
-@test "reasoning effort: shipped agents declare max (deepseek) or off (others)" {
-  # The contract: every shipped agent file declares reasoning_effort —
-  # deepseek models → max; other models → off (jcode's own default would
-  # otherwise be "low", which sends effort=low to glm agents).
+@test "reasoning effort: every shipped agent declares one, and max stays deepseek-only" {
+  # The contract: every shipped agent file declares reasoning_effort, because
+  # jcode's own default is "low" and would silently apply to agents that
+  # never asked for it.
+  #
+  # "max" is part of jcode's DEEPSEEK ladder (bin/jc:270). The value is sent
+  # verbatim in the request body, so putting it on a non-deepseek model risks
+  # a 400 that takes the role out entirely — or a silent ignore, which reads
+  # as "effort changes nothing" when nothing was ever sent.
   for agent in triage worker reviewer e2e; do
     model_line=$(awk '/^model:/{sub(/^model:[[:space:]]*/,""); print; exit}' ".jcode/agents/$agent.md")
     [[ -n "$model_line" ]]
     effort_line=$(awk '/^reasoning_effort:/{sub(/^reasoning_effort:[[:space:]]*/,""); print; exit}' ".jcode/agents/$agent.md")
-    if [[ "$model_line" == *"deepseek"* ]]; then
-      [[ "$effort_line" == "max" ]]
-    else
-      [[ "$effort_line" == "off" ]]
+    [[ -n "$effort_line" ]]
+    case "$effort_line" in
+      none | minimal | low | medium | high | xhigh | max | off) ;;
+      *) echo "agent $agent declares an effort outside jcode's ladder: $effort_line"; false ;;
+    esac
+    if [[ "$model_line" != *"deepseek"* ]]; then
+      [[ "$effort_line" != "max" ]] || {
+        echo "agent $agent is not deepseek but declares max"
+        false
+      }
     fi
   done
 }
@@ -1210,71 +1221,47 @@ VERDICT: FAIL
 [up-bot] Master advanced since this branch was created.'
 }
 
-@test "anchoring: full is the default and changes nothing" {
+@test "anchoring: a prior verdict is reduced to its unmet criteria" {
   TMPF=$(mktemp)
   extract_anchor "$TMPF"
-  run bash -c "unset BOUCLE_REVIEW_ANCHORING; BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$(cat)\"" <<< "$(anchor_fixture)"
-  assert_success
-  assert_output --partial "RATIONALE-ANCHOR"
-  assert_output --partial "- [x] Header renders"
-  rm -f "$TMPF"
-}
-
-@test "anchoring: criteria-only keeps unmet criteria and drops the reasoning" {
-  TMPF=$(mktemp)
-  extract_anchor "$TMPF"
-  run bash -c "BOUCLE_REVIEW_ANCHORING=criteria-only BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$(cat)\"" <<< "$(anchor_fixture)"
+  run bash -c "BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$(cat)\"" <<< "$(anchor_fixture)"
   assert_success
   assert_output --partial "VERDICT: FAIL"
   assert_output --partial "- [ ] Footer link present"
-  # The anchor itself is gone.
+  # The rationale is the anchor — it must not survive.
   refute_output --partial "RATIONALE-ANCHOR"
-  # Met criteria are not re-listed either — the reviewer re-checks all of
+  # Met criteria are not re-listed either: the reviewer re-checks all of
   # them from state.md, it is not handed a shortlist.
   refute_output --partial "- [x] Header renders"
   rm -f "$TMPF"
 }
 
-@test "anchoring: none withholds the verdict entirely" {
-  TMPF=$(mktemp)
-  extract_anchor "$TMPF"
-  run bash -c "BOUCLE_REVIEW_ANCHORING=none BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$(cat)\"" <<< "$(anchor_fixture)"
-  assert_success
-  refute_output --partial "VERDICT: FAIL"
-  refute_output --partial "RATIONALE-ANCHOR"
-  assert_output --partial "withheld"
-  rm -f "$TMPF"
+@test "anchoring: there is no way to configure it back to a worse behaviour" {
+  # Keeping the rationale re-anchors the reviewer; withholding the criterion
+  # lets the verdict flip-flop. Neither is offered.
+  run bash -c "grep -c BOUCLE_REVIEW_ANCHORING bin/jc || true"
+  assert_output "0"
+  run bash -c "grep -c BOUCLE_REVIEW_ANCHORING LOOP.md || true"
+  assert_output "0"
 }
 
-@test "anchoring: human comments reach the reviewer in full under EVERY mode" {
+@test "anchoring: human comments reach the reviewer in full" {
   # Human comments amend the spec and outrank the frozen criteria in
   # state.md. Filtering one would be a spec regression, not a saving.
   TMPF=$(mktemp)
   extract_anchor "$TMPF"
-  for mode in full criteria-only none; do
-    out=$(BOUCLE_REVIEW_ANCHORING="$mode" BOUCLE_BOT_USERNAME=up-bot bash -c "source '$TMPF'; filter_mr_discussion \"\$1\"" _ "$(anchor_fixture)")
-    echo "$out" | grep -q "AMENDMENT-KEEP-ME use https://example.org/v — do not substitute" \
-      || { echo "mode=$mode lost the human amendment"; false; }
-  done
+  run bash -c "BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$1\"" _ "$(anchor_fixture)"
+  assert_success
+  assert_output --partial "AMENDMENT-KEEP-ME use https://example.org/v — do not substitute"
   rm -f "$TMPF"
 }
 
 @test "anchoring: bot notes that are not verdicts pass through untouched" {
   TMPF=$(mktemp)
   extract_anchor "$TMPF"
-  run bash -c "BOUCLE_REVIEW_ANCHORING=none BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$(cat)\"" <<< "$(anchor_fixture)"
+  run bash -c "BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$(cat)\"" <<< "$(anchor_fixture)"
   assert_success
   assert_output --partial "Master advanced since this branch was created."
-  rm -f "$TMPF"
-}
-
-@test "anchoring: an unknown mode falls back to full instead of filtering blind" {
-  TMPF=$(mktemp)
-  extract_anchor "$TMPF"
-  run bash -c "BOUCLE_REVIEW_ANCHORING=typo BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$1\" 2>&1" _ "$(anchor_fixture)"
-  assert_success
-  assert_output --partial "WARN: unknown BOUCLE_REVIEW_ANCHORING"
-  assert_output --partial "RATIONALE-ANCHOR"
   rm -f "$TMPF"
 }
 
