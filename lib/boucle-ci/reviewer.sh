@@ -519,10 +519,11 @@ boucle_ci_reviewer() {
       assign_mr_to_author
       # Set boucle:approval (waits for author to approve the MR natively)
       set_boucle_label "$BOUCLE_ISSUE" "boucle:approval" "boucle::status::human"
-      local mr_ref mr_term
+      local mr_ref mr_term approve_instr
       mr_ref=$(forge_mr_ref "$MR_IID")
       mr_term=$(forge_mr_term)
-      APPROVAL_MSG=$(printf '✅ Reviewer verdict: **PASS**. %s is ready to merge.\n\nThe %s has been assigned to you for approval. To approve and merge, click the **Approve** button on [%s](%s). The merger will then rebase the %s onto %s and merge it serially (avoiding conflicts with other approved %ss).' "$mr_ref" "$mr_term" "$mr_ref" "$MR_URL" "$mr_term" "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}" "$mr_term")
+      approve_instr=$(forge_mr_approve_instruction)
+      APPROVAL_MSG=$(printf '✅ Reviewer verdict: **PASS**. %s is ready to merge.\n\nThe %s has been assigned to you for approval. To approve and merge, %s [%s](%s). The merger will then rebase the %s onto %s and merge it serially (avoiding conflicts with other approved %ss).' "$mr_ref" "$mr_term" "$approve_instr" "$mr_ref" "$MR_URL" "$mr_term" "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}" "$mr_term")
       forge_issue_note "$BOUCLE_ISSUE" "$APPROVAL_MSG"
       # Race condition recovery: the human may have approved the MR
       # BEFORE the reviewer finished (the dispatch `approved` handler
@@ -559,7 +560,7 @@ boucle_ci_reviewer() {
         # Final reviewer FAIL after $MAX_ITER attempts: fused into boucle:human
         # (was boucle:blocked, deleted). Configurable via BOUCLE_MAX_ITERATIONS.
         # Note BEFORE the terminal label — never a muted boucle:human.
-        ESCALATION_MSG=$(printf '⚠️ Reviewer verdict: **FAIL** after %s iterations. The loop could not satisfy the acceptance criteria automatically.\n\nReview [PR #%s](%s) and the reviewer verdicts, then either:\n- **Approve** the PR if the work is acceptable (the merger will rebase + merge), or\n- **Comment** with guidance and re-assign to the bot to re-trigger the worker.' "$MAX_ITER" "$MR_IID" "$MR_URL")
+        ESCALATION_MSG=$(printf '⚠️ Reviewer verdict: **FAIL** after %s iterations. The loop could not satisfy the acceptance criteria automatically.\n\nReview [%s](%s) and the reviewer verdicts, then either:\n- **Approve** the %s if the work is acceptable (the merger will rebase + merge), or\n- **Comment** with guidance and re-assign to the bot to re-trigger the worker.' "$MAX_ITER" "$(forge_mr_ref "$MR_IID")" "$MR_URL" "$(forge_mr_term)")
         if ! forge_issue_note "$BOUCLE_ISSUE" "$ESCALATION_MSG"; then
           echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
           exit 1

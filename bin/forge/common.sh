@@ -126,6 +126,17 @@ forge_mr_ref() {
   esac
 }
 
+# forge_mr_approve_instruction
+#   Echo a forge-specific phrase for approving a PR/MR, fitting into:
+#   "To approve and merge, $(forge_mr_approve_instruction) [PR #70](url)."
+#   GitHub has no "Approve" button — approval is via an approving code review.
+forge_mr_approve_instruction() {
+  case "${BOUCLE_FORGE:-gitlab}" in
+    github) echo "submit an **approving review** on" ;;
+    *) echo "click the **Approve** button on" ;;
+  esac
+}
+
 # ── Contract: reaction name normalization ────────────────────────────────
 #
 # forge_reaction_canonical <name>

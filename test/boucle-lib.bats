@@ -821,6 +821,175 @@ source_with_mock_forge() {
   assert_output "FAIL"
 }
 
+# ── boucle_is_screenshot_review_effective (auto-fallback) ──────────────
+# Screenshot mode is "effective" when explicitly requested OR when preview
+# mode (the default) is used with a deploy provider that has no per-branch
+# preview (github-pages, gitlab-pages). In the auto-fallback case, the
+# worker captures screenshots locally instead of overwriting production,
+# and the reviewer grades from those screenshots instead of degrading to
+# blind diff review.
+
+@test "defines boucle_is_screenshot_review_effective function" {
+  run grep -E '^boucle_is_screenshot_review_effective\(\)' lib/boucle.sh
+  assert_success
+}
+
+@test "boucle_is_screenshot_review_effective returns true for explicit screenshot mode" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_REVIEW_MODE=screenshot
+    source lib/boucle.sh
+    boucle_is_screenshot_review_effective && echo "TRUE" || echo "FALSE"
+  '
+  assert_success
+  assert_output "TRUE"
+}
+
+@test "boucle_is_screenshot_review_effective returns true for preview + github-pages (auto-fallback)" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_REVIEW_MODE=preview
+    BOUCLE_DEPLOY_PROVIDER=github-pages
+    source lib/boucle.sh
+    boucle_is_screenshot_review_effective && echo "TRUE" || echo "FALSE"
+  '
+  assert_success
+  assert_output "TRUE"
+}
+
+@test "boucle_is_screenshot_review_effective returns true for preview + gitlab-pages (auto-fallback)" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_REVIEW_MODE=preview
+    BOUCLE_DEPLOY_PROVIDER=gitlab-pages
+    source lib/boucle.sh
+    boucle_is_screenshot_review_effective && echo "TRUE" || echo "FALSE"
+  '
+  assert_success
+  assert_output "TRUE"
+}
+
+@test "boucle_is_screenshot_review_effective returns false for preview + no provider (self mode has per-branch preview)" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_REVIEW_MODE=preview
+    BOUCLE_DEPLOY_PROVIDER=""
+    source lib/boucle.sh
+    boucle_is_screenshot_review_effective && echo "TRUE" || echo "FALSE"
+  '
+  assert_success
+  assert_output "FALSE"
+}
+
+@test "boucle_is_screenshot_review_effective returns false for diff mode + github-pages" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_REVIEW_MODE=diff
+    BOUCLE_DEPLOY_PROVIDER=github-pages
+    source lib/boucle.sh
+    boucle_is_screenshot_review_effective && echo "TRUE" || echo "FALSE"
+  '
+  assert_success
+  assert_output "FALSE"
+}
+
+@test "boucle_is_screenshot_review_effective returns false for default mode + no provider" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_REVIEW_MODE=""
+    BOUCLE_DEPLOY_PROVIDER=""
+    source lib/boucle.sh
+    boucle_is_screenshot_review_effective && echo "TRUE" || echo "FALSE"
+  '
+  assert_success
+  assert_output "FALSE"
+}
+
+# ── boucle_worker_should_deploy auto-fallback ──────────────────────────
+
+@test "boucle_worker_should_deploy returns 1 for preview + github-pages (auto-screenshot, no production clobber)" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_DEPLOY_MODE=self
+    BOUCLE_REVIEW_MODE=preview
+    BOUCLE_DEPLOY_PROVIDER=github-pages
+    source lib/boucle.sh
+    boucle_worker_should_deploy && echo "OK" || echo "FAIL"
+  '
+  assert_success
+  assert_output "FAIL"
+}
+
+@test "boucle_worker_should_deploy returns 1 for screenshot + github-pages (explicit screenshot, no push)" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_DEPLOY_MODE=self
+    BOUCLE_REVIEW_MODE=screenshot
+    BOUCLE_DEPLOY_PROVIDER=github-pages
+    source lib/boucle.sh
+    boucle_worker_should_deploy && echo "OK" || echo "FAIL"
+  '
+  assert_success
+  assert_output "FAIL"
+}
+
+@test "boucle_worker_should_deploy returns 1 for screenshot + no provider (explicit screenshot, no deploy)" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_DEPLOY_MODE=self
+    BOUCLE_REVIEW_MODE=screenshot
+    BOUCLE_DEPLOY_CMD="npx wrangler pages deploy public"
+    source lib/boucle.sh
+    boucle_worker_should_deploy && echo "OK" || echo "FAIL"
+  '
+  assert_success
+  assert_output "FAIL"
+}
+
+@test "boucle_worker_should_deploy returns 1 for preview + gitlab-pages (auto-screenshot)" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
+    forge_issue_get() { :; }
+    forge_issue_labels_get() { echo ""; }
+    forge_issue_labels_set() { :; }
+    BOUCLE_DEPLOY_MODE=self
+    BOUCLE_REVIEW_MODE=preview
+    BOUCLE_DEPLOY_PROVIDER=gitlab-pages
+    BOUCLE_DEPLOY_CMD=""
+    source lib/boucle.sh
+    boucle_worker_should_deploy && echo "OK" || echo "FAIL"
+  '
+  assert_success
+  assert_output "FAIL"
+}
+
 @test "boucle_resolve_live_url returns CI_PAGES_URL in gitlab-pages provider mode" {
   run bash -c '
     BOUCLE_FORGE_HOST=github.com BOUCLE_PROJECT_ID=1
@@ -1553,4 +1722,8 @@ extract_notify() {
   refute_output --partial 'MR !${MR_IID'
   assert_output --partial 'forge_mr_ref'
   assert_output --partial 'forge_mr_term'
+  # The approval instruction must be forge-aware too (GitHub has no Approve
+  # button — regression: boucle.dev #69 told the user to "click Approve").
+  assert_output --partial 'forge_mr_approve_instruction'
+  refute_output --partial 'click the **Approve** button'
 }

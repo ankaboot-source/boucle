@@ -65,3 +65,16 @@ setup() {
   assert_success
   assert_output "read me"
 }
+
+@test "forge_mr_approve_instruction is forge-aware (GitHub has no Approve button)" {
+  # GitHub has no "Approve" button — approval is via an approving code review.
+  # GitLab has the Approve button. The instruction MUST match the forge.
+  run bash -c 'export BOUCLE_FORGE=github; source bin/forge/common.sh; forge_mr_approve_instruction'
+  assert_success
+  assert_output --partial "approving review"
+  refute_output --partial "Approve button"
+
+  run bash -c 'export BOUCLE_FORGE=gitlab; source bin/forge/common.sh; forge_mr_approve_instruction'
+  assert_success
+  assert_output --partial "Approve** button"
+}
