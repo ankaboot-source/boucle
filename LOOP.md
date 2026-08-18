@@ -217,6 +217,8 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_IMAGE_MAX_BYTES` | `10485760` | Max bytes per attachment (10 MiB). |
 | `BOUCLE_IMAGE_TOTAL_MAX_BYTES` | `52428800` | Max total bytes per issue (50 MiB). |
 | `BOUCLE_PRICING_JSON` | *(empty)* | Per-model price map, USD per 1M tokens: `{"model":{"in":0.10,"out":0.30}}`. Empty = tokens are reported, dollars are not. |
+| `BOUCLE_STATE_NOTE_ENABLED` | `true` | Persist per-issue loop state in a collapsed marker note on the issue. |
+| `BOUCLE_STATE_NOTE_CHARS` | `12000` | Cap on the state note; over it, the oldest state is elided and the tail kept. |
 | `BOUCLE_RETRY_STRATEGY` | `adaptive` | Worktree handling on a worker re-run: `adaptive` (reset only after a contamination failure), `preserve` (always keep prior commits), `reset` (always start clean). |
 | `BOUCLE_QUOTA_PROBE` | `true` | Ask the provider whether it can answer before spinning up an agent run. |
 | `BOUCLE_QUOTA_PROBE_TTL` | `300` | Seconds a probe result is reused, so parallel jobs probe once. |
@@ -481,6 +483,37 @@ The file survives across iterations like `cost.json` and feeds two consumers:
 
 This is the "look at the data" principle applied to the loop itself, and
 the prerequisite for the upstream engine-defect flywheel (#54).
+
+## Per-issue state
+
+Boucle's per-issue memory — the iteration log, the worker's `Approach` and
+`Tried and rejected`, and the failure classification `last-outcome` — used to
+live only in `BOUCLE_STATE_CACHE` on the runner. That cache survives on a
+shell-executor runner and **never** survives on an ephemeral one, so on
+GitHub-hosted runners the worker re-discovered the codebase every iteration,
+repeated approaches it had already rejected, and the retry classifier below
+always saw "no previous outcome".
+
+The state now lives on the **forge**, in a collapsed marker note
+(`<!-- boucle:state v=1 -->`) on the issue — the same idiom boucle already
+uses for verdicts and the status board. One line on the issue page unless you
+open it.
+
+**One authority: the note.** The cache is still written (it is the fast path)
+but it is only *read* when the note is absent, so the two cannot diverge in a
+way that matters. Restore never clobbers a file that already exists locally.
+
+Two things are deliberately **not** stored there:
+
+- **Goal and acceptance criteria** — `worker.sh` re-derives them from the
+  triage comment, which is on the same issue. Persisting them would put the
+  issue's content back on the issue.
+- **`cost.json` / `skills-used.json`** — metrics, not decision state. The
+  next iteration does not read them; they belong in the job artifacts.
+
+The note is **excluded from the notes injected into agent prompts**. Without
+that it would be re-billed as prompt input on every run, growing with every
+iteration it records.
 
 ## Retry strategy
 

@@ -237,7 +237,7 @@ HELP_EOF
   # per_page=100) so all notes are returned, matching the original inline
   # call. The GitHub backend paginates via _gh_api (gh api --paginate).
   BOUCLE_ISSUE_NOTES=$(forge_issue_notes "$IID" \
-    | jq -r '[.[] | select(.system == false or .system == null) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | reverse | .[]' 2> /dev/null || echo "")
+    | jq -r '[.[] | select(.system == false or .system == null) | select((.body // "") | contains("<!-- boucle:state") | not) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | reverse | .[]' 2> /dev/null || echo "")
   if [ -z "$BOUCLE_ISSUE_NOTES" ]; then
     echo "[boucle] INFO: no prior notes for issue #$IID (first triage run)."
   fi

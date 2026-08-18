@@ -343,6 +343,152 @@ boucle_board_upsert() {
   echo "  → status board #$board_iid refreshed"
 }
 
+# ── Per-issue state on the forge ────────────────────────────────────────
+#
+# Boucle's per-issue memory (iterations.md, the worker-written sections of
+# state.md, last-outcome) lived only in $BOUCLE_STATE_CACHE on the runner.
+# That cache survives on a shell-executor runner and NEVER survives on an
+# ephemeral one (GitHub-hosted), so on those the worker re-discovers the
+# codebase every iteration and repeats approaches it already rejected.
+#
+# The fix, from nexu-io/looper: keep the runner stateless and put the state
+# on the forge, in a marker note on the issue — the same idiom boucle
+# already uses for verdicts and the status board.
+#
+# ONE authority: the note. The cache is still written (it is the fast path)
+# but it is only READ when the note is absent, so the two can never diverge
+# in a way that matters.
+#
+# Deliberately NOT stored here:
+#   - Goal and acceptance criteria: worker.sh already re-derives them from
+#     the triage comment, which is on the same issue. Duplicating them would
+#     put the issue's content back on the issue.
+#   - cost.json / skills-used.json: metrics, not decision state. The next
+#     iteration does not read them; they belong in the job artifacts.
+
+BOUCLE_STATE_MARKER="<!-- boucle:state v=1 -->"
+
+# Assemble the state payload from the local files. Prints nothing when there
+# is nothing worth persisting.
+boucle_state_payload() {
+  local iid="$1"
+  local ws="${BOUCLE_WORKSPACE:-.}"
+  local iterations="$ws/.boucle/$iid/iterations.md"
+  local outcome="$ws/.boucle/$iid/last-outcome"
+  local state_md="$ws/.boucle-state/$iid/state.md"
+  local max="${BOUCLE_STATE_NOTE_CHARS:-12000}"
+  case "$max" in
+    '' | *[!0-9]*) max=12000 ;;
+  esac
+
+  local body=""
+  if [ -s "$state_md" ]; then
+    # Only the sections the WORKER writes. Goal and acceptance criteria are
+    # re-derivable from the triage comment.
+    local worker_sections
+    worker_sections=$(awk '
+      /^## (Approach|Tried and rejected|Awaiting human)/ { keep = 1; print; next }
+      /^## / { keep = 0 }
+      keep { print }
+    ' "$state_md" 2> /dev/null || true)
+    [ -n "$(printf '%s' "$worker_sections" | tr -d '[:space:]')" ] && body="$worker_sections"
+  fi
+  if [ -s "$iterations" ]; then
+    body="${body}
+
+### Iterations
+$(cat "$iterations" 2> /dev/null || true)"
+  fi
+  if [ -s "$outcome" ]; then
+    body="${body}
+
+### Last outcome
+$(cat "$outcome" 2> /dev/null || true)"
+  fi
+
+  [ -n "$(printf '%s' "$body" | tr -d '[:space:]')" ] || return 0
+
+  # Keep the TAIL when over the cap: the most recent iterations are the ones
+  # the next run needs. Note bodies are capped by the forge, and a rejected
+  # write would lose the state entirely.
+  if [ "${#body}" -gt "$max" ]; then
+    body="[... older state elided by boucle (BOUCLE_STATE_NOTE_CHARS=$max) ...]
+$(printf '%s' "$body" | tail -c "$max")"
+  fi
+
+  # Collapsed: this is machinery, not conversation. One line on the issue
+  # page unless the human opens it.
+  printf '%s\n<details><summary>➰ boucle — loop state (machine-written, safe to ignore)</summary>\n\n%s\n\n</details>' \
+    "$BOUCLE_STATE_MARKER" "$body"
+}
+
+# Find the state note's id, if one exists.
+boucle_state_note_id() {
+  local iid="$1"
+  forge_issue_notes "$iid" 2> /dev/null \
+    | jq -r --arg m "$BOUCLE_STATE_MARKER" \
+      '[.[] | select((.body // "") | contains($m))] | sort_by(.created_at) | last | .id // empty' \
+      2> /dev/null || echo ""
+}
+
+# Upsert the state note. Best-effort: losing the note costs a slower next
+# iteration, never the run.
+boucle_state_save() {
+  local iid="$1"
+  [ "${BOUCLE_STATE_NOTE_ENABLED:-true}" = "true" ] || return 0
+  command -v forge_issue_notes > /dev/null 2>&1 || return 0
+
+  local payload
+  payload=$(boucle_state_payload "$iid") || return 0
+  [ -n "$payload" ] || return 0
+
+  local note_id
+  note_id=$(boucle_state_note_id "$iid")
+  if [ -n "$note_id" ]; then
+    local current
+    current=$(forge_issue_note_get "$iid" "$note_id" 2> /dev/null | jq -r '.body // ""' 2> /dev/null || echo "")
+    if [ "$current" = "$payload" ]; then
+      return 0
+    fi
+    forge_issue_note_update "$iid" "$note_id" "$payload" 2> /dev/null || true
+  else
+    forge_issue_note "$iid" "$payload" 2> /dev/null || true
+  fi
+  return 0
+}
+
+# Restore the local files from the note. Called only when the cache is cold —
+# the note is the authority, so a cache hit means the note said the same thing.
+boucle_state_restore() {
+  local iid="$1"
+  [ "${BOUCLE_STATE_NOTE_ENABLED:-true}" = "true" ] || return 0
+  command -v forge_issue_notes > /dev/null 2>&1 || return 0
+
+  local note_id body
+  note_id=$(boucle_state_note_id "$iid")
+  [ -n "$note_id" ] || return 0
+  body=$(forge_issue_note_get "$iid" "$note_id" 2> /dev/null | jq -r '.body // ""' 2> /dev/null || echo "")
+  [ -n "$body" ] || return 0
+
+  local ws="${BOUCLE_WORKSPACE:-.}"
+  mkdir -p "$ws/.boucle/$iid" "$ws/.boucle-state/$iid" 2> /dev/null || true
+
+  local iterations
+  iterations=$(printf '%s\n' "$body" | awk '/^### Iterations$/ { keep = 1; next } /^### / { keep = 0 } /^<\/details>/ { keep = 0 } keep')
+  if [ -n "$(printf '%s' "$iterations" | tr -d '[:space:]')" ] \
+    && [ ! -s "$ws/.boucle/$iid/iterations.md" ]; then
+    printf '%s\n' "$iterations" > "$ws/.boucle/$iid/iterations.md" 2> /dev/null || true
+    echo "[boucle] restored iterations.md from the issue state note"
+  fi
+
+  local outcome
+  outcome=$(printf '%s\n' "$body" | awk '/^### Last outcome$/ { keep = 1; next } /^### / { keep = 0 } /^<\/details>/ { keep = 0 } keep' | tr -d '[:space:]')
+  if [ -n "$outcome" ] && [ ! -s "$ws/.boucle/$iid/last-outcome" ]; then
+    printf '%s\n' "$outcome" > "$ws/.boucle/$iid/last-outcome" 2> /dev/null || true
+  fi
+  return 0
+}
+
 # ── Cost accounting (#35) ───────────────────────────────────────────────
 
 # boucle_cost_summary <issue> — markdown breakdown of what this issue cost.
