@@ -2,7 +2,7 @@
 # Spec gate: the decision is emitted, and the AUTHOR approves (#2)
 #
 # The gate used to be (LLM size judgment x BOUCLE_SPEC_PROFILE) -> decision,
-# which is the inference-on-agent-output trap AGENTS.md principle 12 names:
+# which is the inference-on-agent-output trap LESSONS.yml lesson #87 names:
 # the decision belonged to neither the agent nor the config, and could be
 # read off neither. And any non-bot actor could approve someone else's spec.
 
@@ -68,7 +68,7 @@ gate() {
 }
 
 @test "gate: the agent is handed the policy instead of the config applying it" {
-  # AGENTS.md principle 12: make the agent's output more structured rather
+  # LESSONS.yml lesson #87: make the agent's output more structured rather
   # than building an inference layer on top of it.
   run grep -q 'Spec-validation policy in force: BOUCLE_SPEC_PROFILE=' bin/jc
   assert_success
@@ -125,8 +125,14 @@ approver() {
 }
 
 @test "approval: the author walk handles bot-created sub-issues" {
+  # The gate resolves the author through the SAME parent walk the assignment
+  # path uses, so a bot-created sub-issue resolves to the human who owns the
+  # parent instead of to the bot. Sharing the walk is the property under test:
+  # a second, divergent implementation is how the two paths drift apart.
   run grep -q '^resolve_reporter_username()' lib/boucle.sh
   assert_success
-  run bash -c "awk '/^resolve_reporter_username\(\) \{/,/^}/' lib/boucle.sh | grep -c 'Parent issue'"
+  run bash -c "awk '/^resolve_reporter_username\(\) \{/,/^}/' lib/boucle.sh | grep -c '_resolve_reporter_walk'"
+  assert_output "1"
+  run bash -c "awk '/^_resolve_reporter_walk\(\) \{/,/^}/' lib/boucle.sh | grep -c 'Parent issue'"
   assert_output "1"
 }

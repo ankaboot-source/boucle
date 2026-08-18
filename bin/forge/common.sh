@@ -141,7 +141,7 @@ forge_mr_approve_instruction() {
   fi
   case "${BOUCLE_FORGE:-gitlab}" in
     github) echo "submit an **approving review** on" ;;
-    *)      echo "click the **Approve** button on" ;;
+    *) echo "click the **Approve** button on" ;;
   esac
 }
 

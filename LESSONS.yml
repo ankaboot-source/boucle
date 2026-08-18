@@ -815,3 +815,13 @@
   - 'DO: also add `|| true` at the CALL SITE in `lib/boucle-ci/*.sh` for belt-and-suspenders — even if the forge function is correctly guarded, a future refactor might remove the guard. The triage
     split loop (`forge_work_item_link_parent "$NEW_IID" "$PARENT_IID" || true`, `chain_to_role "$NEW_IID" "" || true`) is the canonical example: a crash here creates only the first sub-issue and
     silently drops the rest, with no error visible to the human.'
+
+87:
+  title: Name the authority before enforcing it
+  ❌: 'DO NOT add a gate, a validation step, a persisted field or a "verify before acting" check on an agent-driven action without answering, in one sentence in the MR description: what is the
+    authority for this action, and why is it not the agent''s own structured output? The failure this prevents is deriving a decision from *(what the agent said x a config policy)* rather than
+    from what the agent actually decided — the decision then belongs to neither, readable off neither the agent''s output nor the config. NEVER add a config knob that reinterprets an agent''s
+    judgment.'
+  ✅: 'DO: name the authority explicitly, and make it the agent''s own emitted field wherever the decision is a judgment call. If the honest answer is "the agent''s output, but we do not trust
+    it", change what the agent is asked to emit — make the output MORE structured — instead of building an inference layer on top of infra state. Infra signals are for drift detection, not for
+    authority. A policy setting may seed the agent''s instructions and may serve as an announced fallback when the field is absent, but it must never override the field the agent emitted.'

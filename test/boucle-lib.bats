@@ -1817,6 +1817,8 @@ extract_notify() {
   # At least 3 lines: 1 definition + 2 call sites.
   count=$(/usr/bin/grep -c 'doctor_mr_approval_emoji' lib/boucle-ci/doctor.sh)
   [ "$count" -ge 3 ] || { echo "expected >=3, got $count"; false; }
+}
+
 # ── Quality gate on the loop's own commits (#51) ──────────────────────
 # 37 of 40 consecutive commits reached the default branch unlinted because
 # worker commits carried [skip ci], which disables the check job. The
@@ -1926,9 +1928,12 @@ print('OK' if any('boucle' in c for c in allow) else 'MISSING: %s' % allow)
   assert_output "1"
 }
 
-@test "authority: the rule is in the operating principles, not buried" {
-  run grep -q 'Name the authority before enforcing it' AGENTS.md
+@test "authority: the rule is in the lessons contract, not buried" {
+  # LESSONS.yml, not AGENTS.md: bin/check-lessons rejects lessons above the
+  # historical baseline in AGENTS.md, because bin/update overwrites it on
+  # consumers.
+  run grep -q 'Name the authority before enforcing it' LESSONS.yml
   assert_success
-  run grep -q 'why is it not the agent' AGENTS.md
+  run grep -q 'why is it not the agent' LESSONS.yml
   assert_success
 }
