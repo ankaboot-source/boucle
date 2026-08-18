@@ -591,6 +591,26 @@ is_quota_exhausted() {
   return 0
 }
 
+# ── Forge-aware MR/PR terminology in agent prompts ──────────────────────
+#
+# Agent prompts (.jcode/agents/<role>.md + build_prompt context) use "MR"
+# in prose. On GitHub the agent echoes "MR !48" into its comment, which
+# reads wrong (GitHub says "PR #48"). This substitutes the terminology
+# at prompt-build time so the agent writes "PR" on GitHub, "MR" on GitLab.
+#
+# Safety: \bMR\b does NOT match inside $BOUCLE_MR_DIFF or forge_mr_note
+# (underscore is a word char → no word boundary around MR in _MR_).
+# Lowercase "mr" (CLI subcommand: bin/forge-note mr) is also untouched.
+forge_aware_prompt() {
+  local text="$1"
+  case "${BOUCLE_FORGE:-gitlab}" in
+    github)
+      text=$(printf '%s' "$text" | sed -E 's/MR ?!/PR #/g; s/\bMR\b/PR/g')
+      ;;
+  esac
+  printf '%s' "$text"
+}
+
 # ── Write role-specific prompt-overlay.md ──────────────────────────────
 # jcode loads .jcode/prompt-overlay.md from cwd in addition to AGENTS.md.
 # We write the role-specific agent prompt (body after YAML frontmatter)
@@ -602,7 +622,8 @@ write_prompt_overlay() {
   local overlay_file="$overlay_dir/prompt-overlay.md"
   mkdir -p "$overlay_dir"
   # Extract body after YAML frontmatter (skip lines between --- and ---).
-  awk 'NR==1 && /^---/{f=1;next} f && /^---/{f=0;next} !f' "$agent_file" > "$overlay_file"
+  # Apply forge-aware MR/PR terminology so the agent writes "PR" on GitHub.
+  forge_aware_prompt "$(awk 'NR==1 && /^---/{f=1;next} f && /^---/{f=0;next} !f' "$agent_file")" > "$overlay_file"
   PROMPT_OVERLAY="$overlay_file"
 }
 
@@ -1190,7 +1211,8 @@ Apply the four-point admission test from AGENTS.md. If no candidate passes, emit
 Draft file hygiene: if you write your draft verdict to a file, use \`\$BOUCLE_VERDICT_FILE\` (exported by bin/jc — unique per job). NEVER use a fixed path like /tmp/verdict.md: executors are shared and a leftover file from a previous job gets posted as YOUR verdict. Write the file with your Write tool (bash redirection to a variable target is blocked by the runtime guard) and read it back immediately before posting. Prefer posting directly: bin/forge-note with --message (short) or --message-stdin (long). If a post fails or the file is missing/wrong, re-post with --message — never leave the run without a verdict."
   fi
 
-  echo "$prompt"
+  # Apply forge-aware MR/PR terminology so the agent writes "PR" on GitHub.
+  forge_aware_prompt "$prompt"
 
   # Append attachment paths (if any) so the agent knows how to handle them.
   # bin/fetch-issue-attachments downloads issue uploads to
@@ -1218,7 +1240,7 @@ Draft file hygiene: if you write your draft verdict to a file, use \`\$BOUCLE_VE
   # Same dual nature as issue attachments — decide based on the comment intent.
   if [ -n "${BOUCLE_MR_ATTACHMENTS:-}" ]; then
     echo ""
-    echo "MR comment attachments are available at these local paths:"
+    echo "$(forge_aware_prompt "MR comment attachments") are available at these local paths:"
     echo "$BOUCLE_MR_ATTACHMENTS"
     echo ""
     echo "These may be mockups/screenshots for context OR source assets to ship. Decide based on the comment intent. For each file:"
