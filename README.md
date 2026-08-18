@@ -62,9 +62,37 @@ boucle handles it, if you want to compare:
 | Frozen specs (human comments after review never reach the worker) | Feeds every human note back into the loop — amend at any moment |
 | No budget control (token spend with no cap or visibility) | Step and iteration caps per role, plus a concurrency cap on parallel issues |
 
-## 🚀 Quick start
+## Why boucle
 
-**Prerequisites:** a Git repository hosted on **GitLab or GitHub**, with a
+Harness made for human, made by an indie product builder for product builders.
+
+1. **Lives in your forge** — boucle lives in your forge (GitHub/GitLab). No
+   external tool, no separate dashboard. Everything happens where you already
+   work.
+2. **Deterministic and reliable** — deterministic, therefore reliable. You
+   intervene at the right moment, at the decision points.
+3. **Works while you sleep** — the agent works overnight for you. You intervene
+   only when it matters.
+4. **No UI, No CLI** — no interface to learn, no command line to master. You
+   interact through your forge: issues, comments, labels.
+5. **Self-healing, self-learning loop** — a loop that learns from its mistakes,
+   self-updates, and adapts to your codebase as your project advances.
+
+## How to install
+
+### 🚀 Quick start
+
+One command, and the loop takes over.
+
+```sh
+curl -fsSL https://ankaboot-source.github.io/boucle.dev/install.sh | bash
+```
+
+Then create an issue in your forge and tag it `boucle:triage` — the loop starts.
+
+### Prerequisite
+
+A Git repository hosted on **GitLab or GitHub**, with a
 deployment target. The default target is Cloudflare Pages, but boucle is
 deploy-agnostic: set `BOUCLE_DEPLOY_MODE=external` when your own CI/CD ships
 the app (no deploy command needed, e2e still runs after merge), or bring any
@@ -134,6 +162,16 @@ spec validation and MR approval. The `doctor` job (a scheduled
 self-healing sweep) runs automatically — there is nothing to run by hand.
 
 ## ⚙️ How it works
+
+boucle lives in your forge. GitHub, GitLab. No external tool, no dashboard.
+
+1. **Drop your idea in an issue** — I create an issue in my forge with a title and a description. It's just a normal ticket.
+2. **Receive a proposal with a preview** — boucle analyzes, writes a spec, and posts a comment on the issue with a preview. I see exactly what it will look like.
+3. **Validate with a thumb** — I react with a thumb up on the spec comment. No form, no CLI. Just an emoji.
+4. **It works** — boucle implements, builds, deploys a preview. I have nothing to do meanwhile. The agent works.
+5. **It's verified** — the reviewer checks the render, posts a verdict (PASS/FAIL) as a PR comment. If FAIL, it loops. If PASS, the PR is ready.
+6. **Approve, it's live** — I approve the PR (or boucle merges per config). The feature ships to production. It's live.
+7. **Lessons learned** — boucle captures what worked and what didn't from each loop, and applies those lessons to do better on the next feature.
 
 ```mermaid
 flowchart TD
