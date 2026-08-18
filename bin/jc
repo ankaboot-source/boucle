@@ -364,6 +364,26 @@ is_agent_looping() {
   sort "$log" | uniq -c | awk '$1 >= 5 { found=1 } END { exit found?0:1 }'
 }
 
+# Detect whether the agent already posted a forge note (verdict, draft,
+# triage, files, etc.) during this run. Used to guard the provider
+# fallback: if the agent posted a note but then started looping or hit
+# a quota error, retrying with the fallback provider would post a
+# DUPLICATE note. The existing note (draft or final) is already on the
+# forge; collapse-duplicate-notes and the log-scraping fallback handle
+# within-run draft→final promotion. A fallback retry creates a second
+# run's worth of output that the collapse script treats as a separate
+# batch, leaving both notes visible until the post-agent collapse
+# catches up — the human sees two verdicts.
+agent_posted_note() {
+  local log="$1"
+  [ -s "$log" ] || return 1
+  # The forge-note script outputs "[forge-note]" on success. Also
+  # match direct glab/gh note API calls and boucle markers (triage,
+  # verdict, draft) in the log text — a drafted-but-unposted comment
+  # still counts as agent activity worth preserving.
+  grep -qiE '\[forge-note\]|(glab|gh) (issue (note|comment)|mr note|api .* -X POST|api .*/notes|api .*/comments)|<!-- boucle:(triage|verdict|draft)' "$log"
+}
+
 # ── Generate jcode config from env vars (no runner-host config file) ──
 # Must run AFTER model parsing (uses $MODEL) and BEFORE jcode invocation.
 ensure_jcode_config
@@ -1509,6 +1529,19 @@ elif is_agent_looping "$AGENT_LOG"; then
   FALLBACK_REASON="agent looping (duplicate output)"
 fi
 
+# Guard: if the agent already posted a note (verdict/draft/triage/etc.),
+# skip the fallback even if the provider appears down or the agent is
+# looping. A retry would post a DUPLICATE note — the existing note
+# (draft or final) is already on the forge, and collapse-duplicate-notes
+# handles within-run draft→final promotion. Without this guard, a
+# looping agent that already posted a PASS verdict triggers a fallback
+# retry that posts a second PASS, and the human sees two verdicts until
+# the post-agent collapse catches up.
+if [ -n "$FALLBACK_REASON" ] && agent_posted_note "$AGENT_LOG"; then
+  echo "[boucle:fallback] skipping fallback ($FALLBACK_REASON) — agent already posted a note; retrying would create a duplicate" >&2
+  FALLBACK_REASON=""
+fi
+
 # Freeride rotation: try each remaining OK provider in sequence.
 if [ "$FREERIDE_MODE" = "1" ] && [ -n "$FREERIDE_ROTATION_LIST" ] && [ -n "$FALLBACK_REASON" ]; then
   echo "[boucle:freeride] primary provider ($FR_NAME) appears down ($FALLBACK_REASON) — rotating to next provider" >&2
@@ -1633,12 +1666,11 @@ case "$ROLE" in
   triage | reviewer | e2e)
     if [ -s "$AGENT_LOG" ]; then
       # A posted comment shows up as a forge note call (glab issue note /
-      # glab api POST / gh api POST / bin/forge-note). A drafted-but-
+      # glab api POST / gh api POST / forge-note). A drafted-but-
       # unposted comment shows up as the boucle:triage (or boucle:verdict)
       # marker in the log text. If neither is present, the agent produced
       # nothing actionable.
-      if ! grep -qiE '(glab|gh) (issue note|mr note|api .* -X POST|api .*/notes)|bin/forge-note' "$AGENT_LOG" \
-        && ! grep -qiE '<!-- boucle:(triage|verdict)' "$AGENT_LOG"; then
+      if ! agent_posted_note "$AGENT_LOG"; then
         # A persistent quota error (HTTP 429/402, LESSONS.yml lesson #30)
         # leaves activity traces in the log but produces no comment — the
         # model never completed a run. Retrying cannot fix an exhausted

@@ -89,12 +89,17 @@ empirically on framagit 2026-08).
 The loop adapts automatically to an empty `BOUCLE_DEPLOY_CMD`:
 
 - **Worker** — skips the preview deploy (no `FAIL: no preview URL`); when
-  `BOUCLE_DEPLOY_PROVIDER=gitlab-pages` and `$CI_PAGES_URL` is set, the MR
-  description carries `Site (GitLab Pages): $CI_PAGES_URL — no per-branch
-  preview; reviewed via diff` instead of a blank `Preview:` line.
-- **Reviewer** — sees no preview URL (the pages.dev extraction regex cannot
-  match the forge's Pages domain) and falls back to **diff review** (code
-  review of the MR diff + check suites), same as `BOUCLE_REVIEW_MODE=diff`.
+  `BOUCLE_REVIEW_MODE=preview` (the default), screenshot mode is
+  **auto-activated** — the worker builds the site, serves it locally
+  (`python3 -m http.server`), captures screenshots of impacted pages, and
+  uploads them as MR attachments. The MR description carries
+  `Site (GitLab Pages): $CI_PAGES_URL` plus the embedded screenshots.
+  When `BOUCLE_REVIEW_MODE=diff`, the MR description carries the site URL
+  with `reviewed via diff` and no screenshots are captured.
+- **Reviewer** — in screenshot mode (auto or explicit), grades the
+  screenshots via `bin/describe-images --criteria` (vision model answers
+  each acceptance criterion MET/NOT MET/UNCLEAR). In `diff` mode, falls
+  back to code review of the MR diff + check suites.
 - **Deploy job** — skips cleanly (`deploy: BOUCLE_DEPLOY_CMD is empty`).
 - **Post-merge/e2e** — resolves the live URL to `$CI_PAGES_URL` instead of
   the `pages.dev` fallback (which would point at a nonexistent Cloudflare
@@ -115,12 +120,16 @@ merged build. The site is served at `https://<owner>.github.io/<repo>/`
 
 The loop adapts automatically:
 
-- **Worker** — stamps the SHA marker, pushes the build to `gh-pages`, and
-  records the site URL; the MR description carries `Site (github-pages):
-  https://<owner>.github.io/<repo>/ — no per-branch preview; reviewed via
-  diff`.
-- **Reviewer** — sees no preview URL and falls back to **diff review**,
-  same as GitLab Pages declarative mode.
+- **Worker** — when `BOUCLE_REVIEW_MODE=preview` (the default), screenshot
+  mode is **auto-activated**: the worker builds the site, serves it locally,
+  captures screenshots of impacted pages, and uploads them as MR attachments.
+  Production (`gh-pages`) is **NOT overwritten during review** — the
+  post-merge deploy pushes the merged build. When `BOUCLE_REVIEW_MODE=diff`,
+  the worker pushes the build to `gh-pages` and the MR description carries
+  `Site (github-pages): <url> — reviewed via diff`.
+- **Reviewer** — in screenshot mode (auto or explicit), grades the
+  screenshots via `bin/describe-images --criteria`. In `diff` mode, falls
+  back to code review of the MR diff + check suites.
 - **Deploy job** — re-pushes the merged build to `gh-pages` (keeps
   production in sync) and chains e2e with `BOUCLE_LIVE_URL` set to the
   canonical site URL.
@@ -135,7 +144,7 @@ branch (Settings → Pages → Source: Deploy from a branch → `gh-pages` / roo
 
 | Mode | Behavior |
 |------|----------|
-| `preview` (default) | Worker deploys preview, reviewer tests against `BOUCLE_PREVIEW_URL` extracted from MR description via `BOUCLE_DEPLOY_URL_REGEX`. SHA-anchored freshness assertion. |
+| `preview` (default) | Worker deploys preview, reviewer tests against `BOUCLE_PREVIEW_URL` extracted from MR description via `BOUCLE_DEPLOY_URL_REGEX`. SHA-anchored freshness assertion. **Auto-fallback:** when the deploy provider has no per-branch preview (`github-pages`, `gitlab-pages`), screenshot mode is auto-activated — the worker captures screenshots locally (no production clobber) and the reviewer grades from those screenshots. A screenshot failure degrades to diff review. |
 | `diff` | Worker skips preview deploy. Reviewer runs code-review mode: fetches PR diff via `forge_mr_diff`, waits for PR check suites via `forge_mr_check_suites` (bounded by `BOUCLE_REVIEW_CHECKS_WAIT`, default 900s), plus instructed-content fidelity checks. Verdict stays SHA-anchored. |
 | `screenshot` | Worker builds the site, serves it locally (`python3 -m http.server` — zero dependencies), captures screenshots of impacted pages via puppeteer/chromium (reusing `bin/render-preview.cjs` with HTTP URL support), uploads them as MR attachments. Reviewer receives the screenshots as text descriptions via `bin/describe-images --criteria` — the vision model answers each acceptance criterion (MET/NOT MET/UNCLEAR) from `state.md`, and the reviewer grades against those text descriptions. No deploy command, no token, no CDN propagation wait. Ideal for GitLab CE (no per-branch Pages) or any token-less setup where visual review still matters. Fail-open: a screenshot failure degrades to diff review, never blocks the loop. |
 
@@ -164,7 +173,7 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_DND_TZ` | `UTC` | Quiet-hours timezone (IANA name, e.g. `Europe/Paris`); seeded by `bin/setup` from the machine's timezone. |
 | `BOUCLE_DND_EXCLUDE_DAYS` | *(empty)* | Comma-separated weekday names never in DND (e.g. `Fri,Sat`). |
 | `BOUCLE_DEPLOY_MODE` | `self` | Deploy mode: `self` (boucle runs `BOUCLE_DEPLOY_CMD`) or `external` (consumer's own CI/CD deploys). |
-| `BOUCLE_REVIEW_MODE` | `preview` | Review mode: `preview` (tests deployed preview), `diff` (reviews PR diff + check suites), or `screenshot` (builds locally, captures screenshots of impacted pages, reviewer grades via vision-model descriptions guided by acceptance criteria). Auto-falls back to `diff` when no preview URL could be extracted (e.g. GitLab Pages declarative mode). |
+| `BOUCLE_REVIEW_MODE` | `preview` | Review mode: `preview` (tests deployed preview), `diff` (reviews PR diff + check suites), or `screenshot` (builds locally, captures screenshots of impacted pages, reviewer grades via vision-model descriptions guided by acceptance criteria). **Auto-fallback:** `preview` mode auto-activates `screenshot` when the deploy provider has no per-branch preview (`github-pages`, `gitlab-pages`) — the worker captures screenshots locally instead of overwriting production, and the reviewer grades from those screenshots. A screenshot failure degrades to `diff` review. |
 | `BOUCLE_DEPLOY_PROVIDER` | *(empty)* | Deploy provider profile: `gitlab-pages` (declarative, token-less — leave `BOUCLE_DEPLOY_CMD` empty, live URL = `$CI_PAGES_URL`) or `github-pages` (declarative, token-less — worker pushes `$BOUCLE_BUILD_OUTPUT` to `gh-pages`, live URL = `https://<owner>.github.io/<repo>/`). Empty = deploy via `BOUCLE_DEPLOY_CMD`. |
 | `BOUCLE_DEPLOY_CMD` | `npx wrangler pages deploy ...` | Deploy command (self mode). |
 | `BOUCLE_DEPLOY_URL_REGEX` | `https://[a-z0-9.-]+\.pages\.dev` | Regex to extract URL from deploy output. |

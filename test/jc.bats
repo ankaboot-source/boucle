@@ -560,7 +560,99 @@ NEEDS-SPLIT" > "$LOG"
   rm -f "$LOG"
 }
 
-# ── ensure_jcode_config (replaces strip_mcp_for_ci) ──────────────────
+# ── agent_posted_note (extracted, run in isolation) ──────────────────
+# agent_posted_note detects whether the agent already posted a forge note
+# during the current run. Used by the fallback guard to prevent duplicate
+# verdicts and by the empty-output guard to detect silent failures.
+
+@test "bin/jc defines agent_posted_note function" {
+  run grep -E '^agent_posted_note\(\)' bin/jc
+  assert_success
+}
+
+@test "agent_posted_note: [forge-note] output is detected (regression: false exit 3)" {
+  # The forge-note script outputs "[forge-note]" on success, NOT
+  # "bin/forge-note". The old grep pattern matched only "bin/forge-note",
+  # causing a false exit 3 (silent failure) even when the agent posted
+  # a verdict. This test ensures the [forge-note] prefix is detected.
+  LOG=$(mktemp)
+  echo "[forge-note] Rewrote draft note 5332795256 in place (role=reviewer)." > "$LOG"
+  TMPF=$(mktemp)
+  extract_func agent_posted_note "$TMPF"
+  run bash -c "source '$TMPF'; agent_posted_note '$LOG'"
+  assert_success
+  rm -f "$LOG" "$TMPF"
+}
+
+@test "agent_posted_note: gh api comment call is detected (GitHub)" {
+  LOG=$(mktemp)
+  echo "gh api repos/owner/repo/issues/70/comments -X POST -f body=verdict" > "$LOG"
+  TMPF=$(mktemp)
+  extract_func agent_posted_note "$TMPF"
+  run bash -c "source '$TMPF'; agent_posted_note '$LOG'"
+  assert_success
+  rm -f "$LOG" "$TMPF"
+}
+
+@test "agent_posted_note: boucle:verdict marker in log is detected" {
+  LOG=$(mktemp)
+  echo "<!-- boucle:verdict v=1 role=reviewer sha=abc123def -->" > "$LOG"
+  TMPF=$(mktemp)
+  extract_func agent_posted_note "$TMPF"
+  run bash -c "source '$TMPF'; agent_posted_note '$LOG'"
+  assert_success
+  rm -f "$LOG" "$TMPF"
+}
+
+@test "agent_posted_note: boucle:draft marker in log is detected" {
+  LOG=$(mktemp)
+  echo "<!-- boucle:draft role=reviewer -->" > "$LOG"
+  TMPF=$(mktemp)
+  extract_func agent_posted_note "$TMPF"
+  run bash -c "source '$TMPF'; agent_posted_note '$LOG'"
+  assert_success
+  rm -f "$LOG" "$TMPF"
+}
+
+@test "agent_posted_note: plain jcode banner is NOT detected (silent failure)" {
+  LOG=$(mktemp)
+  echo "Usage: jcode [OPTIONS] <COMMAND>" > "$LOG"
+  TMPF=$(mktemp)
+  extract_func agent_posted_note "$TMPF"
+  run bash -c "source '$TMPF'; agent_posted_note '$LOG'"
+  assert_failure
+  rm -f "$LOG" "$TMPF"
+}
+
+@test "agent_posted_note: empty log is NOT detected" {
+  LOG=$(mktemp)
+  : > "$LOG"
+  TMPF=$(mktemp)
+  extract_func agent_posted_note "$TMPF"
+  run bash -c "source '$TMPF'; agent_posted_note '$LOG'"
+  assert_failure
+  rm -f "$LOG" "$TMPF"
+}
+
+# ── Fallback duplicate-verdict guard ────────────────────────────────
+# The fallback guard prevents a provider fallback retry when the agent
+# already posted a note, avoiding duplicate verdicts on the MR.
+
+@test "fallback guard: bin/jc has the agent_posted_note guard before fallback" {
+  # The guard must appear after FALLBACK_REASON determination and before
+  # the freeride/legacy fallback blocks.
+  run grep -q 'agent_posted_note.*AGENT_LOG.*FALLBACK_REASON\|FALLBACK_REASON.*agent_posted_note.*AGENT_LOG' bin/jc
+  assert_success
+}
+
+@test "fallback guard: guard clears FALLBACK_REASON when agent posted a note" {
+  # When agent_posted_note returns true, FALLBACK_REASON must be cleared
+  # so the fallback blocks (which check -n "$FALLBACK_REASON") skip.
+  run grep -A2 'agent_posted_note "\$AGENT_LOG"' bin/jc
+  assert_output --partial 'FALLBACK_REASON=""'
+}
+
+
 # bin/jc no longer mutates a jcode config to remove MCP (lesson #3:
 # MCP is disabled via JCODE_RUN_MCP=0 env in CI). Instead, bin/jc
 # generates a jcode config.toml on the runner from BOUCLE_LLM_BASE_URL +

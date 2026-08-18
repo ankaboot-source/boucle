@@ -1196,8 +1196,9 @@ boucle_resolve_live_url() {
 
   # Priority 3b: declarative GitHub Pages — the site is served from the
   # gh-pages branch at https://<owner>.github.io/<repo>/. Like GitLab CE
-  # there is no per-branch preview, so the reviewer falls back to diff
-  # review; the e2e checks the canonical URL.
+  # there is no per-branch preview, so the reviewer auto-activates
+  # screenshot mode (which degrades to diff on failure); the e2e checks
+  # the canonical URL.
   if [ "${BOUCLE_DEPLOY_PROVIDER:-}" = "github-pages" ]; then
     echo "$(boucle_github_pages_url)"
     return
@@ -1240,8 +1241,8 @@ boucle_worker_should_deploy() {
   # Skip deploy when no deploy command is configured (GitLab Pages
   # declarative / token-less mode, or a provider without a CLI). An empty
   # BOUCLE_DEPLOY_CMD must SKIP the preview deploy, never fail the worker:
-  # the reviewer already falls back to diff review when no preview URL
-  # could be extracted, so a skipped preview is a valid, complete loop.
+  # screenshot mode auto-activates when no per-branch preview is available,
+  # so a skipped preview is a valid, complete loop.
   if [ -z "${BOUCLE_DEPLOY_CMD:-}" ]; then
     return 1
   fi
@@ -1273,9 +1274,10 @@ boucle_github_pages_url() {
 
 # boucle_worker_deploy
 #   Run the preview deploy. Returns 0 on success. Sets preview_url if the
-#   deploy emitted one, else leaves it empty (reviewer falls back to diff
-#   review). Handles the github-pages provider by pushing the build output
-#   to the gh-pages branch via the existing bot credentials — no token in
+#   deploy emitted one, else leaves it empty (reviewer auto-activates
+#   screenshot mode, which degrades to diff on failure). Handles the
+#   github-pages provider by pushing the build output to the gh-pages
+#   branch via the existing bot credentials — no token in
 #   BOUCLE_DEPLOY_CMD, no CLOUDFLARE_* secrets required.
 #   Arguments: deploy_log path (worker) — GitHub Pages mode ignores it.
 boucle_worker_deploy() {

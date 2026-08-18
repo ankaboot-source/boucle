@@ -508,11 +508,11 @@
 60:
   title: An empty `BOUCLE_DEPLOY_CMD` is a valid mode, not a failure
   ✅:
-  - 'DO: treat an empty `BOUCLE_DEPLOY_CMD` as a first-class mode: the worker skips the preview deploy, the reviewer falls back to diff review when no preview URL could be extracted, the deploy job skips
+  - 'DO: treat an empty `BOUCLE_DEPLOY_CMD` as a first-class mode: the worker skips the preview deploy, screenshot mode auto-activates when no per-branch preview is available (degrades to diff on failure), the deploy job skips
     cleanly, and post-merge/e2e resolve the live URL to `$CI_PAGES_URL` (gitlab-pages) instead of the `pages.dev` fallback. Document the mode in LOOP.md alongside `self`/`external`.'
-  - 'DO: display the GitLab Pages URL even though the mechanics differ from Cloudflare: when `BOUCLE_DEPLOY_PROVIDER=gitlab-pages` and `$CI_PAGES_URL` is set, the worker writes `Site (GitLab Pages): $CI_PAGES_URL
-    — no per-branch preview; reviewed via diff` in the MR description instead of a blank `Preview:` line. The reviewer''s `pages.dev` extraction regex cannot match the forge''s Pages domain (frama.io/gitlab.io/...),
-    so it stays in diff review and never probes the production site as a preview.'
+  - 'DO: display the GitLab Pages URL even though the mechanics differ from Cloudflare: when `BOUCLE_DEPLOY_PROVIDER=gitlab-pages` and `$CI_PAGES_URL` is set, the worker writes `Site (GitLab Pages): $CI_PAGES_URL`
+    in the MR description alongside embedded screenshots (auto-screenshot mode). The reviewer''s `pages.dev` extraction regex cannot match the forge''s Pages domain (frama.io/gitlab.io/...),
+    so it grades screenshots locally and never probes the production site as a preview.'
   - 'DO: centralize the decision in `boucle_worker_should_deploy` (`lib/boucle.sh`) so the extracted worker gets it for free, and mirror it in the inline worker job with the identical guard.'
   ❌:
   - 'DO NOT let a stage `eval "$BOUCLE_DEPLOY_CMD"` unconditionally and FAIL on a missing URL. In GitLab Pages declarative mode (`BOUCLE_DEPLOY_PROVIDER=gitlab-pages`) the consumer sets `BOUCLE_DEPLOY_CMD`
@@ -776,3 +776,13 @@
   - DO mirror the dispatch contract in the doctor''s orphan-recovery path (emoji → worker; reply → triage) so a missed webhook recovers to the same state.
   - DO add a regression test that extracts the routing block and the message and asserts they agree (the note branch routes to triage, NOT to the gated work; the message says a reply never
     approves). Bind the two files so an editor of one cannot break the other silently.
+84:
+  title: A provider fallback (or any agent re-trigger) MUST NOT fire after the agent already posted its deliverable
+  ❌: 'DO NOT trigger a provider fallback retry (or any re-trigger path) when the agent already posted a forge note during the current run. The agent may post its verdict or draft early
+    (post-early rule, I4), then continue running and start looping (duplicate output) or hit a transient quota error. The looping detector fires, the fallback retries the agent from scratch,
+    and the retry posts a SECOND verdict — the human sees two PASS (or FAIL) verdicts on the MR until the post-agent collapse-duplicate-notes script catches up. The collapse script is a safety
+    net, not a license to create duplicates: the window between the second post and the collapse is visible to the human and triggers duplicate notification emails.'
+  ✅: 'DO: before triggering a fallback (or any re-trigger), check whether the agent already produced its side effect — a posted note detectable via the `[forge-note]` script output, a direct
+    glab/gh note API call, or a `<!-- boucle:` marker in the agent log. If it did, skip the retry: the existing note (draft or final) is already on the forge, and collapse-duplicate-notes +
+    the log-scraping fallback handle draft→final promotion within the run. This is I5 (Idempotence) applied to agent re-triggers: a re-run MUST NOT produce additional side effects. The guard
+    lives in `bin/jc` after the `FALLBACK_REASON` determination so it covers every trigger (api-down, quota, looping) and both fallback modes (legacy + freeride rotation).'
