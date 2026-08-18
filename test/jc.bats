@@ -223,13 +223,30 @@ extract_prompt_funcs() {
 @test "build_prompt: reviewer prompt requires verifying each human amendment is addressed" {
   TMPF=$(mktemp)
   extract_prompt_funcs "$TMPF"
-  run bash -c "ISSUE=7; BOUCLE_REVIEWER_FEEDBACK='[tahrir] no letter-based logos'; source '$TMPF'; build_prompt reviewer"
+  # Pin the forge: forge_aware_prompt rewrites MR -> PR on GitHub, and CI runs
+  # with BOUCLE_FORGE=github, so an unpinned "Prior MR discussion" assertion
+  # passes locally and fails in CI.
+  run bash -c "ISSUE=7; BOUCLE_FORGE=gitlab; BOUCLE_REVIEWER_FEEDBACK='[tahrir] no letter-based logos'; source '$TMPF'; build_prompt reviewer"
   assert_success
   assert_output --partial "Prior MR discussion"
   assert_output --partial "human comments AMEND the spec"
   assert_output --partial "enumerate every human amendment"
   assert_output --partial "any human amendment NOT addressed is a FAIL"
   assert_output --partial "[tahrir] no letter-based logos"
+  rm -f "$TMPF"
+}
+
+@test "build_prompt: the discussion heading follows the forge's vocabulary" {
+  # The same section is "Prior MR discussion" on GitLab and "Prior PR
+  # discussion" on GitHub — forge_aware_prompt does the rewrite, and a
+  # reviewer told to read a section that does not exist ignores the
+  # amendments in it.
+  TMPF=$(mktemp)
+  extract_prompt_funcs "$TMPF"
+  run bash -c "ISSUE=7; BOUCLE_FORGE=github; BOUCLE_REVIEWER_FEEDBACK='x'; source '$TMPF'; build_prompt reviewer"
+  assert_success
+  assert_output --partial "Prior PR discussion"
+  refute_output --partial "Prior MR discussion"
   rm -f "$TMPF"
 }
 
