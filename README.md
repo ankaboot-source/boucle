@@ -12,47 +12,63 @@ never touch the engine itself.
 ## 📑 Table of contents
 
 - [✨ Why boucle?](#why-boucle)
-- [🚀 Quick start](#quick-start)
+- [How to install](#how-to-install)
+  - [🚀 Quick start](#quick-start)
+  - [Prerequisite](#prerequisite)
   - [Option 1 — copy/paste prompt](#option-1-copypaste-prompt-easiest)
   - [Option 2 — command line](#option-2-command-line)
   - [After install](#after-install)
-- [⚙️ How it works](#️-how-it-works)
+- [⚙️ How it works](#how-it-works)
 - [💰 Cost](#cost)
-- [🛠️ Configuration](#️-configuration)
+- [🛠️ Configuration](#configuration)
   - [The bot user](#the-bot-user)
   - [Running without a bot account (mono-user)](#running-without-a-bot-account-mono-user)
   - [Advanced — dedicated runners](#advanced--dedicated-runners)
-- [🗺️ Roadmap](#️-roadmap)
-- [⚖️ License](#️-license)
+- [🗺️ Roadmap](#roadmap)
+- [⚖️ License](#license)
 - [📚 Docs](#docs)
 
 ## ✨ Why boucle?
 
-**End to end, from idea to shipped.** A ticket becomes a feature deployed to
-production — and you can **amend at any moment**: comment on the issue and
-the loop picks your feedback up, re-plans, and adjusts. You validate the
-**spec on mockups** before a line of code is written, and the **result on a
-live preview** with screenshots — not prose.
+A harness made for humans, by an indie product builder for product builders.
 
-**Fast and cheap — BYOK.** Lightweight, purpose-built agents run on your
-forge's existing CI, with your own LLM credentials. No Mac Mini, no VPS, no
-always-on laptop. boucle ships a feature for **9.9× less** than Claude Code
-— see [Cost](#cost) for the per-role breakdown and capacity analysis.
+1. **End to end, from idea to shipped** — a ticket becomes a feature deployed
+   to production, and you can **amend at any moment**: comment on the issue
+   and the loop picks your feedback up, re-plans, and adjusts.
+2. **Lives in your forge** — boucle lives in your forge (GitHub/GitLab). No
+   external tool, no separate dashboard. Everything happens where you already
+   work.
+3. **Spec on mockups, result on a live preview** — you validate the spec on
+   mockups before a line of code is written, and the result on a live preview
+   with screenshots — not prose.
+4. **Deterministic and reliable** — deterministic, therefore reliable. You
+   intervene at the right moment, at the decision points.
+5. **Works while you sleep** — the agent works overnight for you. You
+   intervene only when it matters.
+6. **No UI, no CLI** — no interface to learn, no command line to master. You
+   interact through your forge: issues, comments, labels.
+7. **Fast and cheap — BYOK** — lightweight, purpose-built agents run on your
+   forge's existing CI, with your own LLM credentials. No Mac Mini, no VPS,
+   no always-on laptop. boucle ships a feature for **9.9× less** than Claude
+   Code — see [Cost](#cost).
+8. **Built on fast, modern tools — batteries included** —
+   [jcode](https://github.com/1jehuang/jcode), a standalone **Rust** binary
+   (fast startup, zero runtime dependencies), a
+   [codebase knowledge graph](https://github.com/DeusData/codebase-memory-mcp)
+   that gives agents real structural understanding of your repository instead
+   of blind grep, and a curated [skill library](.jcode/skills/) — including
+   UI/UX, design, and frontend engineering — so the agents ship polished
+   results, not just functional code.
+9. **Self-healing, self-learning loop** — a loop that learns from its
+   mistakes, self-updates, and adapts to your codebase as your project
+   advances.
+10. **Your code, your data, your tokens** — no SaaS, no middleman. The whole
+    loop runs on your forge's CI pipelines. Your code, your data, your tokens
+    stay yours.
 
-**No new interface, no server.** No web app, no TUI, no SaaS. The whole loop
-runs on your forge's (GitLab or GitHub) CI pipelines — your code, your data,
-your tokens stay yours. Create an issue, label it, approve the spec, then
-review and merge the PR/MR — everything happens where you already work.
-
-**Built on fast, modern tools — batteries included.** [jcode](https://github.com/1jehuang/jcode), a standalone **Rust** binary (fast startup, zero runtime dependencies), a [codebase knowledge graph](https://github.com/DeusData/codebase-memory-mcp) that gives agents real structural understanding of your repository instead of blind grep, and a curated [skill library](.jcode/skills/) — including UI/UX, design, and frontend engineering — so the agents ship polished results, not just functional code.
-
-**By a product builder, for product builders.** Built by an indie Product
-Builder who got tired of babysitting agents overnight.
-
-If you've lived these pain points too — a daemon that dies overnight, a
-review that ships broken code, a spec that freezes the moment you approve
-it — boucle was designed for you. The table below maps each one to how
-boucle handles it, if you want to compare:
+If you've lived these pain points — a daemon that dies overnight, a review
+that ships broken code, a spec that freezes the moment you approve it —
+boucle was designed for you:
 
 | Pain point | How boucle handles it |
 | --- | --- |
@@ -61,22 +77,6 @@ boucle handles it, if you want to compare:
 | Reviews that ship broken code (diff-scoped review passes) | Verifies *behavior*: a preview URL, screenshots, and a SHA-anchored post-deploy e2e gate |
 | Frozen specs (human comments after review never reach the worker) | Feeds every human note back into the loop — amend at any moment |
 | No budget control (token spend with no cap or visibility) | Step and iteration caps per role, plus a concurrency cap on parallel issues |
-
-## Why boucle
-
-Harness made for human, made by an indie product builder for product builders.
-
-1. **Lives in your forge** — boucle lives in your forge (GitHub/GitLab). No
-   external tool, no separate dashboard. Everything happens where you already
-   work.
-2. **Deterministic and reliable** — deterministic, therefore reliable. You
-   intervene at the right moment, at the decision points.
-3. **Works while you sleep** — the agent works overnight for you. You intervene
-   only when it matters.
-4. **No UI, No CLI** — no interface to learn, no command line to master. You
-   interact through your forge: issues, comments, labels.
-5. **Self-healing, self-learning loop** — a loop that learns from its mistakes,
-   self-updates, and adapts to your codebase as your project advances.
 
 ## How to install
 
@@ -175,18 +175,18 @@ boucle lives in your forge. GitHub, GitLab. No external tool, no dashboard.
 
 ```mermaid
 flowchart TD
-    H1["👤 Create an issue"] --> T["🤖 Triage<br/>Acks with 👀, analyses, drafts spec"]
-    T --> H2["👤 Approve the spec?<br/>👍 or 💬 comment"]
-    H2 -->|👍| W["🤖 Worker<br/>Implements, deploys preview"]
-    H2 -->|💬 comment| T
-    W --> R["🤖 Reviewer<br/>Adversarial review<br/>✅ pass or ❌ fail"]
-    R -->|✅ pass| H3["👤 Approve the MR?<br/>👍 or 💬 comment"]
-    R -->|❌ fail| W
-    H3 -->|👍| M["⚙️ Merge + Deploy"]
-    H3 -->|💬 comment| W
-    M --> E["🤖 E2E<br/>Verifies production<br/>✅ pass or ❌ fail"]
-    E -->|✅ pass| D["✅ Feature validated end-to-end"]
-    E -->|❌ fail| W
+    H1["👤 Create an issue"] --> T["🤖 Triage — acks with 👀, analyzes, drafts spec"]
+    T --> H2["👤 Approve the spec? — 👍 or 💬"]
+    H2 -->|"👍"| W["🤖 Worker — implements, deploys preview"]
+    H2 -->|"💬 comment"| T
+    W --> R["🤖 Reviewer — adversarial review, ✅ pass / ❌ fail"]
+    R -->|"✅ pass"| H3["👤 Approve the MR? — 👍 or 💬"]
+    R -->|"❌ fail"| W
+    H3 -->|"👍"| M["⚙️ Merge + Deploy"]
+    H3 -->|"💬 comment"| W
+    M --> E["🤖 E2E — verifies production, ✅ pass / ❌ fail"]
+    E -->|"✅ pass"| D["✅ Feature validated end-to-end"]
+    E -->|"❌ fail"| W
 ```
 
 The loop runs asynchronously on CI. You intervene at two named gates —
@@ -194,19 +194,22 @@ spec approval and MR review — not in a live chat. A chat-based agent demands
 your attention *now*; boucle inverts that: you take back control of the
 timing.
 
-**Do-Not-Disturb** (`BOUCLE_DND_*`, opt-in — disabled by default) auto-validates the spec gate during your
-off-hours, so the loop never blocks on you overnight. You approve the spec
-over morning coffee; by lunch the worker has implemented, the reviewer has
-verified the preview, and the MR is waiting. A calmer workflow, driven by
-your agenda — not the agent's.
+**Do-Not-Disturb** (`BOUCLE_DND_*`, opt-in — disabled by default)
+auto-validates the spec gate during your off-hours, so the loop never blocks
+on you overnight. You approve the spec over morning coffee; by lunch the
+worker has implemented, the reviewer has verified the preview, and the MR is
+waiting — a calmer workflow, driven by your agenda, not the agent's.
 
-At this intelligence tier, **how** you scaffold the agent matters more than
-**which** model you pick. Raw intelligence has diminishing returns — from
-DeepSeek V4 Flash ($0.03/task) to Opus 5 ($2.34/task), cost increases 78×
-while intelligence increases 21%
-([Artificial Analysis](https://artificialanalysis.ai), v4.1.1).
+boucle's four roles — **triage**, **worker**, **reviewer**, **e2e** — each
+carry a focused prompt and a curated skill library (UI/UX, design, frontend,
+codebase graph). A specialized agent with the right skill outperforms a
+generalist with higher raw intelligence.
 
-What closes the gap is structure: Anthropic's
+At this tier, **how** you scaffold the agent matters more than **which**
+model you pick. Raw intelligence has diminishing returns — from DeepSeek V4
+Flash ($0.03/task) to Opus 5 ($2.34/task), cost increases 78× while
+intelligence increases 21% ([Artificial Analysis](https://artificialanalysis.ai),
+v4.1.1). What closes the gap is structure: Anthropic's
 ["Building Effective Agents"](https://www.anthropic.com/research/building-effective-agents)
 (Dec 2024) recommends "programmatic checks (gates) on any intermediate steps"
 and notes that "code solutions are verifiable through automated tests."
@@ -214,12 +217,8 @@ and notes that "code solutions are verifiable through automated tests."
 and [SWE-bench Verified](https://www.swebench.com/) confirm this — the gate,
 not the model, decides what passes.
 
-boucle's four roles each carry a focused prompt and a curated skill library
-(UI/UX, design, frontend, codebase graph) — a specialized agent with the
-right skill outperforms a generalist with higher raw intelligence.
-
 **The model decides what to *attempt*; the gates and skills decide what
-*ships*.**
+*ships*.** See [Cost](#cost) for the per-role breakdown.
 
 ## 💰 Cost
 
