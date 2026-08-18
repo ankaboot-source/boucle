@@ -66,7 +66,7 @@ A harness made for humans, by an indie product builder for product builders.
 One command, and the loop takes over.
 
 ```sh
-curl -fsSL https://ankaboot-source.github.io/boucle.dev/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ankaboot-source/boucle/main/install.sh | bash
 ```
 
 The installer adds boucle as a git submodule (`.boucle/`) and runs
