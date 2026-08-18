@@ -476,7 +476,7 @@ EOF
     # deploy follows (the marker + deploy need it); clean it only when no
     # deploy is planned, so it does not dirty the tree on non-deploy runs.
     rm -f ".boucle-state/$BOUCLE_ISSUE/build-feedback.md" 2> /dev/null || true
-    if ! boucle_worker_should_deploy && ! boucle_is_screenshot_review; then
+    if ! boucle_worker_should_deploy && ! boucle_is_screenshot_review_effective; then
       [ -n "${BOUCLE_BUILD_OUTPUT:-}" ] && [ -d "$BOUCLE_BUILD_OUTPUT" ] && rm -rf "$BOUCLE_BUILD_OUTPUT" 2> /dev/null || true
     fi
   else
@@ -536,33 +536,34 @@ EOF
       echo "[boucle] GitHub Pages site URL: $boucle_site_url (no per-branch preview — diff review)"
     fi
   else
-    # GitLab Pages declarative mode: the forge serves the production site
-    # at $CI_PAGES_URL. Branch previews are NOT possible on CE instances —
-    # pages.path_prefix is a Premium feature that CE ignores SILENTLY
-    # (publishes at the ROOT, clobbering production; verified on framagit
-    # 2026-08). Display the real site URL in the MR description; the
-    # reviewer falls back to diff review (its pages.dev extraction regex
-    # cannot match the Pages domain).
-    if [ "${BOUCLE_DEPLOY_PROVIDER:-}" = "gitlab-pages" ] && [ -n "${CI_PAGES_URL:-}" ]; then
+    # Deploy was skipped (screenshot mode, diff mode, external, or no
+    # deploy cmd). Record the site URL for declarative Pages providers
+    # so the MR description and post-merge/e2e know the canonical URL.
+    if [ "${BOUCLE_DEPLOY_PROVIDER:-}" = "github-pages" ]; then
+      boucle_site_url=$(boucle_github_pages_url)
+      echo "[boucle] GitHub Pages site URL: $boucle_site_url (no per-branch preview — screenshot review)"
+    elif [ "${BOUCLE_DEPLOY_PROVIDER:-}" = "gitlab-pages" ] && [ -n "${CI_PAGES_URL:-}" ]; then
       boucle_site_url="${CI_PAGES_URL%/}"
-      echo "[boucle] GitLab Pages site URL: $boucle_site_url (no per-branch preview on CE)"
+      echo "[boucle] GitLab Pages site URL: $boucle_site_url (no per-branch preview — screenshot review)"
     else
       echo "[boucle] Deploy skipped (mode: $(boucle_deploy_mode), review: $(boucle_review_mode))"
     fi
   fi
 
   # ── Screenshot review mode ─────────────────────────────────────────
-  # When BOUCLE_REVIEW_MODE=screenshot, the worker builds the site, serves
-  # it locally (python3 -m http.server — zero dependencies, available on
-  # every CI runner), captures screenshots of impacted pages via puppeteer/
-  # chromium (reusing bin/render-preview.cjs with HTTP URL support), and
-  # uploads them as MR attachments. The reviewer then receives the
+  # When screenshot review is in effect (explicit BOUCLE_REVIEW_MODE=screenshot,
+  # or auto-fallback from preview mode when the deploy provider has no
+  # per-branch preview — github-pages, gitlab-pages), the worker builds the
+  # site, serves it locally (python3 -m http.server — zero dependencies,
+  # available on every CI runner), captures screenshots of impacted pages via
+  # puppeteer/chromium (reusing bin/render-preview.cjs with HTTP URL support),
+  # and uploads them as MR attachments. The reviewer then receives the
   # screenshots as text descriptions (via describe-images --criteria) —
   # no deployed preview URL, no token, no CDN propagation wait.
   # Fail-open: a screenshot failure degrades to diff review, never blocks
   # the loop.
   local screenshot_urls=""
-  if boucle_is_screenshot_review && [ -d "$BOUCLE_BUILD_OUTPUT" ]; then
+  if boucle_is_screenshot_review_effective && [ -d "$BOUCLE_BUILD_OUTPUT" ]; then
     echo "[boucle] Screenshot review mode — capturing impacted pages..."
     local server_pid server_port server_ready
     server_port=8099

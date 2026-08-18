@@ -1138,6 +1138,24 @@ boucle_is_screenshot_review() {
   [ "$(boucle_review_mode)" = "screenshot" ]
 }
 
+# boucle_is_screenshot_review_effective
+#   Returns 0 (true) if screenshot review is in effect, either because
+#   BOUCLE_REVIEW_MODE=screenshot was set explicitly, OR because
+#   BOUCLE_REVIEW_MODE=preview (the default) and the deploy provider
+#   has no per-branch preview (github-pages, gitlab-pages). In the
+#   auto-fallback case, the worker captures screenshots locally instead
+#   of overwriting production, and the reviewer grades from those
+#   screenshots instead of degrading to blind diff review.
+boucle_is_screenshot_review_effective() {
+  boucle_is_screenshot_review && return 0
+  if boucle_is_preview_review; then
+    case "${BOUCLE_DEPLOY_PROVIDER:-}" in
+      github-pages | gitlab-pages) return 0 ;;
+    esac
+  fi
+  return 1
+}
+
 # boucle_resolve_live_url [deploy_log]
 #   Resolve the production/live URL in priority order:
 #     1. BOUCLE_LIVE_URL (explicit override)
@@ -1200,10 +1218,17 @@ boucle_resolve_live_url() {
 
 # boucle_worker_should_deploy
 #   Returns 0 if the worker should run the preview deploy step,
-#   1 if it should skip it (external mode, diff review mode, or no
-#   deploy command — e.g. GitLab Pages declarative mode where
-#   BOUCLE_DEPLOY_CMD is empty and the forge serves the site itself).
+#   1 if it should skip it (external mode, diff review mode, screenshot
+#   review mode, or no deploy command — e.g. GitLab Pages declarative mode
+#   where BOUCLE_DEPLOY_CMD is empty and the forge serves the site itself).
 boucle_worker_should_deploy() {
+  # Skip deploy in screenshot review mode (explicit or auto-fallback):
+  # the worker captures screenshots locally instead of deploying. This
+  # prevents overwriting production (gh-pages) with unreviewed code during
+  # review — the post-merge deploy re-pushes the merged build.
+  if boucle_is_screenshot_review_effective; then
+    return 1
+  fi
   # GitHub Pages declarative mode: the worker itself pushes the build
   # output to the gh-pages branch (no BOUCLE_DEPLOY_CMD, no extra
   # credentials — the bot PAT already has contents:write). Deploy must
@@ -1226,12 +1251,6 @@ boucle_worker_should_deploy() {
   fi
   # Skip deploy in diff review mode (no preview needed)
   if boucle_is_diff_review; then
-    return 1
-  fi
-  # Skip deploy in screenshot review mode — the worker captures screenshots
-  # locally (python3 -m http.server + puppeteer) instead of deploying a
-  # preview. No BOUCLE_DEPLOY_CMD, no token, no CDN.
-  if boucle_is_screenshot_review; then
     return 1
   fi
   return 0
