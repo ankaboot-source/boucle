@@ -52,15 +52,26 @@ setup() {
 
 @test "the ack emoji is NOT a spec-approval emoji" {
   # If the ack were in the approval set, boucle acknowledging an issue
-  # would read as boucle approving its own spec.
-  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup heart rocket tada"
-  run bash -c "echo '$BOUCLE_ACK_EMOJI' | grep -Eq '^($BOUCLE_SPEC_APPROVAL_EMOJIS)\$'"
+  # would read as boucle approving its own spec. Read the real constant
+  # out of the source rather than restating it — and split on either
+  # separator, so this asserts the PROPERTY and not today's formatting
+  # (the constant has been both space- and pipe-separated).
+  local approval
+  approval=$(grep -hoE 'BOUCLE_SPEC_APPROVAL_EMOJIS="[^"]*"' lib/boucle-ci/dispatch.sh lib/boucle-ci/doctor.sh \
+    | head -1 | sed 's/.*="//; s/"$//')
+  [ -n "$approval" ]
+  run bash -c "printf '%s' \"$approval\" | tr '|' ' ' | tr ' ' '\n' | grep -qx '$BOUCLE_ACK_EMOJI'"
   assert_failure
 }
 
-@test "dispatch's spec-approval set still excludes the ack emoji in source" {
-  run grep -q 'BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup heart rocket tada"' lib/boucle-ci/dispatch.sh
-  assert_success
+@test "dispatch and doctor agree on the spec-approval set" {
+  # The two constants are separate shells and must not drift apart; each
+  # CI job runs its own copy.
+  local d1 d2
+  d1=$(grep -hoE 'BOUCLE_SPEC_APPROVAL_EMOJIS="[^"]*"' lib/boucle-ci/dispatch.sh | head -1)
+  d2=$(grep -hoE 'BOUCLE_SPEC_APPROVAL_EMOJIS="[^"]*"' lib/boucle-ci/doctor.sh | head -1)
+  [ -n "$d1" ]
+  [ "$d1" = "$d2" ]
 }
 
 # ── ack_issue_taken ───────────────────────────────────────────────────

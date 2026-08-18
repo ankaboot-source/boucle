@@ -442,7 +442,7 @@ boucle_escalation_diagnostic() {
     build-fail)
       class="build-failure"
       evidence="$worker_build_fails worker iteration(s) failed the build."
-      action="The worker shipped code that does not build. Check the build error in the $(forge_mr_term) discussion. If the build command is wrong, verify \`BOUCLE_BUILD_CMD\` in the consumer CI variables."
+      action="The worker shipped code that does not build. Check the build error in the $mr_term discussion. If the build command is wrong, verify \`BOUCLE_BUILD_CMD\` in the consumer CI variables."
       ;;
     rebase-conflict)
       class="rebase-conflict"
@@ -451,8 +451,8 @@ boucle_escalation_diagnostic() {
       ;;
     not-mergeable)
       class="not-mergeable"
-      evidence="$(forge_mr_term) is not mergeable after rebase."
-      action="Check the $(forge_mr_term) conflict status. The merger already attempted a rebase. Resolve the conflict manually on the branch, or re-queue with \`boucle:todo\` for a fresh worker run."
+      evidence="$mr_term is not mergeable after rebase."
+      action="Check the $mr_term conflict status. The merger already attempted a rebase. Resolve the conflict manually on the branch, or re-queue with \`boucle:todo\` for a fresh worker run."
       ;;
     exit-4)
       class="provider/quota"
@@ -523,7 +523,7 @@ boucle_notify() {
       ;;
     boucle:approval)
       event="approval"
-      waiting="Review and approve the $(forge_mr_term) (👍) or comment on it."
+      waiting="Review and approve the $mr_term (👍) or comment on it."
       ;;
     boucle:human)
       event="human"
@@ -545,6 +545,15 @@ boucle_notify() {
     echo "[boucle:notify] suppressed ($event, #$iid) — inside the DND window" >&2
     return 0
   fi
+
+  # The MR/PR wording comes from the forge layer (forge_mr_term is the
+  # single source of truth for it). Resolve it ONCE, guarded: notify is
+  # fail-open by contract — a dead webhook must never block the loop — and
+  # an unguarded call exits 127 under `set -e` whenever lib/boucle.sh is
+  # sourced without the forge backend, killing the notification before it
+  # can even warn. Same defensive shape as the forge_issue_get guard below.
+  local mr_term="MR"
+  command -v forge_mr_term > /dev/null 2>&1 && mr_term=$mr_term
 
   # Title and URL are best-effort: a notification naming only the issue
   # number still beats no notification.
