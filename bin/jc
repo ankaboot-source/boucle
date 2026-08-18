@@ -981,7 +981,7 @@ Post your analysis as a comment with the boucle:triage marker. Use: bin/forge-no
         echo "[boucle:jc] WARNING: worker re-run (iteration ${BOUCLE_ITERATION}) with EMPTY MR feedback — the feedback channel may be broken. The worker will be told to fetch the MR discussion itself." >&2
         feedback="[boucle:guard] No MR feedback was injected on this re-run, but prior runs exist (iteration ${BOUCLE_ITERATION}). Do NOT assume there is no feedback: fetch the MR notes for source branch boucle/${ISSUE} yourself (glab mr note list -R \${CI_PROJECT_PATH} -n 100 or bin/forge-note) and address every actionable human comment and reviewer verdict before claiming done."
       fi
-      prompt="Implement issue #${ISSUE}. Read state.md first. Commit your changes with [skip ci].
+      prompt="Implement issue #${ISSUE}. Read state.md first. Commit your changes.
 
 Preserve instructed content: the issue body below contains the EXACT content the human instructed (URLs, citations, texts, images). You MUST use them verbatim. DO NOT generate placeholders, DO NOT rewrite the instructed texts, DO NOT substitute URLs. If a field is missing from the issue, fetch the issue body via \`bin/forge-note issue ${ISSUE}\` or the forge CLI rather than inventing. Recent amendments (in the feedback section below) AMEND the spec — they do NOT replace earlier preservation instructions. Conciliate them.
 "

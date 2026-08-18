@@ -1817,4 +1817,57 @@ extract_notify() {
   # At least 3 lines: 1 definition + 2 call sites.
   count=$(/usr/bin/grep -c 'doctor_mr_approval_emoji' lib/boucle-ci/doctor.sh)
   [ "$count" -ge 3 ] || { echo "expected >=3, got $count"; false; }
+# ── Quality gate on the loop's own commits (#51) ──────────────────────
+# 37 of 40 consecutive commits reached the default branch unlinted because
+# worker commits carried [skip ci], which disables the check job. The
+# anti-feedback guard was never [skip ci] — it lives in bin/update.
+
+@test "gate: the worker prompt does not ask for [skip ci]" {
+  run bash -c "grep -c 'skip ci' bin/jc || true"
+  assert_output "0"
+}
+
+@test "gate: the worker's commits do not carry [skip ci]" {
+  run bash -c "grep -c 'skip ci' lib/boucle-ci/worker.sh || true"
+  assert_output "0"
+}
+
+@test "gate: the worker agent is told NOT to add it, and why" {
+  run grep -q 'Do NOT add `\[skip ci\]`' .jcode/agents/worker.md
+  assert_success
+  # The reason must travel with the rule, or the next edit restores it.
+  run grep -q 'every loop job requires a pipeline trigger' .jcode/agents/worker.md
+  assert_success
+}
+
+@test "gate: the anti-feedback guard is in bin/update, not in a commit marker" {
+  run grep -q 'BOUCLE_PIPELINE_SOURCE:-}" = "push"' bin/update
+  assert_success
+}
+
+@test "gate: no loop job can start from a push pipeline" {
+  # This is what makes dropping [skip ci] safe: a worker push cannot begin
+  # another iteration because every loop job requires a trigger.
+  run python3 -c "
+import yaml, sys
+d = yaml.safe_load(open('.gitlab-ci.yml'))
+loop = ['dispatch','triage','worker','reviewer','merger','post-merge','catchup','e2e']
+bad = []
+for name in loop:
+    allow = [r.get('if','') for r in d[name].get('rules',[]) if r.get('when','on_success') != 'never']
+    if not all('trigger' in c for c in allow):
+        bad.append((name, allow))
+print('OK' if not bad else 'LOOP JOB RUNNABLE ON PUSH: %s' % bad)
+"
+  assert_output "OK"
+}
+
+@test "gate: check runs on worker branches" {
+  run python3 -c "
+import yaml
+d = yaml.safe_load(open('.gitlab-ci.yml'))
+allow = [r.get('if','') for r in d['check'].get('rules',[]) if r.get('when','on_success') != 'never']
+print('OK' if any('boucle' in c for c in allow) else 'MISSING: %s' % allow)
+"
+  assert_output "OK"
 }
