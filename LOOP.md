@@ -23,8 +23,12 @@ human in the loop at decision points (spec validation, MR approval).
 
 ## Human gates
 
-- **Spec validation** — configurable; default: all sizes via
-  `BOUCLE_SPEC_PROFILE=strict`.
+- **Spec validation** — decided by the triage agent, which emits
+  `Validation: author-required | autonomous` in its comment.
+  `BOUCLE_SPEC_PROFILE` (default `strict`) is handed to the agent as its
+  default policy; it is no longer applied to the agent's size judgment after
+  the fact. Approval is the **issue author's**, by emoji reaction — a 👍 from
+  anyone else does not advance the loop, and they are told so.
 - **MR approval** — always human-gated.
 
 ## Do-Not-Disturb (DND)
@@ -167,7 +171,7 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_ENABLED` | `true` | Master switch: `true` or `false` (pause boucle). |
 | `BOUCLE_FORGE` | *(auto-detected)* | Active forge: `gitlab` or `github`. Auto-detected from the origin git remote (github.com → github, gitlab.com → gitlab, self-hosted via hostname heuristic or API probe). Override with a subcommand (`setup gitlab` / `setup github`), `--forge`, or `BOUCLE_FORGE`. |
 | `BOUCLE_MONO_USER` | *(empty)* | `true` when one account owns both the issues and the loop (the default when no `--bot-id` is given). Swaps the actor-based anti-loop guard for the `<!-- boucle:agent -->` marker, drops the `boucle::status::*` gross label and both assignee side effects. `false` is treated as unset. Degrades notifications — see README. |
-| `BOUCLE_SPEC_PROFILE` | `strict` | Spec validation profile: `strict` (default, gates all sizes), `product` (gates Size M only), `off` (never); unknown → `strict`. |
+| `BOUCLE_SPEC_PROFILE` | `strict` | Default spec-validation policy **handed to the triage agent**, which decides and emits `Validation:`. `strict` (default, always require the author), `product` (require the author when the issue leaves real latitude), `off` (never). Applied as a size×profile mapping only as a fallback, when a triage comment carries no `Validation:` field; unknown → `strict`. |
 | `BOUCLE_DND_ENABLED` | `false` | Do-Not-Disturb master switch: `true` (opt-in) or `false` (default). |
 | `BOUCLE_DND_START` / `BOUCLE_DND_END` | `22:00` / `07:00` | Quiet-hours window: HH:MM 24h start/end. |
 | `BOUCLE_DND_TZ` | `UTC` | Quiet-hours timezone (IANA name, e.g. `Europe/Paris`); seeded by `bin/setup` from the machine's timezone. |

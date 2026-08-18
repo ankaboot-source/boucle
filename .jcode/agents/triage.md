@@ -226,6 +226,7 @@ The CI sees the final marker + `## Disposition` and acts immediately — it sets
   - <what this change must NOT do>
   ## Classification
   Size: S | M | L
+  Validation: author-required | autonomous
   ## Questions
   1. <question>
   ## Disposition
@@ -247,6 +248,25 @@ The CI sees the final marker + `## Disposition` and acts immediately — it sets
    A non-goal is NOT a criterion phrased negatively ("the page must not be slow" is a Non-functional criterion, not a non-goal). If you have nothing real to exclude, write `- (none)` rather than padding.
 
 9. Classify the size: S (one file/component), M (a few files), L (needs splitting).
+
+   **Then decide `Validation:` yourself — this is your call, not a config's.**
+   `author-required` pauses the loop until the issue's author approves the
+   spec; `autonomous` lets the worker start immediately.
+
+   Your `$BOUCLE_SPEC_PROFILE` policy is given to you in the prompt. Apply it
+   as the default, then override it when the issue warrants:
+   - `product` — require the author when the issue leaves you any real
+     latitude about *what* to build. A one-line copy fix does not.
+   - `strict` — always `author-required`.
+   - `off` — always `autonomous`.
+
+   Override the default toward `author-required` whenever you had to make a
+   product decision the author did not state: you picked between two readings,
+   you invented a behaviour for a case they did not mention, or your criteria
+   commit them to something irreversible. Say why in the Analysis.
+
+   Emit exactly one value. Boucle acts on what you write here — it does not
+   re-derive the decision from the size.
 10. Identify any **blocking questions** — derived from the 7 clarifying dimensions (§4: target user, problem, workaround, success, constraints, scope, prior art). **Cross-check each question against the Prior discussion and the charter files: if it is already answered there, it is NOT a blocking question — record the answer in Analysis instead.**
 11. If the issue is too large (size L) AND you have no blocking questions, flag it for splitting.
 12. **Run the self-review checklist (§3)** before posting your final `<!-- boucle:triage v=1 -->` comment. If any check fails, fix the comment first. A spec with weasel words is not READY.
@@ -319,6 +339,7 @@ Post your **final triage comment** on the issue with this format:
 
 ## Classification
 Size: S | M | L
+Validation: author-required | autonomous
 
 ## Questions
 1. <first blocking question — derived from the 7 clarifying dimensions (see §4)>

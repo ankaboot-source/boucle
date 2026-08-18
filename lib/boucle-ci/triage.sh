@@ -323,6 +323,7 @@ HELP_EOF
   # contains "ready" and would match a whole-body grep for READY.
   DISPOSITION=$(echo "$COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
   SIZE=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
+  VALIDATION=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Validation:[[:space:]]*(author-required|autonomous)' | grep -oiE '(author-required|autonomous)' | head -1 | tr '[:upper:]' '[:lower:]')
 
   # ── Log-scraping fallback (step-limit recovery) ──────────────────
   # If the agent drafted a triage comment but ran out of steps before
@@ -374,6 +375,7 @@ HELP_EOF
         if [ -z "$SIZE" ]; then
           SIZE=$(echo "$COMMENT" | grep -oiE 'Size[[:space:]]+[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
         fi
+        VALIDATION=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Validation:[[:space:]]*(author-required|autonomous)' | grep -oiE '(author-required|autonomous)' | head -1 | tr '[:upper:]' '[:lower:]')
         if [ -n "$DISPOSITION" ]; then
           echo "[boucle] Step-limit fallback succeeded: recovered disposition=$DISPOSITION size=${SIZE:-?}."
         else
@@ -538,15 +540,39 @@ HELP_EOF
         # Spec-validation gate (configurable via BOUCLE_SPEC_PROFILE).
         # Default "strict" gates all sizes. "product" gates M, skips S.
         # "off" never gates (legacy). An unknown profile falls back to "strict".
+        # AUTHORITY: the `Validation:` field the triage agent emitted.
+        #
+        # It used to be (LLM size judgment x BOUCLE_SPEC_PROFILE) -> gate,
+        # which is the inference-on-agent-output trap LESSONS.yml lesson #83
+        # names: the decision belonged to neither the agent nor the config,
+        # and could be read off neither. The profile is now handed to the
+        # agent in its prompt (bin/jc) and the agent emits the decision.
+        #
+        # The size x profile mapping survives ONLY as a fallback for a
+        # comment that predates this field, or one the agent posted before
+        # exhausting its steps. It is a compatibility path, not the rule.
         SPEC_PROFILE="${BOUCLE_SPEC_PROFILE:-strict}"
         SHOULD_GATE=false
-        case "$SPEC_PROFILE" in
-          off) SHOULD_GATE=false ;;
-          strict) SHOULD_GATE=true ;;
-          product) [ "$SIZE" = "M" ] && SHOULD_GATE=true ;;
-          *)
-            echo "WARN: unknown BOUCLE_SPEC_PROFILE '$SPEC_PROFILE' — treating as strict"
+        case "${VALIDATION:-}" in
+          author-required)
             SHOULD_GATE=true
+            echo "[boucle] spec gate: author-required (emitted by triage)"
+            ;;
+          autonomous)
+            SHOULD_GATE=false
+            echo "[boucle] spec gate: autonomous (emitted by triage)"
+            ;;
+          *)
+            echo "[boucle] WARN: triage emitted no Validation: field — falling back to the size x profile mapping (profile=$SPEC_PROFILE size=${SIZE:-?})"
+            case "$SPEC_PROFILE" in
+              off) SHOULD_GATE=false ;;
+              strict) SHOULD_GATE=true ;;
+              product) [ "$SIZE" = "M" ] && SHOULD_GATE=true ;;
+              *)
+                echo "WARN: unknown BOUCLE_SPEC_PROFILE '$SPEC_PROFILE' — treating as strict"
+                SHOULD_GATE=true
+                ;;
+            esac
             ;;
         esac
         # Gate-skip transparency: when the spec gate is auto-validated
