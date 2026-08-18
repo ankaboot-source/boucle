@@ -137,7 +137,9 @@ owns both sides — the question is meaningless).
 
 **Removed (dead labels, pruned from `bin/setup`):** `boucle:approved`,
 `boucle:spec-approved`. MR approval uses the native forge Approve button; spec
-approval uses a reply/emoji on `boucle:spec-review`. Neither uses a label.
+approval uses a canonical emoji reaction (👍 ❤️ 🎉 🚀) on `boucle:spec-review`
+— a text reply amends the spec and re-triggers triage, it does NOT approve.
+Neither uses a label.
 
 ### 2.2 Gross labels
 
@@ -158,7 +160,8 @@ stateDiagram-v2
     triage --> human: Size L / unclear criteria / destructive
     triage --> split: issue too big, split into sub-issues
     needs_info --> triage: human replied (note on needs-info)
-    spec_review --> todo: human approved spec (note / 👍 emoji)
+    spec_review --> todo: human approved spec (👍 ❤️ 🎉 🚀 emoji)
+    spec_review --> triage: human replied with amendment (re-triage)
     spec_review --> human: human rejected / no response
     todo --> working: worker started
     working --> review: worker shipped code
@@ -294,15 +297,23 @@ state. This is the explicit "reopen and resume" signal.
 **A local harness that wants to re-queue a `boucle:human` issue MUST
 re-assign the bot, not post a comment.** (LESSONS.yml lesson #11, #44.)
 
-### 4.2 Spec approval — reply or emoji
+### 4.2 Spec approval — emoji only; a reply amends
 
-To approve a spec (issue at `boucle:spec-review`), the human either:
-- posts a **non-bot note** on the issue (dispatch.sh:570-578), OR
-- awards a **`thumbsup` `heart` `rocket` or `tada` emoji** on a note
-  (dispatch.sh, gated by `BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup heart rocket tada"`).
+To approve a spec (issue at `boucle:spec-review`), the human awards a
+**`thumbsup` `heart` `rocket` or `tada` emoji** on the triage/spec-review
+note (dispatch.sh, gated by `BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup heart
+rocket tada"`). The emoji triggers `chain_to_role worker`. An emoji by the
+bot account is skipped — only human emoji count.
 
-Either triggers `chain_to_role worker`. A note by the bot account (carrying
-`<!-- boucle:agent -->`) is skipped — only human notes/emojis count.
+A **text reply is NOT an approval** — it is a correction/amendment. A reply
+re-triggers **triage** (`chain_to_role triage`), which re-reads the human's
+notes and posts an **updated spec** back at `boucle:spec-review` for another
+approval round. The triage validation message says so explicitly: *“A reply
+never approves the spec.”* A bot-authored note (carrying
+`<!-- boucle:agent -->`) is skipped before routing.
+
+The doctor's orphaned-`boucle:spec-review` recovery mirrors this contract:
+an emoji re-triggers the worker; a reply re-triggers triage.
 
 The same emoji set re-triggers triage from `boucle:needs-info` (e.g. after
 the user adds an API key following a no-key or quota-exhausted help message).

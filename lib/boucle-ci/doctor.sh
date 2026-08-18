@@ -210,10 +210,12 @@ boucle_ci_doctor() {
   done
 
   # ── Recover orphaned boucle:spec-review issues ─────────────────────────
-  # The author replied (any non-bot note after the last triage comment) but
-  # the dispatch pipeline was canceled/orphaned before it could trigger the
-  # worker. Issue still has boucle:spec-review (dispatch didn't run to
-  # strip it). Worker relabels to boucle:working on start, which clears it.
+  # An emoji approval or a human reply landed but the dispatch pipeline was
+  # canceled/orphaned before it could route. Issue still has
+  # boucle:spec-review (dispatch didn't run to strip it). An emoji approval
+  # re-triggers the worker (which relabels to boucle:working, clearing it);
+  # a human reply re-triggers triage (amendment, NOT approval — see A2,
+  # LESSONS.yml lesson #83). Triage re-posts the spec at boucle:spec-review.
   SPEC_REVIEW_ISSUES=$(forge_issue_list_by_label "boucle:spec-review" opened \
     | jq -r '.[] | .iid // .number')
 
@@ -251,8 +253,16 @@ boucle_ci_doctor() {
         break
       fi
     done
-    if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ] || [ "$EMOJI_APPROVAL_FOUND" = true ]; then
-      echo "  → #$IID approved (reply=$HUMAN_REPLY_AFTER_TRIAGE, emoji=$EMOJI_APPROVAL_FOUND) — re-triggering worker"
+    # Spec-gate approval contract (A2, LESSONS.yml lesson #83): an emoji
+    # reaction approves the spec → re-trigger the worker; a human text reply
+    # is an amendment, NOT an approval → re-trigger triage so the agent
+    # re-reads the human's notes and produces an updated spec for another
+    # approval round. The old code treated any reply as approval and started
+    # the worker whenever the human replied with a correction — the opposite
+    # of the triage message's promise. The doctor MUST mirror the dispatch
+    # contract so an orphaned webhook recovers to the same state.
+    if [ "$EMOJI_APPROVAL_FOUND" = true ]; then
+      echo "  → #$IID approved by emoji — re-triggering worker"
       if issue_has_active_pipeline "$IID"; then
         echo "  → #$IID: active pipeline already running — skipping re-trigger"
         continue
@@ -260,11 +270,11 @@ boucle_ci_doctor() {
       if doctor_should_skip_dedup "$IID"; then
         continue
       fi
-      # Dependency gate (lesson #49): a reply/approval on an issue whose body
+      # Dependency gate (lesson #49): an approval on an issue whose body
       # declares a dependency on OPEN siblings must NOT start the worker —
       # park it at boucle:blocked until every dep closes. The webhook path
-      # (dispatch) does this; the doctor must too, or a missed emoji/note
-      # webhook starts premature work (framagit #56/#55, 2026-08).
+      # (dispatch) does this; the doctor must too, or a missed emoji webhook
+      # starts premature work (framagit #56/#55, 2026-08).
       DEP_IIDS=$(parse_depends_on "$(forge_issue_get "$IID" | jq -r '.description // ""' 2> /dev/null)" 2> /dev/null)
       if [ -n "$DEP_IIDS" ]; then
         OPEN_DEPS=""
@@ -298,8 +308,26 @@ boucle_ci_doctor() {
       doctor_mark_triggered "$IID"
       echo "  → re-triggered worker for #$IID"
       RECOVERED=$((RECOVERED + 1))
+    elif [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ]; then
+      # Human reply, NO approval emoji = amendment, NOT approval. Re-trigger
+      # triage so the agent re-reads the human's notes and produces an
+      # updated spec for another approval round. No dependency gate here:
+      # triage produces a spec (no work), and re-applies the gate itself.
+      echo "  → #$IID has a human reply (amendment, NOT approval) — re-triggering triage to produce an updated spec"
+      if issue_has_active_pipeline "$IID"; then
+        echo "  → #$IID: active pipeline already running — skipping re-trigger"
+        continue
+      fi
+      if doctor_should_skip_dedup "$IID"; then
+        continue
+      fi
+      set_boucle_label "$IID" "boucle:triage" "boucle::status::bot"
+      chain_to_role "$IID" "triage"
+      doctor_mark_triggered "$IID"
+      echo "  → re-triggered triage for #$IID"
+      RECOVERED=$((RECOVERED + 1))
     else
-      echo "  → #$IID: still waiting for author reply or approval emoji"
+      echo "  → #$IID: still waiting for approval emoji (or a reply to amend the spec)"
     fi
   done
 

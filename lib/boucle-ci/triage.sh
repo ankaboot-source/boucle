@@ -544,7 +544,13 @@ HELP_EOF
           # note). Falls back to a standalone POST if the triage note cannot
           # be resolved or the PUT fails — approval detection tolerates both
           # shapes (doctor polls "React with" across all notes).
-          SPEC_MSG=$(printf '## Validation\n\nReview the **TL;DR** above. If it matches what you want:\n- React with 👍 ❤️ 🎉 or 🚀 on this comment to approve, OR\n- Reply to this issue with any comment.\nIf not, reply with corrections.')
+          # Spec-gate approval contract (A2, LESSONS.yml lesson #83): only a
+          # canonical emoji reaction approves the spec. A text reply is an
+          # amendment — it re-triggers triage (which re-reads the reply and
+          # produces an updated spec for another approval round), it does NOT
+          # approve. The old message promised "reply with corrections" as a
+          # non-approving path that the dispatch logic did not honour.
+          SPEC_MSG=$(printf '## Validation\n\nReview the **TL;DR** above.\n- React with 👍 ❤️ 🎉 or 🚀 on this comment to approve the spec — nothing else approves it.\n- To amend the spec, reply to this issue with your corrections: triage will re-run, read your reply, and post an updated spec for you to approve. A reply never approves the spec.')
           TRIAGE_NOTE_ID=$(forge_issue_notes "$IID" 2> /dev/null \
             | jq -r '[.[] | select(.body | contains("<!-- boucle:triage") and contains("## TL;DR") and contains("## Disposition"))]
                             | sort_by(.created_at) | last | .id' 2> /dev/null || echo "")

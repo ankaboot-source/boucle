@@ -846,24 +846,32 @@ boucle_ci_dispatch() {
       dispatch_noop
     fi
   elif echo "$LABELS" | grep -q "boucle:spec-review"; then
-    # Author approved the spec (added a non-bot note to an issue that
-    # was at boucle:spec-review). The boucle:spec-approved label was
-    # removed — authors now approve by replying instead. Trigger the
-    # worker — it will relabel to boucle:working (replacing all boucle:
-    # labels, including the stale boucle:spec-review). We do NOT strip
-    # boucle:spec-review here. dispatch_human_actor handles mono-user
-    # mode (where the human IS the bot account — issue #35).
-    if [ "$OBJECT_KIND" = "note" ] && dispatch_human_actor; then
-      SHOULD_WORK=true
-    elif [ "$OBJECT_KIND" = "emoji" ] && dispatch_human_actor; then
+    # Spec-gate approval contract (A2, LESSONS.yml lesson #83): the spec is
+    # approved ONLY by a canonical emoji reaction (👍 ❤️ 🎉 🚀) on the
+    # triage/spec-review note. A human TEXT reply is NOT an approval — it is
+    # a correction/amendment that re-triggers TRIAGE so the agent re-reads
+    # the human's notes and produces an updated spec for another approval
+    # round. The old behaviour treated any reply as approval and started the
+    # worker whenever the human replied with a correction — the opposite of
+    # the triage message's "If not, reply with corrections" promise. We do
+    # NOT strip boucle:spec-review here. dispatch_human_actor handles
+    # mono-user mode (where the human IS the bot account — issue #35).
+    if [ "$OBJECT_KIND" = "emoji" ] && dispatch_human_actor; then
       EMOJI_NAME=$(jq -r '.object_attributes.name // empty' "$BOUCLE_TRIGGER_PAYLOAD")
       EMOJI_ACTION=$(jq -r '.object_attributes.action // empty' "$BOUCLE_TRIGGER_PAYLOAD")
       AWARDABLE_TYPE=$(jq -r '.object_attributes.awardable_type // empty' "$BOUCLE_TRIGGER_PAYLOAD")
       if [ "$EMOJI_ACTION" = "award" ] \
         && [ "$AWARDABLE_TYPE" = "Note" ] \
         && echo "$EMOJI_NAME" | grep -Eq "^($BOUCLE_SPEC_APPROVAL_EMOJIS)$"; then
+        # Emoji approval → worker (relabels to boucle:todo, then working).
         SHOULD_WORK=true
       fi
+    elif [ "$OBJECT_KIND" = "note" ] && dispatch_human_actor; then
+      # A text reply is an amendment, NOT an approval. Re-trigger triage so
+      # the agent reads the human's notes and produces an updated spec for
+      # another approval round. The triage job relabels to boucle:triage
+      # (replacing boucle:spec-review) and re-posts the spec.
+      SHOULD_TRIAGE=true
     fi
   elif echo "$LABELS" | grep -q "boucle:human"; then
     # Human comment on an issue at boucle:human — the human is providing

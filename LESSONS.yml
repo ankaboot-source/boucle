@@ -763,3 +763,16 @@
     so role-specific runs serialize per issue; webhook events (issues, issue_comment, pull_request, schedule) use `boucle-dispatch-<issue|run_id>` so the dispatch router runs in its own lane
     and never cancels a pending role trigger. The dispatch is a fast, read-only router; overlapping it with a worker/reviewer is safe. The merger keeps its job-level `concurrency.group:
     boucle-merge` (serial merge). When adding a new role or a new webhook-triggered dispatch path, verify the two event classes land in different groups — a single shared group is the bug.'
+
+83:
+  title: A gate''s approval signal and its user-facing message MUST name the same actions
+  ❌:
+  - DO NOT let a human gate''s user-facing instructions promise a non-approving path (e.g. "if not, reply with corrections") while the routing treats that same action as an approval and starts
+    the gated work. The human replies with a correction believing they are NOT approving, and the loop proceeds as if they had.
+  - DO NOT let the routing and the message live in two files that can drift independently without a test binding them.
+  ✅:
+  - DO make the approval signal a single, unambiguous action (e.g. a canonical emoji reaction) and state in the message that NOTHING else approves — a text reply amends the spec and re-runs
+    triage, it does NOT approve.
+  - DO mirror the dispatch contract in the doctor''s orphan-recovery path (emoji → worker; reply → triage) so a missed webhook recovers to the same state.
+  - DO add a regression test that extracts the routing block and the message and asserts they agree (the note branch routes to triage, NOT to the gated work; the message says a reply never
+    approves). Bind the two files so an editor of one cannot break the other silently.
