@@ -55,13 +55,13 @@ repository files this issue will touch (source, styles, components, charter
 docs). Use the issue body, attachments, and the knowledge graph
 (`search_graph` / `trace_path` locally; `codebase-memory-mcp cli
 search_graph '{"query":"..."}'` in CI — lesson #23). Embed this prediction
-as a `## Fichiers impactés` section **inside your final triage spec
+as a `## Impacted files` section **inside your final triage spec
 comment** (NOT a separate note), so the file claim lives in the spec the
 human reviews, not a distinct comment. The section contains BOTH a visible
 human-readable label AND the machine-readable marker:
 
 ```
-## Fichiers impactés
+## Impacted files
 📁 `src/pages/right-to-resist.astro`, `src/content.config.ts`
 
 <!-- boucle:files v=1 paths=src/content.config.ts,src/pages/right-to-resist.astro -->
@@ -300,7 +300,7 @@ Post your **final triage comment** on the issue with this format:
 - **Artifacts** — <concrete deliverable (e.g. "src/pages/right-to-resist.astro", "public/logo.png")>
 - **Key links** — <critical relationship (e.g. "new page linked from /navbar", "logo referenced in Layout.astro")>
 
-## Fichiers impactés
+## Impacted files
 📁 `<path1>`, `<path2>`
 
 <!-- boucle:files v=1 paths=<path1>,<path2> -->
@@ -374,7 +374,7 @@ The Disposition field is not a free choice. It is **determined** by your Questio
 3. **If you have NO blocking questions AND Size is S or M**:
    - Disposition **MUST** be `READY`.
    - For Size S the worker will implement immediately.
-    - For Size M (and in `BOUCLE_SPEC_PROFILE=strict` mode, also Size S), the loop pauses at `boucle:spec-review` and waits for the author to **approve the spec with a 👍 ❤️ 🎉 or 🚀 emoji reaction** on the triage comment before the worker starts. A **text reply is NOT an approval** — it is an amendment: triage re-runs, reads the reply, and posts an updated spec for another approval round. The gate is applied by the CI job after triage based on size + profile — triage does not decide this.
+    - For Size S or M (unless `BOUCLE_SPEC_PROFILE=product` skips Size S, or `=off` skips all), the loop pauses at `boucle:spec-review` and waits for the author to **approve the spec with a 👍 ❤️ 🎉 or 🚀 emoji reaction** on the triage comment before the worker starts. The default profile is `strict` (gates all sizes). A **text reply is NOT an approval** — it is an amendment: triage re-runs, reads the reply, and posts an updated spec for another approval round. The gate is applied by the CI job after triage based on size + profile — triage does not decide this.
    - Because the author will review the spec before any code is written, your acceptance criteria are the contract they will sign off on. Make them especially clear, complete, and verifiable (machine-checkable or visible on the rendered page). Cover scope, edge cases, and any non-obvious UX/visual decisions.
 
 **Summary: Questions present → NEEDS-INFO (always). No questions + Size L → NEEDS-SPLIT. No questions + Size S/M → READY.**

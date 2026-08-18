@@ -23,8 +23,8 @@ human in the loop at decision points (spec validation, MR approval).
 
 ## Human gates
 
-- **Spec validation** — configurable; default: Size M+ via
-  `BOUCLE_SPEC_PROFILE=product`.
+- **Spec validation** — configurable; default: all sizes via
+  `BOUCLE_SPEC_PROFILE=strict`.
 - **MR approval** — always human-gated.
 
 ## Do-Not-Disturb (DND)
@@ -158,7 +158,7 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_ENABLED` | `true` | Master switch: `true` or `false` (pause boucle). |
 | `BOUCLE_FORGE` | *(auto-detected)* | Active forge: `gitlab` or `github`. Auto-detected from the origin git remote (github.com → github, gitlab.com → gitlab, self-hosted via hostname heuristic or API probe). Override with a subcommand (`setup gitlab` / `setup github`), `--forge`, or `BOUCLE_FORGE`. |
 | `BOUCLE_MONO_USER` | *(empty)* | `true` when one account owns both the issues and the loop (the default when no `--bot-id` is given). Swaps the actor-based anti-loop guard for the `<!-- boucle:agent -->` marker, drops the `boucle::status::*` gross label and both assignee side effects. `false` is treated as unset. Degrades notifications — see README. |
-| `BOUCLE_SPEC_PROFILE` | `product` | Spec validation profile: `product` (default, gates Size M only), `strict` (gates all sizes), `off` (never); unknown → `product`. |
+| `BOUCLE_SPEC_PROFILE` | `strict` | Spec validation profile: `strict` (default, gates all sizes), `product` (gates Size M only), `off` (never); unknown → `strict`. |
 | `BOUCLE_DND_ENABLED` | `false` | Do-Not-Disturb master switch: `true` (opt-in) or `false` (default). |
 | `BOUCLE_DND_START` / `BOUCLE_DND_END` | `22:00` / `07:00` | Quiet-hours window: HH:MM 24h start/end. |
 | `BOUCLE_DND_TZ` | `UTC` | Quiet-hours timezone (IANA name, e.g. `Europe/Paris`); seeded by `bin/setup` from the machine's timezone. |
@@ -563,7 +563,7 @@ flowchart LR
 ### How it works
 
 - **Triage** embeds a `<!-- boucle:files v=1 paths=path1,path2 -->` marker
-  in its spec comment (the `## Fichiers impactés` section), predicting the
+  in its spec comment (the `## Impacted files` section), predicting the
   files the issue will touch (source, styles, charter docs). The file claim
   lives in the spec the human reviews, not a separate note. Absent marker =
   no claim → fail-open (the gate passes).

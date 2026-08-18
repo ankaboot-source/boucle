@@ -638,7 +638,7 @@ if [ "$FORGE" = "gitlab" ]; then
   if [ -n "$EXISTING" ]; then
     log_skip "BOUCLE_SPEC_PROFILE already exists"
   else
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_SPEC_PROFILE -f value=product -f masked=false -f protected=false >/dev/null"
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_SPEC_PROFILE -f value=strict -f masked=false -f protected=false >/dev/null"
     log_pass "BOUCLE_SPEC_PROFILE set"
   fi
 
@@ -859,8 +859,8 @@ else
   log_pass "BOUCLE_ENABLED set (vars)"
 
   # BOUCLE_SPEC_PROFILE
-  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_SPEC_PROFILE --repo \"$PROJECT_ID\" --body product 2>/dev/null"
-  log_pass "BOUCLE_SPEC_PROFILE set to product (vars)"
+  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_SPEC_PROFILE --repo \"$PROJECT_ID\" --body strict 2>/dev/null"
+  log_pass "BOUCLE_SPEC_PROFILE set to strict (vars)"
 
   # BOUCLE_UPDATE_MODE
   run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_UPDATE_MODE --repo \"$PROJECT_ID\" --body release 2>/dev/null"

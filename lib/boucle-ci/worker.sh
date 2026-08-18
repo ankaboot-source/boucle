@@ -765,7 +765,7 @@ ${screenshot_urls}"
   # ── File-impact marker refresh (F1 guard) ─────────────────────────
   # Refresh the <!-- boucle:files v=1 paths=... --> marker with the actual
   # branch diff. The triage agent embeds the marker inside its spec comment
-  # (the `## Fichiers impactés` section); the refresh MUST NOT target that
+  # (the `## Impacted files` section); the refresh MUST NOT target that
   # spec note — updating it with a marker-only body would destroy the
   # human-visible spec. Instead, target the newest marker note that is NOT
   # a triage spec comment (a prior refresh note); if none exists, post a
@@ -781,7 +781,9 @@ ${screenshot_urls}"
         | sed 's|^\./||' | sort -u | paste -sd, -)
       if [ -n "$refresh_paths" ]; then
         local marker_body existing_note_id
-        marker_body="<!-- boucle:files v=1 paths=$refresh_paths -->"
+        marker_body="📦 File-impact claim: \`$refresh_paths\`
+
+<!-- boucle:files v=1 paths=$refresh_paths -->"
         # Newest files-marker note that is NOT the triage spec comment
         # (excludes bodies carrying `boucle:triage` or `boucle:draft role=triage`).
         existing_note_id=$(forge_issue_notes "$BOUCLE_ISSUE" 2> /dev/null \

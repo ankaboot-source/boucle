@@ -145,9 +145,9 @@ run_config_audit() {
   fi
 
   # Unknown enum values silently fall back.
-  case "${BOUCLE_SPEC_PROFILE:-product}" in
-    product | strict | off) pass "spec profile '${BOUCLE_SPEC_PROFILE:-product}' is valid" ;;
-    *) audit_advisory "BOUCLE_SPEC_PROFILE='${BOUCLE_SPEC_PROFILE}' is unknown" "Falling back to 'product'. Valid: product, strict, off." ;;
+  case "${BOUCLE_SPEC_PROFILE:-strict}" in
+    product | strict | off) pass "spec profile '${BOUCLE_SPEC_PROFILE:-strict}' is valid" ;;
+    *) audit_advisory "BOUCLE_SPEC_PROFILE='${BOUCLE_SPEC_PROFILE}' is unknown" "Falling back to 'strict'. Valid: strict, product, off." ;;
   esac
   case "${BOUCLE_REVIEW_ANCHORING:-full}" in
     full | criteria-only | none) : ;;

@@ -1523,3 +1523,19 @@ extract_notify() {
   run grep -nE 'WARN: marker note (update|post) failed' lib/boucle-ci/worker.sh
   assert_success
 }
+
+@test "worker refresh: marker note is human-visible (not an empty comment)" {
+  # The marker note body is posted as a forge comment that humans see. A body
+  # that is only HTML comments (<!-- boucle:files v=1 ... -->) renders as an
+  # empty comment on GitHub/GitLab — looks like a glitch. The marker MUST
+  # carry a human-visible label so the comment is legible, while keeping the
+  # machine marker intact for parse_files_marker (jq contains() still matches).
+  # Machine marker still present (single-line grep on the assignment region).
+  run grep -nE 'boucle:files v=1 paths=\$refresh_paths' lib/boucle-ci/worker.sh
+  assert_success
+  # The marker_body assignment must NOT start with an HTML comment — it must
+  # lead with visible text so the posted note is not an empty comment.
+  run bash -c "awk '/marker_body=/{print; exit}' lib/boucle-ci/worker.sh"
+  assert_success
+  refute_output --partial 'marker_body="<!--'
+}

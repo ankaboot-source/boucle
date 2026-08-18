@@ -295,7 +295,7 @@ all have sane defaults — override them only when you need to:
 | `BOUCLE_ENABLED` | `true` | Master switch: `true` (default) or `false` to pause boucle. |
 | `BOUCLE_LLM_API_KEY` | *(unset)* | LLM provider key. Set as a **masked** variable. |
 | `BOUCLE_LLM_BASE_URL` | `https://ollama.com/v1` | LLM provider endpoint (any OpenAI-compatible API). |
-| `BOUCLE_SPEC_PROFILE` | `product` | Spec gate strictness: `product` (default — gates Size M only), `strict` (gates all sizes), `off` (never gates); unknown → `product`. |
+| `BOUCLE_SPEC_PROFILE` | `strict` | Spec gate strictness: `strict` (default — gates all sizes), `product` (gates Size M only), `off` (never gates); unknown → `strict`. |
 | `BOUCLE_DND_ENABLED` | `false` | Do-Not-Disturb master switch: `true` (opt-in) or `false` (default). |
 | `BOUCLE_DND_START` / `BOUCLE_DND_END` / `BOUCLE_DND_TZ` | `22:00` / `07:00` / `UTC` | Quiet-hours window: HH:MM 24h start/end + IANA timezone (e.g. `Europe/Paris`). |
 | `BOUCLE_DEPLOY_MODE` | `self` | Deploy handling: `self` (default — boucle runs `BOUCLE_DEPLOY_CMD`) or `external` (consumer's own CI/CD deploys; `BOUCLE_LIVE_URL` required). |

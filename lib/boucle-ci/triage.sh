@@ -67,6 +67,31 @@ boucle_ci_triage() {
     EXISTING_HELP=$(forge_issue_notes "$IID" 2> /dev/null \
       | jq -r '[.[] | select(.body | contains("<!-- boucle:needs-info") and contains("reason=no-key"))] | last | .id // 0' 2> /dev/null || echo "0")
 
+    # Forge-specific fragments: show only the section matching the installed
+    # forge. Each heredoc is single-quoted so backticks in markdown code spans
+    # are safe (no command substitution).
+    if [ "${BOUCLE_FORGE:-}" = "github" ]; then
+      HELP_VARS_PATH="Settings → Secrets and variables → Actions"
+      HELP_BOT_SECTION=$(
+        cat << 'BOT_EOF'
+- **GitHub** — create a PAT at
+  https://github.com/settings/tokens/new (scopes: `repo` + `workflow`),
+  add the bot as a collaborator on the repo, then run
+  `bin/setup github --bot-token <PAT> --bot-id <id>`.
+BOT_EOF
+      )
+    else
+      HELP_VARS_PATH="Settings → CI/CD → Variables"
+      HELP_BOT_SECTION=$(
+        cat << 'BOT_EOF'
+- **GitLab** — `bin/setup` provisions a project service account
+  automatically. If your instance does not support it, create one manually
+  under Project → Settings → Service accounts and re-run
+  `bin/setup --bot-id <id> --bot-token <pat>`.
+BOT_EOF
+      )
+    fi
+
     HELP_MSG=$(
       cat << 'HELP_EOF'
 ## 👋 Welcome to boucle
@@ -93,7 +118,7 @@ How to set it up:
 
 1. Create a free account on one of the providers above
 2. Generate an API key
-3. Add it as a CI/CD variable in **Settings → CI/CD → Variables** (masked, protected)
+3. Add it as a CI/CD variable in **HELP_VARS_PATH** (masked, protected)
 4. React to this comment with 👍 to re-trigger boucle
 
 Want better quality? Configure a dedicated endpoint instead:
@@ -112,14 +137,7 @@ notifications degrade (the forge does not notify you about your own
 activity, and an issue already assigned to you never signals "it's your
 turn").
 
-- **GitLab** — `bin/setup` provisions a project service account
-  automatically. If your instance does not support it, create one manually
-  under Project → Settings → Service accounts and re-run
-  `bin/setup --bot-id <id> --bot-token <pat>`.
-- **GitHub** — create a PAT at
-  https://github.com/settings/tokens/new (scopes: `repo` + `workflow`),
-  add the bot as a collaborator on the repo, then run
-  `bin/setup github --bot-token <PAT> --bot-id <id>`.
+HELP_BOT_SECTION
 
 See the [bot user guide](https://github.com/ankaboot-source/boucle#the-bot-user)
 for details.
@@ -135,6 +153,8 @@ and the [README](https://github.com/ankaboot-source/boucle).
 <!-- boucle:needs-info v=1 reason=no-key -->
 HELP_EOF
     )
+    HELP_MSG="${HELP_MSG//HELP_VARS_PATH/$HELP_VARS_PATH}"
+    HELP_MSG="${HELP_MSG//HELP_BOT_SECTION/$HELP_BOT_SECTION}"
 
     if [ "$EXISTING_HELP" != "0" ] && [ -n "$EXISTING_HELP" ]; then
       forge_issue_note_update "$IID" "$EXISTING_HELP" "$HELP_MSG" 2> /dev/null || true

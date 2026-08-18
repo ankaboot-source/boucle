@@ -59,7 +59,7 @@ audit() {
   run env -i PATH="$PATH" HOME="$HOME" BOUCLE_LLM_API_KEY=k BOUCLE_SPEC_PROFILE=typo bash bin/doctor --audit
   assert_success
   assert_output --partial "BOUCLE_SPEC_PROFILE='typo' is unknown"
-  assert_output --partial "Falling back to 'product'"
+  assert_output --partial "Falling back to 'strict'"
 }
 
 @test "audit: malformed pricing JSON is degraded" {

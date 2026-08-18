@@ -112,7 +112,7 @@ env:
   BOUCLE_BOT_USERNAME: ${{ vars.BOUCLE_BOT_USERNAME || 'up-bot' }}
   BOUCLE_BOT_ID: ${{ vars.BOUCLE_BOT_ID || '' }}
   BOUCLE_RUNS_ON: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
-  BOUCLE_SPEC_PROFILE: ${{ vars.BOUCLE_SPEC_PROFILE || 'product' }}
+  BOUCLE_SPEC_PROFILE: ${{ vars.BOUCLE_SPEC_PROFILE || 'strict' }}
   BOUCLE_UPDATE_MODE: ${{ vars.BOUCLE_UPDATE_MODE || 'release' }}
   BOUCLE_MAX_PARALLEL_ISSUES: ${{ vars.BOUCLE_MAX_PARALLEL_ISSUES || '5' }}
   BOUCLE_MAX_ITERATIONS: ${{ vars.BOUCLE_MAX_ITERATIONS || '5' }}

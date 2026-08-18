@@ -32,7 +32,7 @@ If `search_graph` returns no results, run `codebase-memory-mcp cli index_reposit
 **File-impact marker (CI-managed, not your job).** Boucle maintains a
 `<!-- boucle:files v=1 paths=... -->` marker on each issue, predicting
 the files this issue will touch. The triage agent embeds it in its spec
-comment (the `## Fichiers impactés` section); the worker job (CI, after
+comment (the `## Impacted files` section); the worker job (CI, after
 your commits) refreshes the claim in a separate machine note with the
 actual branch diff. You do NOT need to post, edit, or refresh this marker
 — it is entirely CI-managed. The marker drives a gate that defers parallel
