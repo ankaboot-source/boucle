@@ -23,7 +23,7 @@ boucle_ci_doctor() {
   # The forge backends normalize via forge_reaction_canonical, so only
   # "thumbsup" can appear here.
   # Must mirror the dispatch job's constant — each CI job runs its own shell.
-  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup heart rocket tada"
+  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup|heart|rocket|tada"
   source "$BOUCLE_HOME/bin/lib/depends-on.sh" 2> /dev/null || true
   # Shared gate functions (check_sibling_gate, check_file_gate,
   # maybe_unblock_dependents) — single source of truth in lib/boucle-ci/gates.sh.
@@ -563,7 +563,7 @@ boucle_ci_doctor() {
       # posts a verdict PASS as a comment on the PR. Detect that as an
       # approval signal so the doctor can merge without a native review.
       if [ "$MR_OAPPROVED" -eq 0 ] && [ "${BOUCLE_MONO_USER:-false}" = "true" ]; then
-        MR_NOTES=$(forge_mr_notes "$MR_OIID" 2>/dev/null || echo "[]")
+        MR_NOTES=$(forge_mr_notes "$MR_OIID" 2> /dev/null || echo "[]")
         echo "  → mono-user: MR_OIID=$MR_OIID notes_len=${#MR_NOTES} first100=${MR_NOTES:0:100}"
         if echo "$MR_NOTES" | jq -e '[.[] | select(.body | contains("VERDICT: PASS"))] | length > 0' > /dev/null 2>&1; then
           MR_OAPPROVED=1
@@ -814,7 +814,7 @@ boucle_ci_doctor() {
     # posts a verdict PASS as a comment on the PR. Detect that as an
     # approval signal so the doctor can merge without a native review.
     if [ "$APPROVED_COUNT" -eq 0 ] && [ "${BOUCLE_MONO_USER:-false}" = "true" ]; then
-      MR_NOTES=$(forge_mr_notes "$MR_IID" 2>/dev/null || echo "[]")
+      MR_NOTES=$(forge_mr_notes "$MR_IID" 2> /dev/null || echo "[]")
       if echo "$MR_NOTES" | jq -e '[.[] | select(.body | contains("VERDICT: PASS"))] | length > 0' > /dev/null 2>&1; then
         APPROVED_COUNT=1
       fi

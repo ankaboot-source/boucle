@@ -638,7 +638,7 @@ boucle_ci_dispatch() {
   # The webhook carries the raw GitLab award name; the backends normalize
   # via forge_reaction_canonical, so only "thumbsup" counts.
   # Must mirror the doctor job's constant — each CI job runs its own shell.
-  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup heart rocket tada"
+  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup|heart|rocket|tada"
 
   # Detect if the bot was just assigned to this issue (update action with
   # an assignee change). This lets a human trigger boucle by assigning the
