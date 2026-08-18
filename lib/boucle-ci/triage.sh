@@ -516,7 +516,7 @@ HELP_EOF
           echo "[boucle] 🤖 Issue flagged autonomous — auto-validating spec gate for #$IID"
           SHOULD_GATE=false
           GATE_SKIP_LABELS="boucle:autonomous"
-          AUTONOMOUS_NOTE=$(printf "🤖 **Spec gate auto-approved — issue flagged autonomous**\n\nThe human spec validation was automatically approved because this issue carries the \`boucle:autonomous\` label. The loop therefore continues up to the MR without human contact.\n\nThe \`boucle:autonomous\` label remains visible on the issue (board) until the next state transition.\n\nYou can validate the MR when it is ready. To stop auto-approving the spec for this issue, remove the \`boucle:autonomous\` label.")
+          AUTONOMOUS_NOTE=$(printf "🤖 **Spec gate auto-approved — issue flagged autonomous**\n\nThe human spec validation was automatically approved because this issue carries the \`boucle:autonomous\` label. The loop therefore continues up to the $(forge_mr_term) without human contact.\n\nThe \`boucle:autonomous\` label remains visible on the issue (board) until the next state transition.\n\nYou can validate the $(forge_mr_term) when it is ready. To stop auto-approving the spec for this issue, remove the \`boucle:autonomous\` label.")
           forge_issue_note "$IID" "$AUTONOMOUS_NOTE"
         fi
         if [ "$SHOULD_GATE" = "true" ] && "$BOUCLE_HOME/bin/dnd" 2> /dev/null; then
@@ -526,7 +526,7 @@ HELP_EOF
           echo "[boucle] 🌙 DND active — auto-validating spec gate for #$IID"
           SHOULD_GATE=false
           GATE_SKIP_LABELS="${GATE_SKIP_LABELS:+$GATE_SKIP_LABELS,}boucle:dnd"
-          DND_NOTE=$(printf "🌙 **Spec gate auto-approved — Do-Not-Disturb active**\n\nThe human spec validation was automatically approved because the DND window is active (%s–%s %s). The loop therefore continues up to the MR without human contact.\n\nThe \`boucle:dnd\` label was applied to the issue (visible on the board) to flag this auto-approval; it will be removed at the next state transition.\n\nYou can validate the MR when it is ready. DND is disabled by default: this auto-approval only happens when \`BOUCLE_DND_ENABLED=true\` is explicitly set in the project CI variables — set the variable to \`false\` (or remove it) to disable it." "$DND_START" "$DND_END" "$DND_TZ")
+          DND_NOTE=$(printf "🌙 **Spec gate auto-approved — Do-Not-Disturb active**\n\nThe human spec validation was automatically approved because the DND window is active (%s–%s %s). The loop therefore continues up to the $(forge_mr_term) without human contact.\n\nThe \`boucle:dnd\` label was applied to the issue (visible on the board) to flag this auto-approval; it will be removed at the next state transition.\n\nYou can validate the $(forge_mr_term) when it is ready. DND is disabled by default: this auto-approval only happens when \`BOUCLE_DND_ENABLED=true\` is explicitly set in the project CI variables — set the variable to \`false\` (or remove it) to disable it." "$DND_START" "$DND_END" "$DND_TZ")
           forge_issue_note "$IID" "$DND_NOTE"
         fi
         if [ "$SHOULD_GATE" = "true" ]; then

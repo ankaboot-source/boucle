@@ -23,7 +23,7 @@ boucle_ci_doctor() {
   # The forge backends normalize via forge_reaction_canonical, so only
   # "thumbsup" can appear here.
   # Must mirror the dispatch job's constant — each CI job runs its own shell.
-  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup heart rocket tada"
+  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup|heart|rocket|tada"
   source "$BOUCLE_HOME/bin/lib/depends-on.sh" 2> /dev/null || true
   # Shared gate functions (check_sibling_gate, check_file_gate,
   # maybe_unblock_dependents) — single source of truth in lib/boucle-ci/gates.sh.
@@ -710,7 +710,7 @@ boucle_ci_doctor() {
     MR_IID=$(forge_mr_lookup_by_branch "boucle/$IID" opened)
     if [ -z "$MR_IID" ]; then
       echo "  → #$IID: no open MR found — escalating to boucle:human (merger cannot run)"
-      if ! forge_issue_note "$IID" "⚠️ Merger stuck at boucle:merging but no open MR found for branch boucle/$IID. Human intervention needed.$(job_link)"; then
+      if ! forge_issue_note "$IID" "⚠️ Merger stuck at boucle:merging but no open $(forge_mr_term) found for branch boucle/$IID. Human intervention needed.$(job_link)"; then
         echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
         exit 1
       fi
@@ -722,7 +722,7 @@ boucle_ci_doctor() {
     [ "$APPROVED_COUNT" = "true" ] && APPROVED_COUNT=1 || APPROVED_COUNT=0
     if [ "$APPROVED_COUNT" -eq 0 ]; then
       echo "  → #$IID: MR !$MR_IID no longer approved — escalating to boucle:human (merger cannot run without approval)"
-      if ! forge_issue_note "$IID" "⚠️ Merger stuck at boucle:merging but MR !$MR_IID is no longer approved. Human intervention needed.$(job_link)"; then
+      if ! forge_issue_note "$IID" "⚠️ Merger stuck at boucle:merging but $(forge_mr_ref "$MR_IID") is no longer approved. Human intervention needed.$(job_link)"; then
         echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
         exit 1
       fi

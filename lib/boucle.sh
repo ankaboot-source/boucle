@@ -442,7 +442,7 @@ boucle_escalation_diagnostic() {
     build-fail)
       class="build-failure"
       evidence="$worker_build_fails worker iteration(s) failed the build."
-      action="The worker shipped code that does not build. Check the build error in the MR discussion. If the build command is wrong, verify \`BOUCLE_BUILD_CMD\` in the consumer CI variables."
+      action="The worker shipped code that does not build. Check the build error in the $(forge_mr_term) discussion. If the build command is wrong, verify \`BOUCLE_BUILD_CMD\` in the consumer CI variables."
       ;;
     rebase-conflict)
       class="rebase-conflict"
@@ -451,8 +451,8 @@ boucle_escalation_diagnostic() {
       ;;
     not-mergeable)
       class="not-mergeable"
-      evidence="MR is not mergeable after rebase."
-      action="Check the MR conflict status. The merger already attempted a rebase. Resolve the conflict manually on the branch, or re-queue with \`boucle:todo\` for a fresh worker run."
+      evidence="$(forge_mr_term) is not mergeable after rebase."
+      action="Check the $(forge_mr_term) conflict status. The merger already attempted a rebase. Resolve the conflict manually on the branch, or re-queue with \`boucle:todo\` for a fresh worker run."
       ;;
     exit-4)
       class="provider/quota"
@@ -523,7 +523,7 @@ boucle_notify() {
       ;;
     boucle:approval)
       event="approval"
-      waiting="Review and approve the MR (👍) or comment on it."
+      waiting="Review and approve the $(forge_mr_term) (👍) or comment on it."
       ;;
     boucle:human)
       event="human"
@@ -790,10 +790,22 @@ _resolve_reporter_walk() {
 # resolve_reporter_id <iid>
 #
 # Walk up the parent-issue chain until we find a non-bot author.
-# Returns the forge user ID of the original human reporter (empty on
-# failure). Used by set_boucle_label to reassign issues to the human.
+# Returns the forge-appropriate assignment identifier for the original
+# human reporter (empty on failure). Used by set_boucle_label and the
+# triage/reviewer stages to assign issues/MRs back to the human.
+#
+# The identifier follows the same convention as BOUCLE_BOT_ID
+# (bin/forge/common.sh): numeric on GitLab (assignee_ids[]), login on
+# GitHub (assignees[]). GitHub's assignees[] REJECTS numeric user IDs —
+# it silently no-ops, so the MR/issue is never assigned. Returning the
+# login on GitHub keeps the sole consumers (forge_issue_assign /
+# forge_mr_assign) fed with a value the forge actually accepts.
 resolve_reporter_id() {
-  _resolve_reporter_walk "$1" | cut -f1
+  local field=1
+  if [ "${BOUCLE_FORGE:-}" = "github" ]; then
+    field=2
+  fi
+  _resolve_reporter_walk "$1" | cut -f"$field"
 }
 
 # resolve_reporter_username <iid>
@@ -1395,7 +1407,7 @@ The worker is being re-triggered to rebase onto the fresh \`$default_branch\` an
   local body
   body="⚠️ **Merge conflict — human intervention required**
 
-Issue #$issue (MR !$mr_iid, branch \`boucle/$issue\`) cannot be merged automatically: the rebase onto \`$default_branch\` hit a **semantic conflict** that ${max_retries} worker conflict-retries could not resolve. The loop is **paused** on this issue and it is assigned to you.
+Issue #$issue ($(forge_mr_ref "$mr_iid"), branch \`boucle/$issue\`) cannot be merged automatically: the rebase onto \`$default_branch\` hit a **semantic conflict** that ${max_retries} worker conflict-retries could not resolve. The loop is **paused** on this issue and it is assigned to you.
 
 **Classification** : detected from the rebase output (modify/delete = this branch deletes a file the default branch has modified, or vice versa).
 
@@ -1411,7 +1423,7 @@ $conflicts
    \`git add -A && git rebase --continue && git push --force-with-lease origin boucle/$issue\`
    and restore \`boucle:approval\` (the merger will pick it up).
 2. **Let the worker re-plan against fresh $default_branch** (if the issue's goal still stands): set \`boucle:todo\` + \`boucle::status::bot\` — the worker re-baselines and implements the goal on top of the current $default_branch.
-3. **Close the issue** if obsolete or contradictory with changes already on $default_branch (MR !$mr_iid closes with it).
+3. **Close the issue** if obsolete or contradictory with changes already on $default_branch ($(forge_mr_ref "$mr_iid") closes with it).
 
 The loop is paused on #$issue until you decide."
   # Note BEFORE the terminal label — never a muted boucle:human. Observed on

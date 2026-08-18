@@ -4,6 +4,14 @@
 # Agents call this instead of `glab issue note` / `gh issue comment` directly.
 # It sources the forge shim and delegates to forge_issue_note / forge_mr_note.
 #
+# When the message carries a FINAL marker (boucle:triage v=1, boucle:verdict v=1),
+# bin/forge-note rewrites the agent's latest DRAFT note in place (PUT) instead
+# of posting a new comment. This eliminates the window where both the draft
+# and the final are simultaneously visible, and avoids depending on the
+# post-agent collapse-duplicate-notes script to reconcile the two notes after
+# the agent exits. If no draft is found (or the PUT fails), it falls back to
+# the legacy POST behavior, so the collapse script remains a safety net.
+#
 # Usage:
 #   bin/forge-note issue <iid> --message "comment body"
 #   bin/forge-note issue <iid> --message-file /path/to/message
@@ -57,6 +65,51 @@ BOUCLE_HOME="${BOUCLE_HOME:-$(cd "$(dirname "$0")/.." && pwd)}"
 source "$BOUCLE_HOME/bin/forge/common.sh"
 forge_init
 
+# ── Draft rewrite (in-place final posting) ──────────────────────────
+# When the message carries a final marker, find the agent's most recent
+# draft note for the same role and PUT the final body onto it. This
+# rewrites the draft in place — the note id (and the forge URL anchor
+# #note_<id>) stays stable, and there is never a window where both the
+# draft stub and the final are visible. The collapse-duplicate-notes
+# script still runs post-agent as a safety net for edge cases (multiple
+# drafts, update failure, pre-existing drafts from prior runs).
+DRAFT_ROLE=""
+case "$MESSAGE" in
+  *"<!-- boucle:triage v=1 -->"*) DRAFT_ROLE="triage" ;;
+  *"<!-- boucle:verdict v=1 role=reviewer"*) DRAFT_ROLE="reviewer" ;;
+  *"<!-- boucle:verdict v=1 role=e2e"*) DRAFT_ROLE="e2e" ;;
+esac
+
+if [ -n "$DRAFT_ROLE" ]; then
+  DRAFT_MARKER="<!-- boucle:draft role=$DRAFT_ROLE -->"
+  # Notes are returned newest-first per the forge contract; `first` = newest.
+  if [ "$TYPE" = "mr" ]; then
+    NOTES_JSON=$(forge_mr_notes "$IID" 2> /dev/null || true)
+  else
+    NOTES_JSON=$(forge_issue_notes "$IID" 2> /dev/null || true)
+  fi
+  DRAFT_NOTE_ID=$(printf '%s' "$NOTES_JSON" \
+    | jq -r --arg marker "$DRAFT_MARKER" \
+      '[.[] | select(.body | contains($marker))] | first | .id // ""' 2> /dev/null || echo "")
+
+  if [ -n "$DRAFT_NOTE_ID" ] && [ "$DRAFT_NOTE_ID" != "null" ]; then
+    if [ "$TYPE" = "mr" ]; then
+      if forge_mr_note_update "$IID" "$DRAFT_NOTE_ID" "$MESSAGE" 2> /dev/null; then
+        echo "[forge-note] Rewrote draft note $DRAFT_NOTE_ID in place (role=$DRAFT_ROLE)."
+        exit 0
+      fi
+    else
+      if forge_issue_note_update "$IID" "$DRAFT_NOTE_ID" "$MESSAGE" 2> /dev/null; then
+        echo "[forge-note] Rewrote draft note $DRAFT_NOTE_ID in place (role=$DRAFT_ROLE)."
+        exit 0
+      fi
+    fi
+    # Update failed — fall through to POST a new note so the output is never lost.
+    echo "[forge-note] WARN: in-place rewrite of draft $DRAFT_NOTE_ID failed — falling back to new note." >&2
+  fi
+fi
+
+# No draft to rewrite (or rewrite failed) — post a new note.
 case "$TYPE" in
   issue)
     forge_issue_note "$IID" "$MESSAGE"

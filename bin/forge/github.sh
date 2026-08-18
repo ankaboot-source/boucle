@@ -211,7 +211,12 @@ forge_issue_count_by_label() {
 
 forge_issue_update() {
   local iid="$1" key="$2" value="$3"
-  # GitHub uses "body" for description, "title" for title
+  # GitHub uses "body" for the issue description; the engine's callers
+  # (boucle_board_upsert, triage depends-on marker) pass "description"
+  # — the GitLab field name. Translate it so callers stay forge-agnostic.
+  # Without this, the PATCH returns 200 (GitHub ignores unknown fields)
+  # but changes nothing: the board refreshes on paper, never on the forge.
+  [ "$key" = "description" ] && key="body"
   _gh_api_silent -X PATCH "/repos/$BOUCLE_PROJECT_ID/issues/$iid" \
     -f "$key=$value"
 }

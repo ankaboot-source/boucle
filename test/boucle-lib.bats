@@ -416,6 +416,44 @@ source_with_mock_forge() {
   assert_success
 }
 
+# ── resolve_reporter_id: forge-appropriate assignment identifier ────────
+# GitHub's assignees[] API rejects numeric user IDs (silent no-op) and
+# requires the login. BOUCLE_BOT_ID is already documented as "login on
+# GitHub, numeric on GitLab" (bin/forge/common.sh:34); the reporter-id
+# resolver follows the same convention so its sole consumers
+# (forge_issue_assign / forge_mr_assign) receive a value the forge
+# accepts. Regression: PR !38 on boucle.dev was never assigned to the
+# human after a reviewer PASS because the numeric author.id was sent to
+# assignees[] and silently dropped.
+
+@test "resolve_reporter_id returns login on GitHub (assignees[] needs a username)" {
+  run bash -c '
+    BOUCLE_FORGE=github BOUCLE_FORGE_HOST=github.com CI_PROJECT_ID=1
+    BOUCLE_BOT_USERNAME=up-bot
+    forge_issue_get() {
+      printf "%s" "{\"author\":{\"id\":999,\"username\":\"alice\"}}"
+    }
+    source lib/boucle.sh
+    result=$(resolve_reporter_id 42)
+    [ "$result" = "alice" ]
+  '
+  assert_success
+}
+
+@test "resolve_reporter_id still returns numeric id on GitLab (assignee_ids[])" {
+  run bash -c '
+    BOUCLE_FORGE=gitlab BOUCLE_FORGE_HOST=framagit.org CI_PROJECT_ID=1
+    BOUCLE_BOT_USERNAME=up-bot
+    forge_issue_get() {
+      printf "%s" "{\"author\":{\"id\":999,\"username\":\"alice\"}}"
+    }
+    source lib/boucle.sh
+    result=$(resolve_reporter_id 42)
+    [ "$result" = "999" ]
+  '
+  assert_success
+}
+
 # ── resolve_reporter_username: parent-chain walking (allow-list gate) ──
 # Same walk semantics as resolve_reporter_id, but returns the username of
 # the resolved human reporter. Used by check_allow_list_gate.

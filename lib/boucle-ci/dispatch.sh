@@ -466,7 +466,7 @@ boucle_ci_dispatch() {
               forge_issue_labels_set "$MR_ISSUE_IID" "$HUMAN_LABELS"
             fi
             # Note BEFORE the terminal label — never a muted boucle:human.
-            if ! forge_issue_note "$MR_ISSUE_IID" ":warning: MR !${MR_IID} was closed while awaiting approval. Escalated to **boucle:human** (user decision, not auto-redo)."; then
+            if ! forge_issue_note "$MR_ISSUE_IID" ":warning: $(forge_mr_ref "$MR_IID") was closed while awaiting approval. Escalated to **boucle:human** (user decision, not auto-redo)."; then
               echo "FAIL: escalation note could not be posted on issue #$MR_ISSUE_IID — issue already at human labels, flagging loudly (note missing)." >&2
               exit 1
             fi
@@ -749,7 +749,7 @@ boucle_ci_dispatch() {
   # The webhook carries the raw GitLab award name; the backends normalize
   # via forge_reaction_canonical, so only "thumbsup" counts.
   # Must mirror the doctor job's constant — each CI job runs its own shell.
-  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup heart rocket tada"
+  BOUCLE_SPEC_APPROVAL_EMOJIS="thumbsup|heart|rocket|tada"
 
   # Detect if the bot was just assigned to this issue (update action with
   # an assignee change). This lets a human trigger boucle by assigning the
