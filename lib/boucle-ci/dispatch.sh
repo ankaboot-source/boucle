@@ -50,6 +50,71 @@ dispatch_is_github_pr_comment() {
   [ "$(jq -r '.issue.pull_request != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo false)" = "true" ]
 }
 
+# dispatch_github_mr_action [event_name]
+#
+# Translate a GitHub pull_request / pull_request_review action into the
+# GitLab MR vocabulary the router's case arms speak (open, update, close,
+# reopen, approved, unapproved, merge). Echoes the GitLab word, or NOTHING
+# for an action the router has no arm for — callers MUST treat empty as
+# "not an MR action" and leave the event on its original path.
+#
+# Without this the GitHub side is inert: the payload carries "synchronize",
+# "closed" or a review state, none of which match an arm, so every PR
+# webhook fell through to skip. The vocabularies do not line up one-to-one:
+#
+#   synchronize            → update    (GitHub's word for "new commits")
+#   closed + merged: true  → merge     (GitHub reports a merge as a close;
+#                                       only .pull_request.merged tells them
+#                                       apart, and the difference decides
+#                                       catchup vs worker re-run)
+#   closed + merged: false → close
+#   opened                 → open
+#   reopened               → reopen
+#   review submitted, state approved → approved
+#   review dismissed                 → unapproved
+#
+# Anything else (ready_for_review, review_requested, edited, a review left
+# with comments or changes requested) maps to empty on purpose: reviews that
+# are not approvals must stay on the note path, where their feedback
+# re-triggers the worker.
+#
+# Reads $BOUCLE_TRIGGER_PAYLOAD. Takes the event name as an argument for
+# testability; falls back to $BOUCLE_PIPELINE_SOURCE (github.event_name).
+# shellcheck disable=SC2120
+dispatch_github_mr_action() {
+  local event="${1:-${BOUCLE_PIPELINE_SOURCE:-}}"
+  [ -n "${BOUCLE_TRIGGER_PAYLOAD:-}" ] || return 0
+  [ -f "$BOUCLE_TRIGGER_PAYLOAD" ] || return 0
+  local action
+  action=$(jq -r '.action // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || return 0
+  case "$event" in
+    pull_request)
+      case "$action" in
+        opened) echo "open" ;;
+        synchronize) echo "update" ;;
+        reopened) echo "reopen" ;;
+        closed)
+          if [ "$(jq -r '.pull_request.merged // false' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)" = "true" ]; then
+            echo "merge"
+          else
+            echo "close"
+          fi
+          ;;
+      esac
+      ;;
+    pull_request_review)
+      case "$action" in
+        submitted)
+          [ "$(jq -r '.review.state // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null | tr '[:upper:]' '[:lower:]')" = "approved" ] \
+            && echo "approved"
+          ;;
+        dismissed) echo "unapproved" ;;
+      esac
+      ;;
+  esac
+  return 0
+}
+
 # dispatch_human_actor [actor]
 #
 # True when the event's actor is a human (not boucle itself). Used by the
@@ -58,17 +123,23 @@ dispatch_is_github_pr_comment() {
 #
 # In mono-user mode: ALWAYS true. The human IS the bot account, so a bare
 # ACTOR != BOT_USERNAME test discards every human approval and strands the
-# issue at spec-review / needs-info / human forever (issue #35). The
-# agent-marker filter at the top of dispatch already discarded boucle's own
-# notes, and boucle never adds emoji reactions — so any event that reached
-# routing is human by construction.
+# issue at spec-review / needs-info / human forever (issue #35). Any event
+# that reaches routing is human by construction — but ONLY because the
+# guards above hold that line: the agent-marker filter discards boucle's own
+# notes, and the ack filter discards the one reaction boucle writes (the 👀
+# pickup acknowledgement from ack_issue_taken). Boucle emits no other
+# reaction. Anything that changes either of those — a new bot-written
+# reaction, a relaxed filter — puts a boucle event back on this path, where
+# mono-user mode reads it as human and #35 returns in a new costume.
 #
 # In bot mode: actor != BOUCLE_BOT_USERNAME. The top-level guard already
 # filtered bot events, but this is defense-in-depth for the merge exception
 # and any future event class that slips past the guard.
 #
 # Takes an optional actor argument (for testability); falls back to the
-# global ACTOR set at the top of boucle_ci_dispatch.
+# global ACTOR set at the top of boucle_ci_dispatch. Every in-file call site
+# uses the global, hence the SC2120 waiver.
+# shellcheck disable=SC2120
 dispatch_human_actor() {
   boucle_mono_user && return 0
   [ "${1:-${ACTOR:-}}" != "${BOUCLE_BOT_USERNAME:-}" ]
@@ -183,7 +254,9 @@ boucle_ci_dispatch() {
         ;;
       pull_request)
         OBJECT_KIND="merge_request"
-        MR_ACTION=$(jq -r '.action // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+        # Translated, not passed through: the router's case arms speak the
+        # GitLab vocabulary, and GitHub's words never matched any of them.
+        MR_ACTION=$(dispatch_github_mr_action pull_request) || true
         ACTOR=$(jq -r '.sender.login // .user.login // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
         ;;
       issue_comment)
@@ -203,9 +276,18 @@ boucle_ci_dispatch() {
         fi
         ;;
       pull_request_review | pull_request_review_comment)
-        OBJECT_KIND="note"
-        MR_ACTION=$(jq -r '.action // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
         ACTOR=$(jq -r '.sender.login // .user.login // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+        # An APPROVAL (or its dismissal) is an MR action — it must reach the
+        # merger, which is what the forge-native Approve button means (§4.3).
+        # Every other review stays a note, so review feedback keeps
+        # re-triggering the worker as before.
+        MR_ACTION=$(dispatch_github_mr_action pull_request_review) || true
+        if [ -n "$MR_ACTION" ]; then
+          OBJECT_KIND="merge_request"
+        else
+          OBJECT_KIND="note"
+          MR_ACTION=$(jq -r '.action // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+        fi
         ;;
     esac
   fi
@@ -221,6 +303,29 @@ boucle_ci_dispatch() {
   if [ -n "$NOTE_BODY" ] && has_agent_marker "$NOTE_BODY"; then
     echo "dispatch: comment carries the boucle:agent marker — boucle's own write, skipping"
     dispatch_noop
+  fi
+
+  # ── Anti-loop: the pickup acknowledgement (👀) ────────────────────
+  # Triage awards 👀 on the issue it picks up (ack_issue_taken). On a
+  # project whose hook carries emoji_events (bin/setup writes it false,
+  # but an existing hook may have it on) that award fires an emoji webhook
+  # on an issue still labelled boucle:triage — and that label routes to
+  # triage unconditionally, so the loop would re-triage its own
+  # acknowledgement. The identity guard below cannot cover it: in
+  # mono-user mode ACTOR is the human on every event, boucle's own writes
+  # included.
+  #
+  # Issue-level 👀 never carries routing meaning from a human either (the
+  # spec-approval emojis are thumbsup/heart/rocket/tada on a NOTE), so
+  # discarding the event costs nothing.
+  if [ "$OBJECT_KIND" = "emoji" ]; then
+    EMOJI_AWARDABLE=$(jq -r '.object_attributes.awardable_type // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+    EMOJI_AWARDED=$(jq -r '.object_attributes.name // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+    if [ "$EMOJI_AWARDABLE" = "Issue" ] \
+      && [ "$(forge_reaction_canonical "$EMOJI_AWARDED")" = "${BOUCLE_ACK_EMOJI:-eyes}" ]; then
+      echo "dispatch: ${BOUCLE_ACK_EMOJI:-eyes} award on an issue — boucle's pickup acknowledgement, skipping"
+      dispatch_noop
+    fi
   fi
 
   # ── Anti-loop: bot-originated events, by identity ─────────────────
@@ -259,8 +364,14 @@ boucle_ci_dispatch() {
     # exit 5 "system error" — same failure as pipeline #1433434 on a
     # consumer repo). Deferred with a fallback so a vanished file degrades
     # to an empty value instead of killing dispatch silently under set -e.
-    SOURCE_BRANCH=$(jq -r '.object_attributes.source_branch // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
-    MR_IID=$(jq -r '.object_attributes.iid // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
+    # Forge-agnostic by trying both shapes rather than branching on
+    # $BOUCLE_FORGE (same convention as dispatch_note_body): GitLab puts the
+    # MR under .object_attributes, GitHub under .pull_request. The keys are
+    # disjoint. Reading only the GitLab shape left every GitHub PR webhook
+    # with an empty source branch, so each one exited as "not a boucle
+    # branch" — the whole PR path was inert.
+    SOURCE_BRANCH=$(jq -r '.object_attributes.source_branch // .pull_request.head.ref // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
+    MR_IID=$(jq -r '.object_attributes.iid // .pull_request.number // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
     # Extract issue IID from branch name boucle/<iid>
     MR_ISSUE_IID=$(printf '%s' "$SOURCE_BRANCH" | sed -n 's/^boucle\/\([0-9]\+\).*/\1/p')
     if [ -z "$MR_ISSUE_IID" ]; then

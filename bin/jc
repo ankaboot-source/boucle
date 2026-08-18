@@ -199,7 +199,7 @@ fi
 # ── Freeride mode detection ───────────────────────────────────────────
 FREERIDE_MODE=0
 FREERIDE_PROVIDER_LIST=""
-if is_freeride_mode 2>/dev/null; then
+if is_freeride_mode 2> /dev/null; then
   FREERIDE_MODE=1
   FREERIDE_PROVIDER_LIST=$(freeride_providers "$ROLE")
   FIRST_LINE=$(echo "$FREERIDE_PROVIDER_LIST" | head -1)
@@ -318,8 +318,8 @@ freeride_providers() {
     [ "$name" = "cloudflare" ] && [ -z "${BOUCLE_CLOUDFLARE_ACCOUNT_ID:-}" ] && continue
     base_url="${base_url/__CF_ACCOUNT__/${BOUCLE_CLOUDFLARE_ACCOUNT_ID:-}}"
     case "$role" in
-      worker|reviewer) model="$code_model" ;;
-      triage|e2e) model="$reasoning_model" ;;
+      worker | reviewer) model="$code_model" ;;
+      triage | e2e) model="$reasoning_model" ;;
       *) model="$code_model" ;;
     esac
     override_var="BOUCLE_$(echo "$name" | tr '[:lower:]' '[:upper:]')_MODEL"
@@ -330,13 +330,13 @@ freeride_providers() {
 
 has_llm_config() {
   [ -n "${BOUCLE_LLM_BASE_URL:-}" ] && [ -n "${BOUCLE_LLM_API_KEY:-}" ] && return 0
-  [ -n "$(freeride_providers "$ROLE" 2>/dev/null)" ] && return 0
+  [ -n "$(freeride_providers "$ROLE" 2> /dev/null)" ] && return 0
   return 1
 }
 
 is_freeride_mode() {
   [ -n "${BOUCLE_LLM_BASE_URL:-}" ] && [ -n "${BOUCLE_LLM_API_KEY:-}" ] && return 1
-  [ -n "$(freeride_providers "$ROLE" 2>/dev/null)" ] && return 0
+  [ -n "$(freeride_providers "$ROLE" 2> /dev/null)" ] && return 0
   return 1
 }
 
@@ -354,8 +354,7 @@ inject_freeride_thinking() {
         export JCODE_OPENAI_EXTRA_BODY='{"thinking":{"type":"enabled"}}'
       fi
       ;;
-    none|*)
-      ;;
+    none | *) ;;
   esac
 }
 

@@ -27,7 +27,7 @@ This document describes the engine itself.
 
 ```mermaid
 flowchart TD
-    H1["👤 Create an issue"] --> T["🤖 Triage<br/>Analyses, drafts spec"]
+    H1["👤 Create an issue"] --> T["🤖 Triage<br/>Acks with 👀, analyses, drafts spec"]
     T --> H2["👤 Approve the spec?<br/>👍 or 💬 comment"]
     H2 -->|👍| W["🤖 Worker<br/>Implements, deploys preview"]
     H2 -->|💬 comment| T

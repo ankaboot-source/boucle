@@ -38,7 +38,7 @@ CLI_ARGS_PASSED=$#
 # This is equivalent to --forge <gitlab|github> but more ergonomic.
 if [ $# -gt 0 ]; then
   case "$1" in
-    gitlab|github)
+    gitlab | github)
       FORGE="$1"
       shift
       ;;
@@ -205,26 +205,44 @@ detect_forge_from_host() {
 
   # Known SaaS hosts
   case "$host" in
-    github.com) echo "github"; return 0 ;;
-    gitlab.com) echo "gitlab"; return 0 ;;
+    github.com)
+      echo "github"
+      return 0
+      ;;
+    gitlab.com)
+      echo "gitlab"
+      return 0
+      ;;
   esac
 
   # Hostname heuristic (common for self-hosted: gitlab.example.com, github.example.com)
   case "$host" in
-    *github*) echo "github"; return 0 ;;
-    *gitlab*) echo "gitlab"; return 0 ;;
+    *github*)
+      echo "github"
+      return 0
+      ;;
+    *gitlab*)
+      echo "gitlab"
+      return 0
+      ;;
   esac
 
   # API probe — no auth needed, short timeout
   local code
-  code=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "https://$host/api/v4/version" 2>/dev/null || true)
+  code=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "https://$host/api/v4/version" 2> /dev/null || true)
   case "$code" in
-    200|401) echo "gitlab"; return 0 ;;
+    200 | 401)
+      echo "gitlab"
+      return 0
+      ;;
   esac
 
-  code=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "https://$host/api/v3/meta" 2>/dev/null || true)
+  code=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "https://$host/api/v3/meta" 2> /dev/null || true)
   case "$code" in
-    200) echo "github"; return 0 ;;
+    200)
+      echo "github"
+      return 0
+      ;;
   esac
 
   # Could not detect — return empty
@@ -291,7 +309,7 @@ if [ -z "$FORGE" ]; then
 fi
 
 case "$FORGE" in
-  gitlab|github) ;;
+  gitlab | github) ;;
   *)
     echo "Error: forge must be 'gitlab' or 'github' (got: $FORGE)" >&2
     exit 1
@@ -510,7 +528,7 @@ if [ "$FORGE" = "github" ]; then
   CONSUMER_WORKFLOW=".github/workflows/boucle.yml"
   if [ ! -f "$ENGINE_WORKFLOW" ]; then
     log_fail "engine workflow not found at $ENGINE_WORKFLOW — the .boucle submodule may be incomplete"
-  elif [ -f "$CONSUMER_WORKFLOW" ] && ! grep -q "boucle" "$CONSUMER_WORKFLOW" 2>/dev/null; then
+  elif [ -f "$CONSUMER_WORKFLOW" ] && ! grep -q "boucle" "$CONSUMER_WORKFLOW" 2> /dev/null; then
     log_skip "existing $CONSUMER_WORKFLOW is not a boucle workflow — left untouched"
   else
     mkdir -p .github/workflows

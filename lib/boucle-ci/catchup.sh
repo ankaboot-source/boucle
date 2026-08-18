@@ -130,7 +130,7 @@ boucle_ci_catchup() {
   # SECOND — abort without the label if the note cannot be posted).
   local catchup_live_url=""
   if [ "$TARGET" = "done" ]; then
-    catchup_live_url=$(boucle_resolve_live_url "" 2>/dev/null || echo "")
+    catchup_live_url=$(boucle_resolve_live_url "" 2> /dev/null || echo "")
     if [ -n "$catchup_live_url" ]; then
       # shfmt off  # preserve exact string content
       local DEPLOY_NOTE_BODY="✅ Successfully deployed to production (catch-up).

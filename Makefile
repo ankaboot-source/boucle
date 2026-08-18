@@ -8,15 +8,24 @@ SHELL := /usr/bin/env bash
 SHFMT_FLAGS := -i 2 -bn -ci -sr
 BATS := bats
 
-# Shell scripts in the repo: *.sh files + extensionless scripts in bin/.
+# Shell scripts in the repo: *.sh / *.bash files + scripts in bin/ whose
+# SHEBANG says shell. bin/ is a mixed toolbox — bin/check-lessons is Python,
+# bin/render-preview.cjs is Node — and shellcheck does not skip a file it
+# cannot parse: it reports SC1064/SC1073 and fails the whole lint run. Match
+# on the shebang, the way the pre-commit hooks do (`types: [shell]`), so the
+# next non-shell tool dropped into bin/ cannot turn CI red.
 # Exclude .jcode/ — those scripts are upstream-vendored (synced by bin/update);
 # reformatting them creates churn that the next update overwrites.
 # Exclude bin/oc — it is upstream-vendored (synced by bin/update from boucle);
 # the consumer copy may lag upstream's shfmt-conformant version until the next
 # sync, and reformatting it locally creates churn the next update overwrites.
-SRC_SH := $(shell git ls-files '*.sh' '*.bash' ':!:.jcode' 2>/dev/null)
-BIN_SH := $(shell git ls-files 'bin/*' 2>/dev/null | grep -v '\.cjs$$' | grep -v '^bin/oc$$' || true)
-ALL_SH := $(strip $(SRC_SH) $(BIN_SH))
+# NOTE: two make quirks constrain how this is written. An unescaped # starts
+# a make comment even inside $(shell ...), hence \# in the pattern; and make
+# matches parens inside $(shell ...), so an unbalanced ) — a `case` pattern,
+# say — closes the call early. Keep every paren here balanced.
+SHEBANG_RE := ^\#!.*\b(ba)?sh([[:space:]]|$$)
+SH_FILES := $(shell git ls-files '*.sh' '*.bash' 'bin/*' ':!:.jcode' ':!:bin/oc' 2>/dev/null)
+ALL_SH := $(shell for f in $(SH_FILES); do if echo "$$f" | grep -qE '\.(sh|bash)$$' || head -1 "$$f" 2>/dev/null | grep -qE '$(SHEBANG_RE)'; then echo "$$f"; fi; done | sort -u)
 
 .PHONY: check lint fix test install-hooks check-sync
 

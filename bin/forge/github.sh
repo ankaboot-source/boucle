@@ -284,7 +284,10 @@ forge_mr_lookup_by_branch() {
   case "$state" in
     opened) state="open" ;;
     closed) state="closed" ;;
-    merged) state="closed"; merged_filter=1 ;;
+    merged)
+      state="closed"
+      merged_filter=1
+      ;;
   esac
   local encoded
   encoded=$(printf '%s' "$branch" | jq -sRr @uri)
@@ -304,7 +307,7 @@ forge_mr_lookup_by_branch() {
       if [ "$merged_filter" -eq 1 ]; then
         local is_merged
         is_merged=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/pulls/$exact" 2> /dev/null \
-          | jq -r '.merged // false' 2>/dev/null || echo false)
+          | jq -r '.merged // false' 2> /dev/null || echo false)
         [ "$is_merged" = "true" ] && echo "$exact" && return 0
       else
         echo "$exact"
@@ -315,20 +318,20 @@ forge_mr_lookup_by_branch() {
     # When merged_filter=1, also filter by .merged == true.
     if [ "$merged_filter" -eq 1 ]; then
       _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?state=$state&per_page=100" 2> /dev/null \
-        | jq -r --arg prefix "$branch" '[.[] | select((.head.ref | startswith($prefix)) and (.merged == true))] | first | .number // empty' 2>/dev/null || true
+        | jq -r --arg prefix "$branch" '[.[] | select((.head.ref | startswith($prefix)) and (.merged == true))] | first | .number // empty' 2> /dev/null || true
     else
       _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?state=$state&per_page=100" 2> /dev/null \
-        | jq -r --arg prefix "$branch" '[.[] | select(.head.ref | startswith($prefix))] | first | .number // empty' 2>/dev/null || true
+        | jq -r --arg prefix "$branch" '[.[] | select(.head.ref | startswith($prefix))] | first | .number // empty' 2> /dev/null || true
     fi
     return 0
   fi
   # Non-boucle/<digits> branch — exact head match.
   if [ "$merged_filter" -eq 1 ]; then
     _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?head=$owner:$encoded&state=$state&per_page=1" 2> /dev/null \
-      | jq -r '[.[] | select(.merged == true)] | first | .number // empty' 2>/dev/null || true
+      | jq -r '[.[] | select(.merged == true)] | first | .number // empty' 2> /dev/null || true
   else
     _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?head=$owner:$encoded&state=$state&per_page=1" 2> /dev/null \
-      | jq -r '.[0].number // empty' 2>/dev/null || true
+      | jq -r '.[0].number // empty' 2> /dev/null || true
   fi
 }
 
@@ -432,19 +435,19 @@ forge_attachment_upload() {
   if [ -z "$_GH_REPO_ID_CACHE" ]; then
     _GH_REPO_ID_CACHE=$(curl -sf -H "Authorization: Bearer $BOUCLE_TOKEN" \
       "https://api.$host/repos/$BOUCLE_PROJECT_ID" \
-      2>/dev/null | jq -r '.id // empty' 2>/dev/null) || return 0
+      2> /dev/null | jq -r '.id // empty' 2> /dev/null) || return 0
   fi
   [ -z "$_GH_REPO_ID_CACHE" ] && return 0
 
   # Detect the MIME type from the file extension.
   local mime="application/octet-stream"
   case "$filename" in
-    *.png)  mime="image/png" ;;
-    *.jpg|*.jpeg) mime="image/jpeg" ;;
-    *.gif)  mime="image/gif" ;;
+    *.png) mime="image/png" ;;
+    *.jpg | *.jpeg) mime="image/jpeg" ;;
+    *.gif) mime="image/gif" ;;
     *.webp) mime="image/webp" ;;
-    *.svg)  mime="image/svg+xml" ;;
-    *.pdf)  mime="application/pdf" ;;
+    *.svg) mime="image/svg+xml" ;;
+    *.pdf) mime="application/pdf" ;;
   esac
 
   # Upload the raw file bytes. --data-binary preserves the exact bytes
@@ -456,11 +459,11 @@ forge_attachment_upload() {
     -H "Content-Type: $mime" \
     --data-binary "@$file_path" \
     "https://uploads.$host/user-attachments/assets?name=$filename&content_type=$mime&repository_id=$_GH_REPO_ID_CACHE" \
-    2>/dev/null) || return 0
+    2> /dev/null) || return 0
 
   # Extract the asset URL — renders in ![alt](url) in issue/PR comments.
   local asset_url
-  asset_url=$(printf '%s' "$response" | jq -r '.url // empty' 2>/dev/null) || return 0
+  asset_url=$(printf '%s' "$response" | jq -r '.url // empty' 2> /dev/null) || return 0
 
   [ -n "$asset_url" ] && echo "$asset_url"
 }
@@ -502,7 +505,7 @@ forge_mr_create() {
   out=$(GH_TOKEN="$BOUCLE_TOKEN" gh api -X POST "/repos/$BOUCLE_PROJECT_ID/pulls" \
     -f head="$source_branch" -f base="$target_branch" \
     -f title="$title" -f body="$description" 2>&1) || {
-    echo "ERROR: forge_mr_create failed: $(printf '%s' "$out" | jq -r '.message // empty' 2>/dev/null || printf '%s' "$out")" >&2
+    echo "ERROR: forge_mr_create failed: $(printf '%s' "$out" | jq -r '.message // empty' 2> /dev/null || printf '%s' "$out")" >&2
     return 1
   }
   number=$(printf '%s' "$out" | jq -r '.number // empty' 2> /dev/null)
