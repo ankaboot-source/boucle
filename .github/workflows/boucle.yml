@@ -308,6 +308,17 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           # Install gh CLI (pre-installed on ubuntu-latest)
           gh --version
+      - name: Self-update
+        run: |
+          [ "${BOUCLE_UPDATE_DISABLE:-false}" = "true" ] && exit 0
+          [ -d .boucle/bin ] || exit 0
+          [ "${BOUCLE_PIPELINE_SOURCE:-}" = "push" ] && exit 0
+          case "$GITHUB_REF" in
+            refs/heads/*) _BRANCH="${GITHUB_REF#refs/heads/}" ;;
+            *) exit 0 ;;
+          esac
+          [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Dispatch
         id: dispatch
         run: |
@@ -358,6 +369,17 @@ jobs:
             chmod +x "$HOME/.local/bin/jcode"
           fi
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Self-update
+        run: |
+          [ "${BOUCLE_UPDATE_DISABLE:-false}" = "true" ] && exit 0
+          [ -d .boucle/bin ] || exit 0
+          [ "${BOUCLE_PIPELINE_SOURCE:-}" = "push" ] && exit 0
+          case "$GITHUB_REF" in
+            refs/heads/*) _BRANCH="${GITHUB_REF#refs/heads/}" ;;
+            *) exit 0 ;;
+          esac
+          [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Triage
         env:
           BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE || needs.dispatch.outputs.issue-iid }}
@@ -421,6 +443,17 @@ jobs:
             chmod +x "$HOME/.local/bin/jcode"
           fi
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Self-update
+        run: |
+          [ "${BOUCLE_UPDATE_DISABLE:-false}" = "true" ] && exit 0
+          [ -d .boucle/bin ] || exit 0
+          [ "${BOUCLE_PIPELINE_SOURCE:-}" = "push" ] && exit 0
+          case "$GITHUB_REF" in
+            refs/heads/*) _BRANCH="${GITHUB_REF#refs/heads/}" ;;
+            *) exit 0 ;;
+          esac
+          [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Worker
         env:
           BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE || github.event.issue.number }}
@@ -476,6 +509,17 @@ jobs:
             chmod +x "$HOME/.local/bin/jcode"
           fi
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Self-update
+        run: |
+          [ "${BOUCLE_UPDATE_DISABLE:-false}" = "true" ] && exit 0
+          [ -d .boucle/bin ] || exit 0
+          [ "${BOUCLE_PIPELINE_SOURCE:-}" = "push" ] && exit 0
+          case "$GITHUB_REF" in
+            refs/heads/*) _BRANCH="${GITHUB_REF#refs/heads/}" ;;
+            *) exit 0 ;;
+          esac
+          [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Reviewer
         env:
           BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE }}
@@ -527,6 +571,17 @@ jobs:
             chmod +x "$HOME/.local/bin/jcode"
           fi
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Self-update
+        run: |
+          [ "${BOUCLE_UPDATE_DISABLE:-false}" = "true" ] && exit 0
+          [ -d .boucle/bin ] || exit 0
+          [ "${BOUCLE_PIPELINE_SOURCE:-}" = "push" ] && exit 0
+          case "$GITHUB_REF" in
+            refs/heads/*) _BRANCH="${GITHUB_REF#refs/heads/}" ;;
+            *) exit 0 ;;
+          esac
+          [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Merger
         env:
           BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE }}
@@ -563,6 +618,17 @@ jobs:
             chmod +x "$HOME/.local/bin/jcode"
           fi
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Self-update
+        run: |
+          [ "${BOUCLE_UPDATE_DISABLE:-false}" = "true" ] && exit 0
+          [ -d .boucle/bin ] || exit 0
+          [ "${BOUCLE_PIPELINE_SOURCE:-}" = "push" ] && exit 0
+          case "$GITHUB_REF" in
+            refs/heads/*) _BRANCH="${GITHUB_REF#refs/heads/}" ;;
+            *) exit 0 ;;
+          esac
+          [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Post-merge
         env:
           BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE }}
@@ -599,6 +665,17 @@ jobs:
             chmod +x "$HOME/.local/bin/jcode"
           fi
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Self-update
+        run: |
+          [ "${BOUCLE_UPDATE_DISABLE:-false}" = "true" ] && exit 0
+          [ -d .boucle/bin ] || exit 0
+          [ "${BOUCLE_PIPELINE_SOURCE:-}" = "push" ] && exit 0
+          case "$GITHUB_REF" in
+            refs/heads/*) _BRANCH="${GITHUB_REF#refs/heads/}" ;;
+            *) exit 0 ;;
+          esac
+          [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Catchup
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
@@ -622,6 +699,17 @@ jobs:
           cache: 'npm'
       - name: Install dependencies
         run: "[ -f package-lock.json ] && npm ci || true"
+      - name: Self-update
+        run: |
+          [ "${BOUCLE_UPDATE_DISABLE:-false}" = "true" ] && exit 0
+          [ -d .boucle/bin ] || exit 0
+          [ "${BOUCLE_PIPELINE_SOURCE:-}" = "push" ] && exit 0
+          case "$GITHUB_REF" in
+            refs/heads/*) _BRANCH="${GITHUB_REF#refs/heads/}" ;;
+            *) exit 0 ;;
+          esac
+          [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Deploy
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
@@ -656,6 +744,17 @@ jobs:
             chmod +x "$HOME/.local/bin/jcode"
           fi
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Self-update
+        run: |
+          [ "${BOUCLE_UPDATE_DISABLE:-false}" = "true" ] && exit 0
+          [ -d .boucle/bin ] || exit 0
+          [ "${BOUCLE_PIPELINE_SOURCE:-}" = "push" ] && exit 0
+          case "$GITHUB_REF" in
+            refs/heads/*) _BRANCH="${GITHUB_REF#refs/heads/}" ;;
+            *) exit 0 ;;
+          esac
+          [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: E2E
         env:
           BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE }}
@@ -704,6 +803,17 @@ jobs:
             chmod +x "$HOME/.local/bin/jcode"
           fi
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Self-update
+        run: |
+          [ "${BOUCLE_UPDATE_DISABLE:-false}" = "true" ] && exit 0
+          [ -d .boucle/bin ] || exit 0
+          [ "${BOUCLE_PIPELINE_SOURCE:-}" = "push" ] && exit 0
+          case "$GITHUB_REF" in
+            refs/heads/*) _BRANCH="${GITHUB_REF#refs/heads/}" ;;
+            *) exit 0 ;;
+          esac
+          [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Doctor
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
