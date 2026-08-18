@@ -1871,3 +1871,64 @@ print('OK' if any('boucle' in c for c in allow) else 'MISSING: %s' % allow)
 "
   assert_output "OK"
 }
+
+# ── Non-goals in the spec (#4, from nexu-io/looper) ───────────────────
+# Acceptance criteria say what must become true; nothing said what must
+# stay false. So the worker was graded only on what it had to satisfy —
+# the cheapest way to satisfy a criterion wins — and the reviewer had no
+# basis to FAIL work that ticked every box while doing something nobody
+# asked for.
+
+@test "non-goals: triage emits the section in its comment format" {
+  run grep -q '^  ## Non-goals' .jcode/agents/triage.md
+  assert_success
+  # And in the full example, not only the compact listing.
+  run bash -c "grep -c '^## Non-goals' .jcode/agents/triage.md"
+  assert_output "1"
+}
+
+@test "non-goals: triage is told what one is, and what one is not" {
+  run grep -q 'Write the `## Non-goals` section' .jcode/agents/triage.md
+  assert_success
+  # The distinction that keeps the section from filling with restated criteria.
+  run grep -q 'NOT a criterion phrased negatively' .jcode/agents/triage.md
+  assert_success
+  # No padding when there is nothing real to exclude.
+  run grep -q '(none)' .jcode/agents/triage.md
+  assert_success
+}
+
+@test "non-goals: state.md carries them from the triage comment" {
+  run grep -q "sed -n '/^## Non-goals/,/^## /p'" lib/boucle-ci/worker.sh
+  assert_success
+}
+
+@test "non-goals: the worker treats them as binding, not advisory" {
+  run grep -q 'Non-goals are binding' .jcode/agents/worker.md
+  assert_success
+  # A worker that disagrees must say so rather than cross it silently.
+  run grep -q 'Do not' .jcode/agents/worker.md
+  assert_success
+}
+
+@test "non-goals: a violated one is a FAIL for the reviewer" {
+  run grep -q 'crossing a non-goal is a \*\*FAIL\*\*' .jcode/agents/reviewer.md
+  assert_success
+  # And a human comment can lift one, exactly as it amends a criterion.
+  run grep -q 'A human comment may lift a non-goal' .jcode/agents/reviewer.md
+  assert_success
+}
+
+@test "reviewer prompt: the doc-conformance section appears once" {
+  # It was duplicated — the second copy a strictly less detailed version of
+  # the first, re-billed on every reviewer run.
+  run bash -c "grep -c '^## Doc conformance review' .jcode/agents/reviewer.md"
+  assert_output "1"
+}
+
+@test "authority: the rule is in the operating principles, not buried" {
+  run grep -q 'Name the authority before enforcing it' AGENTS.md
+  assert_success
+  run grep -q 'why is it not the agent' AGENTS.md
+  assert_success
+}

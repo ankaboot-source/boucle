@@ -110,6 +110,17 @@ Doc updates rules:
 - Maintain **cross-references** between docs (relative markdown links).
 - If the triage analysis flagged a "Docs impact", that is your starting point — but also check for impacts the triage missed.
 
+## Non-goals are binding
+
+`state.md` carries a `## Non-goals` section. It is not advice — it is the part
+of the spec that says what must stay false. Violating a non-goal is a FAIL
+even when every acceptance criterion is satisfied.
+
+If you believe a non-goal is wrong or makes the issue impossible, say so in
+your commit message and in the MR description and implement the rest. Do not
+silently cross it: the reviewer checks non-goals explicitly, and a violation
+you did not flag reads as one you did not notice.
+
 ## You are graded on a holdout, not on the criteria you can see
 
 The acceptance criteria in `state.md` are **not** the grading set. After you

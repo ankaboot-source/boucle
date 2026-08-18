@@ -172,6 +172,9 @@ $(echo "$triage_comment" | sed -n '/^## Draft acceptance criteria/,/^## /p' | he
 ## Must-haves
 $(echo "$triage_comment" | sed -n '/^## Must-haves/,/^## /p' | head -n -1 | tail -n +2)
 
+## Non-goals
+$(echo "$triage_comment" | sed -n '/^## Non-goals/,/^## /p' | head -n -1 | tail -n +2)
+
 ## Spec delta
 (none yet — record amendments here as ADDED/MODIFIED/REMOVED with source)
 
