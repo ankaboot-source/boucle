@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# bin/skills-index — generate the skill index injected into agent prompts.
+#
+# 41 of 62 skills were named in no agent prompt: they shipped in every clone,
+# were re-synced on every engine update, and could structurally never fire.
+# The cause was a hand-maintained list in the prompts instead of an index
+# derived from what is actually on disk.
+#
+# The index is GENERATED, never authored: every SKILL.md already carries
+# frontmatter with `name` and `description`, and those descriptions are
+# already written as trigger conditions ("Use when designing, building, or
+# reviewing UI: …").
+#
+# NO RANKING, deliberately. The full index of 62 skills is ~7.8k chars
+# against a ~48k-char assembled worker prompt — about +9%. Selecting a
+# "relevant" subset by keyword would buy that 9% at the cost of a miss rate,
+# and a miss means the agent never learns the skill exists, which is the
+# exact bug this fixes. Publish everything.
+#
+# The index is a DISPLAY, never a filter: it changes what is advertised, not
+# what is reachable. Nothing here moves, hides or restricts .jcode/skills/.
+#
+# Usage:
+#   bin/skills-index              # the index, one skill per line
+#   bin/skills-index --names      # directory names only
+#   bin/skills-index --dir <path> # override the skills directory
+
+set -euo pipefail
+
+SKILLS_DIR=""
+MODE="index"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --names)
+      MODE="names"
+      shift
+      ;;
+    --dir)
+      SKILLS_DIR="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [ -z "$SKILLS_DIR" ]; then
+  BOUCLE_HOME="${BOUCLE_HOME:-$(cd "$(dirname "$0")/.." && pwd)}"
+  SKILLS_DIR="${BOUCLE_WORKSPACE:-$BOUCLE_HOME}/.jcode/skills"
+  [ -d "$SKILLS_DIR" ] || SKILLS_DIR="$BOUCLE_HOME/.jcode/skills"
+fi
+
+[ -d "$SKILLS_DIR" ] || exit 0
+
+# Read one frontmatter key from a SKILL.md.
+frontmatter() {
+  awk -v key="$2" '
+    NR == 1 && $0 == "---" { inside = 1; next }
+    inside && $0 == "---" { exit }
+    inside {
+      idx = index($0, ":")
+      if (idx == 0) next
+      k = substr($0, 1, idx - 1)
+      v = substr($0, idx + 1)
+      gsub(/^[ \t]+|[ \t]+$/, "", k)
+      gsub(/^[ \t]+|[ \t]+$/, "", v)
+      gsub(/^"|"$/, "", v)
+      if (k == key) { print v; exit }
+    }
+  ' "$1" 2> /dev/null || true
+}
+
+# Descriptions run long; the index is a pointer, not the skill itself. The
+# agent loads the skill to get the rest.
+DESC_MAX="${BOUCLE_SKILL_DESC_CHARS:-140}"
+
+for skill_md in "$SKILLS_DIR"/*/SKILL.md; do
+  [ -f "$skill_md" ] || continue
+  dir=$(basename "$(dirname "$skill_md")")
+  if [ "$MODE" = "names" ]; then
+    echo "$dir"
+    continue
+  fi
+  desc=$(frontmatter "$skill_md" description | tr '\n' ' ')
+  # The DIRECTORY name is what the agent loads. Publishing the frontmatter
+  # `name:` instead would silently fail to resolve wherever the two disagree.
+  if [ -n "$desc" ]; then
+    echo "- ${dir}: $(printf '%s' "$desc" | cut -c "1-${DESC_MAX}")"
+  else
+    echo "- ${dir}"
+  fi
+done

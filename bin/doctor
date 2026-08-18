@@ -170,6 +170,50 @@ run_config_audit() {
     fi
   fi
 
+  # ── Skills (#49/#50) ───────────────────────────────────────────────
+  # Purely structural, no judgement on content. "Reachable" is the one that
+  # matters: a skill no agent can reach ships in every clone, is re-synced
+  # on every engine update, and can never fire.
+  local skills_dir="${BOUCLE_HOME}/.jcode/skills"
+  if [ -d "$skills_dir" ]; then
+    local total=0 no_trigger=0 no_verify=0 name_mismatch=0 unreachable=0
+    local reachable_names=""
+    if [ -x "${BOUCLE_HOME}/bin/skills-index" ]; then
+      reachable_names=$("${BOUCLE_HOME}/bin/skills-index" --names 2> /dev/null || echo "")
+    fi
+    local skill_md dir declared
+    for skill_md in "$skills_dir"/*/SKILL.md; do
+      [ -f "$skill_md" ] || continue
+      total=$((total + 1))
+      dir=$(basename "$(dirname "$skill_md")")
+      declared=$(awk 'NR==1&&$0=="---"{i=1;next} i&&$0=="---"{exit} i' "$skill_md" \
+        | sed -n 's/^name:[[:space:]]*//p' | tr -d '"' | head -1)
+      [ -n "$declared" ] && [ "$declared" != "$dir" ] && name_mismatch=$((name_mismatch + 1))
+      grep -qiE '^#+ *when to use' "$skill_md" || no_trigger=$((no_trigger + 1))
+      grep -qiE '^#+ *verification' "$skill_md" || no_verify=$((no_verify + 1))
+      echo "$reachable_names" | grep -qx "$dir" || unreachable=$((unreachable + 1))
+    done
+
+    if [ "$unreachable" -gt 0 ]; then
+      audit_degraded "$unreachable of $total skills are unreachable" \
+        "They ship and are re-synced but no agent can load them. Check bin/skills-index."
+    else
+      pass "all $total skills are reachable via the generated index"
+    fi
+    if [ "$name_mismatch" -gt 0 ]; then
+      audit_degraded "$name_mismatch skill(s) declare a frontmatter name that differs from their directory" \
+        "The index publishes the directory name; a mismatch means the skill silently fails to load under the name it advertises."
+    fi
+    if [ "$no_trigger" -gt 0 ]; then
+      audit_advisory "$no_trigger of $total skills have no '## When to use' section" \
+        "Their trigger conditions live only in the frontmatter description. Agents pick skills from the index; a vague description means a skill that never gets chosen."
+    fi
+    if [ "$no_verify" -gt 0 ]; then
+      audit_advisory "$no_verify of $total skills have no '## Verification' section" \
+        "A skill without an evidence requirement is a reference doc, not a workflow — the agent can claim to have followed it with nothing to show."
+    fi
+  fi
+
   # The worker reads the charter before any UI work.
   if [ -x "${BOUCLE_HOME}/bin/check-design-charter" ]; then
     if "${BOUCLE_HOME}/bin/check-design-charter" > /dev/null 2>&1; then
