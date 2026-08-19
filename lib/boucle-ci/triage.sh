@@ -531,6 +531,17 @@ HELP_EOF
   # forge_* contract: forge_issue_notes / forge_issue_note_update /
   # forge_note_delete) since the GitHub-support port.
   $BOUCLE_HOME/bin/collapse-duplicate-notes triage "$BOUCLE_PROJECT_ID" "$IID" "$PRE_RUN_TRIAGE_ID" "$BOUCLE_FORGE_HOST" || true
+
+  # ── Recurring-theme detection (non-blocking context tag) ──────────
+  RECURRING_REFS=$(parse_recurring_marker "$(printf '[{"body":%s,"created_at":"2026-01-01T00:00:00Z"}]' "$(printf '%s' "$COMMENT" | jq -Rs .)")")
+  if [ -n "$RECURRING_REFS" ]; then
+    CURRENT_LABELS=$(forge_issue_labels_get "$IID" 2> /dev/null || echo "")
+    if ! echo ",$CURRENT_LABELS," | grep -q ",boucle:recurring,"; then
+      forge_issue_labels_set "$IID" "${CURRENT_LABELS:+$CURRENT_LABELS,}boucle:recurring" 2> /dev/null || true
+      echo "[boucle] 🔁 Issue flagged recurring (refs: $RECURRING_REFS)"
+    fi
+  fi
+
   # Route based on disposition
   case "$DISPOSITION" in
     READY)

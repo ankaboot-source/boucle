@@ -147,6 +147,7 @@ boucle_ci_reviewer() {
   # Re-trigger the worker instead of running the reviewer uselessly.
   # (.diff_refs.* is GitLab; .base.sha/.head.sha is GitHub — accept both.)
   MR_BASE=$(echo "$MR_DATA" | jq -r '.diff_refs.base_sha // .base.sha // empty')
+  export MR_BASE
   MR_HEAD=$(echo "$MR_DATA" | jq -r '.diff_refs.head_sha // .head.sha // empty')
   if [ -n "$MR_BASE" ] && [ "$MR_BASE" = "$MR_HEAD" ]; then
     ITERATION="${BOUCLE_ITERATION:-1}"
@@ -240,6 +241,28 @@ boucle_ci_reviewer() {
     fi
     export BOUCLE_MR_DIFF BOUCLE_MR_CHECKS
     echo "[boucle] Diff review mode ready: diff=${#BOUCLE_MR_DIFF}chars, checks=$(echo "$BOUCLE_MR_CHECKS" | jq 'length')"
+
+    # ── Base-control: detect pre-existing CI failures ───────────────
+    export BOUCLE_PREEXISTING_FAILURES
+    BOUCLE_PREEXISTING_FAILURES="[]"
+    if [ -n "${MR_BASE:-}" ]; then
+      local base_check_data
+      base_check_data=$(forge_commit_check_suites "$MR_BASE" 2>/dev/null || echo "[]")
+      if [ "$base_check_data" != "[]" ] && [ -n "$base_check_data" ]; then
+        BOUCLE_PREEXISTING_FAILURES=$(printf '%s\n%s' "$check_data" "$base_check_data" | jq -n --slurpfile head <(echo "$check_data") --slurpfile base <(echo "$base_check_data") '
+          def fname: .name // .workflow_name // .app.slug // .id // tostring;
+          def is_fail: .conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out" or .conclusion == "action_required";
+          ($head[0] | map(select(is_fail) | fname)) as $hf
+          | ($base[0] | map(select(is_fail) | fname)) as $bf
+          | ($hf - ($hf - $bf))
+          | sort | unique' 2>/dev/null || echo "[]")
+        local pre_count
+        pre_count=$(echo "$BOUCLE_PREEXISTING_FAILURES" | jq 'length' 2>/dev/null || echo 0)
+        if [ "${pre_count:-0}" -gt 0 ] 2>/dev/null; then
+          echo "[boucle] INFO: ${pre_count} failing check(s) pre-exist on the merge base (${MR_BASE:0:7})"
+        fi
+      fi
+    fi
   fi
 
   # Fetch the issue body and export it so the reviewer agent can verify

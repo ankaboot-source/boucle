@@ -132,6 +132,7 @@ owns both sides — the question is meaningless).
 | `boucle:split` | Parent issue split into sub-issues, waiting for them | bot |
 | `boucle:dnd` | Transient flag: spec gate auto-validated during DND window | (rides along) |
 | `boucle:autonomous` | Transient flag: spec gate skipped per-issue opt-in | (rides along) |
+| `boucle:recurring` | Context tag: issue is part of a recurring bug class (non-blocking, survives transitions) | (rides along) |
 | `boucle:board` | The status-board issue (never dispatched) | — |
 | `boucle:scheduled` | Issue created by a schedule (cron template) | — |
 
@@ -237,6 +238,7 @@ harness MUST use the markers correctly or dispatch will misroute its writes.
 | `<!-- boucle:e2e-fail v=1 iid=N followup=M -->` | `v=1 iid=<origin-IID> followup=<followup-IID>` | e2e.sh:291 (on follow-up issue created by e2e FAIL) | (informational — links follow-up to origin) | Posted on the follow-up issue created when e2e FAILs, linking it to the original issue for cascade. |
 | `<!-- boucle:e2e-escalation v=1 iid=N verdict=X -->` | `v=1 iid=<IID> verdict=<uncertain\|empty>` | e2e.sh:321,357 (on e2e UNCERTAIN or no-verdict) | (informational — structured escalation) | Posted when e2e escalates to human due to UNCERTAIN verdict or no verdict (step exhaustion). Records the verdict reason. |
 | `<!-- boucle:sub-issue v=1 -->` | `v=1` | triage (split operation) | triage.sh:566 (skip in parent-body parsing) | Marks a sub-issue body. Used to avoid parsing sub-issue content as parent-issue content. |
+| `<!-- boucle:recurring v=1 refs=N,M -->` | `v=1 refs=<comma-separated-IIDs>` | triage agent (optional `## Recurring theme` section) | triage.sh (parse + label), worker.sh (inject refs as context) | Recurring-theme declaration: flags the issue as part of a recurring class and cites prior closed issues. CI applies `boucle:recurring` (context tag surviving transitions). Worker receives prior-issue summaries to find the root cause. Non-blocking: never gates. |
 
 ### 3.5 Operational markers
 

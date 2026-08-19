@@ -1039,6 +1039,14 @@ ${BOUCLE_SIBLINGS}
 ---
 "
       fi
+      if [ -n "${BOUCLE_RECURRING_REFS:-}" ] && [ "${BOUCLE_RECURRING_REFS}" != "[]" ]; then
+        prompt="${prompt}
+Recurring-theme prior issues (this issue is part of a recurring class of bugs — diagonalize toward the ROOT CAUSE rather than bandaging another instance. Context only; do NOT re-implement them):
+---
+${BOUCLE_RECURRING_REFS}
+---
+"
+      fi
       if [ -n "${BOUCLE_CONFLICT_FEEDBACK:-}" ]; then
         prompt="${prompt}
 MERGE CONFLICT from a previous iteration: the branch conflicted when rebasing onto the default branch. The default branch has moved on (often a sibling issue was merged). **You are now INSIDE the conflicted rebase** — the working tree holds the conflict markers and both sides' content. Resolve it:
@@ -1129,6 +1137,14 @@ SCREENSHOT review mode (no deployed preview URL). The worker captured screenshot
 NO preview URL is available (diff review mode). Grade the MR against \$BOUCLE_MR_DIFF (the MR diff, injected by CI) and \$BOUCLE_MR_CHECKS (the check suites). Verify each criterion against the code in the diff, not a deployed site. Note in your verdict that this was a diff review (no preview deploy).
 "
         fi
+      fi
+      if [ -n "${BOUCLE_PREEXISTING_FAILURES:-}" ] && [ "${BOUCLE_PREEXISTING_FAILURES}" != "[]" ]; then
+        prompt="${prompt}
+Pre-existing CI failures (these check suites ALSO fail on the merge base — they are NOT regressions introduced by this MR. Do NOT FAIL any acceptance criterion on their account; note them as pre-existing in your verdict):
+---
+${BOUCLE_PREEXISTING_FAILURES}
+---
+"
       fi
       if [ -n "${BOUCLE_EVIDENCE_PACK:-}" ]; then
         prompt="${prompt}

@@ -301,6 +301,16 @@ _Nothing._
 ${rows}"
     fi
   done
+  # Recurring-theme summary (context tag, not a state). Omitted when zero.
+  local recurring_count
+  recurring_count=$(forge_issue_list_by_label "boucle:recurring" opened 2>/dev/null \
+    | jq -r 'length' 2>/dev/null || echo 0)
+  if [ "${recurring_count:-0}" -gt 0 ] 2>/dev/null; then
+    body="${body}
+
+---
+🔁 **${recurring_count} recurring issue(s) in flight** — part of a known bug class (see the \`boucle:recurring\` label on the issue)."
+  fi
   printf '%s' "$body"
 }
 
@@ -849,14 +859,24 @@ set_boucle_label() {
   current_all=$(forge_issue_labels_get "$iid")
   # Preserve non-boucle: labels
   current_non_boucle=$(echo "$current_all" | tr ',' '\n' | grep -v '^boucle:' | tr '\n' ',' | sed 's/,$//')
+  # Preserve non-boucle: labels AND boucle: context tags. Context tags are
+  # boucle:-prefixed labels that are NOT states — they survive transitions.
+  # Known context tags:
+  #   - boucle:recurring — recurring-theme flag (non-blocking, context only)
+  local context_tags
+  context_tags=$(echo "$current_all" | tr ',' '\n' \
+    | grep -E '^boucle:recurring$' | tr '\n' ',' | sed 's/,$//')
+  local preserved=""
+  [ -n "$current_non_boucle" ] && preserved="${current_non_boucle}"
+  [ -n "$context_tags" ] && preserved="${preserved:+$preserved,}$context_tags"
   # The gross axis answers "whose side is this on?", which has no meaning
   # when there is only one actor. In mono-user mode we write the detail
   # axis alone; the idempotence checks that test the pair collapse to it.
   local merged
   if boucle_mono_user; then
-    merged="${current_non_boucle:+$current_non_boucle,}$new"
+    merged="${preserved:+$preserved,}$new"
   else
-    merged="${current_non_boucle:+$current_non_boucle,}$new,$gross"
+    merged="${preserved:+$preserved,}$new,$gross"
   fi
   forge_issue_labels_set "$iid" "$merged"
   # Notify on the TRANSITION, never on the state. The doctor sweep re-applies
@@ -1644,6 +1664,24 @@ parse_files_marker() {
   # empty entries.
   paths=$(printf '%s' "$paths" | grep -oE '[A-Za-z0-9_./-]+' | paste -sd, -)
   printf '%s' "$paths"
+}
+
+# ── Recurring-theme marker parsing (non-blocking semantic link) ───────
+# parse_recurring_marker <notes_json> — extract the refs from the newest
+# `<!-- boucle:recurring v=1 refs=N,M -->` marker. Mirrors parse_files_marker.
+parse_recurring_marker() {
+  local notes_json="$1"
+  [ -n "$notes_json" ] || return 0
+  local marker_body
+  marker_body=$(printf '%s' "$notes_json" \
+    | jq -r '[.[] | select(.body | contains("<!-- boucle:recurring v=1"))] | sort_by(.created_at) | last | .body // empty' \
+      2> /dev/null || echo "")
+  [ -n "$marker_body" ] || return 0
+  local refs
+  refs=$(printf '%s' "$marker_body" \
+    | grep -oE 'refs=[0-9,]+' | head -1 | cut -d= -f2)
+  refs=$(printf '%s' "$refs" | grep -oE '[0-9]+' | paste -sd, -)
+  printf '%s' "$refs"
 }
 
 # ── Worker rebase-conflict handling (agent-first) ─────────────────────

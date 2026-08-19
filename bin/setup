@@ -1095,6 +1095,15 @@ if [ "$FORGE" = "gitlab" ]; then
     run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/labels -f name=boucle:dnd -f color=#1A237E -f 'description=Flag: spec gate auto-validated by DND window at triage' >/dev/null"
     log_pass "boucle:dnd created"
   fi
+
+  # boucle:recurring — context tag (non-blocking, survives transitions)
+  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:recurring" 2> /dev/null | jq -r '.[0].name // empty' || true)
+  if [ -n "$EXISTING" ]; then
+    log_skip "boucle:recurring already exists"
+  else
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/labels -f name=boucle:recurring -f color=#B71C1C -f 'description=Recurring-theme flag: issue is part of a class of similar bugs (context only, never gates)' >/dev/null"
+    log_pass "boucle:recurring created"
+  fi
 else
   # GitHub: forge_label_create (idempotent, uses gh label create)
   # boucle:* labels (12) — same names/colors as GitLab (approved/spec-approved
@@ -1118,6 +1127,10 @@ else
   # boucle:dnd
   run "forge_label_create 'boucle:dnd' '#1A237E'"
   log_pass "boucle:dnd created"
+
+  # boucle:recurring — context tag (non-blocking, survives transitions)
+  run "forge_label_create 'boucle:recurring' '#B71C1C'"
+  log_pass "boucle:recurring created"
 fi
 
 echo ""

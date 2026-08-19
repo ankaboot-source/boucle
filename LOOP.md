@@ -701,6 +701,39 @@ prediction drift (a file the marker missed that actually conflicts). Deferred
 until MR 1's residual conflict rate justifies it; the existing conflict-retry
 budget (`BOUCLE_CONFLICT_RETRIES`) backstops drift until then.
 
+## Recurring-theme detection
+
+Boucle recognises when an issue is part of a **recurring class of bugs**.
+This is a **non-blocking context link**, not a gate: it enriches the worker
+with prior-issue context so it can diagonalize toward the **root cause**
+rather than bandaging another instance.
+
+- **Triage** scans recently **closed** issues for similar ones. If found,
+  it embeds a `<!-- boucle:recurring v=1 refs=N,M -->` marker (optional
+  `## Recurring theme` section). Absent marker = not recurring.
+- **CI** applies the `boucle:recurring` label — a **context tag** that
+  survives state transitions (`set_boucle_label` preserves it).
+- **Worker** receives the prior issues' summaries and diagonalizes toward
+  the root cause.
+
+Invariants: non-blocking (never gates/defers), survives transitions,
+fail-open (absent marker is harmless).
+
+## Base-control CI (pre-existing failure detection)
+
+In `diff` review mode, a red check suite on the MR head may be
+**pre-existing** on the merge base — the default branch is already red.
+Boucle pins the merge base (`MR_BASE`) and computes the **intersection**
+of failing check names between head and base. Those are pre-existing.
+
+- **reviewer.sh** calls `forge_commit_check_suites "$MR_BASE"` and
+  intersects failing check names. Exported as `BOUCLE_PREEXISTING_FAILURES`.
+- **bin/jc** injects a `Pre-existing CI failures` block into the reviewer
+  prompt. The reviewer MUST NOT FAIL on pre-existing failures; notes them
+  in the verdict so the human knows the default branch is red.
+
+Invariants: fail-open (unreadable base -> empty set), diff mode only.
+
 ## Agent transcript
 
 Every agent job uploads `agent-output.log` as a CI artifact (`when: always`

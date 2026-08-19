@@ -39,6 +39,14 @@ actual branch diff. You do NOT need to post, edit, or refresh this marker
 workers whose issues claim overlapping files, preventing rebase/merge
 conflicts.
 
+**Recurring-theme context (CI-managed, not your job).** If the triage
+flagged this issue as part of a recurring class, CI injects the prior
+issues' summaries into your prompt under the "Recurring-theme prior issues"
+block. When present, **diagonalize toward the root cause** rather than
+bandaging another instance: the prior issues show the same symptom, so a
+surface fix will recur. This is context only — the prior issues are NOT
+dependencies and you do NOT re-implement them.
+
 ## Swarm — parallel sub-agents
 
 You have the `swarm` tool available (`--tools '*'` is enabled). Use it to spawn sub-agents that work in parallel when the task has independent parts. This is faster than doing everything sequentially.

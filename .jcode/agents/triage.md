@@ -78,6 +78,26 @@ rebase/merge conflicts. The worker job (CI, not you) later refreshes the
 claim in a separate machine note with the actual branch diff — never edit
 or re-post the marker yourself.
 
+**Recurring-theme detection (optional).** Scan the forge's recently **closed** issues
+for ones whose title, body, or impacted files resemble this issue — same symptom,
+same component, same failure class. If you find 1+ prior issues of the same class,
+this issue is **recurring**: the worker should diagonalize toward the root cause
+rather than bandaging another instance. Embed the link as a
+`## Recurring theme` section **inside your final triage spec comment**, containing
+both a visible line and the machine-readable marker:
+
+```
+## Recurring theme
+🔁 Part of a recurring class (see #42, #67). Consider a root-cause fix, not a patch.
+
+<!-- boucle:recurring v=1 refs=42,67 -->
+```
+
+If you cannot find prior instances with confidence, **omit the section entirely** —
+a false recurring flag wastes the worker's attention. This marker is **non-blocking**:
+it never gates or defers. CI applies the `boucle:recurring` label (a context tag that
+survives state transitions). The worker receives the prior issues' summaries.
+
 ## Skills available
 
 **Codebase & implementation understanding** (load when the issue touches their domain):
@@ -337,6 +357,11 @@ Post your **final triage comment** on the issue with this format:
 
 <!-- boucle:files v=1 paths=<path1>,<path2> -->
 
+## Recurring theme *(optional — omit if no prior instances found)*
+🔁 Part of a recurring class (see #<prior1>, #<prior2>). Consider a root-cause fix, not a patch.
+
+<!-- boucle:recurring v=1 refs=<prior1>,<prior2> -->
+
 ## Classification
 Size: S | M | L
 Validation: author-required | autonomous
@@ -360,7 +385,7 @@ READY | NEEDS-INFO | NEEDS-SPLIT
 - <consequence 2>
 ```
 
-**The `## Creative proposals` and `## Consequences` sections are OPTIONAL.** Include them only if you completed Phase 3. If you exhausted your step budget in Phase 1 or 2, omit them — the comment is still valid. Never pad these sections with cosmetic variants or obvious restatements; 3 sharp bullets beat 5 generic ones.
+**The `## Recurring theme`, `## Creative proposals` and `## Consequences` sections are OPTIONAL.** Include `## Recurring theme` only if you found prior closed issues of the same class with confidence; include the creative/consequence sections only if you completed Phase 3. If you exhausted your step budget early, omit all three — the comment is still valid. Never pad the recurring section with a false positive (a superficially similar but unrelated issue) — a spurious recurring flag wastes the worker's attention. 3 sharp bullets beat 5 generic ones.
 
 You may also post a **first-pass draft** (with the `<!-- boucle:draft role=triage -->` marker — see "Phase 1" above) before the final comment. The CI collapses duplicate triage comments from the same run, so the draft is replaced by the final comment.
 

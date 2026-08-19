@@ -296,6 +296,24 @@ EOF
         })' 2> /dev/null || echo "[]")
   fi
 
+  # ── Recurring-theme refs (context for the worker) ────────────────
+  export BOUCLE_RECURRING_REFS
+  BOUCLE_RECURRING_REFS=""
+  local recurring_refs recurring_iid ref_summary
+  recurring_refs=$(parse_recurring_marker "$(forge_issue_notes "$BOUCLE_ISSUE" 2>/dev/null || echo '[]')" 2>/dev/null || echo "")
+  if [ -n "$recurring_refs" ]; then
+    local ref_entries=""
+    for recurring_iid in $(echo "$recurring_refs" | tr ',' ' '); do
+      ref_summary=$(forge_issue_get "$recurring_iid" 2> /dev/null \
+        | jq -c --arg iid "$recurring_iid" '{iid:$iid, title:(.title//""), state:(.state//""), closed_at:(.closed_at//null)}' 2> /dev/null || echo "")
+      [ -n "$ref_summary" ] && ref_entries="${ref_entries:+$ref_entries
+}${ref_summary}"
+    done
+    if [ -n "$ref_entries" ]; then
+      BOUCLE_RECURRING_REFS=$(printf '%s\n' "$ref_entries" | jq -cs '.' 2>/dev/null || echo "[]")
+    fi
+  fi
+
   # ── Run the agent ────────────────────────────────────────────────
   # Model/API failure retry: bin/jc exits 4 when the LLM API is
   # unavailable or credits are exhausted. A transient outage (rate

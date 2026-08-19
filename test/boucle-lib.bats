@@ -1668,6 +1668,129 @@ extract_notify() {
   assert_output "src/pages/index.astro"
 }
 
+# ── Recurring-theme marker parsing ─────────────────────────────────────
+
+@test "parse_recurring_marker extracts refs from a single matching note" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    forge_issue_get() { :; }
+    source lib/boucle.sh
+    notes='"'"'[{"id":1,"created_at":"2026-01-01T00:00:00Z","body":"## Recurring theme\n<!-- boucle:recurring v=1 refs=42,67 -->"}]'"'"'
+    parse_recurring_marker "$notes"
+  '
+  assert_success
+  assert_output "42,67"
+}
+
+@test "parse_recurring_marker returns empty when no marker note exists" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    forge_issue_get() { :; }
+    source lib/boucle.sh
+    parse_recurring_marker "[]"
+  '
+  assert_success
+  assert_output ""
+}
+
+@test "parse_recurring_marker picks the newest marker by created_at" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    forge_issue_get() { :; }
+    source lib/boucle.sh
+    notes='"'"'[{"id":1,"created_at":"2026-01-01T00:00:00Z","body":"<!-- boucle:recurring v=1 refs=11 -->"},{"id":2,"created_at":"2026-01-02T00:00:00Z","body":"<!-- boucle:recurring v=1 refs=22,33 -->"}]'"'"'
+    parse_recurring_marker "$notes"
+  '
+  assert_success
+  assert_output "22,33"
+}
+
+@test "parse_recurring_marker returns empty for a malformed marker (no refs=)" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    forge_issue_get() { :; }
+    source lib/boucle.sh
+    notes='"'"'[{"id":1,"created_at":"2026-01-01T00:00:00Z","body":"<!-- boucle:recurring v=1 -->"}]'"'"'
+    parse_recurring_marker "$notes"
+  '
+  assert_success
+  assert_output ""
+}
+
+@test "parse_recurring_marker returns empty for empty input" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    forge_issue_get() { :; }
+    source lib/boucle.sh
+    parse_recurring_marker ""
+  '
+  assert_success
+  assert_output ""
+}
+
+@test "parse_recurring_marker ignores non-marker notes in the same list" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    forge_issue_get() { :; }
+    source lib/boucle.sh
+    notes='"'"'[{"id":1,"created_at":"2026-01-01T00:00:00Z","body":"VERDICT: PASS"},{"id":2,"created_at":"2026-01-02T00:00:00Z","body":"<!-- boucle:recurring v=1 refs=99 -->"}]'"'"'
+    parse_recurring_marker "$notes"
+  '
+  assert_success
+  assert_output "99"
+}
+
+# ── set_boucle_label: context-tag preservation ─────────────────────────
+
+@test "set_boucle_label preserves the recurring tag across a state transition" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    forge_issue_get() { :; }
+    boucle_mono_user() { return 1; }
+    forge_issue_labels_get() { echo "boucle:recurring,frontend,boucle:triage,boucle::status::bot"; }
+    forge_issue_labels_set() { echo "LABELS_SET:$2"; }
+    boucle_notify() { :; }
+    forge_issue_assign() { :; }
+    source lib/boucle.sh
+    set_boucle_label 10 "boucle:working" "boucle::status::bot"
+  '
+  assert_success
+  assert_output --partial "boucle:recurring"
+  assert_output --partial "boucle:working"
+  assert_output --partial "frontend"
+}
+
+@test "set_boucle_label preserves the recurring tag in mono-user mode" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    forge_issue_get() { :; }
+    boucle_mono_user() { return 0; }
+    forge_issue_labels_get() { echo "boucle:recurring,size:m,boucle:todo"; }
+    forge_issue_labels_set() { echo "LABELS_SET:$2"; }
+    boucle_notify() { :; }
+    source lib/boucle.sh
+    set_boucle_label 10 "boucle:working" "boucle::status::bot"
+  '
+  assert_success
+  assert_output --partial "boucle:recurring"
+  assert_output --partial "boucle:working"
+}
+
+@test "set_boucle_label does not fabricate the recurring tag when absent" {
+  run bash -c '
+    BOUCLE_FORGE_HOST=h CI_PROJECT_ID=1
+    forge_issue_get() { :; }
+    boucle_mono_user() { return 0; }
+    forge_issue_labels_get() { echo "boucle:todo"; }
+    forge_issue_labels_set() { echo "LABELS_SET:$2"; }
+    boucle_notify() { :; }
+    source lib/boucle.sh
+    set_boucle_label 10 "boucle:working" "boucle::status::bot"
+  '
+  assert_success
+  refute_output --partial "boucle:recurring"
+}
+
 # ── File-impact marker refresh (worker job, MR 1) — F1 guard ────────────
 # The refresh is embedded in boucle_ci_worker() (lib/boucle-ci/worker.sh) —
 # too integration-coupled to unit-test in bats without a real git repo +
