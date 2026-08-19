@@ -27,11 +27,26 @@ human in the loop at decision points (spec validation, MR approval).
   `Validation: author-required | autonomous` in its comment.
   `BOUCLE_SPEC_PROFILE` (default `strict`) is handed to the agent as its
   default policy; it is no longer applied to the agent's size judgment after
-  the fact. Approval is the **issue author's**, by emoji reaction — a 👍 from
-  anyone else does not advance the loop, and they are told so. The doctor's
-  orphan-recovery path applies the same restriction, or the gate would be
-  bypassable by waiting for the next sweep. Both fail open on an
-  unresolvable author: an API hiccup must not stall the loop.
+  the fact. Approval is the **issue author's**, by one of three signals (any
+  one approves; all are restricted to the author):
+  1. **Emoji reaction** (👍 ❤️ 🎉 🚀) on the triage spec comment — primary
+     on GitLab, where `emoji` webhooks fire reliably. On GitHub, reactions
+     on issue comments produce no webhook, so this signal is only detected
+     by the doctor's periodic poll.
+  2. **`boucle:approved` label** added to the issue — primary on GitHub,
+     where `issues: labeled` fires a webhook that dispatch routes to the
+     worker. Requires the author to have label-write access (mono-user and
+     allow-listed users do; external contributors may not).
+  3. **Magic word `approved`** as the first line of a reply on the issue
+     (case-insensitive, standalone) — GitHub fallback, uses the
+     `issue_comment: created` webhook. Any other reply is an amendment that
+     re-triggers triage, never an approval.
+  A 👍 from anyone else does not advance the loop, and they are told so.
+  The doctor's orphan-recovery path applies the same restriction, or the
+  gate would be bypassable by waiting for the next sweep. Both fail open on
+  an unresolvable author: an API hiccup must not stall the loop. The label
+  is consumed (stripped) by the next state transition (`set_boucle_label`
+  strips all `boucle:*` labels).
 - **MR approval** — always human-gated.
 
 ## Do-Not-Disturb (DND)

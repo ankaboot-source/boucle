@@ -291,16 +291,37 @@ boucle_ci_doctor() {
         break
       fi
     done
-    # Spec-gate approval contract (A2, LESSONS.yml lesson #83): an emoji
-    # reaction approves the spec → re-trigger the worker; a human text reply
-    # is an amendment, NOT an approval → re-trigger triage so the agent
-    # re-reads the human's notes and produces an updated spec for another
-    # approval round. The old code treated any reply as approval and started
-    # the worker whenever the human replied with a correction — the opposite
-    # of the triage message's promise. The doctor MUST mirror the dispatch
-    # contract so an orphaned webhook recovers to the same state.
-    if [ "$EMOJI_APPROVAL_FOUND" = true ]; then
-      echo "  → #$IID approved by emoji — re-triggering worker"
+    # Check for the `boucle:approved` label (GitHub primary path: the author
+    # adds the label, `issues: labeled` fires, dispatch routes to the worker.
+    # If that webhook was missed/orphaned, the doctor recovers it here — the
+    # label is still on the issue). LESSONS.yml lesson #89.
+    LABEL_APPROVAL_FOUND=false
+    CURRENT_LABELS=$(forge_issue_labels_get "$IID" 2> /dev/null || echo "")
+    if echo "$CURRENT_LABELS" | tr ',' '\n' | grep -qx "boucle:approved"; then
+      LABEL_APPROVAL_FOUND=true
+    fi
+    # Check for the magic word `approved` (case-insensitive, standalone first
+    # line) in a human note after the last triage comment. GitHub fallback
+    # when neither the emoji webhook nor the label webhook fired.
+    MAGIC_WORD_APPROVAL_FOUND=false
+    if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ] && [ "$LAST_TRIAGE_NOTE_ID" != "0" ]; then
+      MAGIC_WORD_APPROVAL_FOUND=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" --arg author "$SPEC_AUTHOR" '
+            [.[] | select(.author.username != $bname)
+              | select($author == "" or .author.username == $author)
+              | select(.id > ($tid | tonumber))]
+            | map(.body | split("\n")[0] | gsub("^\\s+|\\s+$"; "") | ascii_downcase == "approved")
+            | any
+          ' 2> /dev/null || echo "false")
+      [ "$MAGIC_WORD_APPROVAL_FOUND" != "true" ] && MAGIC_WORD_APPROVAL_FOUND=false
+    fi
+    # Spec-gate approval contract (A2, LESSONS.yml lesson #83 + #89): an
+    # emoji reaction, the `boucle:approved` label, or the magic word
+    # `approved` approves the spec → re-trigger the worker; any OTHER human
+    # text reply is an amendment, NOT an approval → re-trigger triage. The
+    # doctor MUST mirror the dispatch contract so an orphaned webhook
+    # recovers to the same state.
+    if [ "$EMOJI_APPROVAL_FOUND" = true ] || [ "$LABEL_APPROVAL_FOUND" = true ] || [ "$MAGIC_WORD_APPROVAL_FOUND" = true ]; then
+      echo "  → #$IID approved (emoji=$EMOJI_APPROVAL_FOUND label=$LABEL_APPROVAL_FOUND magic-word=$MAGIC_WORD_APPROVAL_FOUND) — re-triggering worker"
       if issue_has_active_pipeline "$IID"; then
         echo "  → #$IID: active pipeline already running — skipping re-trigger"
         continue
@@ -365,7 +386,7 @@ boucle_ci_doctor() {
       echo "  → re-triggered triage for #$IID"
       RECOVERED=$((RECOVERED + 1))
     else
-      echo "  → #$IID: still waiting for approval emoji (or a reply to amend the spec)"
+      echo "  → #$IID: still waiting for approval (emoji reaction, boucle:approved label, or 'approved' magic word) or a reply to amend the spec"
     fi
   done
 

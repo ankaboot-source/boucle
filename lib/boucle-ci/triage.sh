@@ -637,7 +637,10 @@ HELP_EOF
           # produces an updated spec for another approval round), it does NOT
           # approve. The old message promised "reply with corrections" as a
           # non-approving path that the dispatch logic did not honour.
-          SPEC_MSG=$(printf '## Validation\n\nReview the **TL;DR** above.\n- React with 👍 ❤️ 🎉 or 🚀 on this comment to approve the spec — nothing else approves it.\n- To amend the spec, reply to this issue with your corrections: triage will re-run, read your reply, and post an updated spec for you to approve. A reply never approves the spec.')
+          # Three approval signals (LESSONS.yml lesson #89): emoji (GitLab primary),
+          # boucle:approved label (GitHub primary), magic word `approved` (GitHub fallback).
+          # A reply that is NOT the magic word is an amendment, never an approval.
+          SPEC_MSG=$(printf '## Validation\n\nReview the **TL;DR** above.\n- React with 👍 ❤️ 🎉 or 🚀 on this comment to approve the spec — nothing else approves it.\n- Or add the `boucle:approved` label to this issue to approve the spec.\n- Or reply with `approved` (just that word, on its own line) to approve the spec.\n- To amend the spec, reply to this issue with your corrections: triage will re-run, read your reply, and post an updated spec for you to approve. Any other reply never approves the spec.')
           TRIAGE_NOTE_ID=$(forge_issue_notes "$IID" 2> /dev/null \
             | jq -r '[.[] | select(.body | contains("<!-- boucle:triage") and contains("## TL;DR") and contains("## Disposition"))]
                             | sort_by(.created_at) | last | .id' 2> /dev/null || echo "")

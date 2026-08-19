@@ -842,3 +842,14 @@
     or checkout failure must not kill the worker before the agent runs.'
   - 'DO scope the restore to files the worker NEVER legitimately modifies (the workflow file). Charter docs (AGENTS.md, SKILL.md, ARCHITECTURE.md) are also engine-propagated but the worker MAY
     update them (doc self-maintenance) — restoring those would discard legitimate worker doc updates on existing branches.'
+
+89:
+  title: A human gate''s approval signal MUST ride on a webhook the forge actually emits
+  ❌:
+  - 'DO NOT design a human gate whose only approval signal is a forge event that does not fire a webhook. GitHub Actions has no `reaction` event — reactions on issue comments produce no webhook, so an emoji-only spec-approval gate on GitHub is only ever seen by the doctor''s periodic poll. If the doctor''s cron misses a cycle (GitHub schedules runs inconsistently under load), or a queued run gets stuck with zero jobs (a GitHub Actions infrastructure anomaly), the approval sits invisible and the loop is silent. The design is correct on GitLab (where `emoji` webhooks fire reliably) but broken on GitHub by construction.'
+  - 'DO NOT make a periodic poll the sole recovery path for a signal that has no webhook. The poll is a backstop, not a primary path — its cadence is a best-effort scheduler, not a guarantee.'
+  ✅:
+  - 'DO: offer multiple approval signals so at least one rides on a webhook the forge emits. On GitHub, the `boucle:approved` label uses `issues: labeled` (fires a webhook) and the magic word `approved` (first line of a reply) uses `issue_comment: created` (fires a webhook). The emoji reaction stays as the primary on GitLab and as a backstop on GitHub (detected by the doctor''s poll). Three signals, two webhooks on GitHub, one on GitLab — the loop never depends solely on a poll.'
+  - 'DO: make the approval signal a discrete, parseable token — a label is present or not; a magic word is an exact string match on the first line. A semantic parse ("does this comment express approval?") is ambiguous and routes amendments as approvals, breaking the amendment channel (lesson #83). The magic word `approved` (case-insensitive, standalone first line) is unambiguous and one word for the human to type.'
+  - 'DO: consume the label after triggering (set_boucle_label strips all boucle:* labels on the next transition) so a stale `boucle:approved` does not re-fire on every doctor sweep. The label is a one-shot signal, not a persistent state.'
+  - 'DO: mirror every approval signal in the doctor''s orphan-recovery path so a missed webhook recovers to the same state as a caught one. The doctor detects emoji (forge_note_reactions poll), label (forge_issue_labels_get check), and magic word (jq parse of notes after the last triage comment) — three signals, one recovery path.'

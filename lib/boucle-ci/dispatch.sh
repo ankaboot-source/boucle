@@ -856,7 +856,17 @@ boucle_ci_dispatch() {
     # the triage message's "If not, reply with corrections" promise. We do
     # NOT strip boucle:spec-review here.
     #
-    # And the reaction has to be the AUTHOR's: it is their issue, and the
+    # The label and magic-word paths exist because GitHub Actions does NOT
+    # emit a webhook for reactions on issue comments (no `reaction` event),
+    # so an emoji approval on GitHub is only ever seen by the doctor's poll.
+    # The label uses the already-firing `issues: labeled` webhook; the magic
+    # word uses the already-firing `issue_comment: created` webhook. Both
+    # retire the doctor-as-primary-path on GitHub. The emoji path stays the
+    # primary on GitLab (where `emoji` webhooks fire reliably). The author
+    # check (spec_approver_ok) applies to all three signals. See LESSONS.yml
+    # lesson #89.
+    #
+    # And the approval has to be the AUTHOR's: it is their issue, and the
     # criteria commit them. resolve_reporter_username walks the parent chain,
     # so a bot-created sub-issue resolves to the human who owns the parent.
     # An EMPTY lookup means "unknown", never "not the author" — denying on an
@@ -888,12 +898,35 @@ boucle_ci_dispatch() {
         # Emoji approval → worker (relabels to boucle:todo, then working).
         SHOULD_WORK=true
       fi
-    elif [ "$OBJECT_KIND" = "note" ] && dispatch_human_actor; then
-      # A text reply is an amendment, NOT an approval. Re-trigger triage so
-      # the agent reads the human's notes and produces an updated spec for
-      # another approval round. The triage job relabels to boucle:triage
-      # (replacing boucle:spec-review) and re-posts the spec.
-      SHOULD_TRIAGE=true
+    elif [ "$OBJECT_KIND" = "issue" ] && [ "$ACTION" = "labeled" ] && spec_approver_ok; then
+      # GitHub `issues: labeled` — the author added the `boucle:approved`
+      # label. The label name is in .label.name (GitHub) or
+      # .object_attributes.label (GitLab). Match against the canonical
+      # approval label. LESSONS.yml lesson #89: GitHub has no reaction
+      # webhook, so the label rides on `issues: labeled` instead.
+      ADDED_LABEL=$(jq -r '.label.name // .object_attributes.label // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+      if [ "$ADDED_LABEL" = "boucle:approved" ]; then
+        # Label approval → worker. The label is consumed (stripped) by the
+        # subsequent set_boucle_label "boucle:todo" in the SHOULD_WORK path.
+        SHOULD_WORK=true
+      fi
+    elif [ "$OBJECT_KIND" = "note" ] && spec_approver_ok; then
+      # A text reply is either an approval (first line is the magic word
+      # `approved`, case-insensitive, standalone) or an amendment (anything
+      # else). Re-trigger triage for an amendment so the agent reads the
+      # human's notes and produces an updated spec for another approval
+      # round. The triage job relabels to boucle:triage (replacing
+      # boucle:spec-review) and re-posts the spec. LESSONS.yml lesson #89:
+      # the magic word rides on `issue_comment: created` (GitHub fallback).
+      NOTE_BODY_FULL=$(dispatch_note_body)
+      NOTE_FIRST_LINE=$(printf '%s' "$NOTE_BODY_FULL" | head -n 1 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+      if printf '%s' "$NOTE_FIRST_LINE" | tr '[:upper:]' '[:lower:]' | grep -qx 'approved'; then
+        # Magic-word approval → worker.
+        SHOULD_WORK=true
+      else
+        # Amendment → re-trigger triage.
+        SHOULD_TRIAGE=true
+      fi
     fi
   elif echo "$LABELS" | grep -q "boucle:human"; then
     # Human comment on an issue at boucle:human — the human is providing
