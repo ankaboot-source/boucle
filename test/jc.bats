@@ -261,6 +261,44 @@ extract_prompt_funcs() {
   rm -f "$TMPF"
 }
 
+@test "build_prompt: reviewer prompt includes MR/PR number when BOUCLE_MR_IID is set" {
+  # Bug fix (boucle.dev #73): the reviewer agent posted its verdict on the
+  # issue instead of the PR because the prompt never told it the PR number.
+  # BOUCLE_MR_IID is exported by reviewer.sh; bin/jc must inject it into the
+  # prompt so the agent posts on the MR/PR, not the issue.
+  TMPF=$(mktemp)
+  extract_prompt_funcs "$TMPF"
+  run bash -c "ISSUE=7; BOUCLE_MR_IID=74; BOUCLE_FORGE=github; source '$TMPF'; build_prompt reviewer"
+  assert_success
+  assert_output --partial "PR #74"
+  assert_output --partial "number 74"
+  assert_output --partial "NEVER on the issue"
+  rm -f "$TMPF"
+}
+
+@test "build_prompt: reviewer prompt uses MR terminology on GitLab when BOUCLE_MR_IID is set" {
+  TMPF=$(mktemp)
+  extract_prompt_funcs "$TMPF"
+  run bash -c "ISSUE=7; BOUCLE_MR_IID=74; BOUCLE_FORGE=gitlab; source '$TMPF'; build_prompt reviewer"
+  assert_success
+  assert_output --partial "MR !74"
+  assert_output --partial "number 74"
+  assert_output --partial "NEVER on the issue"
+  rm -f "$TMPF"
+}
+
+@test "build_prompt: reviewer prompt omits MR/PR number when BOUCLE_MR_IID is unset" {
+  # No MR exists yet (first run) — the prompt must not reference a number
+  # that does not exist. The agent posts on the issue in that case, which
+  # is acceptable because there is no MR to post on yet.
+  TMPF=$(mktemp)
+  extract_prompt_funcs "$TMPF"
+  run bash -c "ISSUE=7; source '$TMPF'; build_prompt reviewer"
+  assert_success
+  refute_output --partial "NEVER on the issue"
+  rm -f "$TMPF"
+}
+
 @test "build_prompt: e2e role references BOUCLE_LIVE_URL" {
   TMPF=$(mktemp)
   extract_prompt_funcs "$TMPF"

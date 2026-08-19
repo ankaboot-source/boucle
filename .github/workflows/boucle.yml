@@ -409,6 +409,19 @@ jobs:
       (github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'worker')
       || (github.event_name == 'issues' && contains(github.event.action, 'labeled') && contains(github.event.label.name, 'boucle:todo'))
     timeout-minutes: 30
+    # Job-level concurrency: serialize ALL worker runs for the same issue,
+    # regardless of trigger source (workflow_dispatch from chain_to_role OR
+    # issues:labeled from set_boucle_label). The workflow-level concurrency
+    # splits by event source (boucle-issue-<N> vs boucle-dispatch-<N>), so
+    # without this job-level block the two trigger paths run SIMULTANEOUSLY
+    # — two workers on the same branch, duplicate "build failed" comments,
+    # racing commits. This mirrors GitLab's
+    # `resource_group: boucle-issue-$BOUCLE_ISSUE` on the worker job.
+    # cancel-in-progress: false queues the second run instead of cancelling
+    # the first — a worker mid-build must not be killed by a re-trigger.
+    concurrency:
+      group: boucle-issue-${{ github.event.inputs.BOUCLE_ISSUE || github.event.issue.number }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -487,6 +500,14 @@ jobs:
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'reviewer'
     timeout-minutes: 30
+    # Job-level concurrency: serialize reviewer runs per issue (mirrors
+    # GitLab's resource_group: boucle-issue-$BOUCLE_ISSUE). The reviewer
+    # only triggers on workflow_dispatch today, but this is defense-in-depth
+    # — a future trigger path (e.g. pull_request_review) would otherwise
+    # race the workflow_dispatch re-trigger path.
+    concurrency:
+      group: boucle-issue-${{ github.event.inputs.BOUCLE_ISSUE }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -726,6 +747,13 @@ jobs:
     if: |
       github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'e2e'
     timeout-minutes: 20
+    # Job-level concurrency: serialize e2e runs per issue (mirrors GitLab's
+    # resource_group: boucle-issue-$BOUCLE_ISSUE). Defense-in-depth: the e2e
+    # only triggers on workflow_dispatch today, but a future trigger path
+    # would otherwise race the workflow_dispatch re-trigger path.
+    concurrency:
+      group: boucle-issue-${{ github.event.inputs.BOUCLE_ISSUE }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
