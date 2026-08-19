@@ -115,15 +115,16 @@ setup() {
   # The version needs to be READABLE (bin/update compares current vs upstream),
   # so it must be a GitHub Actions Variable (plaintext), NOT a Secret
   # (write-only). forge_ci_var_set MUST route through `gh variable set`.
+  # NOTE: forge_ci_var_set pipes the value into gh (`echo | gh variable set`),
+  # so gh runs in a subshell — the mock must echo its args to stdout rather
+  # than capture into an array (functions/arrays don't propagate to subshells).
   run bash -c '
     BOUCLE_PROJECT_ID="test/repo"
-    captured=()
     gh() {
-      captured+=("$@")
+      printf "%s " "$@"
     }
     source bin/forge/github.sh
     forge_ci_var_set "BOUCLE_VERSION" "abc123"
-    printf "%s " "${captured[@]}"
   '
   assert_success
   assert_output --partial "variable set"
