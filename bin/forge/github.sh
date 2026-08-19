@@ -527,7 +527,7 @@ forge_mr_update() {
 forge_mr_merge() {
   local mr_iid="$1"
   # Poll mergeable_state for up to 10 min (60×10s)
-  local i state resp sha
+  local i state resp sha err
   for i in $(seq 1 60); do
     state=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid" | jq -r '.mergeable_state // "unknown"')
     case "$state" in
@@ -537,13 +537,29 @@ forge_mr_merge() {
         # empty SHA means the PUT failed. Without echoing the SHA,
         # MERGE_SHA was always empty and EVERY successful merge was
         # reported as "merge API call failed".
-        resp=$(_gh_api -X PUT "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid/merge" \
-          -f merge_method=squash) || true
+        #
+        # Call gh api DIRECTLY (not _gh_api): _gh_api adds --paginate,
+        # which gh rejects for non-GET requests ("the --paginate option is
+        # not supported for non-GET requests"). The error goes to stderr
+        # which _gh_api discards, so resp is empty and the merge is
+        # reported as failed even though the PUT never ran. Same pattern
+        # as forge_issue_create (see NOTE above). Capture stderr so real
+        # merge failures are diagnosable instead of silent.
+        err=$(mktemp)
+        resp=$(GH_TOKEN="$BOUCLE_TOKEN" gh api -X PUT \
+          "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid/merge" \
+          -f merge_method=squash 2>"$err") || true
         sha=$(printf '%s' "$resp" | jq -r '.sha // empty' 2> /dev/null)
         if [ -n "$sha" ]; then
+          rm -f "$err"
           echo "$sha"
           return 0
         fi
+        # Empty SHA — surface the gh api error so the failure is
+        # diagnosable instead of a silent "merge API call failed".
+        echo "forge_mr_merge: PUT /pulls/$mr_iid/merge returned no SHA." >&2
+        [ -s "$err" ] && { echo "  gh api stderr:" >&2; sed 's/^/    /' "$err" >&2; }
+        rm -f "$err"
         ;;
       blocked | dirty | unknown)
         # blocked: waiting on required reviews/checks
@@ -559,14 +575,23 @@ forge_mr_merge() {
         ;;
     esac
   done
-  # Still not mergeable after 10 min — try anyway and report
-  resp=$(_gh_api -X PUT "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid/merge" \
-    -f merge_method=squash) || true
+  # Still not mergeable after 10 min — try anyway and report.
+  # Call gh api DIRECTLY (not _gh_api): _gh_api adds --paginate, which gh
+  # rejects for non-GET requests. See the NOTE in the clean|unstable branch
+  # above and at forge_issue_create.
+  err=$(mktemp)
+  resp=$(GH_TOKEN="$BOUCLE_TOKEN" gh api -X PUT \
+    "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid/merge" \
+    -f merge_method=squash 2>"$err") || true
   sha=$(printf '%s' "$resp" | jq -r '.sha // empty' 2> /dev/null)
   if [ -n "$sha" ]; then
+    rm -f "$err"
     echo "$sha"
     return 0
   fi
+  echo "forge_mr_merge: final PUT /pulls/$mr_iid/merge returned no SHA." >&2
+  [ -s "$err" ] && { echo "  gh api stderr:" >&2; sed 's/^/    /' "$err" >&2; }
+  rm -f "$err"
 }
 
 forge_mr_approve() {

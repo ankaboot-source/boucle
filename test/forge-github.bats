@@ -152,23 +152,76 @@ setup() {
   assert_output "deadbeef"
 }
 
-@test "github forge_mr_merge echoes nothing when the merge PUT fails" {
+@test "github forge_mr_merge echoes nothing on stdout when the merge PUT fails" {
   run bash -c '
     BOUCLE_PROJECT_ID="test/repo"
     gh() {
       [ "$1" = "api" ] || return 0
       if [[ " $* " == *"-X PUT"* && " $* " == *"/merge"* ]]; then
+        echo "gh: HTTP 409: Pull Request is not mergeable" >&2
         return 1
       elif [[ " $* " == *"/pulls/"* ]]; then
         printf "%s" "{\"mergeable_state\":\"clean\"}"
       fi
     }
     source bin/forge/github.sh
-    out=$(forge_mr_merge 42)
+    out=$(forge_mr_merge 42 2>/dev/null)
     echo "out=[$out]"
   '
   assert_success
   assert_output --partial "out=[]"
+}
+
+@test "github forge_mr_merge surfaces the gh api stderr when the PUT returns no SHA" {
+  # Regression: _gh_api added --paginate to a PUT, gh rejected it on
+  # stderr (which _gh_api discarded), resp was empty, and the merger
+  # reported "merge API call failed" even though the PUT never ran.
+  # The fix calls gh api directly and captures stderr so the failure is
+  # diagnosable. See boucle.dev PR #72 (merge reported as failed, was
+  # actually merged manually as a workaround).
+  run bash -c '
+    BOUCLE_PROJECT_ID="test/repo"
+    gh() {
+      [ "$1" = "api" ] || return 0
+      if [[ " $* " == *"-X PUT"* && " $* " == *"/merge"* ]]; then
+        echo "the \`--paginate\` option is not supported for non-GET requests" >&2
+        return 1
+      elif [[ " $* " == *"/pulls/"* ]]; then
+        printf "%s" "{\"mergeable_state\":\"clean\"}"
+      fi
+    }
+    source bin/forge/github.sh
+    forge_mr_merge 42 >/dev/null
+  '
+  assert_success
+  assert_output --partial "returned no SHA"
+  assert_output --partial "--paginate"
+}
+
+@test "github forge_mr_merge never passes --paginate to a PUT (the silent-failure bug)" {
+  # The root cause: _gh_api adds --paginate, which gh rejects for non-GET
+  # requests. forge_mr_merge MUST call gh api directly for the PUT. This
+  # test fails if the merge PUT is ever routed through _gh_api again.
+  run bash -c '
+    BOUCLE_PROJECT_ID="test/repo"
+    gh() {
+      [ "$1" = "api" ] || return 0
+      if [[ " $* " == *"-X PUT"* && " $* " == *"/merge"* ]]; then
+        # If --paginate ever leaks into the PUT, fail loudly.
+        if [[ " $* " == *"--paginate"* ]]; then
+          echo "BUG: --paginate reached the merge PUT" >&2
+          return 1
+        fi
+        printf "%s" "{\"sha\":\"abc123\",\"merged\":true}"
+      elif [[ " $* " == *"/pulls/"* ]]; then
+        printf "%s" "{\"mergeable_state\":\"clean\"}"
+      fi
+    }
+    source bin/forge/github.sh
+    forge_mr_merge 42
+  '
+  assert_success
+  assert_output "abc123"
 }
 
 @test "github forge_mr_merge returns non-zero on a dirty (conflict) state" {
