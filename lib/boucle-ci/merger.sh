@@ -146,7 +146,30 @@ boucle_ci_merger() {
 
   if [ -z "$MERGE_SHA" ]; then
     echo "FAIL: merge API call failed" >&2
-    # Note BEFORE the terminal label — never a muted boucle:human.
+    # Before escalating to boucle:human, re-check whether the PR was
+    # actually merged by another path (manual merge via the forge UI, or
+    # GitHub auto-merged it despite the API returning an empty SHA, or a
+    # prior merger attempt succeeded but the SHA was lost). GitHub auto-
+    # closes the issue when the PR body contains "Closes #N", so the
+    # issue may already be closed — escalating to boucle:human on a
+    # closed issue creates an inconsistent state (closed + boucle:human).
+    # Observed on boucle.dev #71: the merger's PUT failed (--paginate
+    # bug), but the PR was merged manually and GitHub closed the issue
+    # via the "Closes #71" keyword in the PR body, while the merger
+    # simultaneously labeled it boucle:human.
+    local RECHECK_DATA RECHECK_MERGED RECHECK_SHA
+    RECHECK_DATA=$(forge_mr_get "$MR_IID" 2> /dev/null || echo "")
+    RECHECK_MERGED=$(echo "$RECHECK_DATA" | jq -r 'if .merged then "true" else "false" end' 2> /dev/null || echo "false")
+    if [ "$RECHECK_MERGED" = "true" ]; then
+      RECHECK_SHA=$(echo "$RECHECK_DATA" | jq -r '.merge_commit_sha // .merge_commit_sha // empty' 2> /dev/null || echo "")
+      echo "PR !${MR_IID} is actually merged (merge_commit ${RECHECK_SHA:0:12}) — the merge API call returned no SHA but the merge landed. Transitioning to boucle:done instead of boucle:human."
+      forge_issue_note "$BOUCLE_ISSUE" "✅ $(forge_mr_ref "$MR_IID") already merged (merge_commit ${RECHECK_SHA:0:12}) — the merge API call returned no SHA but the merge landed.$(job_link)" || true
+      set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::bot"
+      # Chain to post-merge so the merged code deploys + e2e runs.
+      chain_to_role "$BOUCLE_ISSUE" "post-merge"
+      exit 0
+    fi
+    # PR is not merged — escalate to human.
     if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Merger: the merge API call failed for $(forge_mr_ref "$MR_IID"). Human intervention needed.$(job_link)"; then
       echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
       exit 1
