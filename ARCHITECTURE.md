@@ -300,8 +300,13 @@ sweep (every 10 min). It:
   (`bin lib .pi .gitlab-ci.yml|.github/workflows/boucle.yml .jcode/agents
   .jcode/skills .jcode/UPSTREAM-FIX-WORKFLOW.md`), forge-conditional on the
   active forge.
-- **`.boucle-version`** — records the current upstream version (tag in release
-  mode, HEAD SHA in dev mode).
+- **`BOUCLE_VERSION` forge Variable** — records the current upstream version
+  (tag in release mode, HEAD SHA in dev mode). `bin/update` reads it to know
+  the current version and writes it back after a successful sync. For
+  submodule installs, the submodule pointer (`git submodule status .boucle`)
+  is the fallback — it is always accurate. There is no `.boucle-version`
+  file; boucle only runs in forge CI, so the forge Variable is always
+  available when it matters.
 - **Modes** — `release` (latest tag) or `dev` (HEAD of `main`), selected by
   `BOUCLE_UPDATE_MODE`.
 - **Fail-open** — `bin/update` has no `-e`; commands fail individually without

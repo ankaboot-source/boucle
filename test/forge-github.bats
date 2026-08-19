@@ -111,6 +111,56 @@ setup() {
   assert_output --partial "Approve** button"
 }
 
+@test "github forge_ci_var_set uses gh variable set (not secret set)" {
+  # The version needs to be READABLE (bin/update compares current vs upstream),
+  # so it must be a GitHub Actions Variable (plaintext), NOT a Secret
+  # (write-only). forge_ci_var_set MUST route through `gh variable set`.
+  run bash -c '
+    BOUCLE_PROJECT_ID="test/repo"
+    captured=()
+    gh() {
+      captured+=("$@")
+    }
+    source bin/forge/github.sh
+    forge_ci_var_set "BOUCLE_VERSION" "abc123"
+    printf "%s " "${captured[@]}"
+  '
+  assert_success
+  assert_output --partial "variable set"
+  assert_output --partial "BOUCLE_VERSION"
+  assert_output --partial "test/repo"
+  refute_output --partial "secret set"
+}
+
+@test "github forge_ci_var_get uses gh variable get" {
+  run bash -c '
+    BOUCLE_PROJECT_ID="test/repo"
+    gh() {
+      [ "$1" = "variable" ] && [ "$2" = "get" ] || return 0
+      printf "abc123"
+    }
+    source "$PWD/bin/forge/github.sh"
+    forge_ci_var_get "BOUCLE_VERSION"
+  '
+  assert_success
+  assert_output "abc123"
+}
+
+@test "github forge_ci_var_list uses gh variable list" {
+  run bash -c '
+    BOUCLE_PROJECT_ID="test/repo"
+    gh() {
+      [ "$1" = "variable" ] && [ "$2" = "list" ] || return 0
+      printf "NAME  VALUE\nBOUCLE_VERSION  abc123\nOTHER  x\n"
+    }
+    source "$PWD/bin/forge/github.sh"
+    forge_ci_var_list
+  '
+  assert_success
+  assert_output --partial "BOUCLE_VERSION"
+  assert_output --partial "OTHER"
+}
+
 # ── forge_mr_merge: MUST echo the merge commit SHA on success ────────────
 # The merger (lib/boucle-ci/merger.sh) captures the output as MERGE_SHA and
 # treats an empty value as "merge API call failed" → boucle:human escalation.

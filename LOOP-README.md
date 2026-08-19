@@ -62,7 +62,7 @@ If the variable is unset, `release` is used.
 
 ### How it works
 
-1. `bin/update` reads `.boucle-version` (current version) and compares with upstream via the GitHub API.
+1. `bin/update` reads the current version from the `BOUCLE_VERSION` forge Variable (falling back to the submodule pointer for submodule installs) and compares with upstream via the GitHub API.
 2. If different, it downloads a tarball, extracts `bin/`, `.jcode/`, `.gitlab-ci.yml`, and commits the update to `main` via the bot.
 3. The update takes effect on the **next** pipeline (not the current one — pipelines don't change their own config mid-run).
 
@@ -78,8 +78,13 @@ Any error (network failure, permissions, corrupt tarball) logs a warning and con
 | `.jcode/` | Yes | boucle agents + skills |
 | `.gitlab-ci.yml` | Yes | boucle pipeline |
 | `LOOP.md` | Yes | Product reference (config, modes, gates, caps) |
-| `.boucle-version` | No | Managed by `bin/update` |
 
 ### Version tracking
 
-`.boucle-version` at the repo root records the current version (tag name in release mode, commit SHA in dev mode). It is created automatically on first run — no manual setup needed.
+The current engine version is tracked as the `BOUCLE_VERSION` forge Variable
+(GitHub Actions Variable / GitLab CI/CD Variable), which persists across CI
+runs. `bin/update` reads it to know the current version and writes it back
+after a successful sync. For submodule installs, the submodule pointer
+(`git submodule status .boucle`) is the fallback — it is always accurate.
+There is no `.boucle-version` file; boucle only runs in forge CI, so the
+forge Variable is always available when it matters.
