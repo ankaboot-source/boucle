@@ -468,6 +468,12 @@ The doctor maintains one issue, `➰ boucle — status board` (label
   loop would start working on itself.
 - Deleting it by hand simply makes the next sweep recreate it.
 
+The board is refreshed on **every state transition** (hooked into
+`set_boucle_label`, gated on a real label change so a no-op does not trigger
+a write) and on **every doctor sweep** (backstop). The transition-driven
+refresh is webhook-reliable; the doctor sweep catches any refresh that failed
+silently. An unchanged body produces zero writes in both paths.
+
 ## Configuration audit
 
 `bin/doctor --audit` is read-only and forge-independent: it checks that the

@@ -427,6 +427,9 @@ boucle_ci_dispatch() {
           # (GitLab records a Resource Label Event on every PUT, even no-ops).
           if ! (echo "$MR_LABELS" | tr ',' '\n' | grep -qx "boucle:review" && echo "$MR_LABELS" | tr ',' '\n' | grep -qx "boucle::status::bot"); then
             forge_issue_labels_set "$MR_ISSUE_IID" "${NON_BOUCLE:+$NON_BOUCLE,}boucle:review,boucle::status::bot"
+            # Refresh the board — this path bypasses set_boucle_label
+            # (lesson #97: refresh on transition, not only on doctor sweep).
+            boucle_board_upsert || true
           fi
         fi
         echo "MR !${MR_IID} updated — re-triggering reviewer for issue #$MR_ISSUE_IID"
@@ -464,6 +467,9 @@ boucle_ci_dispatch() {
             # even no-ops).
             if ! (echo "$MR_LABELS" | tr ',' '\n' | grep -qx "boucle:human" && echo "$MR_LABELS" | tr ',' '\n' | grep -qx "boucle::status::human"); then
               forge_issue_labels_set "$MR_ISSUE_IID" "$HUMAN_LABELS"
+              # Refresh the board — this path bypasses set_boucle_label
+              # (lesson #97: refresh on transition, not only on doctor sweep).
+              boucle_board_upsert || true
             fi
             # Note BEFORE the terminal label — never a muted boucle:human.
             if ! forge_issue_note "$MR_ISSUE_IID" ":warning: $(forge_mr_ref "$MR_IID") was closed while awaiting approval. Escalated to **boucle:human** (user decision, not auto-redo)."; then
@@ -482,6 +488,9 @@ boucle_ci_dispatch() {
         # (GitLab records a Resource Label Event on every PUT, even no-ops).
         if ! (echo "$MR_LABELS" | tr ',' '\n' | grep -qx "boucle:todo" && echo "$MR_LABELS" | tr ',' '\n' | grep -qx "boucle::status::bot"); then
           forge_issue_labels_set "$MR_ISSUE_IID" "${NON_BOUCLE:+$NON_BOUCLE,}boucle:todo,boucle::status::bot"
+          # Refresh the board — this path bypasses set_boucle_label
+          # (lesson #97: refresh on transition, not only on doctor sweep).
+          boucle_board_upsert || true
         fi
         chain_to_role "$MR_ISSUE_IID" "worker"
         dispatch_noop
@@ -502,6 +511,9 @@ boucle_ci_dispatch() {
         # (GitLab records a Resource Label Event on every PUT, even no-ops).
         if ! (echo "$MR_LABELS" | tr ',' '\n' | grep -qx "boucle:review" && echo "$MR_LABELS" | tr ',' '\n' | grep -qx "boucle::status::bot"); then
           forge_issue_labels_set "$MR_ISSUE_IID" "${NON_BOUCLE:+$NON_BOUCLE,}boucle:review,boucle::status::bot"
+          # Refresh the board — this path bypasses set_boucle_label
+          # (lesson #97: refresh on transition, not only on doctor sweep).
+          boucle_board_upsert || true
         fi
         chain_to_role "$MR_ISSUE_IID" "reviewer"
         dispatch_noop
@@ -595,6 +607,9 @@ boucle_ci_dispatch() {
       # (GitLab records a Resource Label Event on every PUT, even no-ops).
       if ! (echo "$MR_NOTE_LABELS" | tr ',' '\n' | grep -qx "boucle:todo" && echo "$MR_NOTE_LABELS" | tr ',' '\n' | grep -qx "boucle::status::bot"); then
         forge_issue_labels_set "$MR_NOTE_ISSUE_IID" "${NON_BOUCLE:+$NON_BOUCLE,}boucle:todo,boucle::status::bot"
+        # Refresh the board — this path bypasses set_boucle_label
+        # (lesson #97: refresh on transition, not only on doctor sweep).
+        boucle_board_upsert || true
       fi
       chain_to_role "$MR_NOTE_ISSUE_IID" "worker" "BOUCLE_ITERATION=$MR_NOTE_ITERATION"
       dispatch_noop

@@ -161,3 +161,60 @@ STUB
   run grep -q 'merging board; do' bin/setup
   assert_success
 }
+
+@test "board: set_boucle_label refreshes the board on a real transition" {
+  # The board must refresh on the TRANSITION (webhook-reliable), not only on
+  # the doctor sweep (lesson #97). set_boucle_label is the single transition
+  # function, so hooking it there covers every future transition by
+  # construction. This test asserts the board is refreshed when the label
+  # actually changes.
+  TMPF=$(mktemp); board_funcs "$TMPF"
+  awk '/^set_boucle_label\(\) \{/,/^}/' lib/boucle.sh >> "$TMPF"
+  run bash -c "
+    source '$TMPF'
+    # Current labels do NOT contain the new label → the transition guard fires.
+    forge_issue_labels_get() { echo 'boucle:todo,boucle::status::bot'; }
+    forge_issue_labels_set() { echo \"SET \$1 \$2\"; }
+    forge_issue_list_by_label() {
+      if [ \"\$1\" = 'boucle:board' ]; then echo '[]'; else echo '[]'; fi
+    }
+    forge_issue_create() { echo 99; }
+    forge_issue_get() { echo '{\"description\":\"stale\"}'; }
+    forge_issue_update() { echo \"UPDATE \$1 \$2\"; }
+    boucle_notify() { :; }
+    forge_issue_assign() { :; }
+    resolve_reporter_id() { echo ''; }
+    boucle_mono_user() { return 1; }
+    set_boucle_label 42 'boucle:working' 'boucle::status::bot'
+  "
+  assert_success
+  assert_output --partial "status board created as #99"
+  rm -f "$TMPF"
+}
+
+@test "board: set_boucle_label does NOT refresh the board when the label is unchanged" {
+  # A no-op label write (comment, edit, doctor re-apply) must NOT trigger a
+  # board refresh — the guard is "did the label actually change?". This test
+  # asserts the board is left untouched when the new label is already present.
+  TMPF=$(mktemp); board_funcs "$TMPF"
+  awk '/^set_boucle_label\(\) \{/,/^}/' lib/boucle.sh >> "$TMPF"
+  run bash -c "
+    source '$TMPF'
+    # Current labels ALREADY contain the new label → the transition guard does
+    # not fire, so no board refresh.
+    forge_issue_labels_get() { echo 'boucle:working,boucle::status::bot'; }
+    forge_issue_labels_set() { echo \"SET \$1 \$2\"; }
+    forge_issue_list_by_label() { echo 'UNEXPECTED'; }
+    forge_issue_create() { echo 'UNEXPECTED CREATE'; }
+    forge_issue_update() { echo 'UNEXPECTED UPDATE'; }
+    boucle_notify() { :; }
+    forge_issue_assign() { :; }
+    resolve_reporter_id() { echo ''; }
+    boucle_mono_user() { return 1; }
+    set_boucle_label 42 'boucle:working' 'boucle::status::bot'
+  "
+  assert_success
+  refute_output --partial "status board"
+  refute_output --partial "UNEXPECTED"
+  rm -f "$TMPF"
+}

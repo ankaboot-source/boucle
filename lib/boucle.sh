@@ -886,6 +886,13 @@ set_boucle_label() {
   # transitions are covered by construction. Fail-open: never blocks the loop.
   if ! echo "$current_all" | tr ',' '\n' | grep -qx "$new"; then
     boucle_notify "$iid" "$new" || true
+    # Refresh the status board on the TRANSITION, never on the state.
+    # Same guard as the notification above: only when the label actually
+    # changed, so a comment or an edit (no label change) does not trigger
+    # a board refresh. The doctor sweep is the backstop that catches any
+    # refresh that failed silently (API hiccup, race). Fail-open: never
+    # blocks the loop. See LESSONS.yml lesson #97.
+    boucle_board_upsert || true
   fi
   # Both reassignments are no-ops in mono-user mode: the issue already
   # belongs to the only human, and forges emit nothing when the assignee

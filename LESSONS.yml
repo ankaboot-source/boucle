@@ -897,3 +897,32 @@
   - 'DO move mutually-exclusive user-visible choices into `## Questions` as a blocking question ("Which of these directions do you want: A, B, or C?"), set Disposition to `NEEDS-INFO`, and drop the variants from `## Creative proposals`. The test: "if the worker picks the wrong one, is the result visibly wrong?" → blocking; "if the worker ignores it, is the result still correct?" → advisory.'
   - 'DO keep `## Creative proposals` for *additive* ideas the worker may adopt or ignore without changing the core deliverable (an extra micro-interaction, a progressive-enhancement fallback, a telemetry hook). The advisory section expands the solution space; it does not define the deliverable.'
   - 'DO add a self-review checklist item that scans `## Creative proposals` for mutually-exclusive variants and forces them into `## Questions` before posting. A READY spec with three directions and no question is a triage defect — catch it before the comment ships, not after the worker guesses.'
+
+95:
+  title: A GitHub Actions role job with two trigger paths MUST have a job-level concurrency group
+  ❌:
+  - 'DO NOT rely solely on the workflow-level `concurrency.group` to serialize a role job (worker/reviewer/e2e) that has TWO trigger paths. The workflow-level group splits by event source: `workflow_dispatch` (chain_to_role) → `boucle-issue-<N>`, webhook events (issues:labeled, issue_comment, pull_request) → `boucle-dispatch-<N|run_id>`. When a role job triggers on BOTH `workflow_dispatch` AND a webhook event (e.g. the worker job triggers on `workflow_dispatch` from chain_to_role AND `issues: labeled` with `boucle:todo` from set_boucle_label), the two triggers land in DIFFERENT concurrency groups and run SIMULTANEOUSLY. Two workers on the same branch race: duplicate "build failed" comments, conflicting commits, wasted iterations.'
+  - 'DO NOT assume `cancel-in-progress: false` at the workflow level prevents the race — it only prevents cancellation WITHIN a group. Two runs in two different groups are not in the same group, so neither cancels the other.'
+  ✅:
+  - 'DO add a job-level `concurrency` block to every role job that has more than one trigger path, forcing ALL triggers for the same issue into one group: `concurrency: { group: boucle-issue-${{ github.event.inputs.BOUCLE_ISSUE || github.event.issue.number }}, cancel-in-progress: false }`. This mirrors GitLab''s `resource_group: boucle-issue-$BOUCLE_ISSUE` which serializes at the job level regardless of trigger source. The job-level group takes precedence over the workflow-level group for that job.'
+  - 'DO use `cancel-in-progress: false` on the job-level block — a worker mid-build must not be killed by a re-trigger; the second run queues and waits. `cancel-in-progress: true` would lose the in-flight work and the re-trigger would start from scratch.'
+  - 'DO add the job-level block even to role jobs that currently have a single trigger path (reviewer, e2e), as defense-in-depth. A future contributor adding a webhook trigger to those jobs would otherwise reintroduce the race, and the job-level block is a no-op when there is only one trigger path.'
+
+96:
+  title: An agent prompt that references a forge object MUST inject the actual object identifier
+  ❌:
+  - 'DO NOT leave a forge object identifier as a placeholder (`<mr_iid>`, `<issue_iid>`) in the agent prompt when the actual value is available in the CI environment. The agent cannot resolve the placeholder — it only knows the issue number (from the prompt''s "Review the MR for issue #N"). Under step pressure, a weaker model posts the verdict on the issue (the number it knows) instead of looking up the MR/PR number, and the CI parser — which reads MR/PR comments only — never sees the verdict. The issue escalates to human unnecessarily.'
+  - 'DO NOT assume the agent will "figure out" the MR/PR number from the branch name or the forge CLI. The post-early rule pushes the agent to post within the first 5 steps — an agent that spends 2 steps looking up the PR number is 40% through its budget before it starts reviewing.'
+  ✅:
+  - 'DO inject the actual forge object identifier into the prompt when CI has it. `reviewer.sh` exports `BOUCLE_MR_IID` (the MR/PR number for branch `boucle/$ISSUE`); `bin/jc` reads it and adds "The MR/PR for this issue is PR #74 (number 74). Post your verdict on THAT MR/PR with `bin/forge-note 74 --message ...` — NEVER on the issue." to the reviewer prompt. The agent now has the exact number and the exact command.'
+  - 'DO make the prompt explicit about WHERE to post and what happens if the agent posts on the wrong object. "A verdict posted on the issue is invisible to the loop" tells the agent WHY the constraint exists, not just WHAT — an agent that understands the consequence is less likely to rationalize a shortcut.'
+  - 'DO add a regression test that asserts the prompt includes the MR/PR number when `BOUCLE_MR_IID` is set, and omits it when unset. A prompt that silently drops the injection (a future refactor that removes the `BOUCLE_MR_IID` read) is caught before it reaches production.'
+
+97:
+  title: A state-derived artifact MUST refresh on the transition, not only on the periodic sweep
+  ❌:
+  - 'DO NOT couple a status artifact''s freshness (board, dashboard, notification digest) solely to a periodic sweep (doctor schedule). The sweep is a best-effort scheduler, not a guarantee — GitHub Actions schedules run inconsistently under load (lesson #89), and a 10-min cadence can stretch to 30-40 min gaps, leaving the board stale while issues have already moved.'
+  - 'DO NOT assume the fingerprint-skip logic is the culprit when an artifact goes stale — the fingerprint changes on every transition, so when the sweep DOES run it refreshes correctly. The problem is the sweep does not run.'
+  ✅:
+  - 'DO refresh the artifact on the state transition itself (webhook-driven, reliable), hooked at the single transition function (set_boucle_label), gated on "did the label actually change?" so it fires only on real transitions, not on every webhook. The periodic sweep stays as a backstop for any refresh that failed silently.'
+  - 'DO keep the fail-open contract: the artifact refresh MUST NEVER block the loop (|| true), and the sweep''s backstop forces a full refresh on its own cadence regardless.'
