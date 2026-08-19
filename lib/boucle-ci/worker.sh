@@ -141,7 +141,35 @@ boucle_ci_worker() {
       git reset --hard "origin/$BOUCLE_DEFAULT_BRANCH"
     fi
   else
-    git checkout -b "$BRANCH"
+    # Create the branch from origin/$BOUCLE_DEFAULT_BRANCH, NOT from the
+    # local HEAD. bin/update (self-update) runs BEFORE the worker and may
+    # have committed engine-owned files (submodule pointer bump, propagated
+    # .github/workflows/boucle.yml, charter docs) to the local default
+    # branch — and its push may have FAILED (GitHub App token lacks
+    # `workflows` permission). Starting the branch from local HEAD inherits
+    # that unpushed dirt; the worker's push is then remote-rejected on the
+    # workflow file, stranding the issue at boucle:working with no branch.
+    # origin/$BOUCLE_DEFAULT_BRANCH is the clean remote ref (fetched above).
+    git checkout -b "$BRANCH" "origin/$BOUCLE_DEFAULT_BRANCH"
+  fi
+
+  # ── Restore engine-owned CI file from origin ─────────────────────
+  # bin/update (self-update) runs BEFORE the worker and may dirty
+  # .github/workflows/boucle.yml at the consumer root (on GitHub it
+  # propagates the workflow from the .boucle submodule). This file is
+  # engine-owned — the worker MUST NOT commit it. On GitHub the App
+  # token lacks the `workflows` permission, so a push that includes
+  # the workflow file is remote-rejected, stranding the issue at
+  # boucle:working with no branch. Restore it from
+  # origin/$BOUCLE_DEFAULT_BRANCH so the worker's commit only contains
+  # the issue's implementation work. Best-effort: a missing file or
+  # checkout failure is not fatal. Charter docs (AGENTS.md, SKILL.md,
+  # ARCHITECTURE.md) are also engine-propagated but the worker MAY
+  # legitimately update them (doc self-maintenance) — do NOT restore
+  # those, only the workflow file (never worker-modified, always
+  # push-rejected).
+  if [ "${BOUCLE_FORGE:-gitlab}" = "github" ]; then
+    git checkout "origin/$BOUCLE_DEFAULT_BRANCH" -- ".github/workflows/boucle.yml" 2> /dev/null || true
   fi
 
   # ── Restore state cache AFTER checkout ───────────────────────────

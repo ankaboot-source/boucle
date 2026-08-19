@@ -825,3 +825,20 @@
   ✅: 'DO: name the authority explicitly, and make it the agent''s own emitted field wherever the decision is a judgment call. If the honest answer is "the agent''s output, but we do not trust
     it", change what the agent is asked to emit — make the output MORE structured — instead of building an inference layer on top of infra state. Infra signals are for drift detection, not for
     authority. A policy setting may seed the agent''s instructions and may serve as an announced fallback when the field is absent, but it must never override the field the agent emitted.'
+88:
+  title: The worker must not inherit or commit bin/update's engine-owned dirt
+  ❌:
+  - 'DO NOT create the worker branch from the local default-branch HEAD. bin/update (self-update) runs BEFORE the worker in the same job and may commit engine-owned files (submodule pointer bump,
+    propagated .github/workflows/boucle.yml, charter docs) to the local default branch — and its push may have FAILED (on GitHub the App token lacks the `workflows` permission, so any push that
+    includes the workflow file is remote-rejected). A worker branch started from local HEAD inherits that unpushed dirt; the worker''s own push is then remote-rejected on the same workflow file,
+    stranding the issue at boucle:working with no branch on the remote and no re-trigger (the dispatch sees boucle:working and no-ops).'
+  - 'DO NOT let the safety-net `git add -A -- '':!.boucle''` sweep engine-owned files into the worker''s commit. bin/update propagates .github/workflows/boucle.yml from the .boucle submodule to the
+    consumer root on GitHub; that file is engine-owned and the worker never legitimately modifies it, but `git add -A` stages it anyway, and the push is rejected for lacking `workflows` permission.'
+  ✅:
+  - 'DO create the worker branch from origin/$BOUCLE_DEFAULT_BRANCH (the clean remote ref, fetched at the top of the worker), never from the local HEAD. This drops any unpushed bin/update commits
+    from the branch''s starting point.'
+  - 'DO restore engine-owned CI files from origin/$BOUCLE_DEFAULT_BRANCH AFTER the branch checkout and BEFORE the agent runs, so the working tree matches the clean remote ref. On GitHub, restore
+    .github/workflows/boucle.yml; on GitLab there is nothing to restore (the root .gitlab-ci.yml is a consumer-owned shim, never propagated by bin/update). Best-effort (`|| true`): a missing file
+    or checkout failure must not kill the worker before the agent runs.'
+  - 'DO scope the restore to files the worker NEVER legitimately modifies (the workflow file). Charter docs (AGENTS.md, SKILL.md, ARCHITECTURE.md) are also engine-propagated but the worker MAY
+    update them (doc self-maintenance) — restoring those would discard legitimate worker doc updates on existing branches.'
