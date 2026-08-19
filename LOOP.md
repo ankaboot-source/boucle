@@ -180,6 +180,94 @@ branch (Settings → Pages → Source: Deploy from a branch → `gh-pages` / roo
 
 GitLab Pages unique-domain mode uses random 6-char IDs — use `BOUCLE_LIVE_URL` or `$CI_PAGES_URL` instead of regex.
 
+## Non-static-site consumers
+
+Boucle's defaults are biased toward static sites (`npm run build` → `public/` →
+`wrangler pages deploy`). A repo that is NOT a static website — a Docker-compose
+backend, an Ansible playbook repo, a CLI tool — MUST configure the escape
+hatches below or the loop will try to deploy a nonexistent site. The modes are
+orthogonal and composable (see [Deploy targets & review modes](#deploy-targets--review-modes)).
+
+For any non-static-site repo, set:
+
+- `BOUCLE_DEPLOY_MODE=external` — boucle MUST NOT deploy; the consumer's own CI
+  deploys (or nothing deploys at all).
+- `BOUCLE_REVIEW_MODE=diff` — there is no preview URL per MR, so the reviewer
+  MUST review the MR diff + check suites instead of a deployed preview.
+- `BOUCLE_BUILD_CMD` — the consumer's build/verify command, or empty when the
+  consumer's CI builds.
+
+### Command-mode e2e (`BOUCLE_E2E_COMMAND`)
+
+By default e2e probes a live URL (URL-mode). A non-static-site repo has no
+meaningful URL to probe, so boucle supports **command-mode e2e**: the consumer
+supplies a verify command and boucle runs it instead of probing a URL.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `BOUCLE_E2E_COMMAND` | *(empty)* | Consumer-supplied verify command. **Empty** = URL-mode (agent probes `BOUCLE_LIVE_URL`). **Non-empty** = run the command; exit `0` = PASS, non-zero = FAIL. Use `true` for a no-op that always passes. |
+| `BOUCLE_E2E_COMMAND_TIMEOUT` | `3600` | Max seconds the verify command may run. Exceeding it kills the command and FAILs (exit `124`). |
+| `BOUCLE_E2E_COMMAND_EVIDENCE_PARSER` | *(empty)* | Optional command that takes the verify log as `$1` and emits a markdown evidence block for the verdict comment. Empty = no evidence block. |
+
+The e2e decision flow:
+
+```mermaid
+flowchart TD
+  A[e2e stage triggered] --> B{BOUCLE_E2E_COMMAND set?}
+  B -- yes --> C[Run consumer verify command]
+  C --> D{exit code}
+  D -- 0 --> E[VERDICT: PASS]
+  D -- non-zero --> F[VERDICT: FAIL]
+  D -- 124 timeout --> G[VERDICT: FAIL — timeout]
+  E --> H[Post verdict comment]
+  F --> H
+  G --> H
+  H --> I[Route to PASS/FAIL/UNCERTAIN handling]
+  B -- no --> J{BOUCLE_ISSUE set?}
+  J -- no --> K[HTTP 200 smoke test]
+  J -- yes --> L[Run e2e agent on URL]
+  L --> M[Parse verdict from comment]
+  M --> I
+```
+
+The e2e agent role is defined in [AGENTS.md](AGENTS.md) §Agent roles. The
+verdict MUST stay SHA-anchored in both modes.
+
+### Recipe 1: Docker-compose backend service
+
+A backend API (e.g. LiteLLM + OpenWebUI + Postgres) deployed via SSH to a remote
+host.
+
+- `BOUCLE_DEPLOY_MODE=external` — the consumer's own CI deploys via SSH.
+- `BOUCLE_REVIEW_MODE=diff` — no preview URL per MR.
+- `BOUCLE_BUILD_CMD="pytest -m unit"` — or empty; the consumer's CI builds.
+- `BOUCLE_E2E_COMMAND="bash scripts/e2e-verify.sh"` — consumer-supplied verify:
+  build + unit tests.
+- `BOUCLE_LIVE_URL=https://api.example.com` — optional, for URL-mode e2e
+  fallback; NOT needed when `BOUCLE_E2E_COMMAND` is set.
+
+### Recipe 2: Ansible / infrastructure-as-code repo
+
+An Ansible playbook repo that deploys to localhost, with no live URL.
+
+- `BOUCLE_DEPLOY_MODE=external`
+- `BOUCLE_REVIEW_MODE=diff`
+- `BOUCLE_BUILD_CMD="ansible-playbook --check --diff playbook.yml"` — syntax
+  check as the "build".
+- `BOUCLE_E2E_COMMAND="true"` — no-op, always PASS, for repos with no e2e
+  verification.
+- No `BOUCLE_LIVE_URL` — command-mode e2e does not require it.
+
+### Recipe 3: CLI tool / library
+
+A Python library or CLI tool with a test suite.
+
+- `BOUCLE_DEPLOY_MODE=external` — or skip deploy entirely.
+- `BOUCLE_REVIEW_MODE=diff`
+- `BOUCLE_BUILD_CMD="make build"` — or `pip install -e .`.
+- `BOUCLE_E2E_COMMAND="make test"` — or `pytest`.
+- No `BOUCLE_LIVE_URL`.
+
 ## CI/CD variables
 
 Complete reference of all boucle CI/CD variables (set as repo secrets/variables). Defaults shown; override per-consumer. `bin/setup` seeds defaults where possible (e.g. `BOUCLE_DND_TZ` from the installing machine's timezone, fallback model variables).
@@ -202,6 +290,9 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_DEPLOY_PROJECT` | `""` | Cloudflare Pages project name (self mode). |
 | `BOUCLE_LIVE_URL` | `""` | Production/live URL (overrides regex/pages.dev fallback; **required** in external mode). |
 | `BOUCLE_PRODUCTION_URL` | `""` | Production URL fallback for e2e. |
+| `BOUCLE_E2E_COMMAND` | *(empty)* | Consumer-supplied verify command. Empty = URL-mode (agent probes `BOUCLE_LIVE_URL`). Non-empty = run the command; exit `0` = PASS, non-zero = FAIL. Use `true` for a no-op that always passes. See §Non-static-site consumers. |
+| `BOUCLE_E2E_COMMAND_TIMEOUT` | `3600` | Max seconds the verify command may run. Exceeding it kills the command and FAILs (exit `124`). |
+| `BOUCLE_E2E_COMMAND_EVIDENCE_PARSER` | *(empty)* | Optional command that takes the verify log as `$1` and emits a markdown evidence block for the verdict comment. Empty = no evidence block. |
 | `BOUCLE_PREVIEW_MARKER_PATH` | `__boucle_commit__.txt` | SHA marker probe path (relative to URL root). |
 | `BOUCLE_PREVIEW_PROPAGATION_WAIT` | `60` | Seconds to wait for preview CDN propagation. |
 | `BOUCLE_PREVIEW_DISABLE` | `false` | Skip Chromium visual preview in triage: `true` or `false`. |
