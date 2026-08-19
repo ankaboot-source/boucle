@@ -589,6 +589,26 @@ boucle_ci_dispatch() {
         echo "Note on MR !${MR_NOTE_IID} but source_branch '$MR_NOTE_SOURCE_BRANCH' is not a boucle branch, skipping"
         dispatch_noop
       fi
+      # Merge-gate approval contract (LESSONS.yml lesson #85 + #89): in
+      # mono-user mode on GitHub, the human approves the merge by replying
+      # `approved` on the PR (issue_comment webhook fires reliably; reactions
+      # have NO webhook on GitHub). If the issue is at boucle:approval AND
+      # the PR comment's first line is the magic word, trigger the MERGER,
+      # not the worker. Any other comment at boucle:approval is feedback →
+      # re-trigger the worker (the human is reviewing, not approving).
+      MR_NOTE_LABELS_FOR_GATE=$(forge_issue_labels_get "$MR_NOTE_ISSUE_IID" 2> /dev/null || echo "")
+      if echo "$MR_NOTE_LABELS_FOR_GATE" | grep -q "boucle:approval"; then
+        MR_NOTE_BODY=$(dispatch_note_body)
+        MR_NOTE_FIRST_LINE=$(printf '%s' "$MR_NOTE_BODY" | head -n 1 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+        if printf '%s' "$MR_NOTE_FIRST_LINE" | tr '[:upper:]' '[:lower:]' | grep -qx 'approved'; then
+          echo "Note on MR !${MR_NOTE_IID} (issue #$MR_NOTE_ISSUE_IID) at boucle:approval — magic word 'approved' → triggering merger"
+          # Transition to boucle:merging so the doctor doesn't re-trigger
+          # while the merger is in flight. Preserve non-boucle labels.
+          set_boucle_label "$MR_NOTE_ISSUE_IID" "boucle:merging" "boucle::status::bot" 2> /dev/null || true
+          forge_trigger_role "$MR_NOTE_ISSUE_IID" "merger"
+          dispatch_noop
+        fi
+      fi
       echo "Note on MR !${MR_NOTE_IID} (issue #$MR_NOTE_ISSUE_IID) — re-triggering worker with feedback"
       # Count reviewer verdicts on the MR to determine the next iteration
       # number. Each verdict = one completed worker+reviewer cycle, so the

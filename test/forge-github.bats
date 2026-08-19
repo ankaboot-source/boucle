@@ -79,17 +79,21 @@ setup() {
   assert_output --partial "Approve** button"
 }
 
-@test "forge_mr_approve_instruction: mono-user says 👍 on ALL forges" {
+@test "forge_mr_approve_instruction: mono-user is forge-appropriate (approved on GitHub, 👍 on GitLab)" {
   # In mono-user mode the human IS the bot — the PR author is the approver.
   # Neither GitHub nor GitLab reliably counts an author'"'"'s own approval, so
-  # the emoji-reaction gate on the reviewer PASS comment is the ONLY reliable
-  # human MR gate. The instruction MUST point at the emoji on BOTH forges.
+  # a human signal on the PR is the ONLY reliable MR gate. The signal is
+  # forge-appropriate: `approved` magic word on GitHub (issue_comment webhook
+  # fires reliably; reactions have NO webhook on GitHub) or 👍 emoji on GitLab
+  # (emoji webhook fires reliably). The instruction MUST point at the right
+  # signal per forge.
   # Regression (boucle.dev #40, 2026-08-18): the doctor auto-merged on the
-  # PASS verdict alone — the gate was decorative. The emoji is now mandatory.
+  # PASS verdict alone — the gate was decorative. The human gate is now mandatory.
   run bash -c 'export BOUCLE_FORGE=github BOUCLE_MONO_USER=true; source bin/forge/common.sh; forge_mr_approve_instruction'
   assert_success
-  assert_output --partial "👍"
+  assert_output --partial "approved"
   refute_output --partial "approving review"
+  refute_output --partial "👍"
 
   run bash -c 'export BOUCLE_FORGE=gitlab BOUCLE_MONO_USER=true; source bin/forge/common.sh; forge_mr_approve_instruction'
   assert_success

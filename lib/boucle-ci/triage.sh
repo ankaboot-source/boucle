@@ -713,7 +713,20 @@ HELP_EOF
           # Three approval signals (LESSONS.yml lesson #89): emoji (GitLab primary),
           # boucle:approved label (GitHub primary), magic word `approved` (GitHub fallback).
           # A reply that is NOT the magic word is an amendment, never an approval.
-          SPEC_MSG=$(printf '## Validation\n\nReview the **TL;DR** above.\n- React with 👍 ❤️ 🎉 or 🚀 on this comment to approve the spec — nothing else approves it.\n- Or add the `boucle:approved` label to this issue to approve the spec.\n- Or reply with `approved` (just that word, on its own line) to approve the spec.\n- To amend the spec, reply to this issue with your corrections: triage will re-run, read your reply, and post an updated spec for you to approve. Any other reply never approves the spec.')
+          # Spec-gate approval contract (A2, LESSONS.yml lesson #83 + #89):
+          # Three approval signals, but the PRIMARY one depends on the forge:
+          #   - GitHub: reply `approved` (issue_comment webhook fires reliably;
+          #     reactions have NO webhook on GitHub, so emoji is a doctor-poll
+          #     backstop only, not a primary path).
+          #   - GitLab: react with 👍 ❤️ 🎉 or 🚀 (emoji webhook fires reliably).
+          #   - Both: the `boucle:approved` label (issues:labeled webhook).
+          # A reply that is NOT the magic word `approved` is an amendment,
+          # never an approval — triage re-runs and produces an updated spec.
+          if [ "${BOUCLE_FORGE:-gitlab}" = "github" ]; then
+            SPEC_MSG=$(printf '## Validation\n\nReview the **TL;DR** above.\n- **Reply with `approved`** (just that word, on its own line) to approve the spec — nothing else approves it.\n- Or add the `boucle:approved` label to this issue to approve the spec.\n- To amend the spec, reply to this issue with your corrections: triage will re-run, read your reply, and post an updated spec for you to approve. Any other reply never approves the spec.')
+          else
+            SPEC_MSG=$(printf '## Validation\n\nReview the **TL;DR** above.\n- React with 👍 ❤️ 🎉 or 🚀 on this comment to approve the spec — nothing else approves it.\n- Or add the `boucle:approved` label to this issue to approve the spec.\n- Or reply with `approved` (just that word, on its own line) to approve the spec.\n- To amend the spec, reply to this issue with your corrections: triage will re-run, read your reply, and post an updated spec for you to approve. Any other reply never approves the spec.')
+          fi
           TRIAGE_NOTE_ID=$(forge_issue_notes "$IID" 2> /dev/null \
             | jq -r '[.[] | select(.body | contains("<!-- boucle:triage") and contains("## TL;DR") and contains("## Disposition"))]
                             | sort_by(.created_at) | last | .id' 2> /dev/null || echo "")

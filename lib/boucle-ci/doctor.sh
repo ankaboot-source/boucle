@@ -133,6 +133,9 @@ boucle_ci_doctor() {
   # if a non-bot user reacted with an approval emoji, 0 otherwise. Mirrors
   # the spec-approval emoji polling (forge_note_reactions + canonical set).
   # Used in mono-user mode where native PR review is blocked.
+  # GitLab primary (emoji webhooks fire reliably); GitHub backstop only
+  # (reactions have NO webhook on GitHub — the magic word is the primary
+  # there, see doctor_mr_approval_magic_word).
   doctor_mr_approval_emoji() {
     local mr_iid="$1" notes approval_note_id awards
     notes=$(forge_mr_notes "$mr_iid" 2> /dev/null || echo "[]")
@@ -147,6 +150,26 @@ boucle_ci_doctor() {
               [.[] | select(.user.username != $bname) | .name]
               | map(select(. as $n | ($emojis | split("|")) | index($n)))
               | length > 0
+          ' > /dev/null 2>&1; then
+      echo 1
+    else
+      echo 0
+    fi
+  }
+
+  # Poll for the magic word `approved` (case-insensitive, standalone first
+  # line) in a human comment on the PR. Returns 1 if a non-bot user replied
+  # `approved`, 0 otherwise. GitHub primary (issue_comment webhook fires
+  # reliably, but the doctor backstop catches a missed webhook); GitLab
+  # backstop (emoji is the primary there). Mirrors the spec-gate magic-word
+  # poll in the doctor's spec-review path.
+  doctor_mr_approval_magic_word() {
+    local mr_iid="$1" notes
+    notes=$(forge_mr_notes "$mr_iid" 2> /dev/null || echo "[]")
+    if echo "$notes" | jq -e --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
+              [.[] | select(.author.username != $bname)
+                | (.body | split("\n")[0] | gsub("^\\s+|\\s+$"; "") | ascii_downcase == "approved")]
+              | any
           ' > /dev/null 2>&1; then
       echo 1
     else
@@ -894,12 +917,16 @@ boucle_ci_doctor() {
     # — map to 0/1 so the count-based logic and messages keep working.
     APPROVED_COUNT=$(forge_mr_approvals "$MR_IID")
     [ "$APPROVED_COUNT" = "true" ] && APPROVED_COUNT=1 || APPROVED_COUNT=0
-    # In mono-user mode, the human approves by reacting 👍 on the
-    # boucle:approval-request note the reviewer posted on the PR. Poll that
-    # note's reactions. The old auto-detect of the PASS verdict merged without
-    # a human signal — removed.
+    # In mono-user mode, the human approves via a forge-appropriate signal
+    # on the PR: magic word `approved` (GitHub primary — issue_comment
+    # webhook fires reliably, but the doctor backstop catches a missed
+    # webhook) or 👍 emoji on the boucle:approval-request note (GitLab
+    # primary — emoji webhooks fire reliably). Poll both so a missed
+    # webhook on either forge recovers. The old auto-detect of the PASS
+    # verdict merged without a human signal — removed.
     if [ "$APPROVED_COUNT" -eq 0 ] && [ "${BOUCLE_MONO_USER:-false}" = "true" ]; then
-      APPROVED_COUNT=$(doctor_mr_approval_emoji "$MR_IID")
+      APPROVED_COUNT=$(doctor_mr_approval_magic_word "$MR_IID")
+      [ "$APPROVED_COUNT" = "1" ] || APPROVED_COUNT=$(doctor_mr_approval_emoji "$MR_IID")
     fi
     # Guard: if the merger already escalated a SEMANTIC merge conflict on
     # this issue (boucle_escalate_merge_conflict posts a note with "Merge

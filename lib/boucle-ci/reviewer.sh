@@ -549,13 +549,22 @@ boucle_ci_reviewer() {
       APPROVAL_MSG=$(printf '✅ Reviewer verdict: **PASS**. %s is ready to merge.\n\nThe %s has been assigned to you for approval. To approve and merge, %s [%s](%s). The merger will then rebase the %s onto %s and merge it serially (avoiding conflicts with other approved %ss).' "$mr_ref" "$mr_term" "$approve_instr" "$mr_ref" "$MR_URL" "$mr_term" "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}" "$mr_term")
       forge_issue_note "$BOUCLE_ISSUE" "$APPROVAL_MSG"
       # Post an approval-request note ON THE PR so the doctor can poll for
-      # a 👍 reaction. In mono-user mode on GitHub, self-review is blocked,
-      # so the human approves by reacting 👍 on this note. The marker lets
-      # the doctor find it reliably across runs. Skipped when not in
-      # mono-user mode — native review/approval is the signal there.
+      # the approval signal. In mono-user mode, native self-review is blocked,
+      # so the human approves via a forge-appropriate signal on this note:
+      #   - GitHub: reply `approved` on the PR (issue_comment webhook fires
+      #     reliably; reactions have NO webhook on GitHub). The dispatch
+      #     MR-note path routes `approved` at boucle:approval → merger.
+      #   - GitLab: react 👍 on this note (emoji webhook fires reliably).
+      # The marker lets the doctor find the note reliably across runs for its
+      # emoji-poll backstop. Skipped when not in mono-user mode — native
+      # review/approval is the signal there.
       if boucle_mono_user; then
         local pr_approval_note
-        pr_approval_note=$(printf '👍 **this comment** to approve and merge.\n\nThe merger will rebase onto `%s` and merge serially.\n\n<!-- boucle:approval-request v=1 -->' "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}")
+        if [ "${BOUCLE_FORGE:-gitlab}" = "github" ]; then
+          pr_approval_note=$(printf 'Reply `approved` on this PR to approve and merge.\n\nThe merger will rebase onto `%s` and merge serially.\n\n<!-- boucle:approval-request v=1 -->' "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}")
+        else
+          pr_approval_note=$(printf '👍 **this comment** to approve and merge.\n\nThe merger will rebase onto `%s` and merge serially.\n\n<!-- boucle:approval-request v=1 -->' "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}")
+        fi
         forge_mr_note "$MR_IID" "$pr_approval_note" \
           || echo "[boucle] WARN: PR approval-request note post failed (fail-open — the issue note still tells the human what to do)"
       fi

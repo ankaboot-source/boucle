@@ -133,10 +133,15 @@ forge_mr_ref() {
 forge_mr_approve_instruction() {
   # Mono-user mode: the human IS the bot account, so native self-approval
   # is unreliable (GitHub blocks author self-review; GitLab is inconsistent).
-  # The MR gate is a 👍 emoji on the reviewer PASS comment on the PR,
-  # polled by the doctor. Applies on ALL forges in mono-user mode.
+  # The MR gate is a magic-word `approved` reply on the PR (GitHub, where
+  # issue_comment webhooks fire reliably but reaction webhooks do not) or a
+  # 👍 emoji on the reviewer PASS comment (GitLab, where emoji webhooks fire
+  # reliably). Applies on ALL forges in mono-user mode.
   if [ "${BOUCLE_MONO_USER:-false}" = "true" ]; then
-    echo "react with 👍 on the reviewer **PASS** comment for"
+    case "${BOUCLE_FORGE:-gitlab}" in
+      github) echo "reply \`approved\` on" ;;
+      *) echo "react with 👍 on the reviewer **PASS** comment for" ;;
+    esac
     return
   fi
   case "${BOUCLE_FORGE:-gitlab}" in

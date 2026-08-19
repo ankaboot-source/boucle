@@ -345,17 +345,54 @@ extract_spec_review_block() {
   echo "$note_branch" | grep -q 'SHOULD_TRIAGE=true'
 }
 
+# ── Merge-gate approval contract (lesson #85 + #89): magic word on PR ──────
+# A human comment on a PR whose issue is at boucle:approval is feedback
+# (re-trigger worker) UNLESS its first line is the magic word `approved`
+# (case-insensitive, standalone) — then it triggers the MERGER, not the
+# worker. This mirrors the spec gate and rides on issue_comment: created
+# (GitHub, where reaction webhooks do not fire). See LESSONS.yml #85, #89.
+
+@test "merge-gate: PR comment 'approved' at boucle:approval triggers the merger" {
+  # The MR-note dispatch path must check for boucle:approval + magic word
+  # BEFORE the worker-feedback path. Extract the MR-note block and verify
+  # it routes to the merger when the magic word is detected.
+  block=$(awk '
+    /MR_NOTE_IID.*OBJECT_KIND.*note/ { p = 1 }
+    p == 1 { print }
+    p == 1 && /^    IID=/ { exit }
+  ' lib/boucle-ci/dispatch.sh)
+  echo "$block" | grep -q 'boucle:approval'
+  echo "$block" | grep -q 'approved'
+  echo "$block" | grep -q 'forge_trigger_role.*merger'
+}
+
+@test "merge-gate: PR comment 'approved' transitions to boucle:merging" {
+  block=$(awk '
+    /MR_NOTE_IID.*OBJECT_KIND.*note/ { p = 1 }
+    p == 1 { print }
+    p == 1 && /^    IID=/ { exit }
+  ' lib/boucle-ci/dispatch.sh)
+  echo "$block" | grep -q 'boucle:merging'
+}
+
 @test "spec-review block documents the amendment-vs-approval contract" {
   block=$(extract_spec_review_block)
   echo "$block" | grep -qi 'amendment\|NOT an approval\|not.*approval'
 }
 
-@test "triage validation message lists all three approval signals" {
+@test "triage validation message lists all approval signals (forge-aware)" {
+  # GitHub: magic word `approved` is the primary (reactions have no webhook).
+  # GitLab: emoji reaction is the primary (emoji webhooks fire reliably).
+  # Both: the `boucle:approved` label. The message is forge-aware — the
+  # GitHub branch leads with "Reply with approved", the GitLab branch leads
+  # with "React with". Both branches mention the label and the amendment path.
   run grep -E "React with .* to approve" lib/boucle-ci/triage.sh
   assert_success
-  run grep -E "boucle:approved.*label.*to approve" lib/boucle-ci/triage.sh
+  run grep -E "Reply with .approved." lib/boucle-ci/triage.sh
   assert_success
-  run grep -Ei "reply with .approved. .*to approve" lib/boucle-ci/triage.sh
+  run grep -E "to approve the spec" lib/boucle-ci/triage.sh
+  assert_success
+  run grep -E "boucle:approved.*label.*to approve" lib/boucle-ci/triage.sh
   assert_success
   run grep -Ei "reply.*amend|re-?trigger.*triage|A reply never approves|triage will re-run|never approves" lib/boucle-ci/triage.sh
   assert_success
