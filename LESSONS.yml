@@ -929,3 +929,13 @@
   ✅:
   - 'DO refresh the artifact on the state transition itself (webhook-driven, reliable), hooked at the single transition function (set_boucle_label), gated on "did the label actually change?" so it fires only on real transitions, not on every webhook. The periodic sweep stays as a backstop for any refresh that failed silently.'
   - 'DO keep the fail-open contract: the artifact refresh MUST NEVER block the loop (|| true), and the sweep''s backstop forces a full refresh on its own cadence regardless.'
+
+98:
+  title: A multi-bucket aggregation MUST read one atomic snapshot, not N sequential queries
+  ❌:
+  - 'DO NOT render a status board (or any aggregation that buckets entities into mutually-exclusive sections) by issuing one forge/API query PER bucket label and concatenating the results. A state transition that fires BETWEEN two queries (e.g. boucle:approval → boucle:merging, which itself triggers a board refresh via set_boucle_label) makes the SAME entity appear in TWO buckets at once — a contradictory board. The per-label query sees the world at a different instant for each label, so there is no single point in time the board describes.'
+  - 'DO NOT assume the write path is the only source of duplicate appearances. Even when set_boucle_label strips all old boucle: detail labels before writing the new one (so an issue never truly holds two state labels), the READ path can still split one issue across two sections because two queries see two different label states. The bug is in the render, not the transition.'
+  ✅:
+  - 'DO take a SINGLE atomic snapshot of all open issues (one forge_issue_list_all call) and partition it client-side into the mutually-exclusive sections, with deduplication: each issue appears in the FIRST matching section only, so even an issue that somehow holds two state labels (a write-path bug) lands in one bucket. One snapshot cannot split a transitioning issue across sections because every bucket is derived from the same point-in-time view.'
+  - 'DO order the sections by priority (human-waiting > in-flight > blocked > dependency) so the dedup-first-match rule puts the issue where the human most needs to see it, not where a label-listing race happens to surface it.'
+  - 'DO add a regression test that feeds the render an issue carrying TWO state labels and asserts it appears in exactly ONE section — that test fails on the old per-query render and passes on the single-snapshot render, so a future refactor that reintroduces per-label queries is caught.'

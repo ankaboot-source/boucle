@@ -264,7 +264,7 @@ $(boucle_schedule_body "$file")"
 # The board is a forge ISSUE that boucle edits in place — the forge is the
 # UI, which is the whole thesis (CONTEXT.md §7: no new frontend, no server).
 boucle_board_render() {
-  local section label iids body=""
+  local body=""
   body="<!-- boucle:board v=1 -->
 _Maintained by boucle. Edited in place — do not reply here; act on the linked issues._
 "
@@ -274,23 +274,61 @@ _Maintained by boucle. Edited in place — do not reply here; act on the linked 
     "🚧 Blocked|boucle:blocked boucle:human boucle:needs-info"
     "🔗 Waiting on a dependency|boucle:depends-on"
   )
-  local group title labels rows
+  # Single atomic snapshot of all open issues, partitioned client-side.
+  #
+  # The previous implementation issued one forge API call PER label (9 calls
+  # across 4 sections). A transition that fired between two calls (e.g.
+  # boucle:approval → boucle:merging, which itself triggers a board refresh
+  # via set_boucle_label) made the same issue appear in TWO sections at
+  # once — a contradictory board (boucle.dev #34). One snapshot cannot
+  # split a single issue across sections.
+  #
+  # Deduplication: each issue appears in the FIRST section whose label set
+  # it carries, even if it somehow holds two state labels (a write-path
+  # bug we do not rely on, but defend against). The section order above is
+  # intentional: human-waiting > in-flight > blocked > dependency.
+  local snapshot
+  snapshot=$(forge_issue_list_all opened 2> /dev/null || echo "[]")
+  local group title labels section_rows row iid
+  local seen_iids=""
   for group in "${groups[@]}"; do
     title="${group%%|*}"
     labels="${group#*|}"
-    rows=""
-    for label in $labels; do
-      iids=$(forge_issue_list_by_label "$label" opened 2> /dev/null \
-        | jq -r --arg l "${label#boucle:}" \
-          '.[] | "| #\(.iid // .number) | \(.title // "" | .[0:70]) | \($l) | \(.updated_at // "" | .[0:10]) |"' \
-          2> /dev/null || true)
-      [ -n "$iids" ] && rows="${rows}${iids}
+    # Partition the snapshot in ONE jq pass: emit `IID<TAB>row` for each
+    # issue carrying any label in this section's set, minus issues already
+    # shown in an earlier section. Bash tracks `seen_iids` (a CSV of ints)
+    # across sections and passes it as --arg; jq splits and parses it.
+    # An empty seen_iids → empty array → no issue is excluded.
+    section_rows=""
+    while IFS=$'\t' read -r iid row; do
+      [ -z "$iid" ] && continue
+      section_rows="${section_rows}${row}
 "
-    done
+      if [ -n "$seen_iids" ]; then
+        seen_iids="${seen_iids},${iid}"
+      else
+        seen_iids="$iid"
+      fi
+    done < <(printf '%s' "$snapshot" \
+      | jq -r --arg seen "$seen_iids" --arg labels "$labels" \
+        '
+          ($labels | split(" ")) as $sect
+          | ($sect | map(sub("^boucle:"; ""))) as $sect_short
+          | ($seen | split(",") | map(select(length > 0) | tonumber)) as $seen_ids
+          | .[]
+          | (.iid // .number) as $id
+          | select($id)
+          | (.labels // [] | map(.name)) as $ilabels
+          | select(($seen_ids | index($id)) | not)
+          | select($ilabels | any(. as $l | $sect | index($l)))
+          | [ $id,
+              "| #\($id) | \((.title // "")[0:70]) | \(($ilabels | map(select(startswith("boucle:")) | sub("^boucle:"; "")) | map(select($sect_short | index(.))) | first // "?")) | \((.updated_at // "")[0:10]) |"
+            ] | @tsv
+        ' 2> /dev/null || true)
     body="${body}
 ## ${title}
 "
-    if [ -z "$(printf '%s' "$rows" | tr -d '[:space:]')" ]; then
+    if [ -z "$(printf '%s' "$section_rows" | tr -d '[:space:]')" ]; then
       body="${body}
 _Nothing._
 "
@@ -298,13 +336,14 @@ _Nothing._
       body="${body}
 | Issue | Title | State | Last moved |
 |---|---|---|---|
-${rows}"
+${section_rows}"
     fi
   done
   # Recurring-theme summary (context tag, not a state). Omitted when zero.
+  # Read from the same snapshot — no second forge call.
   local recurring_count
-  recurring_count=$(forge_issue_list_by_label "boucle:recurring" opened 2> /dev/null \
-    | jq -r 'length' 2> /dev/null || echo 0)
+  recurring_count=$(printf '%s' "$snapshot" \
+    | jq -r '[.[] | select((.labels // []) | map(.name) | any(. == "boucle:recurring"))] | length' 2> /dev/null || echo 0)
   if [ "${recurring_count:-0}" -gt 0 ] 2> /dev/null; then
     body="${body}
 

@@ -17,10 +17,17 @@ board_funcs() {
 
 stub_forge() {
   cat <<'STUB'
-forge_issue_list_by_label() {
+# The board reads a SINGLE atomic snapshot (forge_issue_list_all) and
+# partitions it client-side, so a transition between two per-label queries
+# can no longer split one issue across two sections (boucle.dev #34).
+forge_issue_list_all() {
   case "$1" in
-    boucle:approval) echo '[{"iid":12,"title":"Add a pricing page","updated_at":"2026-08-10T09:00:00Z"}]' ;;
-    boucle:working)  echo '[{"iid":15,"title":"Fix the nav","updated_at":"2026-08-10T11:00:00Z"}]' ;;
+    opened)
+      echo '[
+        {"iid":12,"title":"Add a pricing page","updated_at":"2026-08-10T09:00:00Z","labels":[{"name":"boucle:approval"}]},
+        {"iid":15,"title":"Fix the nav","updated_at":"2026-08-10T11:00:00Z","labels":[{"name":"boucle:working"}]}
+      ]'
+      ;;
     *) echo '[]' ;;
   esac
 }
@@ -44,12 +51,12 @@ STUB
   # Omitting them makes the board silently hide active work (#69 regression).
   TMPF=$(mktemp); board_funcs "$TMPF"
   run bash -c "
-    $(stub_forge)
     source '$TMPF'
-    forge_issue_list_by_label() {
+    forge_issue_list_all() {
       case \"\$1\" in
-        boucle:triage) echo '[{\"iid\":69,\"title\":\"Fix current step indicator\",\"updated_at\":\"2026-08-18T09:00:00Z\"}]' ;;
-        boucle:todo)   echo '[{\"iid\":42,\"title\":\"Add a pricing page\",\"updated_at\":\"2026-08-18T08:00:00Z\"}]' ;;
+        opened)
+          echo '[{\"iid\":69,\"title\":\"Fix current step indicator\",\"updated_at\":\"2026-08-18T09:00:00Z\",\"labels\":[{\"name\":\"boucle:triage\"}]},{\"iid\":42,\"title\":\"Add a pricing page\",\"updated_at\":\"2026-08-18T08:00:00Z\",\"labels\":[{\"name\":\"boucle:todo\"}]}]'
+          ;;
         *) echo '[]' ;;
       esac
     }
@@ -130,6 +137,7 @@ STUB
   TMPF=$(mktemp); board_funcs "$TMPF"
   run bash -c "
     source '$TMPF'
+    forge_issue_list_all() { echo 'UNEXPECTED'; }
     forge_issue_list_by_label() { echo 'UNEXPECTED'; }
     BOUCLE_BOARD_ENABLED=false boucle_board_upsert
   "
@@ -175,6 +183,7 @@ STUB
     # Current labels do NOT contain the new label → the transition guard fires.
     forge_issue_labels_get() { echo 'boucle:todo,boucle::status::bot'; }
     forge_issue_labels_set() { echo \"SET \$1 \$2\"; }
+    forge_issue_list_all() { echo '[]'; }
     forge_issue_list_by_label() {
       if [ \"\$1\" = 'boucle:board' ]; then echo '[]'; else echo '[]'; fi
     }
@@ -204,6 +213,7 @@ STUB
     # not fire, so no board refresh.
     forge_issue_labels_get() { echo 'boucle:working,boucle::status::bot'; }
     forge_issue_labels_set() { echo \"SET \$1 \$2\"; }
+    forge_issue_list_all() { echo 'UNEXPECTED'; }
     forge_issue_list_by_label() { echo 'UNEXPECTED'; }
     forge_issue_create() { echo 'UNEXPECTED CREATE'; }
     forge_issue_update() { echo 'UNEXPECTED UPDATE'; }
@@ -216,5 +226,29 @@ STUB
   assert_success
   refute_output --partial "status board"
   refute_output --partial "UNEXPECTED"
+  rm -f "$TMPF"
+}
+
+@test "board: an issue appears in only ONE section even with two state labels" {
+  # Regression guard for boucle.dev #34: issue #73 appeared in BOTH
+  # "Waiting on you" (boucle:approval) and "In flight" (boucle:merging)
+  # because the old render issued one forge call per label and a transition
+  # fired between two calls. The single-snapshot render partitions
+  # client-side and deduplicates: an issue carrying two state labels lands
+  # in the FIRST matching section only (human-waiting > in-flight).
+  TMPF=$(mktemp); board_funcs "$TMPF"
+  run bash -c "
+    source '$TMPF'
+    # Issue #73 carries BOTH boucle:approval AND boucle:merging — the
+    # contradictory state the old race produced. It must appear in
+    # \"Waiting on you\" (approval) only, never in \"In flight\".
+    forge_issue_list_all() {
+      echo '[{\"iid\":73,\"title\":\"Enhance How boucle works messages\",\"updated_at\":\"2026-08-19T12:00:00Z\",\"labels\":[{\"name\":\"boucle:approval\"},{\"name\":\"boucle:merging\"}]}]'
+    }
+    boucle_board_render
+  "
+  assert_success
+  assert_output --partial "| #73 | Enhance How boucle works messages | approval |"
+  refute_output --partial "| #73 | Enhance How boucle works messages | merging |"
   rm -f "$TMPF"
 }
