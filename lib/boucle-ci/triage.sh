@@ -766,138 +766,6 @@ HELP_EOF
         fi
       fi
 
-      # ── Visual preview (systematic for UI/UX issues) ────────────────
-      # Fires for ALL READY dispositions (Size S/M/L, gated or not).
-      # The triage agent writes RENDER_REQUEST + preview.html for
-      # UI/UX issues (mandatory per triage.md). Non-UI/UX issues have
-      # no RENDER_REQUEST → block is a no-op (zero Chromium cost).
-      # Failure is isolated: fallback note, never blocks the loop.
-      # Idempotent: RENDER_REQUEST deleted after successful embed.
-      PREVIEW_HTML="$BOUCLE_WORKSPACE/.boucle-state/$IID/preview.html"
-      RENDER_REQUEST_FILE="$BOUCLE_WORKSPACE/.boucle-state/$IID/RENDER_REQUEST"
-
-      if [ "${BOUCLE_PREVIEW_DISABLE:-false}" != "true" ] && [ -s "$RENDER_REQUEST_FILE" ] && [ -s "$PREVIEW_HTML" ]; then
-        echo "[boucle] RENDER_REQUEST found — attempting visual preview"
-
-        # 1. Resolve the triage comment note_id (separate fetch so we
-        #    don't disturb the existing comment parse).
-        TRIAGE_NOTE_ID=$(forge_issue_notes "$IID" 2> /dev/null \
-          | jq -r '[.[] | select(.body | contains("<!-- boucle:triage") and contains("## TL;DR") and contains("## Disposition"))]
-                        | sort_by(.created_at) | last | .id' 2> /dev/null || echo "")
-
-        if [ -z "$TRIAGE_NOTE_ID" ]; then
-          echo "[boucle] WARN: triage comment not found — cannot embed preview"
-        else
-          # 2. Install Chromium + puppeteer-core (only now, in a per-job dir).
-          NPM_TMP="/tmp/npm-${CI_JOB_ID:-$$}"
-          RENDER_STDERR="$BOUCLE_WORKSPACE/.boucle-state/$IID/render-stderr.log"
-          mkdir -p "$(dirname "$RENDER_STDERR")"
-          if npm install --prefix "$NPM_TMP" puppeteer-core @sparticuz/chromium > /dev/null 2>&1; then
-            # 3. Render preview.html → preview.png (1280x800, fullPage).
-            #    NODE_PATH=$NPM_TMP/node_modules so the script (bin/) resolves
-            #    the modules installed in the per-job dir.
-            PREVIEW_PNG="$BOUCLE_WORKSPACE/.boucle-state/$IID/preview.png"
-            #    The renderer emits one PNG per BOUCLE_PREVIEW_VIEWPORTS
-            #    entry (default: one phone, one desktop) and prints each
-            #    path on stdout. A spec approved on a desktop-only shot
-            #    hides exactly the class of regression this audience
-            #    cannot read from a diff.
-            #    Capture stderr to a log file (CI artifact) so render
-            #    failures are diagnosable. stdout (produced PNG paths) is
-            #    captured in RENDERED_PNGS as before. Lesson: never swallow
-            #    render errors.
-            RENDERED_PNGS=$(NODE_PATH="$NPM_TMP/node_modules" node "$BOUCLE_HOME/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2> "$RENDER_STDERR" || true)
-            if [ -n "$RENDERED_PNGS" ]; then
-              # 4. Upload each PNG via the forge contract. The backend
-              #    returns the embeddable path (GitLab: /uploads/...;
-              #    GitHub: no upload API → empty, handled below).
-              #    Total bytes respect BOUCLE_IMAGE_TOTAL_MAX_BYTES: N
-              #    viewports must not blow the per-issue attachment budget.
-              IMG_URL=""
-              PREVIEW_BYTES=0
-              PREVIEW_MAX="${BOUCLE_IMAGE_TOTAL_MAX_BYTES:-52428800}"
-              while IFS= read -r png; do
-                [ -s "$png" ] || continue
-                png_size=$(wc -c < "$png" 2> /dev/null || echo 0)
-                if [ "$((PREVIEW_BYTES + png_size))" -gt "$PREVIEW_MAX" ]; then
-                  echo "[boucle] WARN: viewport $(basename "$png") skipped — would exceed BOUCLE_IMAGE_TOTAL_MAX_BYTES"
-                  continue
-                fi
-                # "preview-390x844.png" → "390x844" → a label the human reads.
-                dims=$(basename "$png" .png | sed 's/^.*-//')
-                width=${dims%%x*}
-                case "$width" in
-                  '' | *[!0-9]*) label="$dims" ;;
-                  *)
-                    if [ "$width" -lt 600 ]; then
-                      label="📱 Mobile ($dims)"
-                    elif [ "$width" -lt 1024 ]; then
-                      label="📲 Tablet ($dims)"
-                    else
-                      label="🖥️ Desktop ($dims)"
-                    fi
-                    ;;
-                esac
-                img_path=$(forge_attachment_upload "$IID" "$png" "$(basename "$png")" 2> /dev/null || true)
-                if [ -n "$img_path" ]; then
-                  PREVIEW_BYTES=$((PREVIEW_BYTES + png_size))
-                  IMG_URL="${IMG_URL}**${label}**
-
-![Preview ${dims}](${img_path})
-
-"
-                fi
-              done <<< "$RENDERED_PNGS"
-
-              if [ -n "$IMG_URL" ]; then
-                # 5. Fetch the existing comment, insert Preview right after
-                #    the TL;DR section (first thing the human sees), PUT.
-                #    Guard: if EXISTING_BODY is empty (fetch failed), do NOT
-                #    PUT — otherwise we overwrite the entire triage comment
-                #    (losing the boucle:triage marker + criteria + disposition).
-                EXISTING_BODY=$(forge_issue_note_get "$IID" "$TRIAGE_NOTE_ID" 2> /dev/null \
-                  | jq -r '.body // empty' 2> /dev/null)
-                if [ -n "$EXISTING_BODY" ]; then
-                  NEW_BODY=$(printf '%s\n' "$EXISTING_BODY" | awk -v img="$IMG_URL" '
-                                        /^## TL;DR/ { in_tldr=1; print; next }
-                                        in_tldr && /^## / && !inserted {
-                                            print "## Preview"; print img; print ""; inserted=1; in_tldr=0
-                                        }
-                                        { print }
-                                        END { if (!inserted) { print ""; print "## Preview"; print img } }
-                                    ')
-                  if forge_issue_note_update "$IID" "$TRIAGE_NOTE_ID" "$NEW_BODY"; then
-                    # 6. Idempotence: delete RENDER_REQUEST (no re-render on retry).
-                    rm -f "$RENDER_REQUEST_FILE"
-                    echo "[boucle] Visual preview embedded in triage comment #$TRIAGE_NOTE_ID"
-                  else
-                    echo "[boucle] WARN: PUT notes failed — RENDER_REQUEST kept for retry"
-                  fi
-                else
-                  echo "[boucle] WARN: existing comment body empty — posting fallback note"
-                  forge_issue_note "$IID" "Preview unavailable (comment read failed) — validate from the TL;DR."
-                fi
-              else
-                echo "[boucle] WARN: PNG upload failed — posting fallback note"
-                forge_issue_note "$IID" "Preview unavailable (upload failed) — validate from the TL;DR."
-              fi
-            else
-              echo "[boucle] WARN: Chromium render failed — posting fallback note"
-              # Surface the render stderr in the job trace for diagnosis.
-              if [ -s "$RENDER_STDERR" ]; then
-                echo "[boucle:render-stderr] last 50 lines of render error:"
-                tail -n 50 "$RENDER_STDERR" | sed 's/^/[boucle:render-stderr] /' >&2
-              fi
-              forge_issue_note "$IID" "Preview unavailable (render failed) — validate from the TL;DR."
-            fi
-          else
-            echo "[boucle] WARN: Chromium install failed — posting fallback note"
-            forge_issue_note "$IID" "Preview unavailable (Chromium unavailable) — validate from the TL;DR."
-            # Chain to worker (cap disabled)
-            chain_to_role "$IID" "worker"
-          fi
-        fi
-      fi
       ;;
     NEEDS-INFO)
       set_boucle_label "$IID" "boucle:needs-info" "boucle::status::human"
@@ -1208,6 +1076,136 @@ HELP_EOF
       set_boucle_label "$IID" "boucle:human" "boucle::status::human"
       ;;
   esac
+  # ── Visual preview (systematic for UI/UX issues) ────────────────
+  # Fires for ALL dispositions (READY, NEEDS-INFO, NEEDS-SPLIT) — the
+  # triage agent writes RENDER_REQUEST + preview.html for any UI/UX issue
+  # regardless of disposition (mandatory per triage.md). Non-UI/UX issues
+  # have no RENDER_REQUEST → block is a no-op (zero Chromium cost).
+  # Failure is isolated: fallback note, never blocks the loop.
+  # Idempotent: RENDER_REQUEST deleted after successful embed.
+  PREVIEW_HTML="$BOUCLE_WORKSPACE/.boucle-state/$IID/preview.html"
+  RENDER_REQUEST_FILE="$BOUCLE_WORKSPACE/.boucle-state/$IID/RENDER_REQUEST"
+
+  if [ "${BOUCLE_PREVIEW_DISABLE:-false}" != "true" ] && [ -s "$RENDER_REQUEST_FILE" ] && [ -s "$PREVIEW_HTML" ]; then
+    echo "[boucle] RENDER_REQUEST found — attempting visual preview"
+
+    # 1. Resolve the triage comment note_id (separate fetch so we
+    #    don't disturb the existing comment parse).
+    TRIAGE_NOTE_ID=$(forge_issue_notes "$IID" 2> /dev/null \
+      | jq -r '[.[] | select(.body | contains("<!-- boucle:triage") and contains("## TL;DR") and contains("## Disposition"))]
+                    | sort_by(.created_at) | last | .id' 2> /dev/null || echo "")
+
+    if [ -z "$TRIAGE_NOTE_ID" ]; then
+      echo "[boucle] WARN: triage comment not found — cannot embed preview"
+    else
+      # 2. Install Chromium + puppeteer-core (only now, in a per-job dir).
+      NPM_TMP="/tmp/npm-${CI_JOB_ID:-$$}"
+      RENDER_STDERR="$BOUCLE_WORKSPACE/.boucle-state/$IID/render-stderr.log"
+      mkdir -p "$(dirname "$RENDER_STDERR")"
+      if npm install --prefix "$NPM_TMP" puppeteer-core @sparticuz/chromium > /dev/null 2>&1; then
+        # 3. Render preview.html → preview.png (1280x800, fullPage).
+        #    NODE_PATH=$NPM_TMP/node_modules so the script (bin/) resolves
+        #    the modules installed in the per-job dir.
+        PREVIEW_PNG="$BOUCLE_WORKSPACE/.boucle-state/$IID/preview.png"
+        #    The renderer emits one PNG per BOUCLE_PREVIEW_VIEWPORTS
+        #    entry (default: one phone, one desktop) and prints each
+        #    path on stdout. A spec approved on a desktop-only shot
+        #    hides exactly the class of regression this audience
+        #    cannot read from a diff.
+        #    Capture stderr to a log file (CI artifact) so render
+        #    failures are diagnosable. stdout (produced PNG paths) is
+        #    captured in RENDERED_PNGS as before. Lesson: never swallow
+        #    render errors.
+        RENDERED_PNGS=$(NODE_PATH="$NPM_TMP/node_modules" node "$BOUCLE_HOME/bin/render-preview.cjs" "$PREVIEW_HTML" "$PREVIEW_PNG" 2> "$RENDER_STDERR" || true)
+        if [ -n "$RENDERED_PNGS" ]; then
+          # 4. Upload each PNG via the forge contract. The backend
+          #    returns the embeddable path (GitLab: /uploads/...;
+          #    GitHub: no upload API → empty, handled below).
+          #    Total bytes respect BOUCLE_IMAGE_TOTAL_MAX_BYTES: N
+          #    viewports must not blow the per-issue attachment budget.
+          IMG_URL=""
+          PREVIEW_BYTES=0
+          PREVIEW_MAX="${BOUCLE_IMAGE_TOTAL_MAX_BYTES:-52428800}"
+          while IFS= read -r png; do
+            [ -s "$png" ] || continue
+            png_size=$(wc -c < "$png" 2> /dev/null || echo 0)
+            if [ "$((PREVIEW_BYTES + png_size))" -gt "$PREVIEW_MAX" ]; then
+              echo "[boucle] WARN: viewport $(basename "$png") skipped — would exceed BOUCLE_IMAGE_TOTAL_MAX_BYTES"
+              continue
+            fi
+            # "preview-390x844.png" → "390x844" → a label the human reads.
+            dims=$(basename "$png" .png | sed 's/^.*-//')
+            width=${dims%%x*}
+            case "$width" in
+              '' | *[!0-9]*) label="$dims" ;;
+              *)
+                if [ "$width" -lt 600 ]; then
+                  label="📱 Mobile ($dims)"
+                elif [ "$width" -lt 1024 ]; then
+                  label="📲 Tablet ($dims)"
+                else
+                  label="🖥️ Desktop ($dims)"
+                fi
+                ;;
+            esac
+            img_path=$(forge_attachment_upload "$IID" "$png" "$(basename "$png")" 2> /dev/null || true)
+            if [ -n "$img_path" ]; then
+              PREVIEW_BYTES=$((PREVIEW_BYTES + png_size))
+              IMG_URL="${IMG_URL}**${label}**
+
+![Preview ${dims}](${img_path})
+
+"
+            fi
+          done <<< "$RENDERED_PNGS"
+
+          if [ -n "$IMG_URL" ]; then
+            # 5. Fetch the existing comment, insert Preview right after
+            #    the TL;DR section (first thing the human sees), PUT.
+            #    Guard: if EXISTING_BODY is empty (fetch failed), do NOT
+            #    PUT — otherwise we overwrite the entire triage comment
+            #    (losing the boucle:triage marker + criteria + disposition).
+            EXISTING_BODY=$(forge_issue_note_get "$IID" "$TRIAGE_NOTE_ID" 2> /dev/null \
+              | jq -r '.body // empty' 2> /dev/null)
+            if [ -n "$EXISTING_BODY" ]; then
+              NEW_BODY=$(printf '%s\n' "$EXISTING_BODY" | awk -v img="$IMG_URL" '
+                                    /^## TL;DR/ { in_tldr=1; print; next }
+                                    in_tldr && /^## / && !inserted {
+                                        print "## Preview"; print img; print ""; inserted=1; in_tldr=0
+                                    }
+                                    { print }
+                                    END { if (!inserted) { print ""; print "## Preview"; print img } }
+                                ')
+              if forge_issue_note_update "$IID" "$TRIAGE_NOTE_ID" "$NEW_BODY"; then
+                # 6. Idempotence: delete RENDER_REQUEST (no re-render on retry).
+                rm -f "$RENDER_REQUEST_FILE"
+                echo "[boucle] Visual preview embedded in triage comment #$TRIAGE_NOTE_ID"
+              else
+                echo "[boucle] WARN: PUT notes failed — RENDER_REQUEST kept for retry"
+              fi
+            else
+              echo "[boucle] WARN: existing comment body empty — posting fallback note"
+              forge_issue_note "$IID" "Preview unavailable (comment read failed) — validate from the TL;DR."
+            fi
+          else
+            echo "[boucle] WARN: PNG upload failed — posting fallback note"
+            forge_issue_note "$IID" "Preview unavailable (upload failed) — validate from the TL;DR."
+          fi
+        else
+          echo "[boucle] WARN: Chromium render failed — posting fallback note"
+          # Surface the render stderr in the job trace for diagnosis.
+          if [ -s "$RENDER_STDERR" ]; then
+            echo "[boucle:render-stderr] last 50 lines of render error:"
+            tail -n 50 "$RENDER_STDERR" | sed 's/^/[boucle:render-stderr] /' >&2
+          fi
+          forge_issue_note "$IID" "Preview unavailable (render failed) — validate from the TL;DR."
+        fi
+      else
+        echo "[boucle] WARN: Chromium install failed — posting fallback note"
+        forge_issue_note "$IID" "Preview unavailable (Chromium unavailable) — validate from the TL;DR."
+      fi
+    fi
+  fi
 
   # Assert: triage comment exists and disposition parsable
   if [ -z "$DISPOSITION" ]; then

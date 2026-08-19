@@ -258,3 +258,45 @@ READY' && echo yes || echo no
   run grep -q 'Re-trigger triage' lib/boucle-ci/triage.sh
   assert_success
 }
+
+# ── Mutually-exclusive options are blocking, not advisory ──────────────
+# LESSONS.yml lesson #94: the triage agent used to present 3 mutually-
+# exclusive user-visible outcomes (different taglines, different logo
+# treatments) as `## Creative proposals` with `Questions: none` and
+# Disposition READY. But creative proposals are advisory — the worker is
+# not bound by them. When the worker must pick between variants, the
+# choice changes what gets built, so it is a blocking question. A READY
+# spec with three directions and no question forces the worker to guess
+# (boucle.dev #73).
+
+@test "prompt: triage.md distinguishes advisory proposals from blocking choices" {
+  # The prompt must tell the agent that mutually-exclusive user-visible
+  # outcomes are blocking questions, not creative proposals.
+  run grep -q 'Mutually-exclusive options are NOT creative proposals' .jcode/agents/triage.md
+  assert_success
+  run grep -q 'Mutually-exclusive user-visible outcomes are always blocking' .jcode/agents/triage.md
+  assert_success
+}
+
+@test "prompt: the advisory/ blocking test is stated in the prompt" {
+  # The agent needs a decision rule, not just a prohibition. The test:
+  # "if the worker picks the wrong one, is the result visibly wrong?" →
+  # blocking; "if the worker ignores it, is the result still correct?" →
+  # advisory.
+  run grep -q 'if the worker picks the wrong one, is the result visibly wrong' .jcode/agents/triage.md
+  assert_success
+  run grep -q 'if the worker ignores it, is the result still correct' .jcode/agents/triage.md
+  assert_success
+}
+
+@test "prompt: the self-review checklist catches mutually-exclusive proposals" {
+  # The self-review checklist (§3) must scan Creative proposals for
+  # mutually-exclusive variants and force them into Questions before
+  # posting. A READY spec with three directions and no question is a
+  # triage defect — catch it before the comment ships.
+  run grep -q 'Mutually-exclusive options' .jcode/agents/triage.md
+  assert_success
+  run bash -c "grep -c 'Mutually-exclusive options' .jcode/agents/triage.md"
+  # Two occurrences: the rule in Phase 3 + the checklist item in §3.
+  [ "$output" -ge 2 ]
+}

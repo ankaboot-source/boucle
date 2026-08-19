@@ -243,3 +243,38 @@ PY
   run grep -q 'BOUCLE_PREVIEW_DISABLE:-false' lib/boucle-ci/triage.sh
   assert_success
 }
+
+# Regression for boucle.dev #73: the visual preview block was nested inside
+# the READY) case branch, so NEEDS-INFO / NEEDS-SPLIT issues never had their
+# mockup rendered — even though the triage agent produces preview.html +
+# RENDER_REQUEST for any UI/UX issue regardless of disposition. The block
+# must live OUTSIDE the case/esac so it fires for all dispositions.
+@test "triage preview: block is outside the case/esac (fires for all dispositions)" {
+  # The preview block header must appear AFTER the main case/esac, not
+  # inside any case branch. We assert: the line number of the preview header
+  # is greater than the line number of the main esac.
+  preview_line=$(grep -n '# ── Visual preview (systematic for UI/UX issues)' lib/boucle-ci/triage.sh | head -1 | cut -d: -f1)
+  esac_line=$(grep -n '^  esac$' lib/boucle-ci/triage.sh | head -1 | cut -d: -f1)
+  [ -n "$preview_line" ] || { echo "preview header not found"; false; }
+  [ -n "$esac_line" ] || { echo "main esac not found"; false; }
+  [ "$preview_line" -gt "$esac_line" ] || {
+    echo "preview block (line $preview_line) is inside the case (esac at $esac_line) — must be after"
+    false
+  }
+}
+
+@test "triage preview: no chain_to_role inside the preview block" {
+  # The preview block runs for all dispositions now. A chain_to_role call
+  # inside it would wrongly trigger a worker run for NEEDS-INFO issues (which
+  # must pause for the author). The only legitimate chain_to_role calls are
+  # in the READY non-gated path, before the case/esac.
+  run grep -n 'chain_to_role "\$IID" "worker"' lib/boucle-ci/triage.sh
+  assert_success
+  # Exactly two occurrences (both in the READY non-gated path, before esac).
+  count=$(echo "$output" | grep -c 'chain_to_role')
+  [ "$count" -eq 2 ] || {
+    echo "expected 2 chain_to_role calls (READY non-gated path), found $count:"
+    echo "$output"
+    false
+  }
+}

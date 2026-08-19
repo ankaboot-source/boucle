@@ -303,9 +303,9 @@ ${rows}"
   done
   # Recurring-theme summary (context tag, not a state). Omitted when zero.
   local recurring_count
-  recurring_count=$(forge_issue_list_by_label "boucle:recurring" opened 2>/dev/null \
-    | jq -r 'length' 2>/dev/null || echo 0)
-  if [ "${recurring_count:-0}" -gt 0 ] 2>/dev/null; then
+  recurring_count=$(forge_issue_list_by_label "boucle:recurring" opened 2> /dev/null \
+    | jq -r 'length' 2> /dev/null || echo 0)
+  if [ "${recurring_count:-0}" -gt 0 ] 2> /dev/null; then
     body="${body}
 
 ---
