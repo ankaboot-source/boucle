@@ -19,12 +19,13 @@ boucle_ci_post_merge() {
     # ── External mode: wait for consumer's own CI ─────────────────
     echo "External deploy mode — waiting for consumer's own CI on merged commit..."
 
-    # BOUCLE_LIVE_URL is required in external mode
-    if [ -z "${BOUCLE_LIVE_URL:-}" ]; then
-      echo "FAIL: BOUCLE_LIVE_URL must be set in external deploy mode" >&2
+    # BOUCLE_LIVE_URL is required in external mode UNLESS command-mode e2e is
+    # active (BOUCLE_E2E_COMMAND set) — the verify command doesn't need a URL.
+    if [ -z "${BOUCLE_LIVE_URL:-}" ] && [ -z "${BOUCLE_E2E_COMMAND:-}" ]; then
+      echo "FAIL: BOUCLE_LIVE_URL must be set in external deploy mode (or set BOUCLE_E2E_COMMAND for command-mode e2e)" >&2
       exit 1
     fi
-    live_url="$BOUCLE_LIVE_URL"
+    live_url="${BOUCLE_LIVE_URL:-}"
 
     # Wait for check suites on the merged commit
     local head_sha wait_sec attempt max_attempts

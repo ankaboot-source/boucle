@@ -153,7 +153,7 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Env fallbacks: BOUCLE_FORGE BOUCLE_PROJECT BOUCLE_HOST BOUCLE_BOT_ID BOUCLE_BOT_USERNAME"
       echo "               BOUCLE_BOT_TOKEN BOUCLE_CF_TOKEN BOUCLE_RUNNER_TAG BOUCLE_ALLOWED_USERS"
-      echo "               BOUCLE_LLM_API_KEY BOUCLE_LLM_BASE_URL"
+      echo "               BOUCLE_LLM_API_KEY BOUCLE_LLM_BASE_URL BOUCLE_E2E_COMMAND"
       exit 0
       ;;
     *)

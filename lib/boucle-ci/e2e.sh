@@ -19,6 +19,14 @@
 #   BOUCLE_WORKSPACE      — checkout directory (agent-output.log lives under it)
 #   BOUCLE_HOME           — boucle installation root
 #
+# Two verification modes:
+#   Command-mode (BOUCLE_E2E_COMMAND set) — run the consumer's verify command;
+#     exit 0=PASS, non-zero=FAIL, 124=timeout. No agent, no URL probe. This is
+#     the analog of autonomous-dev-team's E2E_COMMAND contract, for non-static
+#     repos (Docker-compose backends, Ansible playbook repos, CLI tools) where
+#     verification is a build+test command, not a URL probe.
+#   Agent-mode (default) — the URL-probing agent posts a verdict comment.
+#
 # Verdict contract: the agent posts `<!-- boucle:verdict v=1 role=e2e -->`
 # + a `VERDICT: PASS|FAIL|UNCERTAIN` line on the issue. CI parses it from
 # issue notes, with a log-scraping fallback (AGENTS.md lessons #41, #43, #47).
@@ -53,118 +61,181 @@ boucle_ci_e2e() {
     echo "$active" | jq -e 'length > 0' > /dev/null 2>&1
   }
 
-  # Deploy-triggered e2e: no issue context. Run a deterministic HTTP smoke test.
-  if [ -z "${BOUCLE_ISSUE:-}" ]; then
-    echo "Deploy-triggered e2e — no issue context. Running HTTP smoke test."
-    HTTP_CODE=$(curl -sL -o /dev/null -w "%{http_code}" "$BOUCLE_LIVE_URL")
-    if [ "$HTTP_CODE" = "200" ]; then
-      echo "E2E smoke test PASS — $BOUCLE_LIVE_URL returns 200"
-      exit 0
+  # ── Command-mode e2e ────────────────────────────────────────────────
+  # When BOUCLE_E2E_COMMAND is set, run the consumer's verify command instead
+  # of the URL-probing agent. Exit 0=PASS, non-zero=FAIL, 124=timeout. The
+  # command `true` (or `:`) is a no-op = always PASS (the ansible-supabase
+  # pattern for repos with no live URL).
+  if [ -n "${BOUCLE_E2E_COMMAND:-}" ]; then
+    echo "Command-mode e2e — running BOUCLE_E2E_COMMAND instead of the URL-probing agent."
+    # Disable errexit: the verify command's non-zero exit IS the verdict, not
+    # a script failure. We capture it explicitly below.
+    set +e
+    e2e_log=$(mktemp)
+    e2e_timeout="${BOUCLE_E2E_COMMAND_TIMEOUT:-3600}"
+    # Run the command with a timeout, capturing stdout+stderr to a temp log
+    # (never a fixed path — executors are shared between jobs).
+    timeout --kill-after=30s --signal=TERM "$e2e_timeout" bash -c "$BOUCLE_E2E_COMMAND" > "$e2e_log" 2>&1
+    e2e_exit=$?
+
+    # Build the evidence block: via the consumer's evidence parser if set,
+    # else a default block (last 4000 chars of output + exit code).
+    if [ -n "${BOUCLE_E2E_COMMAND_EVIDENCE_PARSER:-}" ]; then
+      # bash -c treats the first arg after the command string as $0, so pass a
+      # dummy $0 so the log path lands in $1 (the documented contract).
+      evidence=$(bash -c "$BOUCLE_E2E_COMMAND_EVIDENCE_PARSER" "evidence-parser" "$e2e_log" 2> /dev/null || echo "")
     else
-      echo "E2E smoke test FAIL — $BOUCLE_LIVE_URL returns $HTTP_CODE" >&2
-      exit 1
+      evidence=$(printf '```\n%s\n```\n\n**Exit code:** %s' "$(tail -c 4000 "$e2e_log")" "$e2e_exit")
     fi
-  fi
 
-  # Run the agent on the live URL.
-  # Tolerate non-zero exit: the agent may post a valid verdict (PASS/FAIL)
-  # yet exit non-zero (e.g. jcode cleanup, forge CLI "new version" warning on
-  # stderr). We verify the verdict from the issue comment below, so the
-  # agent exit code is not authoritative.
-  # Capture the highest e2e verdict note ID that existed BEFORE this run,
-  # so we can collapse duplicate v2 verdicts below.
-  PRE_RUN_VERDICT_ID=$(forge_issue_notes "$BOUCLE_ISSUE" \
-    | jq -r '[.[] | select(.body | test("<!-- boucle:verdict")) | select(.body | test("role=e2e")) | .id] | max // 0' 2> /dev/null || echo 0)
-  echo "PRE_RUN_VERDICT_ID=$PRE_RUN_VERDICT_ID"
+    # Determine the verdict from the exit code.
+    case "$e2e_exit" in
+      0) verdict="PASS" ;;
+      124) verdict="FAIL" ;;
+      *) verdict="FAIL" ;;
+    esac
 
-  "$BOUCLE_HOME"/bin/jc e2e || true
+    # Deploy-triggered smoke test (no issue context): exit 0/1.
+    if [ -z "${BOUCLE_ISSUE:-}" ]; then
+      if [ "$verdict" = "PASS" ]; then
+        echo "E2E command-mode smoke test PASS (exit 0)"
+        exit 0
+      else
+        echo "E2E command-mode smoke test FAIL (exit $e2e_exit)" >&2
+        exit 1
+      fi
+    fi
 
-  # Disable errexit for the post-agent section: the verdict parsing and
-  # label/close calls below are all best-effort. GitLab Runner runs - |
-  # blocks with `set -eo pipefail`, so a non-zero from grep (no match),
-  # a forge API error, or jq (bad JSON) would kill the script before the
-  # case statement can route to PASS/FAIL/UNCERTAIN. We handle errors
-  # explicitly per-command instead.
-  set +e
-  # Parse verdict from agent output (bin/jc logs to stdout)
-  # If BOUCLE_ISSUE is set, parse from issue comment; otherwise from agent stdout.
-  # Tolerate forge CLI / jq non-zero exit (the CLI may warn about version updates on
-  # stderr; jq may error on unexpected JSON). An empty COMMENT → empty VERDICT
-  # → UNCERTAIN branch, which is safe.
-  COMMENT=$(forge_issue_notes "$BOUCLE_ISSUE" 2> /dev/null \
-    | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | first | .body // empty' 2> /dev/null)
-  # Reject a foreign-SHA verdict: a marker whose sha exists but differs from
-  # the e2e head is not this run's verdict (AGENTS.md P4). Accept only when
-  # the marker carries no sha at all (malformed marker tolerance).
-  MR_HEAD_SHORT="${MR_HEAD:0:7}"
-  FOUND_SHA=$(printf '%s' "$COMMENT" | grep -oE 'sha=[a-f0-9]+' | head -1 | cut -d= -f2 || true)
-  if [ -n "$FOUND_SHA" ] && [ -n "$MR_HEAD_SHORT" ] && [ "$FOUND_SHA" != "$MR_HEAD_SHORT" ]; then
-    echo "[boucle] REJECTED foreign-SHA e2e verdict: marker sha=$FOUND_SHA != head $MR_HEAD_SHORT. Not accepting."
-    COMMENT=""
-  fi
-  VERDICT=$(echo "$COMMENT" | grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+    # Issue-triggered: post the verdict comment directly and fall through to
+    # the shared verdict routing below. Command-mode posts exactly one verdict,
+    # so collapse-duplicate-notes is skipped.
+    sha="${MR_HEAD:-${CI_COMMIT_SHA:-unknown}}"
+    # shfmt off  # preserve exact string content
+    COMMENT="<!-- boucle:verdict v=1 role=e2e sha=$sha -->
+VERDICT: $verdict
 
-  # ── Log-scraping fallback (step-limit recovery) ──────────────────
-  # If the agent drafted a verdict but ran out of steps before posting it
-  # (VERDICT empty), scrape the drafted verdict from the agent's stdout log
-  # and post it ourselves. Mirrors the reviewer job's fallback.
-  # All marker patterns are anchored to start-of-line (AGENTS.md lesson
-  # #47) so prose that merely quotes the marker is never matched.
-  if [ -z "$VERDICT" ]; then
-    AGENT_LOG="$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE/agent-output.log"
-    if [ -f "$AGENT_LOG" ]; then
-      DRAFTED_VERDICT=$(awk '
-                /^<!-- boucle:verdict v=1 role=e2e/ { found=1 }
-                found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
-            ' "$AGENT_LOG" 2> /dev/null || echo "")
-      # If no boucle:verdict found, try the boucle:draft marker (first-pass
-      # draft posted early per the post-early rule). Promote it to a
-      # verdict by replacing the draft marker with the verdict marker.
-      if [ -z "$DRAFTED_VERDICT" ]; then
+## Command-mode e2e evidence
+$evidence"
+    # shfmt on
+    VERDICT="$verdict"
+    forge_issue_note "$BOUCLE_ISSUE" "$COMMENT"
+    echo "Command-mode e2e verdict: $verdict (exit $e2e_exit)"
+  else
+    # ── Agent-mode e2e (URL probing) ─────────────────────────────────
+    # Deploy-triggered e2e: no issue context. Run a deterministic HTTP smoke test.
+    if [ -z "${BOUCLE_ISSUE:-}" ]; then
+      echo "Deploy-triggered e2e — no issue context. Running HTTP smoke test."
+      HTTP_CODE=$(curl -sL -o /dev/null -w "%{http_code}" "$BOUCLE_LIVE_URL")
+      if [ "$HTTP_CODE" = "200" ]; then
+        echo "E2E smoke test PASS — $BOUCLE_LIVE_URL returns 200"
+        exit 0
+      else
+        echo "E2E smoke test FAIL — $BOUCLE_LIVE_URL returns $HTTP_CODE" >&2
+        exit 1
+      fi
+    fi
+
+    # Run the agent on the live URL.
+    # Tolerate non-zero exit: the agent may post a valid verdict (PASS/FAIL)
+    # yet exit non-zero (e.g. jcode cleanup, forge CLI "new version" warning on
+    # stderr). We verify the verdict from the issue comment below, so the
+    # agent exit code is not authoritative.
+    # Capture the highest e2e verdict note ID that existed BEFORE this run,
+    # so we can collapse duplicate v2 verdicts below.
+    PRE_RUN_VERDICT_ID=$(forge_issue_notes "$BOUCLE_ISSUE" \
+      | jq -r '[.[] | select(.body | test("<!-- boucle:verdict")) | select(.body | test("role=e2e")) | .id] | max // 0' 2> /dev/null || echo 0)
+    echo "PRE_RUN_VERDICT_ID=$PRE_RUN_VERDICT_ID"
+
+    "$BOUCLE_HOME"/bin/jc e2e || true
+
+    # Disable errexit for the post-agent section: the verdict parsing and
+    # label/close calls below are all best-effort. GitLab Runner runs - |
+    # blocks with `set -eo pipefail`, so a non-zero from grep (no match),
+    # a forge API error, or jq (bad JSON) would kill the script before the
+    # case statement can route to PASS/FAIL/UNCERTAIN. We handle errors
+    # explicitly per-command instead.
+    set +e
+    # Parse verdict from agent output (bin/jc logs to stdout)
+    # If BOUCLE_ISSUE is set, parse from issue comment; otherwise from agent stdout.
+    # Tolerate forge CLI / jq non-zero exit (the CLI may warn about version updates on
+    # stderr; jq may error on unexpected JSON). An empty COMMENT → empty VERDICT
+    # → UNCERTAIN branch, which is safe.
+    COMMENT=$(forge_issue_notes "$BOUCLE_ISSUE" 2> /dev/null \
+      | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | first | .body // empty' 2> /dev/null)
+    # Reject a foreign-SHA verdict: a marker whose sha exists but differs from
+    # the e2e head is not this run's verdict (AGENTS.md P4). Accept only when
+    # the marker carries no sha at all (malformed marker tolerance).
+    MR_HEAD_SHORT="${MR_HEAD:0:7}"
+    FOUND_SHA=$(printf '%s' "$COMMENT" | grep -oE 'sha=[a-f0-9]+' | head -1 | cut -d= -f2 || true)
+    if [ -n "$FOUND_SHA" ] && [ -n "$MR_HEAD_SHORT" ] && [ "$FOUND_SHA" != "$MR_HEAD_SHORT" ]; then
+      echo "[boucle] REJECTED foreign-SHA e2e verdict: marker sha=$FOUND_SHA != head $MR_HEAD_SHORT. Not accepting."
+      COMMENT=""
+    fi
+    VERDICT=$(echo "$COMMENT" | grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+
+    # ── Log-scraping fallback (step-limit recovery) ──────────────────
+    # If the agent drafted a verdict but ran out of steps before posting it
+    # (VERDICT empty), scrape the drafted verdict from the agent's stdout log
+    # and post it ourselves. Mirrors the reviewer job's fallback.
+    # All marker patterns are anchored to start-of-line (AGENTS.md lesson
+    # #47) so prose that merely quotes the marker is never matched.
+    if [ -z "$VERDICT" ]; then
+      AGENT_LOG="$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE/agent-output.log"
+      if [ -f "$AGENT_LOG" ]; then
         DRAFTED_VERDICT=$(awk '
-                    /^<!-- boucle:draft role=e2e -->/ { found=1 }
-                    found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
-                ' "$AGENT_LOG" 2> /dev/null || echo "")
-        if [ -n "$DRAFTED_VERDICT" ]; then
-          echo "[boucle] WARN: no boucle:verdict in log — promoting boucle:draft to verdict (step-limit fallback)."
-          DRAFTED_VERDICT=$(printf '%s' "$DRAFTED_VERDICT" | sed "s|<!-- boucle:draft role=e2e -->|<!-- boucle:verdict v=1 role=e2e sha=$MR_HEAD -->|")
-          # If the promoted draft has no VERDICT line, default to UNCERTAIN
-          # (the agent posted a draft checklist but ran out of steps before
-          # posting a final verdict with a VERDICT: line).
-          if ! echo "$DRAFTED_VERDICT" | grep -qiE '^VERDICT: (PASS|FAIL|UNCERTAIN)'; then
-            DRAFTED_VERDICT="$(printf '%s\n\nVERDICT: UNCERTAIN\n' "$DRAFTED_VERDICT")"
-            echo "[boucle] WARN: promoted e2e draft had no VERDICT line — defaulting to UNCERTAIN."
+                  /^<!-- boucle:verdict v=1 role=e2e/ { found=1 }
+                  found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
+              ' "$AGENT_LOG" 2> /dev/null || echo "")
+        # If no boucle:verdict found, try the boucle:draft marker (first-pass
+        # draft posted early per the post-early rule). Promote it to a
+        # verdict by replacing the draft marker with the verdict marker.
+        if [ -z "$DRAFTED_VERDICT" ]; then
+          DRAFTED_VERDICT=$(awk '
+                      /^<!-- boucle:draft role=e2e -->/ { found=1 }
+                      found { print; if ($0 ~ /^VERDICT: (PASS|FAIL|UNCERTAIN)/) { exit } }
+                  ' "$AGENT_LOG" 2> /dev/null || echo "")
+          if [ -n "$DRAFTED_VERDICT" ]; then
+            echo "[boucle] WARN: no boucle:verdict in log — promoting boucle:draft to verdict (step-limit fallback)."
+            DRAFTED_VERDICT=$(printf '%s' "$DRAFTED_VERDICT" | sed "s|<!-- boucle:draft role=e2e -->|<!-- boucle:verdict v=1 role=e2e sha=$MR_HEAD -->|")
+            # If the promoted draft has no VERDICT line, default to UNCERTAIN
+            # (the agent posted a draft checklist but ran out of steps before
+            # posting a final verdict with a VERDICT: line).
+            if ! echo "$DRAFTED_VERDICT" | grep -qiE '^VERDICT: (PASS|FAIL|UNCERTAIN)'; then
+              DRAFTED_VERDICT="$(printf '%s\n\nVERDICT: UNCERTAIN\n' "$DRAFTED_VERDICT")"
+              echo "[boucle] WARN: promoted e2e draft had no VERDICT line — defaulting to UNCERTAIN."
+            fi
+          fi
+        fi
+        if [ -n "$DRAFTED_VERDICT" ] && echo "$DRAFTED_VERDICT" | grep -qiE '^VERDICT: (PASS|FAIL|UNCERTAIN)'; then
+          echo "[boucle] Recovering drafted e2e verdict from agent log (step-limit fallback)."
+          DRAFTED_VERDICT=$(echo "$DRAFTED_VERDICT" | sed '/^```$/d')
+          forge_issue_note "$BOUCLE_ISSUE" "$DRAFTED_VERDICT"
+          COMMENT=$(forge_issue_notes "$BOUCLE_ISSUE" 2> /dev/null \
+            | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | first | .body // empty' 2> /dev/null)
+          # Reject a foreign-SHA re-fetch: a marker whose sha exists but differs
+          # from the e2e head is not this run's verdict (AGENTS.md P4).
+          NEW_FOUND_SHA=$(printf '%s' "$COMMENT" | grep -oE 'sha=[a-f0-9]+' | head -1 | cut -d= -f2 || true)
+          if [ -n "$NEW_FOUND_SHA" ] && [ -n "$MR_HEAD_SHORT" ] && [ "$NEW_FOUND_SHA" != "$MR_HEAD_SHORT" ]; then
+            echo "[boucle] REJECTED foreign-SHA e2e re-fetch: marker sha=$NEW_FOUND_SHA != head $MR_HEAD_SHORT. Not adopting."
+            COMMENT=""
+          fi
+          VERDICT=$(echo "$COMMENT" | grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
+          if [ -n "$VERDICT" ]; then
+            echo "[boucle] Step-limit fallback succeeded: recovered e2e verdict=$VERDICT."
+          else
+            echo "[boucle] Step-limit fallback failed: drafted verdict had no parsable VERDICT line."
           fi
         fi
       fi
-      if [ -n "$DRAFTED_VERDICT" ] && echo "$DRAFTED_VERDICT" | grep -qiE '^VERDICT: (PASS|FAIL|UNCERTAIN)'; then
-        echo "[boucle] Recovering drafted e2e verdict from agent log (step-limit fallback)."
-        DRAFTED_VERDICT=$(echo "$DRAFTED_VERDICT" | sed '/^```$/d')
-        forge_issue_note "$BOUCLE_ISSUE" "$DRAFTED_VERDICT"
-        COMMENT=$(forge_issue_notes "$BOUCLE_ISSUE" 2> /dev/null \
-          | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=e2e"))] | first | .body // empty' 2> /dev/null)
-        # Reject a foreign-SHA re-fetch: a marker whose sha exists but differs
-        # from the e2e head is not this run's verdict (AGENTS.md P4).
-        NEW_FOUND_SHA=$(printf '%s' "$COMMENT" | grep -oE 'sha=[a-f0-9]+' | head -1 | cut -d= -f2 || true)
-        if [ -n "$NEW_FOUND_SHA" ] && [ -n "$MR_HEAD_SHORT" ] && [ "$NEW_FOUND_SHA" != "$MR_HEAD_SHORT" ]; then
-          echo "[boucle] REJECTED foreign-SHA e2e re-fetch: marker sha=$NEW_FOUND_SHA != head $MR_HEAD_SHORT. Not adopting."
-          COMMENT=""
-        fi
-        VERDICT=$(echo "$COMMENT" | grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
-        if [ -n "$VERDICT" ]; then
-          echo "[boucle] Step-limit fallback succeeded: recovered e2e verdict=$VERDICT."
-        else
-          echo "[boucle] Step-limit fallback failed: drafted verdict had no parsable VERDICT line."
-        fi
-      fi
     fi
+
+    # Collapse duplicate e2e verdicts: replace the draft in place (PUT the
+    # final verdict body onto the draft's note id so the #note_<id> anchor stays
+    # stable) and delete redundant copies. Agent may post a v2; CI replaces the first.
+    "$BOUCLE_HOME"/bin/collapse-duplicate-notes e2e "$BOUCLE_PROJECT_ID" "$BOUCLE_ISSUE" "$PRE_RUN_VERDICT_ID" "$BOUCLE_FORGE_HOST"
   fi
 
-  # Collapse duplicate e2e verdicts: replace the draft in place (PUT the
-  # final verdict body onto the draft's note id so the #note_<id> anchor stays
-  # stable) and delete redundant copies. Agent may post a v2; CI replaces the first.
-  "$BOUCLE_HOME"/bin/collapse-duplicate-notes e2e "$BOUCLE_PROJECT_ID" "$BOUCLE_ISSUE" "$PRE_RUN_VERDICT_ID" "$BOUCLE_FORGE_HOST"
-
+  # ── Shared verdict routing (command-mode and agent-mode) ────────────
   case "$VERDICT" in
     PASS)
       # Post a deploy-success note on the issue BEFORE the terminal label so

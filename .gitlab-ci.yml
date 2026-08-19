@@ -111,6 +111,20 @@ variables:
   BOUCLE_DEPLOY_MODE: "self"
   # Review mode: "preview" (review tests against deployed preview) or "diff" (review PR diff + check suites)
   BOUCLE_REVIEW_MODE: "preview"
+  # Command-mode e2e: consumer-supplied verify command (replaces the URL-probing
+  # agent). Empty = agent-mode (URL probe). Non-empty = run the command; exit 0=PASS,
+  # non-zero=FAIL. Use 'true' for a no-op (always PASS — for repos with no live URL).
+  # Examples:
+  #   pytest:           "pytest -m unit"
+  #   make test:        "make test"
+  #   ansible check:    "ansible-playbook --check --diff playbook.yml"
+  #   no-op:            "true"
+  BOUCLE_E2E_COMMAND: ""
+  # Max seconds for the e2e command (default 3600 = 1h).
+  BOUCLE_E2E_COMMAND_TIMEOUT: "3600"
+  # Optional: a command that takes the verify log as $1 and emits a markdown
+  # evidence block to stdout. If unset, boucle formats a default block.
+  BOUCLE_E2E_COMMAND_EVIDENCE_PARSER: ""
   # External deploy: max seconds to wait for consumer's own CI run on merged commit
   BOUCLE_EXTERNAL_DEPLOY_WAIT: "600"
   # Diff review: max seconds to wait for PR check suites before proceeding

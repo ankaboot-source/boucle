@@ -1311,6 +1311,12 @@ boucle_is_screenshot_review() {
   [ "$(boucle_review_mode)" = "screenshot" ]
 }
 
+# boucle_is_command_e2e
+#   Returns 0 (true) if BOUCLE_E2E_COMMAND is set and non-empty (command-mode e2e).
+boucle_is_command_e2e() {
+  [ -n "${BOUCLE_E2E_COMMAND:-}" ]
+}
+
 # boucle_is_screenshot_review_effective
 #   Returns 0 (true) if screenshot review is in effect, either because
 #   BOUCLE_REVIEW_MODE=screenshot was set explicitly, OR because
@@ -1374,6 +1380,12 @@ boucle_resolve_live_url() {
   # the canonical URL.
   if [ "${BOUCLE_DEPLOY_PROVIDER:-}" = "github-pages" ]; then
     echo "$(boucle_github_pages_url)"
+    return
+  fi
+
+  # Command-mode e2e: no URL needed. Don't fabricate a pages.dev fallback.
+  if boucle_is_command_e2e; then
+    echo "$url" # may be empty — that's fine for command-mode
     return
   fi
 

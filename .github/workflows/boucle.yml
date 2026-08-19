@@ -73,6 +73,15 @@ on:
       BOUCLE_REVIEW_MODE:
         description: "Review mode (preview|diff)"
         required: false
+      BOUCLE_E2E_COMMAND:
+        description: "Command-mode e2e verify command (replaces URL-probing agent)"
+        required: false
+      BOUCLE_E2E_COMMAND_TIMEOUT:
+        description: "Max seconds for the e2e command (default 3600)"
+        required: false
+      BOUCLE_E2E_COMMAND_EVIDENCE_PARSER:
+        description: "Command that takes the verify log as $1 and emits markdown evidence"
+        required: false
       BOUCLE_EXTERNAL_DEPLOY_WAIT:
         description: "Seconds to wait for external deploy CI"
         required: false
@@ -144,6 +153,9 @@ env:
   BOUCLE_VISION_ROLES: ${{ vars.BOUCLE_VISION_ROLES || 'triage,worker,reviewer' }}
   BOUCLE_DEPLOY_MODE: ${{ vars.BOUCLE_DEPLOY_MODE || 'self' }}
   BOUCLE_REVIEW_MODE: ${{ vars.BOUCLE_REVIEW_MODE || 'preview' }}
+  BOUCLE_E2E_COMMAND: ${{ vars.BOUCLE_E2E_COMMAND || '' }}
+  BOUCLE_E2E_COMMAND_TIMEOUT: ${{ vars.BOUCLE_E2E_COMMAND_TIMEOUT || '3600' }}
+  BOUCLE_E2E_COMMAND_EVIDENCE_PARSER: ${{ vars.BOUCLE_E2E_COMMAND_EVIDENCE_PARSER || '' }}
   BOUCLE_EXTERNAL_DEPLOY_WAIT: ${{ vars.BOUCLE_EXTERNAL_DEPLOY_WAIT || '600' }}
   BOUCLE_REVIEW_CHECKS_WAIT: ${{ vars.BOUCLE_REVIEW_CHECKS_WAIT || '900' }}
   BOUCLE_PREVIEW_MARKER_PATH: ${{ vars.BOUCLE_PREVIEW_MARKER_PATH || '__boucle_commit__.txt' }}
