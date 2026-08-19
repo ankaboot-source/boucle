@@ -165,3 +165,96 @@ approver() {
   run grep -q 'accepting a reaction from any non-bot user (previous behaviour)' lib/boucle-ci/doctor.sh
   assert_success
 }
+
+# ── Spec-completeness guard (LESSONS.yml lesson #92) ───────────────────
+# A triage comment is only routable when it carries BOTH ## TL;DR and
+# ## Disposition. The main jq COMMENT filter already enforces this, but
+# three recovery paths (pre-agent draft promotion, log-scraping fallback,
+# posted-draft promotion) parse ## Disposition DIRECTLY, bypassing the
+# ## TL;DR check. An agent that posts a draft stub ("DRAFT — first-pass
+# triage, refining next.") with the FINAL marker + ## Disposition READY
+# but no ## TL;DR would be promoted by those paths, routing an EMPTY
+# spec to the spec gate and asking the human to approve nothing
+# (boucle.dev #73). The guard refuses to promote a comment without
+# ## TL;DR and escalates to human instead of routing an empty spec.
+
+@test "spec-completeness: comment_has_tldr detects a ## TL;DR section header" {
+  run bash -c "
+    comment_has_tldr() { printf '%s' \"\$1\" | grep -qiE '^## TL;DR[[:space:]]*\$'; }
+    comment_has_tldr '## TL;DR
+some content' && echo yes || echo no
+  "
+  assert_output "yes"
+}
+
+@test "spec-completeness: comment_has_tldr rejects a draft stub without ## TL;DR" {
+  run bash -c "
+    comment_has_tldr() { printf '%s' \"\$1\" | grep -qiE '^## TL;DR[[:space:]]*\$'; }
+    comment_has_tldr 'DRAFT — first-pass triage, refining next.
+## Disposition
+READY' && echo yes || echo no
+  "
+  assert_output "no"
+}
+
+@test "spec-completeness: comment_has_tldr does not false-match TL;DR in prose" {
+  # A body-text grep for 'TL;DR' would false-match website content being
+  # triaged (e.g. a draft page the author wants reviewed). The structural
+  # check (section header) does not.
+  run bash -c "
+    comment_has_tldr() { printf '%s' \"\$1\" | grep -qiE '^## TL;DR[[:space:]]*\$'; }
+    comment_has_tldr 'The TL;DR of this issue is that the page is broken.
+## Disposition
+READY' && echo yes || echo no
+  "
+  assert_output "no"
+}
+
+@test "spec-completeness: triage.sh defines comment_has_tldr and INCOMPLETE_SPEC" {
+  run grep -q 'comment_has_tldr()' lib/boucle-ci/triage.sh
+  assert_success
+  run grep -q 'INCOMPLETE_SPEC=0' lib/boucle-ci/triage.sh
+  assert_success
+}
+
+@test "spec-completeness: pre-agent draft promotion guards on ## TL;DR" {
+  # The pre-agent promotion path MUST call comment_has_tldr before promoting
+  # a draft. A draft without ## TL;DR is an incomplete spec.
+  run bash -c "grep -c 'comment_has_tldr \"\$PRE_DRAFTED_COMMENT\"' lib/boucle-ci/triage.sh"
+  assert_success
+  [ "$output" -ge 1 ]
+}
+
+@test "spec-completeness: log-scraping fallback guards on ## TL;DR" {
+  run bash -c "grep -c 'comment_has_tldr \"\$DRAFTED_COMMENT\"' lib/boucle-ci/triage.sh"
+  assert_success
+  [ "$output" -ge 2 ]
+}
+
+@test "spec-completeness: posted-draft promotion guards on ## TL;DR" {
+  # The posted-draft promotion path also guards on ## TL;DR (the second
+  # occurrence of comment_has_tldr \"\$DRAFTED_COMMENT\" is in this path).
+  run bash -c "grep -c 'comment_has_tldr' lib/boucle-ci/triage.sh"
+  assert_success
+  # 3 call sites (pre-agent, log-scrape, posted-draft) + 1 definition = 4.
+  [ "$output" -ge 4 ]
+}
+
+@test "spec-completeness: INCOMPLETE_SPEC escalation posts a note and escalates to human" {
+  # When INCOMPLETE_SPEC=1, the no-disposition handler MUST post an
+  # explanatory note and set boucle:human — never route an empty spec to
+  # the spec gate.
+  run bash -c "awk '/Incomplete-spec escalation/,/set_boucle_label .*boucle:human/' lib/boucle-ci/triage.sh | grep -c 'INCOMPLETE_SPEC'"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | tail -1)" -ge 1 ]
+  run grep -q 'incomplete spec' lib/boucle-ci/triage.sh
+  assert_success
+  run grep -q 'empty spec cannot be approved' lib/boucle-ci/triage.sh
+  assert_success
+}
+
+@test "spec-completeness: the escalation note names the re-trigger path" {
+  # The human must know how to resume: re-apply boucle:triage.
+  run grep -q 'Re-trigger triage' lib/boucle-ci/triage.sh
+  assert_success
+}

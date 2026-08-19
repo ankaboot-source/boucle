@@ -250,6 +250,29 @@ HELP_EOF
   PRE_RUN_TRIAGE_ID=$(forge_issue_notes "$IID" \
     | jq -r '[.[] | select(.body | contains("<!-- boucle:triage")) | select(.body | test("## TL;DR")) | select(.body | test("## Disposition"))] | first | .id // 0')
 
+  # ── Spec-completeness guard (LESSONS.yml lesson #92) ───────────────────
+  # A triage comment is only routable when it carries BOTH ## TL;DR and
+  # ## Disposition (lesson #45: distinguish draft from final by structure).
+  # The main jq COMMENT filter already enforces this. But three recovery
+  # paths (pre-agent draft promotion, log-scraping fallback, posted-draft
+  # promotion) parse ## Disposition DIRECTLY, bypassing the ## TL;DR check.
+  # An agent that posts a draft stub ("DRAFT — first-pass triage, refining
+  # next.") with the FINAL marker + ## Disposition READY but no ## TL;DR
+  # would be promoted by those paths, routing an EMPTY spec to the spec
+  # gate and asking the human to approve nothing (boucle.dev #73).
+  #
+  # comment_has_tldr returns 0 (true) when the comment has a ## TL;DR
+  # section header, 1 (false) otherwise. Every recovery path MUST call it
+  # before adopting a disposition, and set INCOMPLETE_SPEC=1 when it fails
+  # so the no-disposition handler escalates instead of routing an empty
+  # spec. A draft that legitimately lacks ## TL;DR is left in place for
+  # the agent (or a later run) to refine — it is never promoted to a
+  # routing decision.
+  comment_has_tldr() {
+    printf '%s' "$1" | grep -qiE '^## TL;DR[[:space:]]*$'
+  }
+  INCOMPLETE_SPEC=0
+
   # ── Pre-agent draft promotion (timeout safety net) ──────────────────────
   # A previous triage run may have posted first-pass drafts (post-early
   # rule) but timed out before triage.sh could promote them — e.g. the
@@ -264,6 +287,11 @@ HELP_EOF
   # runs afterwards and may post a richer triage comment that supersedes
   # the promoted draft; if it times out, the promoted draft's disposition
   # is already parsed and the issue moves forward.
+  #
+  # A draft without ## TL;DR is an incomplete spec (lesson #92): leave it
+  # in place for the agent to refine, do NOT promote it to a routing
+  # decision. Promoting an empty spec routes the issue to the spec gate
+  # with no spec to approve (boucle.dev #73).
   PRE_PROMOTED_DISPOSITION=""
   PRE_PROMOTED_SIZE=""
   PRE_PROMOTED_NOTE_ID=0
@@ -274,24 +302,31 @@ HELP_EOF
     PRE_DRAFTED_COMMENT=$(forge_issue_note_get "$IID" "$PRE_DRAFT_NOTE_ID" 2> /dev/null \
       | jq -r '.body // empty' 2> /dev/null)
     if [ -n "$PRE_DRAFTED_COMMENT" ]; then
-      echo "[boucle] Pre-agent: promoting existing draft (note $PRE_DRAFT_NOTE_ID) to triage — safety net for timeout."
-      PRE_DRAFTED_COMMENT=$(printf '%s' "$PRE_DRAFTED_COMMENT" | sed 's|<!-- boucle:draft role=triage -->|<!-- boucle:triage v=1 -->|')
-      if forge_issue_note_update "$IID" "$PRE_DRAFT_NOTE_ID" "$PRE_DRAFTED_COMMENT"; then
-        PRE_PROMOTED_NOTE_ID="$PRE_DRAFT_NOTE_ID"
-        PRE_PROMOTED_DISPOSITION=$(echo "$PRE_DRAFTED_COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
-        PRE_PROMOTED_SIZE=$(echo "$PRE_DRAFTED_COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
-        if [ -z "$PRE_PROMOTED_SIZE" ]; then
-          PRE_PROMOTED_SIZE=$(echo "$PRE_DRAFTED_COMMENT" | grep -oiE 'Size[[:space:]]+[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
-        fi
-        echo "[boucle] Pre-agent: promoted draft disposition=${PRE_PROMOTED_DISPOSITION:-?} size=${PRE_PROMOTED_SIZE:-?}."
-        # Advance PRE_RUN_TRIAGE_ID past the promoted note so the post-
-        # agent COMMENT query doesn't re-find it (it requires ## TL;DR
-        # which a draft lacks, but be explicit — the promoted note is
-        # now a triage note and could match if the agent posts ## TL;DR
-        # in a SEPARATE note that the jq `first` skips over).
-        PRE_RUN_TRIAGE_ID="$PRE_DRAFT_NOTE_ID"
+      # Spec-completeness guard (lesson #92): a draft without ## TL;DR
+      # is an incomplete spec — do NOT promote it to a routing
+      # decision. Leave it in place for the agent to refine.
+      if ! comment_has_tldr "$PRE_DRAFTED_COMMENT"; then
+        echo "[boucle] Pre-agent: draft (note $PRE_DRAFT_NOTE_ID) has no ## TL;DR — incomplete spec, NOT promoting (lesson #92)."
       else
-        echo "[boucle] Pre-agent: draft promotion failed (note update rejected for note $PRE_DRAFT_NOTE_ID)." >&2
+        echo "[boucle] Pre-agent: promoting existing draft (note $PRE_DRAFT_NOTE_ID) to triage — safety net for timeout."
+        PRE_DRAFTED_COMMENT=$(printf '%s' "$PRE_DRAFTED_COMMENT" | sed 's|<!-- boucle:draft role=triage -->|<!-- boucle:triage v=1 -->|')
+        if forge_issue_note_update "$IID" "$PRE_DRAFT_NOTE_ID" "$PRE_DRAFTED_COMMENT"; then
+          PRE_PROMOTED_NOTE_ID="$PRE_DRAFT_NOTE_ID"
+          PRE_PROMOTED_DISPOSITION=$(echo "$PRE_DRAFTED_COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
+          PRE_PROMOTED_SIZE=$(echo "$PRE_DRAFTED_COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
+          if [ -z "$PRE_PROMOTED_SIZE" ]; then
+            PRE_PROMOTED_SIZE=$(echo "$PRE_DRAFTED_COMMENT" | grep -oiE 'Size[[:space:]]+[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
+          fi
+          echo "[boucle] Pre-agent: promoted draft disposition=${PRE_PROMOTED_DISPOSITION:-?} size=${PRE_PROMOTED_SIZE:-?}."
+          # Advance PRE_RUN_TRIAGE_ID past the promoted note so the post-
+          # agent COMMENT query doesn't re-find it (it requires ## TL;DR
+          # which a draft lacks, but be explicit — the promoted note is
+          # now a triage note and could match if the agent posts ## TL;DR
+          # in a SEPARATE note that the jq `first` skips over).
+          PRE_RUN_TRIAGE_ID="$PRE_DRAFT_NOTE_ID"
+        else
+          echo "[boucle] Pre-agent: draft promotion failed (note update rejected for note $PRE_DRAFT_NOTE_ID)." >&2
+        fi
       fi
     fi
   fi
@@ -358,29 +393,41 @@ HELP_EOF
         fi
       fi
       if [ -n "$DRAFTED_COMMENT" ] && echo "$DRAFTED_COMMENT" | grep -qiE '^## Disposition'; then
-        echo "[boucle] Recovering drafted triage comment from agent log (step-limit fallback)."
-        # Strip leading/trailing ``` fences if the agent wrapped the comment.
-        DRAFTED_COMMENT=$(echo "$DRAFTED_COMMENT" | sed '/^```$/d')
-        forge_issue_note "$IID" "$DRAFTED_COMMENT"
-        # Parse DIRECTLY from the promoted draft. A first-pass draft has no
-        # ## TL;DR (triage.md draft format), so re-fetching through the
-        # COMMENT filter — which requires ## TL;DR — would find nothing and
-        # drop the recovered disposition.
-        COMMENT="$DRAFTED_COMMENT"
-        DISPOSITION=$(echo "$COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
-        SIZE=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
-        # A first-pass draft may state the size in prose ("Size M ...")
-        # instead of a ## Classification section — recover it so the spec
-        # gate still applies for M (recovery path only).
-        if [ -z "$SIZE" ]; then
-          SIZE=$(echo "$COMMENT" | grep -oiE 'Size[[:space:]]+[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
-        fi
-        VALIDATION=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Validation:[[:space:]]*(author-required|autonomous)' | grep -oiE '(author-required|autonomous)' | head -1 | tr '[:upper:]' '[:lower:]')
-        if [ -n "$DISPOSITION" ]; then
-          echo "[boucle] Step-limit fallback succeeded: recovered disposition=$DISPOSITION size=${SIZE:-?}."
+        # Spec-completeness guard (lesson #92): a drafted comment with
+        # ## Disposition but no ## TL;DR is an incomplete spec (a draft
+        # stub the agent posted with the final marker before refining —
+        # the #42 pattern). Do NOT post it as a triage comment and do NOT
+        # parse its disposition: routing an empty spec to the spec gate
+        # asks the human to approve nothing (boucle.dev #73). Leave the
+        # issue at boucle:triage for a re-run to produce a complete spec.
+        if ! comment_has_tldr "$DRAFTED_COMMENT"; then
+          echo "[boucle] WARN: scraped draft has ## Disposition but no ## TL;DR — incomplete spec, NOT posting (lesson #92)."
+          INCOMPLETE_SPEC=1
         else
-          echo "[boucle] Step-limit fallback failed: drafted comment had no parsable Disposition."
-        fi
+          echo "[boucle] Recovering drafted triage comment from agent log (step-limit fallback)."
+          # Strip leading/trailing ``` fences if the agent wrapped the comment.
+          DRAFTED_COMMENT=$(echo "$DRAFTED_COMMENT" | sed '/^```$/d')
+          forge_issue_note "$IID" "$DRAFTED_COMMENT"
+          # Parse DIRECTLY from the promoted draft. A first-pass draft has no
+          # ## TL;DR (triage.md draft format), so re-fetching through the
+          # COMMENT filter — which requires ## TL;DR — would find nothing and
+          # drop the recovered disposition.
+          COMMENT="$DRAFTED_COMMENT"
+          DISPOSITION=$(echo "$COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
+          SIZE=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
+          # A first-pass draft may state the size in prose ("Size M ...")
+          # instead of a ## Classification section — recover it so the spec
+          # gate still applies for M (recovery path only).
+          if [ -z "$SIZE" ]; then
+            SIZE=$(echo "$COMMENT" | grep -oiE 'Size[[:space:]]+[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
+          fi
+          VALIDATION=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Validation:[[:space:]]*(author-required|autonomous)' | grep -oiE '(author-required|autonomous)' | head -1 | tr '[:upper:]' '[:lower:]')
+          if [ -n "$DISPOSITION" ]; then
+            echo "[boucle] Step-limit fallback succeeded: recovered disposition=$DISPOSITION size=${SIZE:-?}."
+          else
+            echo "[boucle] Step-limit fallback failed: drafted comment had no parsable Disposition."
+          fi
+        fi # comment_has_tldr guard
       fi
     fi
   fi
@@ -401,30 +448,38 @@ HELP_EOF
       DRAFTED_COMMENT=$(forge_issue_note_get "$IID" "$DRAFT_NOTE_ID" 2> /dev/null \
         | jq -r '.body // empty' 2> /dev/null)
       if [ -n "$DRAFTED_COMMENT" ]; then
-        echo "[boucle] WARN: no boucle:triage in log — promoting posted boucle:draft (note $DRAFT_NOTE_ID) to triage."
-        DRAFTED_COMMENT=$(printf '%s' "$DRAFTED_COMMENT" | sed 's|<!-- boucle:draft role=triage -->|<!-- boucle:triage v=1 -->|')
-        if forge_issue_note_update "$IID" "$DRAFT_NOTE_ID" "$DRAFTED_COMMENT"; then
-          # Parse DIRECTLY from the promoted draft. A first-pass draft has no
-          # ## TL;DR (triage.md draft format), so re-fetching through the
-          # COMMENT filter — which requires ## TL;DR — would find nothing and
-          # drop the recovered disposition.
-          COMMENT="$DRAFTED_COMMENT"
-          DISPOSITION=$(echo "$COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
-          SIZE=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
-          # A first-pass draft may state the size in prose ("Size M ...")
-          # instead of a ## Classification section — recover it so the spec
-          # gate still applies for M (recovery path only).
-          if [ -z "$SIZE" ]; then
-            SIZE=$(echo "$COMMENT" | grep -oiE 'Size[[:space:]]+[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
-          fi
-          if [ -n "$DISPOSITION" ]; then
-            echo "[boucle] Posted-draft promotion succeeded: disposition=$DISPOSITION size=${SIZE:-?}."
-          else
-            echo "[boucle] Posted-draft promotion failed: posted draft had no parsable Disposition."
-          fi
+        # Spec-completeness guard (lesson #92): a posted draft without
+        # ## TL;DR is an incomplete spec — do NOT promote it to a routing
+        # decision. Leave it in place for a re-run to refine.
+        if ! comment_has_tldr "$DRAFTED_COMMENT"; then
+          echo "[boucle] WARN: posted draft (note $DRAFT_NOTE_ID) has ## Disposition but no ## TL;DR — incomplete spec, NOT promoting (lesson #92)."
+          INCOMPLETE_SPEC=1
         else
-          echo "[boucle] Posted-draft promotion failed: note update rejected (note $DRAFT_NOTE_ID)." >&2
-        fi
+          echo "[boucle] WARN: no boucle:triage in log — promoting posted boucle:draft (note $DRAFT_NOTE_ID) to triage."
+          DRAFTED_COMMENT=$(printf '%s' "$DRAFTED_COMMENT" | sed 's|<!-- boucle:draft role=triage -->|<!-- boucle:triage v=1 -->|')
+          if forge_issue_note_update "$IID" "$DRAFT_NOTE_ID" "$DRAFTED_COMMENT"; then
+            # Parse DIRECTLY from the promoted draft. A first-pass draft has no
+            # ## TL;DR (triage.md draft format), so re-fetching through the
+            # COMMENT filter — which requires ## TL;DR — would find nothing and
+            # drop the recovered disposition.
+            COMMENT="$DRAFTED_COMMENT"
+            DISPOSITION=$(echo "$COMMENT" | awk '/^## Disposition[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1 | tr '[:lower:]' '[:upper:]')
+            SIZE=$(echo "$COMMENT" | awk '/^## Classification[[:space:]]*$/{f=1;next}/^## /{f=0}f' | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
+            # A first-pass draft may state the size in prose ("Size M ...")
+            # instead of a ## Classification section — recover it so the spec
+            # gate still applies for M (recovery path only).
+            if [ -z "$SIZE" ]; then
+              SIZE=$(echo "$COMMENT" | grep -oiE 'Size[[:space:]]+[SML]' | grep -oiE '[SML][[:space:]]*$' | tr -d '[:space:]' | head -1 | tr '[:lower:]' '[:upper:]')
+            fi
+            if [ -n "$DISPOSITION" ]; then
+              echo "[boucle] Posted-draft promotion succeeded: disposition=$DISPOSITION size=${SIZE:-?}."
+            else
+              echo "[boucle] Posted-draft promotion failed: posted draft had no parsable Disposition."
+            fi
+          else
+            echo "[boucle] Posted-draft promotion failed: note update rejected (note $DRAFT_NOTE_ID)." >&2
+          fi
+        fi # comment_has_tldr guard
       fi
     fi
   fi
@@ -463,6 +518,24 @@ HELP_EOF
   # new question asked — the exact "back to a human review although
   # no question was asked" symptom.
   if [ -z "$DISPOSITION" ]; then
+    # ── Incomplete-spec escalation (lesson #92) ───────────────────────
+    # The agent posted a comment with ## Disposition but no ## TL;DR — a
+    # draft stub it shipped with the final marker before refining (the
+    # #42 pattern). The recovery paths refused to promote it (correctly),
+    # so DISPOSITION is empty. Escalate to human: an empty spec routed to
+    # the spec gate asks the human to approve nothing (boucle.dev #73),
+    # and leaving the issue at boucle:triage makes the doctor re-trigger
+    # the same broken triage every sweep. The human can re-trigger triage
+    # after the agent prompt / provider issue is resolved.
+    if [ "${INCOMPLETE_SPEC:-0}" = "1" ]; then
+      echo "[boucle] Incomplete spec (draft with ## Disposition but no ## TL;DR) — escalating issue #$IID to human (lesson #92)."
+      if ! forge_issue_note "$IID" ":warning: Triage produced an incomplete spec (a draft with \`## Disposition\` but no \`## TL;DR\`). The spec was NOT routed to the approval gate — an empty spec cannot be approved. Escalating to human review. Re-trigger triage (re-apply \`boucle:triage\`) once the agent produces a complete spec. See the job logs at $BOUCLE_JOB_URL."; then
+        echo "FAIL: incomplete-spec escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
+        exit 1
+      fi
+      set_boucle_label "$IID" "boucle:human" "boucle::status::human"
+      exit 1
+    fi
     # ── Circuit breaker (silent-failure escalation) ─────────────────
     # bin/jc exits 3 when the agent produced NO posted comment AND NO
     # drafted comment (silent failure — e.g. hit OUTPUT_TOKEN_MAX
