@@ -211,7 +211,10 @@ download_and_extract() {
 # On GitHub, the workflow file MUST be at the repo root — GitHub Actions
 # only reads .github/workflows/ at the root, not inside .boucle/. So the
 # workflow IS propagated.
-CONSUMER_ROOT_DOCS="AGENTS.md SKILL.md ARCHITECTURE.md"
+# AGENTS.md is consumer-owned (project-specific context); SKILL.md and
+# ARCHITECTURE.md are engine-owned. See bin/setup §"Charter docs" for the
+# rationale (consumer AGENTS.md overwrite regression during m3llm migration).
+CONSUMER_ROOT_DOCS="SKILL.md ARCHITECTURE.md"
 
 # propagate_consumer_root_files
 # Copies engine-owned docs + CI from ENGINE_DIR to the consumer root.

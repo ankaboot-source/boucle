@@ -212,13 +212,32 @@ setup() {
   cd "$tmpdir" || return
   ENGINE_DIR=".boucle" BOUCLE_FORGE=github run propagate_consumer_root_files
   assert_success
-  assert_output --partial "AGENTS.md"
+  # AGENTS.md is consumer-owned — NOT propagated. SKILL.md + ARCHITECTURE.md
+  # are engine-owned and propagated.
+  refute_output --partial "AGENTS.md"
   assert_output --partial "SKILL.md"
   assert_output --partial "ARCHITECTURE.md"
-  [ -f "$tmpdir/AGENTS.md" ]
+  [ ! -f "$tmpdir/AGENTS.md" ]
   [ -f "$tmpdir/SKILL.md" ]
   [ -f "$tmpdir/ARCHITECTURE.md" ]
   [ -f "$tmpdir/.github/workflows/boucle.yml" ]
+}
+
+@test "propagate_consumer_root_files does NOT overwrite consumer-owned AGENTS.md" {
+  # AGENTS.md is consumer-owned (project-specific context). The engine has
+  # its own AGENTS.md inside .boucle/, but it MUST NOT overwrite the consumer's.
+  # Regression: bin/setup/bin/update used to copy AGENTS.md from the engine,
+  # destroying the consumer's project context (observed during m3llm migration).
+  # shellcheck disable=SC2154
+  local tmpdir="$BATS_TEST_TMPDIR"
+  mkdir -p "$tmpdir/.boucle"
+  echo "# consumer AGENTS — project context" > "$tmpdir/AGENTS.md"
+  echo "# engine AGENTS — generic charter" > "$tmpdir/.boucle/AGENTS.md"
+  cd "$tmpdir" || return
+  ENGINE_DIR=".boucle" BOUCLE_FORGE=github run propagate_consumer_root_files
+  assert_success
+  run cat "$tmpdir/AGENTS.md"
+  assert_output "# consumer AGENTS — project context"
 }
 
 @test "propagate_consumer_root_files does NOT overwrite consumer-owned docs" {
