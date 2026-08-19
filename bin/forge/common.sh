@@ -361,13 +361,12 @@ forge_reaction_canonical() {
 # ── Contract: CI variable mapping ────────────────────────────────────────
 #
 # forge_ci_var_set <key> <value> [masked] [protected]
-#   Set a CI variable (repo secret). Returns 0 on success.
-#   (GitLab: /projects/:id/variables; GitHub: gh secret set.)
+#   Set a CI variable (repo variable). Returns 0 on success.
+#   (GitLab: /projects/:id/variables; GitHub: gh variable set.)
 #
 # forge_ci_var_get <key>
 #   Get a CI variable value. Returns empty on failure.
-#   (GitLab: /projects/:id/variables/:key; GitHub: secrets are write-only —
-#   returns empty and callers must not rely on this for GitHub.)
+#   (GitLab: /projects/:id/variables/:key; GitHub: gh variable get.)
 #
 # forge_ci_var_list
 #   List CI variable names (one per line). Returns empty on failure.

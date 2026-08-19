@@ -809,23 +809,22 @@ forge_webhook_issue_iid() {
   echo "$payload" | jq -r '.issue.number // .pull_request.number // empty' 2> /dev/null || true
 }
 
-# ── CI variables (repo secrets) ──────────────────────────────────────────
+# ── CI variables (repo variables) ────────────────────────────────────────
 
 forge_ci_var_set() {
   local key="$1" value="$2" masked="${3:-true}" protected="${4:-false}"
-  # GitHub secrets are always masked (write-only). Use gh CLI for simplicity
-  # (handles libsodium encryption internally).
-  echo "$value" | GH_TOKEN="$BOUCLE_TOKEN" gh secret set "$key" --repo "$BOUCLE_PROJECT_ID" 2> /dev/null || true
+  # GitHub Actions Variables (plaintext, readable) — NOT Secrets (write-only).
+  # `gh variable set` creates or updates the variable. --body takes the value.
+  echo "$value" | GH_TOKEN="$BOUCLE_TOKEN" gh variable set "$key" --repo "$BOUCLE_PROJECT_ID" --body - 2> /dev/null || true
 }
 
 forge_ci_var_get() {
-  # GitHub secrets are write-only — cannot read values via API.
-  # Return empty; callers must not rely on this for GitHub.
-  echo ""
+  local key="$1"
+  GH_TOKEN="$BOUCLE_TOKEN" gh variable get "$key" --repo "$BOUCLE_PROJECT_ID" 2> /dev/null || true
 }
 
 forge_ci_var_list() {
-  GH_TOKEN="$BOUCLE_TOKEN" gh secret list --repo "$BOUCLE_PROJECT_ID" 2> /dev/null | awk '{print $1}' || true
+  GH_TOKEN="$BOUCLE_TOKEN" gh variable list --repo "$BOUCLE_PROJECT_ID" 2> /dev/null | awk '{print $1}' || true
 }
 
 # ── Branch protection ────────────────────────────────────────────────────

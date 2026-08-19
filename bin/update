@@ -26,8 +26,8 @@ UPSTREAM_TARBALL="$UPSTREAM_API/tarball"
 # - Legacy/dogfood: bin/update at repo root → ENGINE_DIR="."
 # - .boucle/ install: .boucle/bin/update → ENGINE_DIR=".boucle"
 # This auto-detects the install model — no env var needed. The engine
-# files (bin/, lib/, .jcode/, .gitlab-ci.yml, LOOP.md, .boucle-version)
-# are synced INTO ENGINE_DIR, not the consumer repo root.
+# files (bin/, lib/, .jcode/, .gitlab-ci.yml, LOOP.md) are synced INTO
+# ENGINE_DIR, not the consumer repo root.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENGINE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Make ENGINE_DIR relative to CWD for cleaner git operations.
@@ -36,7 +36,18 @@ case "$ENGINE_DIR" in
   "$CWD") ENGINE_DIR="." ;;
   "$CWD"/*) ENGINE_DIR="${ENGINE_DIR#"$CWD"/}" ;;
 esac
-VERSION_FILE="$ENGINE_DIR/.boucle-version"
+
+# ── Forge backend ─────────────────────────────────────────────────────
+# bin/update runs in the before_script BEFORE lib/boucle-ci.sh sources the
+# forge backend, so source it here to get forge_ci_var_set (used to record
+# BOUCLE_VERSION in the forge Variable). Fail-open: if the backend is
+# missing, forge_ci_var_set is a no-op and the sync still succeeds.
+if [ -f "$ENGINE_DIR/bin/forge/common.sh" ]; then
+  export BOUCLE_HOME="${BOUCLE_HOME:-$(cd "$ENGINE_DIR" && pwd)}"
+  # shellcheck source=forge/common.sh
+  . "$ENGINE_DIR/bin/forge/common.sh"
+  forge_init 2> /dev/null || true
+fi
 
 # ── Submodule detection ───────────────────────────────────────────────
 # When the engine is installed as a git submodule (.boucle/ is a gitlink
@@ -99,13 +110,25 @@ get_mode() {
   echo "${BOUCLE_UPDATE_MODE:-release}"
 }
 
-# get_current_version: echo the content of .boucle-version, or empty if missing.
+# get_current_version: echo the current engine version, or empty if unknown.
+# Resolution order:
+#   1. BOUCLE_VERSION env var (forge Variable — primary source in CI)
+#   2. Submodule pointer (git submodule status .boucle — for submodule installs)
+#   3. Empty (no file fallback — boucle only runs in forge CI)
 get_current_version() {
-  if [ -f "$VERSION_FILE" ]; then
-    cat "$VERSION_FILE"
-  else
-    echo ""
+  if [ -n "${BOUCLE_VERSION:-}" ]; then
+    echo "$BOUCLE_VERSION"
+    return
   fi
+  # Submodule pointer: for submodule installs, the gitlink IS the version.
+  # `git submodule status` outputs " <sha> .boucle (heads/main)" — field 1 is the SHA.
+  local sub_sha
+  sub_sha=$(git submodule status .boucle 2> /dev/null | awk '{print $1}' | tr -d ' ')
+  if [ -n "$sub_sha" ]; then
+    echo "$sub_sha"
+    return
+  fi
+  echo ""
 }
 
 # needs_update: return 0 if update needed, 1 if not.
@@ -294,21 +317,16 @@ main() {
     return 0
   fi
 
-  # First run: no .boucle-version → just record current version and exit.
-  # No file replacement happens on this run — we only record the baseline.
+  # First run: no BOUCLE_VERSION env var and no submodule pointer → just
+  # record the version in the forge Variable and exit. No file replacement
+  # happens on this run — we only record the baseline. The submodule pointer
+  # is set by `git submodule add` (done by bin/setup), so the next run
+  # derives the version from there.
   if [ -z "$current" ]; then
-    echo "$upstream" > "$VERSION_FILE"
-    # Force bot identity — NEVER preserve the clone's inherited identity.
-    # On a CI runner the clone inherits the human's git config, so a
-    # `git config user.email > /dev/null 2>&1 || ...` guard leaves the
-    # human's name as the commit author. The self-update commit is the
-    # bot's work, not the human's — force the bot identity unconditionally.
-    git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
-    git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
-    git add "$VERSION_FILE"
-    git commit -m "chore(boucle): record initial version $upstream" > /dev/null 2>&1 || true
-    configure_git_push
-    git push 2> /dev/null || echo "[boucle] WARN: push failed, will retry next pipeline" >&2
+    # Record the new version in the forge Variable so the next run sees it.
+    # This replaces the old .boucle-version file write. The forge Variable
+    # persists across CI runs (GitHub Actions Variables, GitLab CI/CD Variables).
+    forge_ci_var_set "BOUCLE_VERSION" "$upstream" 2> /dev/null || true
     echo "[boucle] recorded initial version $upstream"
     return 0
   fi
@@ -369,10 +387,10 @@ main() {
     git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
     git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
     git update-index --cacheinfo 160000 "$submodule_sha" "$ENGINE_DIR"
-    # Also update the version file (tracked at the parent root for
-    # bin/update's own version check on the next run).
-    echo "$upstream" > "$VERSION_FILE"
-    git add "$VERSION_FILE"
+    # Record the new version in the forge Variable so the next run sees it.
+    # This replaces the old .boucle-version file write. The forge Variable
+    # persists across CI runs (GitHub Actions Variables, GitLab CI/CD Variables).
+    forge_ci_var_set "BOUCLE_VERSION" "$upstream" 2> /dev/null || true
     # Propagate engine-owned docs to the consumer root (submodule files
     # are not readable by agents at the parent root — AGENTS.md etc. must
     # be copied out). The CI checkout materializes .boucle/ so the docs
@@ -398,8 +416,10 @@ main() {
   # LOOP.md, CONTEXT.md) are NOT overwritten.
   propagated_files=$(propagate_consumer_root_files)
 
-  # Update version file
-  echo "$upstream" > "$VERSION_FILE"
+  # Record the new version in the forge Variable so the next run sees it.
+  # This replaces the old .boucle-version file write. The forge Variable
+  # persists across CI runs (GitHub Actions Variables, GitLab CI/CD Variables).
+  forge_ci_var_set "BOUCLE_VERSION" "$upstream" 2> /dev/null || true
 
   # Commit and push
   # Force bot identity — NEVER preserve the clone's inherited identity.
@@ -415,7 +435,7 @@ main() {
     add_paths="$add_paths $ENGINE_DIR/$path"
   done
   # shellcheck disable=SC2086 # word-splitting is intentional: add_paths is a space-separated list.
-  git add $add_paths "$VERSION_FILE" $propagated_files
+  git add $add_paths $propagated_files
   git commit -m "chore(boucle): auto-update to $upstream" > /dev/null 2>&1 || true
   configure_git_push
   git push 2> /dev/null || echo "[boucle] WARN: push failed, will retry next pipeline" >&2

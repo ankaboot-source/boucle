@@ -1447,22 +1447,6 @@ fi
 
 echo ""
 
-# ── 9. .boucle-version — GitHub only (GitLab uses CI mirror) ─────────
-if [ "$FORGE" = "github" ]; then
-  echo "=== .boucle-version ==="
-
-  # Check if .boucle-version already exists in the repo
-  FILE_CHECK=$(GH_TOKEN="$BOT_TOKEN" gh api "/repos/$PROJECT_ID/contents/.boucle-version" 2> /dev/null || true)
-  if echo "$FILE_CHECK" | jq -e '.content' > /dev/null 2>&1; then
-    log_skip ".boucle-version already exists"
-  else
-    BOUCLE_VERSION_CONTENT=$(echo -n '0.0.0' | base64 -w0 2> /dev/null || echo -n '0.0.0' | base64)
-    run "GH_TOKEN=\"$BOT_TOKEN\" gh api -X PUT /repos/$PROJECT_ID/contents/.boucle-version -f message='init' -f content=\"$BOUCLE_VERSION_CONTENT\" >/dev/null 2>&1"
-    log_pass ".boucle-version created (0.0.0)"
-  fi
-  echo ""
-fi
-
 # ── Summary ───────────────────────────────────────────────────────────
 echo "=== Summary ==="
 echo "  Passed: $PASS"

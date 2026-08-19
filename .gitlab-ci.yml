@@ -24,6 +24,11 @@ variables:
   # this file IS the GitLab pipeline, so gitlab is the only sane default.
   BOUCLE_FORGE: "gitlab"
   BOUCLE_FORGE_HOST: gitlab.example.com
+  # Current engine version, tracked as a forge Variable (GitLab CI/CD
+  # Variable). bin/update reads it to know the current version and writes it
+  # back after a successful sync. The submodule pointer is the fallback for
+  # submodule installs. No .boucle-version file.
+  BOUCLE_VERSION: "${BOUCLE_VERSION}"
   # NOTE: there is deliberately no BOUCLE_RUNNER_TAG here. Jobs run UNTAGGED by
   # default, so the instance's shared runners pick them up and a fresh install
   # needs no runner of its own. A variable cannot express this: GitLab expands
