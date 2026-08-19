@@ -328,7 +328,7 @@ EOF
   export BOUCLE_RECURRING_REFS
   BOUCLE_RECURRING_REFS=""
   local recurring_refs recurring_iid ref_summary
-  recurring_refs=$(parse_recurring_marker "$(forge_issue_notes "$BOUCLE_ISSUE" 2>/dev/null || echo '[]')" 2>/dev/null || echo "")
+  recurring_refs=$(parse_recurring_marker "$(forge_issue_notes "$BOUCLE_ISSUE" 2> /dev/null || echo '[]')" 2> /dev/null || echo "")
   if [ -n "$recurring_refs" ]; then
     local ref_entries=""
     for recurring_iid in $(echo "$recurring_refs" | tr ',' ' '); do
@@ -338,7 +338,7 @@ EOF
 }${ref_summary}"
     done
     if [ -n "$ref_entries" ]; then
-      BOUCLE_RECURRING_REFS=$(printf '%s\n' "$ref_entries" | jq -cs '.' 2>/dev/null || echo "[]")
+      BOUCLE_RECURRING_REFS=$(printf '%s\n' "$ref_entries" | jq -cs '.' 2> /dev/null || echo "[]")
     fi
   fi
 

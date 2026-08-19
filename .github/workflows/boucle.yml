@@ -696,7 +696,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # No cache: 'npm' — boucle is a shell project with no package-lock.json.
+          # setup-node's npm cache requires a lock file and fails the job without
+          # one. The Install dependencies step below already no-ops when there is
+          # no lock file, so there is nothing to cache anyway.
       - name: Install dependencies
         run: "[ -f package-lock.json ] && npm ci || true"
       - name: Self-update

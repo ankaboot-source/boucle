@@ -548,7 +548,7 @@ forge_mr_merge() {
         err=$(mktemp)
         resp=$(GH_TOKEN="$BOUCLE_TOKEN" gh api -X PUT \
           "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid/merge" \
-          -f merge_method=squash 2>"$err") || true
+          -f merge_method=squash 2> "$err") || true
         sha=$(printf '%s' "$resp" | jq -r '.sha // empty' 2> /dev/null)
         if [ -n "$sha" ]; then
           rm -f "$err"
@@ -558,7 +558,10 @@ forge_mr_merge() {
         # Empty SHA — surface the gh api error so the failure is
         # diagnosable instead of a silent "merge API call failed".
         echo "forge_mr_merge: PUT /pulls/$mr_iid/merge returned no SHA." >&2
-        [ -s "$err" ] && { echo "  gh api stderr:" >&2; sed 's/^/    /' "$err" >&2; }
+        [ -s "$err" ] && {
+          echo "  gh api stderr:" >&2
+          sed 's/^/    /' "$err" >&2
+        }
         rm -f "$err"
         ;;
       blocked | dirty | unknown)
@@ -582,7 +585,7 @@ forge_mr_merge() {
   err=$(mktemp)
   resp=$(GH_TOKEN="$BOUCLE_TOKEN" gh api -X PUT \
     "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid/merge" \
-    -f merge_method=squash 2>"$err") || true
+    -f merge_method=squash 2> "$err") || true
   sha=$(printf '%s' "$resp" | jq -r '.sha // empty' 2> /dev/null)
   if [ -n "$sha" ]; then
     rm -f "$err"
@@ -590,7 +593,10 @@ forge_mr_merge() {
     return 0
   fi
   echo "forge_mr_merge: final PUT /pulls/$mr_iid/merge returned no SHA." >&2
-  [ -s "$err" ] && { echo "  gh api stderr:" >&2; sed 's/^/    /' "$err" >&2; }
+  [ -s "$err" ] && {
+    echo "  gh api stderr:" >&2
+    sed 's/^/    /' "$err" >&2
+  }
   rm -f "$err"
 }
 

@@ -247,7 +247,7 @@ boucle_ci_reviewer() {
     BOUCLE_PREEXISTING_FAILURES="[]"
     if [ -n "${MR_BASE:-}" ]; then
       local base_check_data
-      base_check_data=$(forge_commit_check_suites "$MR_BASE" 2>/dev/null || echo "[]")
+      base_check_data=$(forge_commit_check_suites "$MR_BASE" 2> /dev/null || echo "[]")
       if [ "$base_check_data" != "[]" ] && [ -n "$base_check_data" ]; then
         BOUCLE_PREEXISTING_FAILURES=$(printf '%s\n%s' "$check_data" "$base_check_data" | jq -n --slurpfile head <(echo "$check_data") --slurpfile base <(echo "$base_check_data") '
           def fname: .name // .workflow_name // .app.slug // .id // tostring;
@@ -255,10 +255,10 @@ boucle_ci_reviewer() {
           ($head[0] | map(select(is_fail) | fname)) as $hf
           | ($base[0] | map(select(is_fail) | fname)) as $bf
           | ($hf - ($hf - $bf))
-          | sort | unique' 2>/dev/null || echo "[]")
+          | sort | unique' 2> /dev/null || echo "[]")
         local pre_count
-        pre_count=$(echo "$BOUCLE_PREEXISTING_FAILURES" | jq 'length' 2>/dev/null || echo 0)
-        if [ "${pre_count:-0}" -gt 0 ] 2>/dev/null; then
+        pre_count=$(echo "$BOUCLE_PREEXISTING_FAILURES" | jq 'length' 2> /dev/null || echo 0)
+        if [ "${pre_count:-0}" -gt 0 ] 2> /dev/null; then
           echo "[boucle] INFO: ${pre_count} failing check(s) pre-exist on the merge base (${MR_BASE:0:7})"
         fi
       fi
