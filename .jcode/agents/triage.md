@@ -98,6 +98,100 @@ a false recurring flag wastes the worker's attention. This marker is **non-block
 it never gates or defers. CI applies the `boucle:recurring` label (a context tag that
 survives state transitions). The worker receives the prior issues' summaries.
 
+**Structural impacts, diagrams, and previews (CI-gated — deterministic).**
+When the issue has a **legitimate structural complexity** — an architectural impact, a
+data-model change, a multi-step process, a state-machine addition, a non-trivial data
+flow, a deployment boundary, OR a user-visible UI/UX/design change — you MUST include the
+matching artifact in your final triage comment so the human can *see* and *validate* what
+will be built before any code is written.
+
+**This is deterministic, not advisory.** You MUST declare the issue's structural impacts
+in a `## Impacts` section with a machine-readable marker. CI parses that marker and
+cross-checks it against the `## Diagram` section (for structural kinds) and the
+`preview.html` + `RENDER_REQUEST` files (for visual kinds): if you declare an impact but
+omit the matching artifact, **CI blocks the spec-review approval** and re-triggers
+triage to add the missing artifact. The human never sees a complex spec without its
+diagram or its preview.
+
+**Complexity gate (Size M/L only).** The diagram and preview are required ONLY when the
+issue is **Size M or L**. A Size S issue with a structural or visual kind is probably
+trivial (a one-liner, a single-field rename, a button-label swap) — forcing a full
+diagram or mockup is noise, not clarity. CI combines `## Impacts` with the `## Classification` Size: if Size S, the gate skips (the artifact is optional). If Size M or L, the gate enforces. So: declare the kind honestly, and let the Size you already emit drive whether the artifact is mandatory.
+
+**Re-trigger etiquette (do NOT re-analyze from scratch).** If CI re-triggers you because
+a diagram or preview was missing, the "Prior discussion" block in your prompt contains
+your previous spec + a `<!-- boucle:diagram-missing v=1 -->` or
+`<!-- boucle:preview-missing v=1 -->` note. **Re-read your previous spec and add ONLY the
+missing artifact** — do NOT re-analyze the issue, re-ask questions, or re-draft the
+acceptance criteria. The spec was already good; it just lacked the artifact. Re-posting
+a full re-analysis wastes your step budget and the human's patience.
+
+**`## Impacts` section (MANDATORY — CI-gated).** Every final triage comment MUST
+include a `## Impacts` section declaring which impacts this issue has, with both a
+human-readable line and a machine-readable marker. Declare exactly the impacts that
+apply from this closed set:
+
+| Impact kind | Meaning | Required artifact |
+|---|---|---|
+| `architecture` | New component, service, or boundary between subsystems | `## Diagram` (architecture/flowchart) |
+| `data-model` | New entity, field, relationship, or migration | `## Diagram` (erDiagram) |
+| `process` | Multi-step flow with handoffs, branches, or async stages | `## Diagram` (flowchart/sequence/swimlane) |
+| `state-machine` | New states or transitions in the loop's labels | `## Diagram` (stateDiagram-v2) |
+| `data-flow` | Data moving between stores, pipelines, or roles | `## Diagram` (flowchart/sequence) |
+| `deployment` | New runtime, container, or network boundary | `## Diagram` (flowchart with subgraph) |
+| `ui` | User-visible layout, visual design, or frontend rendering change | `preview.html` + `RENDER_REQUEST` |
+| `ux` | Interaction, flow, or first-run experience change | `preview.html` + `RENDER_REQUEST` |
+| `design` | Design-system, token, or brand visual change | `preview.html` + `RENDER_REQUEST` |
+| `none` | No structural or visual impact (copy tweak, single-file, config flag) | (none) |
+
+Format (place the section between `## Non-goals` and `## Diagram`):
+
+```
+## Impacts
+🏗️ architecture, data-model
+
+<!-- boucle:impacts v=1 kinds=architecture,data-model -->
+```
+
+Rules:
+- The visible line uses the same `kinds` as the marker (comma-separated, from the closed set above, sorted, deduplicated).
+- If the issue has NO structural or visual impact, write `none` in both the visible line and the marker: `<!-- boucle:impacts v=1 kinds=none -->`.
+- **The marker is the source of truth for the CI gate.** A missing `## Impacts` section or marker → CI fails the gate (re-triggers triage). A marker declaring a structural kind (architecture, data-model, process, state-machine, data-flow, deployment) without a matching `## Diagram` section + `<!-- boucle:diagram v=1 -->` marker → CI fails the gate. A marker declaring a visual kind (ui, ux, design) without a `preview.html` + `RENDER_REQUEST` in `.boucle-state/<issue>/` → CI fails the gate.
+- **Never invent kinds outside the closed set** — CI rejects unknown kinds and fails the gate.
+- **An issue can have both structural and visual impacts** (e.g. `architecture,ui`) — then BOTH a diagram AND a preview are required.
+
+**`## Diagram` section (mandatory when `## Impacts` declares a structural kind).**
+When `## Impacts` declares any of `architecture`, `data-model`, `process`,
+`state-machine`, `data-flow`, `deployment`, include a `## Diagram` section with a
+**Mermaid** diagram. Pick the diagram type from the 27-type catalogue in
+[`templates/diagram-theme.md`](../../templates/diagram-theme.md) — that file is the
+**static source of truth** for the boucle.dev Mermaid theme block (light/transparent)
+and the full type catalogue. **Read it before drawing your first diagram** and paste its
+`%%{init:...}%%` theme block as the **first line** of every Mermaid fence. NEVER inline
+the theme block from memory — always copy it from `templates/diagram-theme.md` so the
+design system never drifts.
+
+When `## Impacts` declares only visual kinds (`ui`, `ux`, `design`) or `none`, omit the
+`## Diagram` section — the preview (for visual kinds) or the TL;DR (for `none`) suffices.
+
+**`## Diagram` marker (MANDATORY when a diagram is present).** Place it at the end of
+the section, after the Mermaid fence(s):
+
+```
+<!-- boucle:diagram v=1 types=erDiagram,flowchart -->
+```
+
+The `types` attribute lists the Mermaid block types you used (comma-separated, from the
+27-type catalogue, sorted, deduplicated). CI cross-checks this marker against `## Impacts`.
+
+**Visual preview (mandatory when `## Impacts` declares a visual kind).** When `## Impacts`
+declares `ui`, `ux`, or `design`, you MUST produce a `preview.html` + `RENDER_REQUEST` in
+`.boucle-state/<issue>/` (see "Visual preview rules" below). This is the same preview
+mechanism that already exists for UI/UX issues — the `## Impacts` marker makes it
+deterministic instead of relying on the agent's judgment. When `## Impacts` declares only
+structural kinds or `none`, the preview is not required (but still allowed if the issue
+happens to have a visual component).
+
 ## Skills available
 
 **Codebase & implementation understanding** (load when the issue touches their domain):
@@ -162,6 +256,9 @@ Before posting `<!-- boucle:triage v=1 -->`, verify:
 - [ ] **Testability** — each acceptance criterion has one clear outcome a reviewer can pass/fail.
 - [ ] **Dependencies** — implicit dependencies on other teams or integrations are surfaced.
 - [ ] **Scope** — in-scope is explicit; out-of-scope is stated when non-obvious.
+- [ ] **Impacts** — the `## Impacts` section is present with a `<!-- boucle:impacts v=1 kinds=... -->` marker; `kinds` uses only values from the closed set (architecture, data-model, process, state-machine, data-flow, deployment, ui, ux, design, none); a missing section or marker fails the CI gate.
+- [ ] **Diagram** — if `## Impacts` declares any structural kind (architecture, data-model, process, state-machine, data-flow, deployment), a `## Diagram` section with a Mermaid fence AND a `<!-- boucle:diagram v=1 types=... -->` marker is present, uses the boucle.dev light/transparent theme block from `templates/diagram-theme.md`, has ≤9 nodes, and is consistent with the acceptance criteria. If `## Impacts` declares only visual kinds or `none`, the `## Diagram` section and marker are correctly omitted. A mismatch fails the CI gate.
+- [ ] **Preview** — if `## Impacts` declares any visual kind (ui, ux, design), a `preview.html` + `RENDER_REQUEST` exists in `.boucle-state/<issue>/`. If `## Impacts` declares only structural kinds or `none`, the preview is correctly omitted. A mismatch fails the CI gate.
 
 If any check fails, fix the comment before posting. A spec with weasel words is not READY.
 
@@ -366,6 +463,21 @@ Post your **final triage comment** on the issue with this format:
 ## Non-goals
 - <something a reasonable implementer might do that this change must NOT do>
 - <a boundary: a file, subsystem, dependency or behaviour to leave alone>
+
+## Impacts
+🏗️ <comma-separated kinds from: architecture, data-model, process, state-machine, data-flow, deployment, ui, ux, design, none>
+
+<!-- boucle:impacts v=1 kinds=<same-kinds-comma-separated> -->
+
+## Diagram *(mandatory when ## Impacts declares a structural kind; omit otherwise)*
+<one-line caption: what decision the human is validating by reading this diagram>
+
+```mermaid
+%%{init: {"theme":"base","themeVariables":{"background":"transparent","primaryColor":"#f5c842","primaryTextColor":"#0d1117","primaryBorderColor":"#c9a233","lineColor":"#a0a0b8","secondaryColor":"#fdf3d7","tertiaryColor":"#e8e6f5","clusterBkg":"#faf7f2","clusterBorder":"#c9a233","edgeLabelBackground":"#ffffff","fontFamily":"Sora, system-ui, sans-serif","fontSize":"14px"}}}%%
+<flowchart | erDiagram | sequenceDiagram | stateDiagram-v2 | gantt | quadrantChart | xychart-beta | timeline | mindmap> — pick the type from templates/diagram-theme.md that best fits the concept
+```
+
+<!-- boucle:diagram v=1 types=<mermaid-block-types-used> -->
 
 ## Impacted files
 📁 `<path1>`, `<path2>`

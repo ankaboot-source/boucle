@@ -1776,6 +1776,52 @@ parse_recurring_marker() {
   printf '%s' "$refs"
 }
 
+# ── Impacts marker parsing (deterministic CI gate — AGENTS.md §12) ────
+# parse_impacts_marker <notes_json> — extract the comma-separated `kinds`
+# value from the newest `<!-- boucle:impacts v=1 kinds=... -->` marker in
+# the final triage comment. Mirrors parse_files_marker. The closed set is
+# all lowercase hyphenated (architecture, data-model, process,
+# state-machine, data-flow, deployment, ui, ux, design, none), so the
+# sanitizer keeps only lowercase letters, hyphens and commas. Returns
+# empty if no marker found (fail-open — the caller treats empty as "no
+# impacts declared = nothing to check").
+parse_impacts_marker() {
+  local notes_json="$1"
+  [ -n "$notes_json" ] || return 0
+  local marker_body
+  marker_body=$(printf '%s' "$notes_json" \
+    | jq -r '[.[] | select(.body | contains("<!-- boucle:impacts v=1"))] | sort_by(.created_at) | last | .body // empty' \
+      2> /dev/null || echo "")
+  [ -n "$marker_body" ] || return 0
+  local kinds
+  kinds=$(printf '%s' "$marker_body" \
+    | grep -oE 'kinds=[^ >]+' | head -1 | cut -d= -f2)
+  kinds=$(printf '%s' "$kinds" | grep -oE '[a-z,-]+' | paste -sd, -)
+  printf '%s' "$kinds"
+}
+
+# ── Diagram marker parsing (deterministic CI gate — AGENTS.md §12) ─────
+# parse_diagram_marker <notes_json> — extract the comma-separated `types`
+# value from the newest `<!-- boucle:diagram v=1 types=... -->` marker in
+# the final triage comment. Mirrors parse_files_marker. Mermaid block types
+# are camelCase (erDiagram, stateDiagram-v2), so the sanitizer keeps
+# uppercase/lowercase letters, hyphens and commas. Returns empty if no
+# marker found (fail-open).
+parse_diagram_marker() {
+  local notes_json="$1"
+  [ -n "$notes_json" ] || return 0
+  local marker_body
+  marker_body=$(printf '%s' "$notes_json" \
+    | jq -r '[.[] | select(.body | contains("<!-- boucle:diagram v=1"))] | sort_by(.created_at) | last | .body // empty' \
+      2> /dev/null || echo "")
+  [ -n "$marker_body" ] || return 0
+  local types
+  types=$(printf '%s' "$marker_body" \
+    | grep -oE 'types=[^ >]+' | head -1 | cut -d= -f2)
+  types=$(printf '%s' "$types" | grep -oE '[A-Za-z,-]+' | paste -sd, -)
+  printf '%s' "$types"
+}
+
 # ── Worker rebase-conflict handling (agent-first) ─────────────────────
 # Called when `git rebase origin/$CI_DEFAULT_BRANCH` fails inside the
 # worker job (setup + pre-build stages). Two modes:

@@ -111,6 +111,126 @@ check_file_gate() {
   return 0
 }
 
+# ── Diagram gate (deterministic — AGENTS.md §12) ──────────────────────
+# Before a spec pauses for human approval, verify that a spec declaring
+# structural impacts (architecture, data-model, process, state-machine,
+# data-flow, deployment) in its `## Impacts` section actually includes the
+# required `## Diagram` section with a Mermaid fence AND a
+# `<!-- boucle:diagram v=1 types=... -->` marker. A mismatch re-triggers
+# triage (sets boucle:triage so the doctor picks it up and the triage agent
+# adds the missing diagram).
+#
+# Complexity gate: the diagram is required ONLY when the issue is Size M
+# or L. A Size S issue with a structural kind is probably trivial (a
+# one-liner, a single-field rename) — forcing a diagram is noise. The
+# size is passed as the 3rd argument by the caller (triage.sh already
+# parses it from ## Classification).
+#
+# Fail-open everywhere: missing impacts marker, missing/unknown size,
+# forge API error → return 0 (pass). A flaky forge must never block the
+# loop (CONTEXT.md §7). The comment body is passed as an argument —
+# NEVER re-fetched from the forge.
+check_diagram_gate() {
+  local iid="$1" comment_body="$2" size="${3:-}"
+  # Extract kinds from the impacts marker in the comment body.
+  local kinds
+  kinds=$(printf '%s' "$comment_body" \
+    | grep -oE 'kinds=[^ >]+' | head -1 | cut -d= -f2)
+  [ -z "$kinds" ] && return 0 # no impacts declared → nothing to check (fail-open)
+  local structural=" architecture data-model process state-machine data-flow deployment "
+  # kinds=none → a diagram marker would be padding noise. Warn, do NOT block.
+  if echo ",$kinds," | grep -q ",none,"; then
+    if printf '%s' "$comment_body" | grep -q '<!-- boucle:diagram v=1'; then
+      echo "[boucle] WARN: #$iid declares kinds=none but includes a diagram marker — padding noise, not blocking"
+    fi
+    return 0
+  fi
+  # Visual-only impacts → diagram not required.
+  local has_structural=false k
+  for k in $structural; do
+    if echo ",$kinds," | grep -q ",$k,"; then
+      has_structural=true
+      break
+    fi
+  done
+  [ "$has_structural" = "false" ] && return 0
+  # Complexity gate: Size S → diagram not required (trivial issue).
+  # Unknown/empty size → fail-open (do not block on a parse gap).
+  case "$size" in
+    S) return 0 ;;
+    M|L) ;; # proceed to the diagram check
+    *) return 0 ;; # unknown/empty → fail-open
+  esac
+  # Structural impact declared + Size M/L → diagram marker MUST be present.
+  if ! printf '%s' "$comment_body" | grep -q '<!-- boucle:diagram v=1'; then
+    echo "[boucle] #$iid blocked — spec declares structural impacts ($kinds, Size $size) but is missing the required ## Diagram section"
+    set_boucle_label "$iid" "boucle:triage" "boucle::status::bot"
+    local block_body
+    block_body=$(printf '⚠️ This spec declares structural impacts (%s, Size %s) but is missing the required `## Diagram` section. Triage has been re-triggered to add the diagram — re-read your previous spec in the Prior discussion and add ONLY the missing `## Diagram` section, do NOT re-analyze from scratch. The spec will be re-posted for approval once the diagram is present.\n\n<!-- boucle:diagram-missing v=1 kinds=%s -->' "$kinds" "$size" "$kinds")
+    forge_issue_note "$iid" "$block_body"
+    return 1
+  fi
+  return 0
+}
+
+# ── Preview gate (deterministic — AGENTS.md §12) ──────────────────────
+# Before a spec pauses for human approval, verify that a spec declaring
+# visual impacts (ui, ux, design) in its `## Impacts` section actually has
+# a `preview.html` AND a non-empty `RENDER_REQUEST` in
+# `.boucle-state/<iid>/`. A mismatch re-triggers triage (sets boucle:triage
+# so the doctor picks it up and the triage agent adds the missing preview).
+#
+# Complexity gate: the preview is required ONLY when the issue is Size M
+# or L. A Size S UI tweak (a button label, a color swap) does not need a
+# full mockup. The size is passed as the 3rd argument by the caller.
+#
+# Fail-open everywhere: missing impacts marker, missing/unknown size,
+# forge API error → return 0 (pass). A flaky forge must never block the
+# loop (CONTEXT.md §7). The comment body is passed as an argument —
+# NEVER re-fetched from the forge.
+check_preview_gate() {
+  local iid="$1" comment_body="$2" size="${3:-}"
+  # Extract kinds from the impacts marker in the comment body.
+  local kinds
+  kinds=$(printf '%s' "$comment_body" \
+    | grep -oE 'kinds=[^ >]+' | head -1 | cut -d= -f2)
+  [ -z "$kinds" ] && return 0 # no impacts declared → nothing to check (fail-open)
+  local visual=" ui ux design "
+  # kinds=none → preview files would be padding noise. Warn, do NOT block.
+  if echo ",$kinds," | grep -q ",none,"; then
+    if [ -f ".boucle-state/$iid/preview.html" ] || [ -s ".boucle-state/$iid/RENDER_REQUEST" ]; then
+      echo "[boucle] WARN: #$iid declares kinds=none but has preview artifacts — padding noise, not blocking"
+    fi
+    return 0
+  fi
+  # Structural-only impacts → preview not required.
+  local has_visual=false k
+  for k in $visual; do
+    if echo ",$kinds," | grep -q ",$k,"; then
+      has_visual=true
+      break
+    fi
+  done
+  [ "$has_visual" = "false" ] && return 0
+  # Complexity gate: Size S → preview not required (trivial UI tweak).
+  # Unknown/empty size → fail-open (do not block on a parse gap).
+  case "$size" in
+    S) return 0 ;;
+    M|L) ;; # proceed to the preview check
+    *) return 0 ;; # unknown/empty → fail-open
+  esac
+  # Visual impact declared + Size M/L → preview.html AND non-empty RENDER_REQUEST MUST exist.
+  if [ ! -f ".boucle-state/$iid/preview.html" ] || [ ! -s ".boucle-state/$iid/RENDER_REQUEST" ]; then
+    echo "[boucle] #$iid blocked — spec declares visual impacts ($kinds, Size $size) but is missing the required preview.html / RENDER_REQUEST"
+    set_boucle_label "$iid" "boucle:triage" "boucle::status::bot"
+    local block_body
+    block_body=$(printf '⚠️ This spec declares visual impacts (%s, Size %s) but is missing the required `preview.html` / `RENDER_REQUEST`. Triage has been re-triggered to add the preview — re-read your previous spec in the Prior discussion and add ONLY the missing preview files, do NOT re-analyze from scratch. The spec will be re-posted for approval once the preview is present.\n\n<!-- boucle:preview-missing v=1 kinds=%s -->' "$kinds" "$size" "$kinds")
+    forge_issue_note "$iid" "$block_body"
+    return 1
+  fi
+  return 0
+}
+
 # When a sub-issue closes, check whether any sibling sub-issues were
 # blocked waiting on it. For each blocked sibling whose deps are NOW all
 # closed, flip boucle:blocked → boucle:todo and trigger the worker.
