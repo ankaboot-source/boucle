@@ -36,7 +36,11 @@ known recurring bug, documented in LESSONS.yml.
 1. **Post-early rule** — The agent MUST post its comment or verdict **FIRST**, then
    refine it afterward. Step-limit waste (the agent exhausts its budget without ever
    posting) is bug #1. **Rule**: an incomplete draft posted is ALWAYS better than a
-   refinement never posted.
+   refinement never posted. **BUT**: the draft MUST contain at least the content the
+   human needs to act on it — for triage, a rough `## Analysis` section (2-3 sentences
+   restating the issue) and a `## Disposition`. An empty placeholder ("DRAFT —
+   first-pass triage, refining next.") is noise, not a draft (lesson #99). "Post
+   early" means minimal but meaningful, not "post nothing early".
 
 2. **Silent-failure detection** — `bin/jc` exits with code `3` if the agent has
    produced no posted or drafted comment. CI then escalates to a human.

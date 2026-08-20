@@ -59,6 +59,15 @@ Post the comment or verdict FIRST, then refine. An incomplete draft posted is
 ALWAYS better than a refinement never posted. Step-budget waste (the agent
 exhausts its budget without posting) is bug #1. (LESSONS.yml lesson #1, #2, #5.)
 
+**"Post early" means minimal but meaningful, not an empty placeholder.** A
+draft MUST contain at least the content the human needs to act on it — for
+triage, a rough `## Analysis` section (2-3 sentences restating the issue) and
+a `## Disposition`. An empty placeholder ("DRAFT — first-pass triage,
+refining next.") is noise the human cannot act on: no analysis, no questions,
+no criteria. The agent MUST read the issue body (already in its prompt as
+`$BOUCLE_ISSUE_BODY`) before posting — "post early" does NOT mean "post
+before reading the issue". (LESSONS.yml lesson #99.)
+
 ### I5 — Idempotence
 
 All `bin/*` scripts and label writes MUST be idempotent. Re-running a script
