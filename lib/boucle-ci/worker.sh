@@ -566,6 +566,38 @@ EOF
     echo "[boucle] SHA marker stamp skipped (no deploy in $(boucle_deploy_mode)/$(boucle_review_mode) mode)"
   fi
 
+  # ── Format pass (shfmt) ──────────────────────────────────────────
+  # Hooks do NOT run in CI: they are not installed in the checkout, and
+  # the safety-net commit above uses --no-verify. Shell changes the agent
+  # committed would reach the branch unformatted and fail the `check` gate
+  # (2026-08: recurring red push pipelines from a `2>/dev/null` line).
+  # Best-effort: format every shell file this branch touched — however it
+  # was committed — and commit the fixup. Skipped silently when shfmt is
+  # unavailable. File selection mirrors the Makefile's ALL_SH (extension or
+  # shell shebang; .jcode/ and bin/oc are upstream-vendored, never touch).
+  # CONTEXT.md: "a worker commit must pass check exactly like a human's".
+  if command -v shfmt > /dev/null 2>&1; then
+    local fmt_f fmt_list
+    fmt_list=""
+    for fmt_f in $(git diff --name-only "origin/$BOUCLE_DEFAULT_BRANCH..HEAD" 2> /dev/null); do
+      [ -f "$fmt_f" ] || continue
+      case "$fmt_f" in .jcode/* | bin/oc) continue ;; esac
+      if printf '%s\n' "$fmt_f" | grep -qE '\.(sh|bash)$' \
+        || head -1 "$fmt_f" 2> /dev/null | grep -qE '^#!.*\b(ba)?sh([[:space:]]|$)'; then
+        if [ -n "$(shfmt -d -i 2 -bn -ci -sr "$fmt_f" 2> /dev/null)" ]; then
+          shfmt -w -i 2 -bn -ci -sr "$fmt_f" 2> /dev/null || true
+          fmt_list="$fmt_list $fmt_f"
+        fi
+      fi
+    done
+    if [ -n "${fmt_list# }" ]; then
+      # shellcheck disable=SC2086 # word-splitting is intentional: fmt_list is a space-separated file list.
+      git add $fmt_list
+      git commit -m "style: shfmt pass on worker branch (#$BOUCLE_ISSUE)" --no-verify || true
+      echo "[boucle] shfmt formatted:${fmt_list}"
+    fi
+  fi
+
   # ── Push branch ──────────────────────────────────────────────────
   git push --force origin "$BRANCH"
 

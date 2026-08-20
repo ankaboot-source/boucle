@@ -54,7 +54,7 @@ boucle_ci_e2e() {
   # posted its verdict. Fall back through the CI-provider SHA env vars,
   # then to the git HEAD of the workspace.
   if [ -z "${MR_HEAD:-}" ]; then
-    MR_HEAD="${CI_COMMIT_SHA:-${GITHUB_SHA:-$(cd "$BOUCLE_WORKSPACE" && git rev-parse HEAD 2>/dev/null || echo unknown)}}"
+    MR_HEAD="${CI_COMMIT_SHA:-${GITHUB_SHA:-$(cd "$BOUCLE_WORKSPACE" && git rev-parse HEAD 2> /dev/null || echo unknown)}}"
   fi
   export MR_HEAD
 

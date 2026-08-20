@@ -189,15 +189,27 @@ setup() {
   assert_output "abc123def456789"
 }
 
-@test "github forge_mr_merge echoes the SHA when unstable (checks running)" {
+@test "github forge_mr_merge waits out unstable, then merges once checks go clean" {
+  # unstable = mergeable BUT non-required checks failing/pending. The merge
+  # MUST wait for the checks to settle and merge on clean — not merge
+  # immediately (2026-08: merging on unstable landed red code on main).
   run bash -c '
     BOUCLE_PROJECT_ID="test/repo"
+    BOUCLE_MERGE_POLL_SLEEP=0
+    cnt=$(mktemp)
+    echo 0 > "$cnt"
     gh() {
       [ "$1" = "api" ] || return 0
       if [[ " $* " == *"-X PUT"* && " $* " == *"/merge"* ]]; then
         printf "%s" "{\"sha\":\"deadbeef\",\"merged\":true}"
       elif [[ " $* " == *"/pulls/"* ]]; then
-        printf "%s" "{\"mergeable_state\":\"unstable\"}"
+        n=$(cat "$cnt")
+        echo $((n + 1)) > "$cnt"
+        if [ "$n" -eq 0 ]; then
+          printf "%s" "{\"mergeable_state\":\"unstable\"}"
+        else
+          printf "%s" "{\"mergeable_state\":\"clean\"}"
+        fi
       fi
     }
     source bin/forge/github.sh
@@ -205,6 +217,59 @@ setup() {
   '
   assert_success
   assert_output "deadbeef"
+}
+
+@test "github forge_mr_merge refuses to merge when checks stay red (unstable)" {
+  # If the checks never go green, the merge MUST be refused — merging would
+  # put code that fails the repo'"'"'s own gate on the default branch. The
+  # merger treats the empty SHA as a failed merge and escalates.
+  run bash -c '
+    BOUCLE_PROJECT_ID="test/repo"
+    BOUCLE_MERGE_POLL_MAX=2
+    BOUCLE_MERGE_POLL_SLEEP=0
+    gh() {
+      [ "$1" = "api" ] || return 0
+      if [[ " $* " == *"-X PUT"* && " $* " == *"/merge"* ]]; then
+        printf "%s" "{\"sha\":\"must-not-merge\",\"merged\":true}"
+      elif [[ " $* " == *"/pulls/"* ]]; then
+        printf "%s" "{\"mergeable_state\":\"unstable\"}"
+      fi
+    }
+    source bin/forge/github.sh
+    forge_mr_merge 42
+  '
+  assert_failure
+  assert_output --partial "refusing to merge red checks"
+  refute_output --partial "must-not-merge"
+}
+
+@test "github forge_mr_merge_status maps unstable to checking (never mergeable)" {
+  # The merger polls forge_mr_merge_status before merging. Reporting
+  # "mergeable" while checks are red let the merger merge PRs that fail the
+  # check gate (2026-08: recurring shfmt failures merged through to main).
+  run bash -c '
+    BOUCLE_PROJECT_ID="test/repo"
+    gh() {
+      [ "$1" = "api" ] || return 0
+      printf "%s" "{\"mergeable_state\":\"unstable\"}"
+    }
+    source bin/forge/github.sh
+    forge_mr_merge_status 42
+  '
+  assert_success
+  assert_output "checking"
+
+  run bash -c '
+    BOUCLE_PROJECT_ID="test/repo"
+    gh() {
+      [ "$1" = "api" ] || return 0
+      printf "%s" "{\"mergeable_state\":\"clean\"}"
+    }
+    source bin/forge/github.sh
+    forge_mr_merge_status 42
+  '
+  assert_success
+  assert_output "mergeable"
 }
 
 @test "github forge_mr_merge echoes nothing on stdout when the merge PUT fails" {

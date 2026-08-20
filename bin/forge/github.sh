@@ -337,14 +337,22 @@ forge_mr_lookup_by_branch() {
 
 forge_mr_merge_status() {
   local mr_iid="$1"
-  # GitHub's mergeable_state: "clean" and "unstable" mean mergeable,
-  # "dirty" means conflict, "blocked" means checks pending, "unknown"
-  # means GitHub is still computing. Normalize to the GitLab-style status
-  # the merger expects (mergeable/conflict/blocked/unknown) so the
-  # forge layer is vocabulary-agnostic.
+  # GitHub's mergeable_state: "clean" means mergeable with all checks green,
+  # "unstable" means mergeable BUT non-required checks are failing or still
+  # pending, "dirty" means conflict, "blocked" means branch protection
+  # (required checks/reviews) is not satisfied, "unknown" means GitHub is
+  # still computing. Normalize to the GitLab-style status the merger expects
+  # (mergeable/conflict/blocked/checking) so the forge layer is
+  # vocabulary-agnostic.
+  # NEVER report "unstable" as mergeable: that merged PRs with red checks
+  # into the default branch (2026-08: recurring shfmt failures landed on
+  # main because the check job is not a required check). Report it as
+  # "checking" so the merger waits for the checks to settle — clean →
+  # mergeable, failed → stays unstable until the MWPS/escalation path.
   _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid" 2> /dev/null \
     | jq -r '
-      if .mergeable_state == "clean" or .mergeable_state == "unstable" then "mergeable"
+      if .mergeable_state == "clean" then "mergeable"
+      elif .mergeable_state == "unstable" then "checking"
       elif .mergeable_state == "dirty" then "conflict"
       elif .mergeable_state == "blocked" then "blocked"
       else (.mergeable_state // "unknown") end
@@ -526,16 +534,19 @@ forge_mr_update() {
 
 forge_mr_merge() {
   local mr_iid="$1"
-  # Poll mergeable_state for up to 10 min (60×10s)
+  # Poll mergeable_state for up to 10 min (60×10s). Poll count and sleep are
+  # env-overridable so unit tests can exercise the loop without waiting.
   local i state resp sha err
-  for i in $(seq 1 60); do
+  local max_polls="${BOUCLE_MERGE_POLL_MAX:-60}" poll_sleep="${BOUCLE_MERGE_POLL_SLEEP:-10}"
+  state="unknown"
+  for i in $(seq 1 "$max_polls"); do
     state=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/pulls/$mr_iid" | jq -r '.mergeable_state // "unknown"')
     case "$state" in
-      clean | unstable)
-        # mergeable — squash merge. Echo the merge commit SHA on stdout so
-        # the caller (merger.sh) can record it and chain to post-merge. An
-        # empty SHA means the PUT failed. Without echoing the SHA,
-        # MERGE_SHA was always empty and EVERY successful merge was
+      clean)
+        # mergeable, checks green — squash merge. Echo the merge commit SHA
+        # on stdout so the caller (merger.sh) can record it and chain to
+        # post-merge. An empty SHA means the PUT failed. Without echoing the
+        # SHA, MERGE_SHA was always empty and EVERY successful merge was
         # reported as "merge API call failed".
         #
         # Call gh api DIRECTLY (not _gh_api): _gh_api adds --paginate,
@@ -564,6 +575,15 @@ forge_mr_merge() {
         }
         rm -f "$err"
         ;;
+      unstable)
+        # Mergeable BUT non-required checks are failing or pending. Wait for
+        # them to settle: green flips the state to clean (merged above), red
+        # keeps it unstable until the poll window ends (refused below).
+        # NEVER merge on unstable — that is how code failing the repo's own
+        # check gate lands on the default branch (2026-08: recurring shfmt
+        # failures merged through to main).
+        sleep "$poll_sleep"
+        ;;
       blocked | dirty | unknown)
         # blocked: waiting on required reviews/checks
         # dirty: merge conflict
@@ -571,16 +591,23 @@ forge_mr_merge() {
           echo "forge_mr_merge: PR #$mr_iid has merge conflicts — cannot merge." >&2
           return 1
         fi
-        sleep 10
+        sleep "$poll_sleep"
         ;;
       *)
-        sleep 10
+        sleep "$poll_sleep"
         ;;
     esac
   done
+  # Still unstable after the poll window: the checks stayed red. Refuse —
+  # merging would put code that fails the repo's own gate on the default
+  # branch. The merger treats the empty SHA as a failed merge and escalates.
+  if [ "$state" = "unstable" ]; then
+    echo "forge_mr_merge: PR #$mr_iid still has failing status checks after $((max_polls * poll_sleep))s (mergeable_state=unstable) — refusing to merge red checks." >&2
+    return 1
+  fi
   # Still not mergeable after 10 min — try anyway and report.
   # Call gh api DIRECTLY (not _gh_api): _gh_api adds --paginate, which gh
-  # rejects for non-GET requests. See the NOTE in the clean|unstable branch
+  # rejects for non-GET requests. See the NOTE in the clean branch
   # above and at forge_issue_create.
   err=$(mktemp)
   resp=$(GH_TOKEN="$BOUCLE_TOKEN" gh api -X PUT \

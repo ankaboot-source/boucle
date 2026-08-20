@@ -232,10 +232,14 @@ jobs:
       # ships shellcheck but neither shfmt nor bats, and the Makefile guards
       # abort the job on the first missing one — so install them here. Pinned:
       # an shfmt minor bump can change formatting and would fail `shfmt -d` on
-      # untouched files.
+      # untouched files. The shfmt pin MUST stay in sync with
+      # bin/check-bootstrap.sh (GitLab CI) and .pre-commit-config.yaml
+      # (local hooks): a drift means code formatted by the hooks fails CI
+      # (2026-08: this job pinned 3.10.0 while hooks and GitLab CI used
+      # 3.13.1 — recurring red check runs).
       - name: Install lint/test tooling
         env:
-          SHFMT_VERSION: '3.10.0'
+          SHFMT_VERSION: '3.13.1'
           BATS_VERSION: '1.11.0'
         run: |
           set -euo pipefail
@@ -509,6 +513,16 @@ jobs:
             mv "$JCODE_TMP/jcode-linux-x86_64.bin" "$HOME/.local/bin/jcode"
             chmod +x "$HOME/.local/bin/jcode"
           fi
+          # shfmt for the worker's pre-push format pass (lib/boucle-ci/worker.sh).
+          # Hooks do not run in CI (not installed; safety-net commits use
+          # --no-verify), so without this the agent's shell edits can reach
+          # the branch unformatted and fail the `check` gate. Pin MUST stay
+          # in sync with the check job above and bin/check-bootstrap.sh.
+          SHFMT_VER="3.13.1"
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/shfmt" \
+            "https://github.com/mvdan/sh/releases/download/v${SHFMT_VER}/shfmt_v${SHFMT_VER}_linux_amd64"
+          chmod +x "$HOME/.local/bin/shfmt"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Self-update
         run: |
