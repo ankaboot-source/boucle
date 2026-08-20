@@ -154,6 +154,11 @@ ${CI_COMMIT_SHA:-unknown}"
   # Close the issue (boucle:done is a board label, not a close state).
   close_issue "$BOUCLE_ISSUE"
   echo "Catchup: closed issue #$BOUCLE_ISSUE"
+  # Refresh the board — the issue moved to closed/done, the board must
+  # reflect it immediately (lesson #97: refresh on transition, not only
+  # on doctor sweep). Without this the board shows a stale "merging" entry
+  # until the next doctor sweep catches up.
+  boucle_board_upsert || true
 
   # Post-merge branch cleanup: delete the worker branch. Best-effort — a
   # failed deletion logs a warning but does not fail the job. lesson #68.

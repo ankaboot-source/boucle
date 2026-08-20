@@ -259,6 +259,8 @@ ${CI_COMMIT_SHA:-${MR_HEAD_SHORT:-unknown}}"
       set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
       # boucle:done is a board label, not a close state — close the issue too
       close_issue "$BOUCLE_ISSUE"
+      # Refresh the board — the issue moved to done/closed (lesson #97).
+      boucle_board_upsert || true
       # If this issue is a sub-issue, check whether all siblings are closed
       # and close the parent when the last sub-issue completes.
       maybe_close_parent "$BOUCLE_ISSUE" "$LIVE_URL"
@@ -333,6 +335,8 @@ Closing this issue — work continues in #$E2E_NEW_IID."
       forge_issue_note "$BOUCLE_ISSUE" "$E2E_LINK_BODY"
       set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
       close_issue "$BOUCLE_ISSUE"
+      # Refresh the board — the issue moved to done/closed (lesson #97).
+      boucle_board_upsert || true
       maybe_close_parent "$BOUCLE_ISSUE"
       maybe_unblock_dependents "$BOUCLE_ISSUE"
       ;;

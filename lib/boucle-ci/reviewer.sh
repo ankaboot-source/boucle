@@ -88,6 +88,8 @@ boucle_ci_reviewer() {
       set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
       close_issue "$BOUCLE_ISSUE"
       forge_issue_note "$BOUCLE_ISSUE" "✅ Reviewer: no open $(forge_mr_term) found, but a merged $(forge_mr_term) exists for this issue. Marked boucle:done and closed."
+      # Refresh the board — the issue moved to done/closed (lesson #97).
+      boucle_board_upsert || true
     elif [ -n "$CLOSED_MR_STATE" ]; then
       # Closed WITHOUT a merge is ambiguous: it may be (a) the human
       # closed the MR mid-review (issue pinned at boucle:review — closing
@@ -106,6 +108,8 @@ boucle_ci_reviewer() {
           set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
           close_issue "$BOUCLE_ISSUE"
           forge_issue_note "$BOUCLE_ISSUE" "✅ Reviewer: no open $(forge_mr_term) found, but a closed $(forge_mr_term) exists for this issue. Marked boucle:done and closed."
+          # Refresh the board — the issue moved to done/closed (lesson #97).
+          boucle_board_upsert || true
           ;;
         *)
           echo "boucle: closed MR for issue #$BOUCLE_ISSUE is stale (not merged, issue queued for work) — leaving the issue open"
