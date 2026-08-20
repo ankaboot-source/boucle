@@ -212,7 +212,15 @@ This project uses `codebase-memory-mcp` to maintain a knowledge graph of the cod
 
 The graph is built once (by CI or locally) and auto-syncs on changes. If
 `search_graph` returns nothing, run `index_repository` with the repo path, then
-retry.
+retry. In CI, `bin/jc` auto-indexes the repo before the agent starts (triage,
+worker, reviewer roles) if the `.codebase-memory/` index doesn't exist.
+
+> **Consumer repos:** `LESSONS.yml`, `.jcode/skills/`, and `bin/` live under
+> `.boucle/` (the engine dir) but are symlinked to the repo root by
+> `bin/setup`, `bin/update`, and `bin/jc` (runtime fallback). If
+> `Read LESSONS.yml` or `skill(...)` fails, check that the symlinks exist:
+> `ls -la LESSONS.yml .jcode/skills bin` — they should point to
+> `.boucle/LESSONS.yml`, `.boucle/.jcode/skills`, `.boucle/bin` respectively.
 
 ### Priority order
 

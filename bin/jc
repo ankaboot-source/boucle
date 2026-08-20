@@ -692,7 +692,30 @@ if [ -n "${BOUCLE_HOME:-}" ] && [ "$BOUCLE_HOME" != "$BOUCLE_WORKSPACE" ]; then
   done
 fi
 
-# ── 3a. Load issue attachments (if bin/fetch-issue-attachments ran) ──
+# ── 3a-bis2. Ensure codebase graph is indexed ──────────────────────────
+# The codebase graph (codebase-memory-mcp) is never used by agents (0/68
+# runs observed on boucle.dev) because the .codebase-memory/ index doesn't
+# exist in the consumer repo. GitLab CI installs + indexes in the setup
+# step, but GitHub Actions does neither. This runtime fallback installs
+# the CLI (if missing) and indexes the repo before the agent starts, so
+# search_graph/trace_path return results. Only runs for agent roles that
+# use the graph (triage, worker, reviewer) and only if the index doesn't
+# already exist (idempotent). Fast (<30s for typical repo size). e2e
+# doesn't query the graph.
+case "$ROLE" in
+  triage | worker | reviewer)
+    if ! command -v codebase-memory-mcp &>/dev/null; then
+      echo "[boucle] Installing codebase-memory-mcp (role=$ROLE)..." >&2
+      curl -fsSL "https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh" | bash 2>/dev/null || true
+    fi
+    if command -v codebase-memory-mcp &>/dev/null; then
+      if [ ! -d "$BOUCLE_WORKSPACE/.codebase-memory" ]; then
+        echo "[boucle] Indexing repo for codebase-memory-mcp (role=$ROLE)..." >&2
+        codebase-memory-mcp cli index_repository --repo_path "$BOUCLE_WORKSPACE" --json >/dev/null 2>&1 || true
+      fi
+    fi
+    ;;
+esac
 # The fetch script writes .boucle-state/$ISSUE/.attachments.env with
 # BOUCLE_ISSUE_ATTACHMENTS="path1 path2 ...". Empty string = no attachments.
 ATTACHMENTS_ENV="$STATE_DIR/.attachments.env"
