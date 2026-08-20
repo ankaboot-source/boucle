@@ -379,14 +379,20 @@ boucle_ci_dispatch() {
       dispatch_noop
     fi
 
-    # Global guard: if the issue is already closed, skip ALL MR webhooks.
-    # A closed issue is terminal from the loop's perspective; re-triggering
-    # roles on it only produces pipeline noise (issue #35). The catchup
-    # (merge action) is idempotent on a closed issue, and all other actions
-    # are meaningless once the issue is closed.
+    # Global guard: if the issue is already closed, skip ALL MR webhooks
+    # EXCEPT merge. A closed issue is terminal from the loop's perspective;
+    # re-triggering roles on it only produces pipeline noise (issue #35).
+    # The merge action is exempted because GitHub auto-closes the issue via
+    # the commit message (#iid) ~2s after a merge, BEFORE the
+    # pull_request closed+merged=true webhook arrives. Blocking the merge
+    # webhook would prevent catchup from reconciling the label (transitioning
+    # to boucle:merging → e2e → terminal label), leaving the issue stuck at
+    # its pre-merge label on a closed issue (issue #79). Catchup is
+    # idempotent on a closed issue — its label-based routing exits early for
+    # terminal states (boucle:done/boucle:human).
     if [ -n "$MR_ISSUE_IID" ]; then
       ISSUE_STATE=$(forge_issue_get "$MR_ISSUE_IID" | jq -r '.state // empty' 2> /dev/null || true)
-      if [ "$ISSUE_STATE" = "closed" ]; then
+      if [ "$ISSUE_STATE" = "closed" ] && [ "$MR_ACTION" != "merge" ]; then
         echo "boucle: issue #$MR_ISSUE_IID is closed — skipping $MR_ACTION webhook (no-op)"
         dispatch_noop
       fi

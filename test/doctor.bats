@@ -303,3 +303,24 @@ extract_spec_review_recovery() {
   run grep -q 'approved (reply=' <<< "$block"
   assert_failure
 }
+
+# ── Closed-issue non-terminal-label recovery (GitHub auto-close race, #79) ──
+
+@test "doctor: scans closed issues with non-terminal boucle labels" {
+  # The generalized zombie scan must iterate non-terminal labels on closed
+  # issues, not just boucle:working/boucle:review.
+  run grep -q 'boucle:spec-review' lib/boucle-ci/doctor.sh
+  assert_success
+  # The scan must check for a merged MR and chain to post-merge.
+  run grep -q 'merged MR — chaining to post-merge' lib/boucle-ci/doctor.sh
+  assert_success
+}
+
+@test "doctor: closed issue with merged MR chains to post-merge (not done)" {
+  # Lesson #102: e2e runs on every merge. A closed issue with a merged MR
+  # must chain to post-merge for e2e verification, NOT set boucle:done.
+  run grep -q 'chain_to_role "\$IID" "post-merge"' lib/boucle-ci/doctor.sh
+  assert_success
+  run grep -q 'merged MR' lib/boucle-ci/doctor.sh
+  assert_success
+}

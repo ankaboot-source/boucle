@@ -539,6 +539,26 @@ less:
   every run is a full sweep — the old behaviour exactly. No regression, and
   no saving either.
 
+### Manual-merge reconciliation (GitHub auto-close race)
+
+GitHub auto-closes an issue via the commit message `(#iid)` ~2s after a
+merge, BEFORE the `pull_request closed+merged=true` webhook arrives. The
+loop reconciles a manual merge in three layers:
+
+1. **Dispatch** — the `merge` action is exempted from the closed-issue
+   guard (which otherwise skips all MR webhooks on a closed issue, lesson
+   #44). The merge webhook chains to catchup even when the issue is already
+   closed.
+2. **Catchup** — no blanket closed-issue guard; label-based routing handles
+   terminal states (exit 0) and non-terminal states (proceed). Sets
+   `boucle:merging` and chains to post-merge → e2e (lesson #102: e2e runs
+   on every merge). `boucle:merging` is a skip-state for idempotence on
+   duplicate webhook delivery.
+3. **Doctor backstop** — scans closed issues with ANY non-terminal
+   `boucle:*` label. Recovery depends on MR state: merged MR → chain to
+   post-merge (e2e), open zombie MR → close + `boucle:done`, no MR →
+   `boucle:done`. Catches lost webhooks and races the immediate path misses.
+
 ## Skills
 
 Boucle ships ~62 skills in `.jcode/skills/`. Two mechanisms make them real

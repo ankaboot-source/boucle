@@ -900,3 +900,20 @@ extract_working_amend_block() {
   echo "$guard_block" | grep -q 'boucle_health_outcome'
   echo "$guard_block" | grep -q 'amended-in-flight'
 }
+
+# ── Closed-issue guard: merge exemption (GitHub auto-close race, #79) ──
+
+@test "dispatch: merge webhook is NOT skipped on a closed issue (GitHub auto-close race)" {
+  # The closed-issue guard must exempt MR_ACTION=merge so catchup can
+  # reconcile the label when GitHub auto-closes the issue before the
+  # pull_request webhook arrives.
+  run grep -q 'ISSUE_STATE" = "closed" \] && \[ "$MR_ACTION" != "merge"' lib/boucle-ci/dispatch.sh
+  assert_success
+}
+
+@test "dispatch: non-merge MR webhooks ARE still skipped on a closed issue" {
+  # The guard still blocks open/update/close/reopen/approved/unapproved
+  # on a closed issue (lesson #44 — don't run the loop on a closed issue).
+  run grep -q 'ISSUE_STATE" = "closed"' lib/boucle-ci/dispatch.sh
+  assert_success
+}

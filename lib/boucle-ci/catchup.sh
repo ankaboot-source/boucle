@@ -66,12 +66,6 @@ boucle_ci_catchup() {
   ISSUE_STATE=$(echo "$ISSUE_DATA" | jq -r '.state // "unknown"')
   ISSUE_LABELS=$(echo "$ISSUE_DATA" | jq -r '.labels | map(if type == "string" then . else .name end) | join(",")')
 
-  # If the issue is already closed, nothing to catch up — idempotence.
-  if [ "$ISSUE_STATE" = "closed" ]; then
-    echo "Issue #$BOUCLE_ISSUE already closed — nothing to catch up."
-    exit 0
-  fi
-
   # Determine the current boucle:* detail label (not the gross-axis
   # boucle::status::* labels, which also start with "boucle:").
   CURRENT_BOUCLE=$(echo "$ISSUE_LABELS" | tr ',' '\n' | grep -E '^boucle:(triage|needs-info|spec-review|todo|working|review|approval|merging|done|human|split|blocked)$' | head -1)
@@ -82,15 +76,19 @@ boucle_ci_catchup() {
       # merged directly. Trust the judgment → mark done.
       TARGET="done"
       ;;
-    triage | needs-info | spec-review | todo | working | review | merging)
+    triage | needs-info | spec-review | todo | working | review)
       # Merged before the loop finished its review. Honest signal: the
       # bot did not validate completion → mark human. Still close +
       # cascade so the issue doesn't stay stuck.
       TARGET="human"
       ;;
-    done | human | split | blocked)
-      # Already at a terminal state — issue was handled by another path.
-      echo "Issue #$BOUCLE_ISSUE already at terminal state boucle:$CURRENT_BOUCLE — skipping."
+    done | human | split | blocked | merging)
+      # merging is in-progress (a prior catchup set it and chained to
+      # post-merge → e2e). A duplicate catchup run must NOT re-chain — the
+      # in-flight e2e applies the terminal label. The doctor's merging scan
+      # (open issues) and the closed-issue non-terminal-label scan (closed
+      # issues) are the backstop if the chain failed.
+      echo "Issue #$BOUCLE_ISSUE already at terminal/in-progress state boucle:$CURRENT_BOUCLE — skipping."
       exit 0
       ;;
     "")

@@ -848,28 +848,77 @@ boucle_ci_doctor() {
     RECOVERED=$((RECOVERED + 1))
   done
 
-  # ── Recover CLOSED issues stuck at boucle:working/boucle:review ─────────
-  # The doctor's main scan filters state=opened, so a closed issue that
-  # still has boucle:working or boucle:review is invisible. This happens
-  # when a human merges the MR directly (catchup chains to post-merge → e2e,
-  # which closes the issue on a PASS verdict) while a worker iteration is
-  # in flight — the worker's rebase-conflict re-trigger or the reviewer
-  # FAIL handler re-triggers the worker on the closed issue, creating
-  # zombie MRs and failed pipeline cascades (lesson #44). Recovery: set
-  # boucle:done + close any open zombie MRs.
-  ZOMBIE_WORKING=$(forge_issue_list_by_label "boucle:working" closed | jq -r '.[] | .iid // .number')
-  ZOMBIE_REVIEW=$(forge_issue_list_by_label "boucle:review" closed | jq -r '.[] | .iid // .number')
-  for IID in $ZOMBIE_WORKING $ZOMBIE_REVIEW; do
-    echo "  → #$IID: closed but stuck at working/review — zombie recovery"
-    # Close any open MR on the boucle/$IID branch (zombie MR created by
-    # the worker running on the closed issue).
-    ZOMBIE_MR_IID=$(forge_mr_lookup_by_branch "boucle/$IID" opened)
-    if [ -n "$ZOMBIE_MR_IID" ]; then
-      echo "  → #$IID: closing zombie MR !${ZOMBIE_MR_IID}"
-      forge_mr_close "$ZOMBIE_MR_IID"
-    fi
-    set_boucle_label "$IID" "boucle:done" "boucle::status::done"
-    RECOVERED=$((RECOVERED + 1))
+  # ── Recover closed issues stuck at non-terminal boucle labels ──────────
+  # GitHub auto-closes the issue via commit message (#iid) ~2s after a
+  # merge, BEFORE the pull_request closed+merged=true webhook arrives.
+  # The dispatch closed-issue guard (exempted for merge) + catchup (no
+  # blanket closed-issue guard) handle the immediate case. This scan is
+  # the backstop: it catches ANY closed issue with a non-terminal boucle:*
+  # label — whether the webhook lost the race, was lost entirely, or a
+  # worker ran on a closed issue and created a zombie MR.
+  #
+  # Recovery depends on the MR state on the boucle/$IID branch:
+  #   - merged MR → set boucle:merging, chain to post-merge (e2e
+  #     verification — lesson #102: production health is orthogonal to
+  #     who merged). The terminal label is applied by e2e, not here.
+  #   - open MR (zombie from a worker on a closed issue) → close the
+  #     zombie MR, set boucle:done (the work was completed via another
+  #     path; the open MR is garbage).
+  #   - no MR → set boucle:done (issue closed manually, no MR involved).
+  # An open MR coexisting with a merged MR means the issue was reopened
+  # for a new iteration — skip (the open MR is the active work).
+  echo "Scanning closed issues with non-terminal boucle labels..."
+  for LABEL in boucle:triage boucle:needs-info boucle:spec-review \
+    boucle:todo boucle:working boucle:review boucle:approval \
+    boucle:merging boucle:split boucle:blocked; do
+    CLOSED_STUCK=$(forge_issue_list_by_label "$LABEL" closed \
+      | jq -r '.[] | .iid // .number')
+    for IID in $CLOSED_STUCK; do
+      echo "  → #$IID: closed but stuck at $LABEL — recovery"
+      # Check for a merged MR on the branch (GitHub auto-close race).
+      MR_MERGED_IID=$(forge_mr_lookup_by_branch "boucle/$IID" merged)
+      MR_MERGED_STATE=""
+      if [ -n "$MR_MERGED_IID" ]; then
+        MR_MERGED_STATE=$(forge_mr_get "$MR_MERGED_IID" | jq -r 'if .merged == true then "merged" else .state // empty end')
+      fi
+      if [ "$MR_MERGED_STATE" = "merged" ]; then
+        # An open MR coexisting with a merged MR = reopened for a new
+        # iteration — skip (the open MR is the active work).
+        MR_OPEN_IID=$(forge_mr_lookup_by_branch "boucle/$IID" opened)
+        MR_OPEN_STATE=""
+        if [ -n "$MR_OPEN_IID" ]; then
+          MR_OPEN_STATE=$(forge_mr_get "$MR_OPEN_IID" | jq -r 'if .state == "open" then "opened" else .state // empty end')
+        fi
+        if [ "$MR_OPEN_STATE" = "opened" ]; then
+          echo "  → #$IID: merged MR but open MR exists — reopened for new iteration, skipping"
+          continue
+        fi
+        # Active-pipeline guard: skip if a post-merge/e2e pipeline is
+        # already in flight (the webhook path may have triggered it).
+        if issue_has_active_pipeline "$IID"; then
+          echo "  → #$IID: active pipeline already running — skipping"
+          continue
+        fi
+        if doctor_should_skip_dedup "$IID"; then
+          continue
+        fi
+        echo "  → #$IID: merged MR — chaining to post-merge for e2e verification"
+        set_boucle_label "$IID" "boucle:merging" "boucle::status::bot"
+        chain_to_role "$IID" "post-merge"
+        doctor_mark_triggered "$IID"
+        RECOVERED=$((RECOVERED + 1))
+        continue
+      fi
+      # No merged MR — check for an open zombie MR (worker ran on the
+      # closed issue). Close it and set boucle:done.
+      ZOMBIE_MR_IID=$(forge_mr_lookup_by_branch "boucle/$IID" opened)
+      if [ -n "$ZOMBIE_MR_IID" ]; then
+        echo "  → #$IID: closing zombie MR !${ZOMBIE_MR_IID}"
+        forge_mr_close "$ZOMBIE_MR_IID"
+      fi
+      set_boucle_label "$IID" "boucle:done" "boucle::status::done"
+      RECOVERED=$((RECOVERED + 1))
+    done
   done
 
   # ── Recover boucle:human AND boucle:approval issues with approved MRs ──
