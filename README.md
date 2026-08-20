@@ -14,8 +14,9 @@ never touch the engine itself.
 - [✨ Why boucle?](#why-boucle)
 - [How to install](#how-to-install)
   - [🚀 Quick start](#-quick-start)
-  - [Prerequisite](#prerequisite)
   - [No terminal? Use a prompt](#no-terminal-use-a-prompt)
+  - [Detailed install — CLI](#detailed-install--cli)
+  - [Prerequisite](#prerequisite)
   - [After install](#after-install)
 - [⚙️ How it works](#how-it-works)
 - [💰 Cost](#cost)
@@ -59,6 +60,35 @@ A harness made for humans, by an indie product builder for product builders.
     and a curated [skill library](.jcode/skills/) (UI/UX, design, frontend).
     No SaaS, no middleman — your code, your data, your tokens.
 
+<details>
+<summary><b>Other features</b> — the factual list, beyond the pitch above</summary>
+
+- **Four specialized agents** — triage (spec), worker (implementation),
+  reviewer (verification), e2e (production check), each with a focused prompt
+  and step/iteration caps.
+- **Mono-user mode** — no second account required: one account carries the
+  issues, the MRs and the loop's own actions.
+- **Deploy-agnostic** — Cloudflare Pages, GitHub Pages, GitLab Pages, or your
+  own pipeline (`external` mode).
+- **Three review modes** — `preview` (test the deployed preview), `diff`
+  (review the MR diff + check suites), `screenshot` (grade screenshots via a
+  vision model).
+- **Do-Not-Disturb** — opt-in quiet window: the spec gate is auto-validated,
+  the loop runs autonomously up to the MR.
+- **Observability in the issue** — `/boucle status`, `/boucle log`,
+  `/boucle help` as issue comments.
+- **Interactive takeover** — `boucle takeover` resumes the worker's jcode
+  session interactively when the loop escalates.
+- **Status board** — a pinned issue answers "what is waiting on me?".
+- **Scheduled maintenance issues** — cron-driven issue creation from
+  `.boucle/schedules/*.md`.
+- **Provider probe + fallback** — quota is probed before a run; a fallback
+  provider takes over when the primary is down or exhausted.
+- **Cost accounting** — per-issue token and cost tracking
+  (`.boucle/<issue>/cost.json`).
+- **Open-source, open-weight** — AGPL-3.0, open-weight models by default.
+</details>
+
 ## How to install
 
 ### 🚀 Quick start
@@ -70,26 +100,8 @@ curl -fsSL https://raw.githubusercontent.com/ankaboot-source/boucle/main/install
 ```
 
 The installer adds boucle as a git submodule (`.boucle/`) and runs
-`bin/setup`, which auto-detects your forge from the `origin` remote. Need to
-pass flags to setup (e.g. a GitHub bot token)? Pipe through `bash -s --`:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/ankaboot-source/boucle/main/install.sh | bash -s -- github --bot-token "<bot-PAT>" --bot-id <bot-user-id>
-```
-
-Then create an issue in your forge and tag it `boucle:triage` — the loop starts.
-
-### Prerequisite
-
-A Git repository hosted on **GitLab or GitHub**, with a
-deployment target. The default target is Cloudflare Pages, but boucle is
-deploy-agnostic: set `BOUCLE_DEPLOY_MODE=external` when your own CI/CD ships
-the app (no deploy command needed, e2e still runs after merge), or bring any
-hosting reachable by `BOUCLE_DEPLOY_CMD`/`BOUCLE_LIVE_URL` — see the
-[Configuration](#configuration) table and [LOOP.md](LOOP.md). `bin/setup`
-creates the bot (a project service account on GitLab, the PAT owner on
-GitHub) as part of the install — see [The bot user](#the-bot-user) if you
-prefer to wire in an existing account instead.
+`bin/setup`, which auto-detects your forge from the `origin` remote. Then
+create an issue in your forge and tag it `boucle:triage` — the loop starts.
 
 ### No terminal? Use a prompt
 
@@ -116,6 +128,46 @@ back what you did:
 6. Show me the URL bin/setup printed for configuring the masked API key,
    and any next steps it listed.
 ```
+
+### Detailed install — CLI
+
+Run the steps by hand when you want control over each one — flags, bot
+account, commit message. The one-liner above is a thin wrapper over these
+steps:
+
+```sh
+git submodule add https://github.com/ankaboot-source/boucle .boucle
+.boucle/bin/setup --non-interactive   # auto-detects the forge from origin
+git add .gitmodules .boucle .gitlab-ci.yml
+git commit -m "chore: install boucle engine"
+```
+
+Pass flags to setup when you need them — e.g. a GitHub bot account:
+
+```sh
+.boucle/bin/setup github --bot-token "<bot-PAT>" --bot-id <bot-user-id>
+```
+
+Prefer a one-liner with flags? Pipe them through the installer:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ankaboot-source/boucle/main/install.sh | bash -s -- github --bot-token "<bot-PAT>" --bot-id <bot-user-id>
+```
+
+`bin/setup` is idempotent — re-run it to change the bot, the runner tag
+(`--runner-tag`), or the allow list (`--allowed-users`).
+
+### Prerequisite
+
+A Git repository hosted on **GitLab or GitHub**, with a
+deployment target. The default target is Cloudflare Pages, but boucle is
+deploy-agnostic: set `BOUCLE_DEPLOY_MODE=external` when your own CI/CD ships
+the app (no deploy command needed, e2e still runs after merge), or bring any
+hosting reachable by `BOUCLE_DEPLOY_CMD`/`BOUCLE_LIVE_URL` — see the
+[Configuration](#configuration) table and [LOOP.md](LOOP.md). `bin/setup`
+creates the bot (a project service account on GitLab, the PAT owner on
+GitHub) as part of the install — see [The bot user](#the-bot-user) if you
+prefer to wire in an existing account instead.
 
 ### After install
 
