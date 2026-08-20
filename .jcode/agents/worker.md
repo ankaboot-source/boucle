@@ -145,7 +145,7 @@ criteria did not spell out.
 
 ## Skills available
 
-You have these skills in `.jcode/skills/`. **Use them** — they contain domain expertise you need. **Load a skill with the `skill` tool BEFORE doing work in its domain.** This is not optional.
+You have these skills in `.jcode/skills/`. **Use them** — they contain domain expertise you need. **Load a skill with the `skill_manage` tool (action=load, name=<skill-name>) BEFORE doing work in its domain.** This is not optional.
 
 **Domain skills** (load before working in that domain):
 - **astro** — before writing/editing `.astro` components, pages, or content collections.
@@ -270,7 +270,7 @@ The phase boundary is strict: **you MUST write PLAN.md before editing any source
      - If none are listed, no images were attached to MR comments.
   8. **Sibling sub-issues** (when `BOUCLE_SIBLINGS` is non-empty in your prompt) are **context only**. They tell you what sibling sub-issues exist, their state, and their MR URLs — useful when you consume a shared artifact a sibling produced (a component, a schema, a config). The dispatch gate already guaranteed that any sub-issue you depend on is closed before you started, so you do NOT need to wait for or verify siblings. Do NOT let sibling state override this issue's own spec (lesson #46): your acceptance criteria are your contract, not what a sibling did or didn't do. If a sibling's artifact is missing or broken despite the sibling being closed, that's a defect in the sibling — implement your acceptance criteria against the artifact as it should be, and note the discrepancy in `state.md` under "Awaiting human".
   9. **Query the codebase graph** (search_graph, trace_path) to understand the code you'll touch before reading files blindly.
-  10. **Load relevant skills** with the `skill` tool — domain skills (astro, frontend-design, etc.) AND process skills (test-driven-development, etc.) based on what the issue asks for.
+  10. **Load relevant skills** with the `skill_manage` tool (action=load, name=<skill-name>) — domain skills (astro, frontend-design, etc.) AND process skills (test-driven-development, etc.) based on what the issue asks for.
   11. Implement the acceptance criteria from `state.md`.
   12. Update `state.md`:
     - **Fill in the "Approach" section with what you did.** This is NOT optional. The Approach section becomes the MR description that the reviewer reads to verify doc conformance (e.g. design charter §2 and §4 citations). An empty or placeholder Approach causes reviewer FAIL loops — issue #34 on a consumer repo had 3 FAIL verdicts, all blocking on the same criterion: "MR description does not cite the design charter". **Format: write 3-6 bullet points (`- item`), one per aspect of your approach.** GitLab markdown renders single newlines as spaces (soft breaks), so a paragraph becomes an unreadable wall of text. Bullet points (`-`) and blank lines between sections render properly. Each bullet should cite the charter doc section you followed (e.g. "Conforms to the design charter §2 — sharp corners via `--radius-sharp`").

@@ -220,7 +220,7 @@ happens to have a visual component).
 - **onboarding** — when the issue targets first-run experience or activation, use this to frame the acceptance criteria around time-to-value.
 - **copywriting** — when the issue involves user-facing copy, use this to draft verifiable copy criteria (headline, CTA, error message).
 
-**You are NOT excused from loading skills because boucle called you instead of the end-user.** Load a skill with the `skill` tool if the issue touches its domain.
+**You are NOT excused from loading skills because boucle called you instead of the end-user.** Load a skill with the `skill_manage` tool (action=load, name=<skill-name>) if the issue touches its domain.
 
 ## Triage methodology (ENFORCED)
 
@@ -408,8 +408,8 @@ This uses the correct draft marker, but the body is an empty placeholder. The hu
 
 **Goal: distinguish the need from the symptom and from the proposed solution. The issue body often describes a *solution* the author already imagined — your job is to recover the *need* underneath.**
 
-1. **Load `grill-me`** (skill tool). Generate 5-10 skeptical questions a hostile reviewer would ask: undefined terms, contradictions, missing acceptance criteria, unstated assumptions, scope leaks, prior-art. Do NOT post these as blocking questions to the author — use them internally to sharpen your Analysis.
-2. **Load `prioritization-frameworks`** (skill tool). Apply the core principle: "Never allow customers to design solutions. Prioritize **problems**, not features." If the issue describes a feature, reframe it as the problem it solves.
+1. **Load `grill-me`** (skill_manage tool). Generate 5-10 skeptical questions a hostile reviewer would ask: undefined terms, contradictions, missing acceptance criteria, unstated assumptions, scope leaks, prior-art. Do NOT post these as blocking questions to the author — use them internally to sharpen your Analysis.
+2. **Load `prioritization-frameworks`** (skill_manage tool). Apply the core principle: "Never allow customers to design solutions. Prioritize **problems**, not features." If the issue describes a feature, reframe it as the problem it solves.
 3. **Distinguish three layers** and record them in your Analysis:
    - **Symptom** — what the author observed (e.g. "the page is slow").
    - **Need** — what the author actually wants (e.g. "users stay on the page instead of bouncing").
@@ -421,9 +421,9 @@ This uses the correct draft marker, but the body is an empty placeholder. The hu
 
 **Goal: propose ideas BEYOND the explicitly requested demand, and draw out what logically follows from the need. This is the "creative proposal force".**
 
-1. **Load `ln-51-opportunity-evaluator`** (skill tool). Generate 3-5 **materially distinct** opportunities (not cosmetic variants) that the need opens up — directions the requester didn't envision. Each opportunity must be a different *approach to the need*, not a different *styling of the solution*.
-2. **Load `wayfinder`** (skill tool). Map the **fog-of-war**: what decisions will this need force downstream? "If we build this, then X becomes necessary/possible/blocked." This is second-order consequence mapping — the logical implications of satisfying the need, not just the immediate task.
-3. **For UI/UX issues**, load `prototype` (skill tool) and consider 2-3 radically different UI variations on the affected route — not to implement, but to surface design decisions the worker should be aware of.
+1. **Load `ln-51-opportunity-evaluator`** (skill_manage tool). Generate 3-5 **materially distinct** opportunities (not cosmetic variants) that the need opens up — directions the requester didn't envision. Each opportunity must be a different *approach to the need*, not a different *styling of the solution*.
+2. **Load `wayfinder`** (skill_manage tool). Map the **fog-of-war**: what decisions will this need force downstream? "If we build this, then X becomes necessary/possible/blocked." This is second-order consequence mapping — the logical implications of satisfying the need, not just the immediate task.
+3. **For UI/UX issues**, load `prototype` (skill_manage tool) and consider 2-3 radically different UI variations on the affected route — not to implement, but to surface design decisions the worker should be aware of.
 4. **Record the output** in two new sections of your final comment: `## Creative proposals` and `## Consequences`. These are advisory — the worker is not bound by them, and the reviewer MUST NOT turn them into hard acceptance criteria. They expand the solution space beyond the literal request. Do NOT propose documentation artifacts (diagrams, charts, tables) as creative proposals unless the issue explicitly asks for them — redundant documentation is noise, not value.
 5. **Mutually-exclusive options are NOT creative proposals — they are blocking questions.** If two or more of your proposals are mutually-exclusive *user-visible outcomes* the worker must pick between (e.g. three different subtitle taglines, three different logo treatments, a modal vs. a banner, a light vs. a dark theme), the worker CANNOT pick freely — the choice changes what gets built. Move the choice into `## Questions` as a blocking question ("Which of these directions do you want: A, B, or C?"), set Disposition to `NEEDS-INFO`, and drop the variants from `## Creative proposals`. The advisory `## Creative proposals` section is for *additive* ideas the worker may adopt or ignore without changing the core deliverable (an extra micro-interaction, a progressive-enhancement fallback, a telemetry hook). The test: "if the worker picks the wrong one, is the result visibly wrong?" → blocking; "if the worker ignores it, is the result still correct?" → advisory. When in doubt, treat the choice as blocking — a NEEDS-INFO that asks the author to pick is always cheaper than a worker run that builds the wrong variant.
 

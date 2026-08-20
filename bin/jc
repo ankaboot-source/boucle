@@ -1490,11 +1490,12 @@ Draft file hygiene: if you write your draft verdict to a file, use \`\$BOUCLE_VE
         catalogue=$("${BOUCLE_HOME}/bin/skills-index" 2> /dev/null || echo "")
       fi
       if [ -n "$catalogue" ]; then
-        echo ""
-        echo "Complete skill catalogue (load any of these with the \`skill\` tool, by the name shown):"
-        echo "$catalogue"
-        echo ""
-        echo "This list is exhaustive and every entry is loadable at any point during your run — including mid-task, once you discover you need one. The curated guidance above highlights the skills most often needed for your role; it does not restrict what you may load."
+        prompt="${prompt}
+
+Complete skill catalogue (load any of these with the \`skill_manage\` tool — action=load, name=<skill-name> — by the name shown):
+${catalogue}
+
+This list is exhaustive and every entry is loadable at any point during your run — including mid-task, once you discover you need one. The curated guidance above highlights the skills most often needed for your role; it does not restrict what you may load."
       fi
       ;;
   esac
@@ -2158,7 +2159,10 @@ extract_skills_used() {
   [ -f "$log" ] || return 0
   # The transcript format is jcode's, not ours, so match on several plausible
   # shapes rather than one. Names are the on-disk directory names.
-  grep -oiE '(skill[^a-z0-9]{0,3}(tool|call|load)?[^a-z0-9]{0,3}|\bskill\(|loading skill |\.jcode/skills/)[a-z0-9_-]+' "$log" 2> /dev/null \
+  # jcode's tool is called `skill_manage` (not `skill`), so match on
+  # skill_manage calls + the `## Skill: <name>` output pattern + the older
+  # `skill(` pattern for compatibility.
+  grep -oiE '(skill_manage[^a-z0-9]{0,5}(load|read)?[^a-z0-9]{0,5}|\bskill\(|loading skill |\.jcode/skills/|## Skill: |skill_manage.*name.*["\x27])[a-z0-9_-]+' "$log" 2>/dev/null \
     | grep -oE '[a-z0-9_-]+$' \
     | sort -u \
     | while read -r candidate; do
