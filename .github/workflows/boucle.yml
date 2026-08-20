@@ -134,7 +134,11 @@ env:
   BOUCLE_MAX_PARALLEL_ISSUES: ${{ vars.BOUCLE_MAX_PARALLEL_ISSUES || '5' }}
   BOUCLE_MAX_ITERATIONS: ${{ vars.BOUCLE_MAX_ITERATIONS || '5' }}
   BOUCLE_STALENESS_THRESHOLD: ${{ vars.BOUCLE_STALENESS_THRESHOLD || '2400' }}
-  BOUCLE_BUILD_CMD: ${{ vars.BOUCLE_BUILD_CMD || 'npm run build' }}
+  # MUST stay in sync with the .gitlab-ci.yml default and LOOP.md: a build
+  # without dependency install exits 127 ("astro: not found") on a fresh
+  # runner — observed on boucle.dev issue #81, where every iteration burned
+  # on the same missing-node_modules failure.
+  BOUCLE_BUILD_CMD: ${{ vars.BOUCLE_BUILD_CMD || 'npm ci && npm run build' }}
   BOUCLE_BUILD_OUTPUT: ${{ vars.BOUCLE_BUILD_OUTPUT || 'public' }}
   BOUCLE_DEPLOY_CMD: ${{ vars.BOUCLE_DEPLOY_CMD || 'npx wrangler pages deploy public --project-name=$BOUCLE_DEPLOY_PROJECT' }}
   BOUCLE_DEPLOY_PROJECT: ${{ vars.BOUCLE_DEPLOY_PROJECT || '' }}
@@ -477,8 +481,13 @@ jobs:
     # `resource_group: boucle-issue-$BOUCLE_ISSUE` on the worker job.
     # cancel-in-progress: false queues the second run instead of cancelling
     # the first — a worker mid-build must not be killed by a re-trigger.
+    # The group prefix MUST differ from the workflow-level concurrency group
+    # (boucle-issue-<N> for workflow_dispatch runs): an identical string at
+    # both levels made GitHub's scheduler reject the job instantly — 0 steps,
+    # no runner, no logs (2026-08-20: every worker dispatch failed for 10h,
+    # doctor loop re-dispatched forever).
     concurrency:
-      group: boucle-issue-${{ github.event.inputs.BOUCLE_ISSUE || github.event.issue.number }}
+      group: boucle-worker-${{ github.event.inputs.BOUCLE_ISSUE || github.event.issue.number }}
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
