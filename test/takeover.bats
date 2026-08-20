@@ -61,7 +61,12 @@ takeover_funcs() {
   mkdir -p "${T}/.boucle-state/7/session"
   echo "session_test_5678_def" > "${T}/.boucle-state/7/session-id"
   # bin/boucle reads .boucle-state relative to CWD; run it from $T.
-  run env -i PATH="${PATH}" HOME="${HOME}" bash -c "cd '${T}' && '${OLDPWD}/bin/boucle' takeover 7"
+  # Resolve the script path from BATS_TEST_DIRNAME (test/) before env -i
+  # strips the environment — OLDPWD is unset under env -i, so the old
+  # '${OLDPWD}/bin/boucle' collapsed to /bin/boucle and exited 127 in CI.
+  # shellcheck disable=SC2154 # BATS_TEST_DIRNAME is set by bats at runtime
+  BOUCLE_BIN="${BATS_TEST_DIRNAME}/../bin/boucle"
+  run env -i PATH="${PATH}" HOME="${HOME}" BOUCLE_BIN="${BOUCLE_BIN}" bash -c "cd '${T}' && \"\${BOUCLE_BIN}\" takeover 7"
   assert_success
   assert_output --partial "Captured jcode session: session_test_5678_def"
   assert_output --partial "jcode --resume session_test_5678_def"
@@ -73,7 +78,9 @@ takeover_funcs() {
 
 @test "takeover: bin/boucle takeover fails open with a fallback when no session-id exists" {
   T=$(mktemp -d)
-  run env -i PATH="${PATH}" HOME="${HOME}" bash -c "cd '${T}' && '${OLDPWD}/bin/boucle' takeover 7"
+  # shellcheck disable=SC2154 # BATS_TEST_DIRNAME is set by bats at runtime
+  BOUCLE_BIN="${BATS_TEST_DIRNAME}/../bin/boucle"
+  run env -i PATH="${PATH}" HOME="${HOME}" BOUCLE_BIN="${BOUCLE_BIN}" bash -c "cd '${T}' && \"\${BOUCLE_BIN}\" takeover 7"
   assert_failure
   assert_output --partial "No captured jcode session for issue #7"
   assert_output --partial "boucle restart 7"
