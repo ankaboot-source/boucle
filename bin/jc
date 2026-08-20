@@ -366,7 +366,7 @@ is_agent_looping() {
   # counting duplicates — these appear 5+ times in a healthy multi-edit
   # run and caused a false-positive "agent looping" on 100% of
   # worker+triage runs (observed on boucle.dev: 35/35 runs).
-  grep -vE '^\[[a-z]+\] |^→ |^[[:space:]]*$|^[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$log" 2>/dev/null \
+  grep -vE '^\[[a-z]+\] |^→ |^[[:space:]]*$|^[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$log" 2> /dev/null \
     | awk 'length > 20' \
     | sort \
     | uniq -c \
@@ -688,7 +688,7 @@ if [ -n "${BOUCLE_HOME:-}" ] && [ "$BOUCLE_HOME" != "$BOUCLE_WORKSPACE" ]; then
     # Stale/broken symlink → replace.
     [ -L "$root_path" ] && rm -f "$root_path"
     mkdir -p "$(dirname "$root_path")"
-    ln -s "$engine_src" "$root_path" 2>/dev/null || true
+    ln -s "$engine_src" "$root_path" 2> /dev/null || true
   done
 fi
 
@@ -704,14 +704,14 @@ fi
 # doesn't query the graph.
 case "$ROLE" in
   triage | worker | reviewer)
-    if ! command -v codebase-memory-mcp &>/dev/null; then
+    if ! command -v codebase-memory-mcp &> /dev/null; then
       echo "[boucle] Installing codebase-memory-mcp (role=$ROLE)..." >&2
-      curl -fsSL "https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh" | bash 2>/dev/null || true
+      curl -fsSL "https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh" | bash 2> /dev/null || true
     fi
-    if command -v codebase-memory-mcp &>/dev/null; then
+    if command -v codebase-memory-mcp &> /dev/null; then
       if [ ! -d "$BOUCLE_WORKSPACE/.codebase-memory" ]; then
         echo "[boucle] Indexing repo for codebase-memory-mcp (role=$ROLE)..." >&2
-        codebase-memory-mcp cli index_repository --repo_path "$BOUCLE_WORKSPACE" --json >/dev/null 2>&1 || true
+        codebase-memory-mcp cli index_repository --repo_path "$BOUCLE_WORKSPACE" --json > /dev/null 2>&1 || true
       fi
     fi
     ;;
@@ -1350,14 +1350,14 @@ Apply the four-point admission test from AGENTS.md. If no candidate passes, emit
             | grep -oE '[a-z]{4,}' \
             | sort -u \
             | head -20 \
-            | paste -sd'|' - 2>/dev/null || echo "")
+            | paste -sd'|' - 2> /dev/null || echo "")
         fi
         # Grep LESSONS.yml for lessons matching any keyword in the title,
         # ❌, or ✅ fields. Extract the full lesson block (number + title +
         # ❌ + ✅). Limit to 10 matches to keep the prompt within budget.
         local matched=""
         if [ -n "$keywords" ]; then
-          matched=$(grep -iE "$keywords" "$lessons_file" 2>/dev/null | head -1 || true)
+          matched=$(grep -iE "$keywords" "$lessons_file" 2> /dev/null | head -1 || true)
         fi
         if [ -n "$matched" ]; then
           # Keyword match: extract the matching lesson blocks.
@@ -1370,7 +1370,7 @@ Apply the four-point admission test from AGENTS.md. If no candidate passes, emit
             }
             { buf = buf $0 "\n" }
             END { if (buf && buf ~ kw) print buf }
-          ' "$lessons_file" 2>/dev/null | head -80 || true)
+          ' "$lessons_file" 2> /dev/null | head -80 || true)
         fi
         # If no keyword match, inject the default critical lessons.
         if [ -z "$lessons_block" ]; then
@@ -1379,7 +1379,7 @@ Apply the four-point admission test from AGENTS.md. If no candidate passes, emit
             p && /^[0-9]+:/ { if (buf) print buf; buf=$0"\n"; p=0; next }
             p { buf=buf$0"\n" }
             END { if (buf) print buf }
-          ' "$lessons_file" 2>/dev/null | head -40 || true)
+          ' "$lessons_file" 2> /dev/null | head -40 || true)
         fi
         if [ -n "$lessons_block" ]; then
           prompt="${prompt}
@@ -1402,13 +1402,13 @@ These lessons are mandatory operating principles. Violating any ❌ pattern is a
   # (triage, worker, reviewer — not e2e).
   case "$role" in
     triage | worker | reviewer)
-      if command -v codebase-memory-mcp &>/dev/null; then
+      if command -v codebase-memory-mcp &> /dev/null; then
         local arch_block=""
         local proj_name
         proj_name=$(basename "$BOUCLE_WORKSPACE")
         arch_block=$(codebase-memory-mcp cli get_architecture \
           --project "$proj_name" \
-          --aspects overview 2>/dev/null || echo "")
+          --aspects overview 2> /dev/null || echo "")
         if [ -n "$arch_block" ]; then
           # Trim to ~2000 chars to keep the prompt within budget.
           arch_block=$(printf '%s' "$arch_block" | head -c 2000)
@@ -1440,7 +1440,7 @@ Use this map to locate code. For deeper queries (callers, callees, data flow), c
         [ -f "$doc_path" ] || doc_path="$BOUCLE_HOME/$doc"
         if [ -f "$doc_path" ]; then
           local doc_summary
-          doc_summary=$(head -c 1500 "$doc_path" 2>/dev/null || echo "")
+          doc_summary=$(head -c 1500 "$doc_path" 2> /dev/null || echo "")
           if [ -n "$doc_summary" ]; then
             charter_block="${charter_block}
 
@@ -1837,7 +1837,7 @@ if [ "$FREERIDE_MODE" = "1" ] && [ -n "$FREERIDE_ROTATION_LIST" ] && [ -n "$FALL
       {
         echo ""
         echo "--- [boucle:freeride] primary attempt log (appended for exit-3 guard) ---"
-        cat "${AGENT_LOG}.primary" 2>/dev/null
+        cat "${AGENT_LOG}.primary" 2> /dev/null
       } >> "$AGENT_LOG"
       break
     fi
@@ -1882,7 +1882,7 @@ elif [ -n "$FALLBACK_PROVIDER" ] && [ -n "$FALLBACK_REASON" ]; then
     {
       echo ""
       echo "--- [boucle:fallback] primary attempt log (appended for exit-3 guard) ---"
-      cat "${AGENT_LOG}.primary" 2>/dev/null
+      cat "${AGENT_LOG}.primary" 2> /dev/null
     } >> "$AGENT_LOG"
   fi
   rm -f "${AGENT_LOG}.primary" 2> /dev/null || true
@@ -1979,7 +1979,7 @@ case "$ROLE" in
       # Extract the posted/drafted note body from the log and check its
       # length. A meaningful draft has at least 50 chars of content (the
       # marker line itself is ~40 chars, so 50 excludes pure markers).
-      POSTED_BODY=$(grep -oE '(boucle:(triage|verdict|draft)[^"]*|<!-- boucle:(triage|verdict|draft)[^>]*-->.*$)' "$AGENT_LOG" 2>/dev/null | tail -1 || true)
+      POSTED_BODY=$(grep -oE '(boucle:(triage|verdict|draft)[^"]*|<!-- boucle:(triage|verdict|draft)[^>]*-->.*$)' "$AGENT_LOG" 2> /dev/null | tail -1 || true)
       if [ -n "$POSTED_BODY" ]; then
         POSTED_LEN=${#POSTED_BODY}
         if [ "$POSTED_LEN" -lt 50 ]; then
@@ -2162,7 +2162,7 @@ extract_skills_used() {
   # jcode's tool is called `skill_manage` (not `skill`), so match on
   # skill_manage calls + the `## Skill: <name>` output pattern + the older
   # `skill(` pattern for compatibility.
-  grep -oiE '(skill_manage[^a-z0-9]{0,5}(load|read)?[^a-z0-9]{0,5}|\bskill\(|loading skill |\.jcode/skills/|## Skill: |skill_manage.*name.*["\x27])[a-z0-9_-]+' "$log" 2>/dev/null \
+  grep -oiE '(skill_manage[^a-z0-9]{0,5}(load|read)?[^a-z0-9]{0,5}|\bskill\(|loading skill |\.jcode/skills/|## Skill: |skill_manage.*name.*["\x27])[a-z0-9_-]+' "$log" 2> /dev/null \
     | grep -oE '[a-z0-9_-]+$' \
     | sort -u \
     | while read -r candidate; do

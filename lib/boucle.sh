@@ -1776,7 +1776,7 @@ parse_recurring_marker() {
   printf '%s' "$refs"
 }
 
-# ── Impacts marker parsing (deterministic CI gate — AGENTS.md §12) ────
+# ── Impacts marker parsing (deterministic CI gate — LESSONS.yml #104) ────
 # parse_impacts_marker <notes_json> — extract the comma-separated `kinds`
 # value from the newest `<!-- boucle:impacts v=1 kinds=... -->` marker in
 # the final triage comment. Mirrors parse_files_marker. The closed set is
@@ -1800,7 +1800,7 @@ parse_impacts_marker() {
   printf '%s' "$kinds"
 }
 
-# ── Diagram marker parsing (deterministic CI gate — AGENTS.md §12) ─────
+# ── Diagram marker parsing (deterministic CI gate — LESSONS.yml #104) ─────
 # parse_diagram_marker <notes_json> — extract the comma-separated `types`
 # value from the newest `<!-- boucle:diagram v=1 types=... -->` marker in
 # the final triage comment. Mirrors parse_files_marker. Mermaid block types

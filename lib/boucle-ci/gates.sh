@@ -111,7 +111,7 @@ check_file_gate() {
   return 0
 }
 
-# ── Diagram gate (deterministic — AGENTS.md §12) ──────────────────────
+# ── Diagram gate (deterministic — LESSONS.yml #104) ──────────────────────
 # Before a spec pauses for human approval, verify that a spec declaring
 # structural impacts (architecture, data-model, process, state-machine,
 # data-flow, deployment) in its `## Impacts` section actually includes the
@@ -158,7 +158,7 @@ check_diagram_gate() {
   # Unknown/empty size → fail-open (do not block on a parse gap).
   case "$size" in
     S) return 0 ;;
-    M|L) ;; # proceed to the diagram check
+    M | L) ;;      # proceed to the diagram check
     *) return 0 ;; # unknown/empty → fail-open
   esac
   # Structural impact declared + Size M/L → diagram marker MUST be present.
@@ -173,7 +173,7 @@ check_diagram_gate() {
   return 0
 }
 
-# ── Preview gate (deterministic — AGENTS.md §12) ──────────────────────
+# ── Preview gate (deterministic — LESSONS.yml #104) ──────────────────────
 # Before a spec pauses for human approval, verify that a spec declaring
 # visual impacts (ui, ux, design) in its `## Impacts` section actually has
 # a `preview.html` AND a non-empty `RENDER_REQUEST` in
@@ -216,7 +216,7 @@ check_preview_gate() {
   # Unknown/empty size → fail-open (do not block on a parse gap).
   case "$size" in
     S) return 0 ;;
-    M|L) ;; # proceed to the preview check
+    M | L) ;;      # proceed to the preview check
     *) return 0 ;; # unknown/empty → fail-open
   esac
   # Visual impact declared + Size M/L → preview.html AND non-empty RENDER_REQUEST MUST exist.

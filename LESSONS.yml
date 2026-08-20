@@ -989,3 +989,16 @@
   - 'DO exempt the merge action from the closed-issue guard in dispatch. The merge action chains to catchup, which is idempotent on a closed issue — its label-based routing exits early for terminal states (boucle:done/boucle:human) and proceeds for non-terminal states (the GitHub race case).'
   - 'DO rely on label-based routing, not issue-state-based routing, for catchup idempotence. Catchup''s case statement on CURRENT_BOUCLE already handles terminal states (exit 0) and non-terminal states (proceed). A blanket issue-state guard is redundant and too broad.'
   - 'DO add a doctor backstop that scans closed issues with non-terminal boucle labels. The backstop catches lost webhooks, races the immediate fix loses, and any future guard that is too broad. The recovery depends on MR state: merged MR → chain to post-merge (e2e, lesson #102), open MR → close zombie + done, no MR → done.'
+104:
+  title: Complex specs MUST carry their diagram or preview artifact
+  ❌:
+  - 'DO NOT let a Size M/L spec with structural impacts (architecture, data-model, process, state-machine, data-flow, deployment) reach spec-review approval without a `## Diagram` section and a `<!-- boucle:diagram v=1 types=... -->` marker.'
+  - 'DO NOT let a Size M/L spec with visual impacts (ui, ux, design) reach spec-review approval without a `preview.html` + `RENDER_REQUEST` in `.boucle-state/<issue>/`.'
+  - 'DO NOT inline the Mermaid theme block from memory — `templates/diagram-theme.md` is the static source of truth (boucle.dev design system; light/transparent background ONLY, NEVER dark, NEVER the default Mermaid theme).'
+  - 'DO NOT re-analyze the issue from scratch when re-triggered to add a missing artifact — re-read the previous spec in the Prior discussion and add ONLY the missing artifact.'
+  - 'DO NOT pad a simple spec (`kinds=none` or Size S) with a redundant diagram or preview — the gate skips for Size S.'
+  ✅:
+  - 'DO declare impacts in a `## Impacts` section with a `<!-- boucle:impacts v=1 kinds=... -->` marker (closed set: architecture, data-model, process, state-machine, data-flow, deployment, ui, ux, design, none).'
+  - 'DO include a `## Diagram` section with a Mermaid diagram AND a `<!-- boucle:diagram v=1 types=... -->` marker when structural kinds + Size M/L; pick the diagram type from the 27-type catalogue of the diagram-design skill.'
+  - 'DO include a `preview.html` + `RENDER_REQUEST` in `.boucle-state/<issue>/` when visual kinds + Size M/L.'
+  - 'DO let CI block spec-review approval and re-trigger triage on mismatch (structural impact without diagram, visual impact without preview, `none` with a diagram/preview, unknown kind) + Size M/L.'

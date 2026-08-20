@@ -45,7 +45,7 @@ boucle_ci_triage() {
   fi
   export BOUCLE_ISSUE="$IID"
 
-  # ── Shared gate functions (diagram/preview gates — AGENTS.md §12) ──
+  # ── Shared gate functions (diagram/preview gates — LESSONS.yml #104) ──
   # Single source of truth in lib/boucle-ci/gates.sh (sourced by the other
   # CI stages too). Best-effort: a missing/unreadable gates.sh must never
   # kill the loop.
@@ -695,7 +695,7 @@ HELP_EOF
           DND_NOTE=$(printf "🌙 **Spec gate auto-approved — Do-Not-Disturb active**\n\nThe human spec validation was automatically approved because the DND window is active (%s–%s %s). The loop therefore continues up to the $(forge_mr_term) without human contact.\n\nThe \`boucle:dnd\` label was applied to the issue (visible on the board) to flag this auto-approval; it will be removed at the next state transition.\n\nYou can validate the $(forge_mr_term) when it is ready. DND is disabled by default: this auto-approval only happens when \`BOUCLE_DND_ENABLED=true\` is explicitly set in the project CI variables — set the variable to \`false\` (or remove it) to disable it." "$DND_START" "$DND_END" "$DND_TZ")
           forge_issue_note "$IID" "$DND_NOTE"
         fi
-        # ── Diagram & preview gates (deterministic — AGENTS.md §12) ──
+        # ── Diagram & preview gates (deterministic — LESSONS.yml #104) ──
         # Before pausing for human spec approval, verify that the spec
         # includes the required diagram (structural impacts, Size M/L) and/or
         # preview (visual impacts, Size M/L) declared in ## Impacts. A

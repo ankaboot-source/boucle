@@ -90,39 +90,6 @@ known recurring bug, documented in LESSONS.yml.
     cross-references. **NEVER** let docs drift from code — a doc that
     describes a system that no longer exists is a bug.
 
-12. **Spec diagrams & previews — deterministic CI gate** — When an issue has
-    a legitimate structural or visual complexity, the triage agent MUST
-    declare it in a `## Impacts` section with a `<!-- boucle:impacts v=1
-    kinds=... -->` marker (closed set: `architecture`, `data-model`,
-    `process`, `state-machine`, `data-flow`, `deployment`, `ui`, `ux`,
-    `design`, `none`). CI cross-checks that declaration deterministically,
-    **combined with the Size** from `## Classification`:
-    - **Structural kinds** (architecture, data-model, process, state-machine,
-      data-flow, deployment) + **Size M or L** → a `## Diagram` section with a
-      Mermaid diagram AND a `<!-- boucle:diagram v=1 types=... -->` marker
-      MUST be present. The Mermaid theme block (boucle.dev design system:
-      gold `#f5c842`, violet `#7b2ff7`, cyan `#00e5ff`, Sora font) is defined
-      in `templates/diagram-theme.md` — the **static source of truth**, NEVER
-      inlined from memory. Light or transparent background ONLY — NEVER dark,
-      NEVER the default Mermaid theme. The diagram type is picked from the
-      27-type catalogue of the
-      [diagram-design](https://github.com/cathrynlavery/diagram-design) skill.
-    - **Visual kinds** (ui, ux, design) + **Size M or L** → a `preview.html`
-      + `RENDER_REQUEST` MUST exist in `.boucle-state/<issue>/`.
-    - **Size S** → the gate skips (the artifact is optional). A trivial
-      structural or UI tweak does not need a full diagram or mockup — forcing
-      one is noise, not clarity.
-    - **Mismatch** (structural impact without diagram, visual impact without
-      preview, `none` with a diagram/preview, unknown kind) + Size M/L →
-      **CI blocks the spec-review approval** and re-triggers triage to add
-      the missing artifact. The re-triggered triage MUST re-read its previous
-      spec in the Prior discussion and add ONLY the missing artifact — it
-      MUST NOT re-analyze the issue from scratch (the spec was already good).
-    - The human never sees a complex spec without its diagram or preview. A
-      spec with no structural or visual complexity (`kinds=none`) MUST omit
-      both — padding a simple spec with a redundant diagram or preview is
-      noise.
-
 ## Lessons learned (forward-looking operating principles)
 
 Each entry below is a **contract** that every agent and CI step MUST honor
