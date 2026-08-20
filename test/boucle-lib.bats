@@ -1833,13 +1833,14 @@ extract_notify() {
 }
 
 @test "reviewer: approval message uses forge-aware MR/PR wording" {
-  # The reviewer PASS note is posted as a forge comment that humans read.
-  # Hardcoding "MR !<iid>" produces GitLab wording on GitHub, where the
-  # forge-native reference is "PR #<iid>". The note MUST use forge_mr_ref /
-  # forge_mr_term so the wording matches the forge (regression: boucle.dev
-  # #69 comment talked about "MR !70" on a GitHub PR).
-  # Grep the APPROVAL_MSG block (5 lines around the assignment).
-  run bash -c "grep -n -B5 'APPROVAL_MSG=' lib/boucle-ci/reviewer.sh"
+  # The reviewer PASS appends an approval instruction to the verdict
+  # comment. Hardcoding "MR !<iid>" produces GitLab wording on GitHub,
+  # where the forge-native reference is "PR #<iid>". The instruction MUST
+  # use forge_mr_ref / forge_mr_term so the wording matches the forge
+  # (regression: boucle.dev #69 comment talked about "MR !70" on a GitHub
+  # PR).
+  # Grep the approval_suffix block (10 lines around the assignment).
+  run bash -c "grep -n -B10 'approval_suffix=' lib/boucle-ci/reviewer.sh"
   assert_success
   refute_output --partial 'MR !%s'
   refute_output --partial 'MR !${MR_IID'
@@ -1851,12 +1852,19 @@ extract_notify() {
   refute_output --partial 'click the **Approve** button'
 }
 
-@test "reviewer PASS: posts an approval-request note on the PR (not just the issue)" {
-  # In mono-user mode on GitHub, self-review is blocked — the human approves
-  # with a 👍 reaction on the PR. The reviewer MUST post a short note ON THE
-  # PR (forge_mr_note) carrying the boucle:approval-request marker, so the
-  # doctor can find it by marker and poll its reactions.
-  run bash -c "grep -n -A3 'forge_mr_note \"\$MR_IID\"' lib/boucle-ci/reviewer.sh | grep -E 'approval-request'"
+@test "reviewer PASS: amends the verdict comment with the approval-request marker (mono-user)" {
+  # In mono-user mode on GitHub, self-review is blocked — the human
+  # approves with a 👍 reaction (GitLab) or `approved` reply (GitHub) on
+  # the verdict comment. The reviewer MUST amend the verdict comment with
+  # the boucle:approval-request marker (via forge_mr_note_update), so the
+  # doctor can find it by marker and poll its reactions. The marker is
+  # folded into the verdict comment — one comment instead of two.
+  # The marker is built into approval_suffix, which is appended to the
+  # verdict body and posted via forge_mr_note_update.
+  run bash -c "grep -n 'boucle:approval-request' lib/boucle-ci/reviewer.sh"
+  assert_success
+  assert_output --partial 'boucle:approval-request'
+  run bash -c "grep -n 'forge_mr_note_update' lib/boucle-ci/reviewer.sh"
   assert_success
 }
 
@@ -1902,14 +1910,14 @@ extract_notify() {
   [ "$count" -ge 2 ] || { echo "expected >=2 boucle_mono_user refs, got $count"; false; }
 }
 
-@test "reviewer: posts approval-request note on the PR in mono-user mode" {
-  # The reviewer MUST post a note ON THE PR (forge_mr_note) carrying the
-  # boucle:approval-request marker in mono-user mode, so the doctor can
-  # find it by marker and poll its reactions for the 👍.
+@test "reviewer: amends verdict comment with approval-request marker in mono-user mode" {
+  # The reviewer MUST amend the verdict comment (forge_mr_note_update)
+  # carrying the boucle:approval-request marker in mono-user mode, so the
+  # doctor can find it by marker and poll its reactions for the 👍.
   run bash -c "grep -n 'boucle:approval-request' lib/boucle-ci/reviewer.sh"
   assert_success
   assert_output --partial 'boucle:approval-request'
-  run bash -c "grep -n 'forge_mr_note' lib/boucle-ci/reviewer.sh"
+  run bash -c "grep -n 'forge_mr_note_update' lib/boucle-ci/reviewer.sh"
   assert_success
 }
 

@@ -333,8 +333,15 @@ boucle_ci_reviewer() {
   # Use 7 chars (Git's minimum short SHA length) so it matches
   # sha=6675f9e (7), sha=6675f9e1 (8), and the full 40-char SHA.
   MR_HEAD_SHORT="${MR_HEAD:0:7}"
+  VERDICT_NOTE_ID=0
   COMMENT=$(forge_mr_notes "$MR_IID" \
     | jq -r --arg sha "$MR_HEAD_SHORT" '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer") and contains("sha=\($sha)"))] | first | .body // empty')
+  # Also capture the verdict note ID so the PASS branch can amend the
+  # verdict comment with the approval instruction (one comment instead of
+  # two — the verdict + "to approve, do X" in the same place the human is
+  # already reading).
+  VERDICT_NOTE_ID=$(forge_mr_notes "$MR_IID" \
+    | jq -r --arg sha "$MR_HEAD_SHORT" '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer") and contains("sha=\($sha)"))] | first | .id // 0' 2> /dev/null || echo 0)
   VERDICT=$(echo "$COMMENT" | grep -oE '^VERDICT: (PASS|FAIL|UNCERTAIN)' | cut -d' ' -f2)
   # Track whether the verdict we found matches the current MR head SHA.
   # The SHA-anchored parse above filters on sha=$MR_HEAD_SHORT, so if VERDICT is
@@ -350,6 +357,8 @@ boucle_ci_reviewer() {
   if [ -z "$VERDICT" ]; then
     COMMENT=$(forge_mr_notes "$MR_IID" \
       | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer"))] | first | .body // empty')
+    VERDICT_NOTE_ID=$(forge_mr_notes "$MR_IID" \
+      | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer"))] | first | .id // 0' 2> /dev/null || echo 0)
     FOUND_SHA=$(printf '%s' "$COMMENT" | grep -oE 'sha=[a-f0-9]+' | head -1 | cut -d= -f2 || true)
     if [ -n "$FOUND_SHA" ] && [ "$FOUND_SHA" != "$MR_HEAD_SHORT" ]; then
       echo "[boucle] REJECTED foreign-SHA verdict: marker sha=$FOUND_SHA != MR head $MR_HEAD_SHORT. Not accepting."
@@ -454,6 +463,14 @@ boucle_ci_reviewer() {
           COMMENT="$NEW_COMMENT"
           VERDICT="$NEW_VERDICT"
           VERDICT_SHA_MATCHED=true
+          # Capture the note ID of the recovered verdict so the PASS branch
+          # can amend it with the approval instruction.
+          VERDICT_NOTE_ID=$(forge_mr_notes "$MR_IID" \
+            | jq -r --arg sha "$MR_HEAD" '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer") and contains("sha=\($sha)"))] | first | .id // 0' 2> /dev/null || echo 0)
+          if [ "$VERDICT_NOTE_ID" -eq 0 ]; then
+            VERDICT_NOTE_ID=$(forge_mr_notes "$MR_IID" \
+              | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer"))] | first | .id // 0' 2> /dev/null || echo 0)
+          fi
           echo "[boucle] Step-limit fallback succeeded: recovered verdict=$VERDICT (overrode stale verdict)."
         else
           echo "[boucle] Step-limit fallback failed: drafted verdict had no parsable VERDICT line — keeping previous verdict=$VERDICT."
@@ -550,27 +567,55 @@ boucle_ci_reviewer() {
       mr_ref=$(forge_mr_ref "$MR_IID")
       mr_term=$(forge_mr_term)
       approve_instr=$(forge_mr_approve_instruction)
-      APPROVAL_MSG=$(printf '✅ Reviewer verdict: **PASS**. %s is ready to merge.\n\nThe %s has been assigned to you for approval. To approve and merge, %s [%s](%s). The merger will then rebase the %s onto %s and merge it serially (avoiding conflicts with other approved %ss).' "$mr_ref" "$mr_term" "$approve_instr" "$mr_ref" "$MR_URL" "$mr_term" "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}" "$mr_term")
-      forge_issue_note "$BOUCLE_ISSUE" "$APPROVAL_MSG"
-      # Post an approval-request note ON THE PR so the doctor can poll for
-      # the approval signal. In mono-user mode, native self-review is blocked,
-      # so the human approves via a forge-appropriate signal on this note:
-      #   - GitHub: reply `approved` on the PR (issue_comment webhook fires
-      #     reliably; reactions have NO webhook on GitHub). The dispatch
-      #     MR-note path routes `approved` at boucle:approval → merger.
-      #   - GitLab: react 👍 on this note (emoji webhook fires reliably).
-      # The marker lets the doctor find the note reliably across runs for its
-      # emoji-poll backstop. Skipped when not in mono-user mode — native
-      # review/approval is the signal there.
+      # Build the approval instruction block that gets appended to the
+      # verdict comment. One comment instead of two: the human sees the
+      # review detail + the action instruction in the same place they're
+      # already reading (the PR). In mono-user mode, the
+      # boucle:approval-request marker is folded in so the doctor can
+      # still poll for the emoji/reply signal — no separate PR note.
+      local approval_suffix
+      approval_suffix=$(printf '\n\n---\n\n✅ **Ready to merge.** The %s has been assigned to you for approval. To approve and merge, %s [%s](%s). The merger will then rebase the %s onto %s and merge it serially (avoiding conflicts with other approved %ss).' "$mr_term" "$approve_instr" "$mr_ref" "$MR_URL" "$mr_term" "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}" "$mr_term")
       if boucle_mono_user; then
-        local pr_approval_note
+        # In mono-user mode, native self-review is blocked, so the human
+        # approves via a forge-appropriate signal on the verdict note:
+        #   - GitHub: reply `approved` on the PR (issue_comment webhook
+        #     fires reliably; reactions have NO webhook on GitHub). The
+        #     dispatch MR-note path routes `approved` at boucle:approval
+        #     → merger.
+        #   - GitLab: react 👍 on the verdict note (emoji webhook fires
+        #     reliably).
+        # The marker lets the doctor find the note reliably across runs
+        # for its emoji-poll backstop.
         if [ "${BOUCLE_FORGE:-gitlab}" = "github" ]; then
-          pr_approval_note=$(printf 'Reply `approved` on this PR to approve and merge.\n\nThe merger will rebase onto `%s` and merge serially.\n\n<!-- boucle:approval-request v=1 -->' "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}")
+          approval_suffix=$(printf '%s\n\nReply `approved` on this PR to approve and merge.\n\n<!-- boucle:approval-request v=1 -->' "$approval_suffix")
         else
-          pr_approval_note=$(printf '👍 **this comment** to approve and merge.\n\nThe merger will rebase onto `%s` and merge serially.\n\n<!-- boucle:approval-request v=1 -->' "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}")
+          approval_suffix=$(printf '%s\n\n👍 **this comment** to approve and merge.\n\n<!-- boucle:approval-request v=1 -->' "$approval_suffix")
         fi
-        forge_mr_note "$MR_IID" "$pr_approval_note" \
-          || echo "[boucle] WARN: PR approval-request note post failed (fail-open — the issue note still tells the human what to do)"
+      fi
+      # Amend the verdict comment with the approval instruction. If the
+      # verdict note ID is known (agent posted it, or log-scraping
+      # recovered it), update in place. If not (edge case: note ID
+      # capture failed), fall back to posting a separate issue note so
+      # the human is still notified — never a silent PASS.
+      if [ -n "$VERDICT_NOTE_ID" ] && [ "$VERDICT_NOTE_ID" -gt 0 ] 2> /dev/null; then
+        local amended_body
+        amended_body=$(printf '%s%s' "$COMMENT" "$approval_suffix")
+        if forge_mr_note_update "$MR_IID" "$VERDICT_NOTE_ID" "$amended_body"; then
+          echo "Amended verdict comment !$VERDICT_NOTE_ID with approval instruction."
+        else
+          echo "[boucle] WARN: verdict note update failed — falling back to a separate issue note."
+          local fallback_msg
+          fallback_msg=$(printf '✅ Reviewer verdict: **PASS**. %s is ready to merge.\n\nThe %s has been assigned to you for approval. To approve and merge, %s [%s](%s). The merger will then rebase the %s onto %s and merge it serially (avoiding conflicts with other approved %ss).' "$mr_ref" "$mr_term" "$approve_instr" "$mr_ref" "$MR_URL" "$mr_term" "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}" "$mr_term")
+          forge_issue_note "$BOUCLE_ISSUE" "$fallback_msg" || true
+        fi
+      else
+        # Edge case: verdict note ID not captured (API hiccup, jq parse
+        # failure). Post the approval instruction as a separate issue note
+        # so the human is still notified — fail-open, never a silent PASS.
+        echo "[boucle] WARN: verdict note ID not captured ($VERDICT_NOTE_ID) — posting approval instruction as a separate issue note."
+        local fallback_msg
+        fallback_msg=$(printf '✅ Reviewer verdict: **PASS**. %s is ready to merge.\n\nThe %s has been assigned to you for approval. To approve and merge, %s [%s](%s). The merger will then rebase the %s onto %s and merge it serially (avoiding conflicts with other approved %ss).' "$mr_ref" "$mr_term" "$approve_instr" "$mr_ref" "$MR_URL" "$mr_term" "${BOUCLE_DEFAULT_BRANCH:-${CI_DEFAULT_BRANCH:-master}}" "$mr_term")
+        forge_issue_note "$BOUCLE_ISSUE" "$fallback_msg" || true
       fi
       # Race condition recovery: the human may have approved the MR
       # BEFORE the reviewer finished (the dispatch `approved` handler
