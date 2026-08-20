@@ -1098,11 +1098,12 @@ echo ""
 echo "=== Labels ==="
 
 if [ "$FORGE" = "gitlab" ]; then
-  # boucle:* labels (12) — boucle:approved and boucle:spec-approved removed
-  # (dead labels: MR approval is the native forge Approve button, spec
-  # approval is a reply/emoji on boucle:spec-review — neither uses a label).
+  # boucle:* labels (13) — boucle:approved restored (GitHub primary path:
+  # the author adds the label to approve the spec — see triage.sh:749,
+  # dispatch.sh:980, doctor.sh:323). boucle:spec-approved remains removed
+  # (dead label: spec approval is a reply/emoji on boucle:spec-review).
   # shellcheck disable=SC1010 # 'done' is a label name, not the loop keyword
-  for label in triage needs-info todo working review human blocked done split approval spec-review merging board; do
+  for label in triage needs-info todo working review human blocked done split approval spec-review merging board approved; do
     EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/labels?search=boucle:$label" 2> /dev/null | jq -r '.[0].name // empty' || true)
     if [ -n "$EXISTING" ]; then
       log_skip "boucle:$label already exists"
