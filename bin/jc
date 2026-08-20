@@ -1201,6 +1201,19 @@ ${LESSON_CANDIDATE_CONTENT}
 
 Verify content fidelity: the issue body below is the original spec. Check that the MR preserves the instructed content (URLs, citations, texts) verbatim — no placeholders, no rewrites, no substitutions. A MR that degrades instructed content is a FAIL even if it satisfies the latest amendments.
 "
+      # C3: Inject the correct MR head SHA so the agent posts the verdict
+      # marker with the right SHA. Without this, the agent guesses (or copies
+      # a stale SHA from a previous iteration), and CI rejects the verdict as
+      # foreign-SHA (observed on boucle.dev: 3/16 reviewer runs had wrong SHA).
+      if [ -n "${MR_HEAD_SHORT:-}" ]; then
+        prompt="${prompt}
+
+**Verdict SHA (MANDATORY):** the MR head SHA is \`${MR_HEAD_SHORT}\`. Your verdict marker MUST contain \`sha=${MR_HEAD_SHORT}\` — use this exact value. Do NOT compute the SHA yourself, do NOT copy a SHA from a previous verdict, do NOT use the full 40-char SHA. The marker format is:
+\`\`\`
+<!-- boucle:verdict v=1 role=reviewer sha=${MR_HEAD_SHORT} -->
+\`\`\`
+CI rejects any verdict whose marker SHA does not match the MR head."
+      fi
       # Diff review mode (no preview URL — e.g. GitLab Pages declarative
       # mode with an empty BOUCLE_DEPLOY_CMD): the CI injected the MR diff
       # and check suites into BOUCLE_MR_DIFF / BOUCLE_MR_CHECKS. The
@@ -1407,6 +1420,42 @@ ${arch_block}
 ---
 Use this map to locate code. For deeper queries (callers, callees, data flow), call: codebase-memory-mcp cli search_graph --project \"${proj_name}\" --query \"<keywords>\""
         fi
+      fi
+      ;;
+  esac
+
+  # ── Inject charter docs (CONTEXT.md, LOOP.md) ────────────────────────
+  # Agents claim to read charter docs but never do (0/14 triage, 0/21 worker
+  # actually read AGENTS.md/CONTEXT.md/LOOP.md — observed on boucle.dev).
+  # Inject a trimmed summary of CONTEXT.md and LOOP.md directly into the
+  # prompt so the agent has the project context and per-consumer config
+  # without spending a step on Read. Only the first ~1500 chars of each
+  # (enough for the tech stack, constraints, and cadence — the rest is
+  # detail the agent can Read if needed). Not for e2e (30-step budget).
+  case "$role" in
+    triage | worker | reviewer)
+      local charter_block=""
+      for doc in CONTEXT.md LOOP.md; do
+        local doc_path="$BOUCLE_WORKSPACE/$doc"
+        [ -f "$doc_path" ] || doc_path="$BOUCLE_HOME/$doc"
+        if [ -f "$doc_path" ]; then
+          local doc_summary
+          doc_summary=$(head -c 1500 "$doc_path" 2>/dev/null || echo "")
+          if [ -n "$doc_summary" ]; then
+            charter_block="${charter_block}
+
+### ${doc} (first 1500 chars — Read the full file if you need more):
+---
+${doc_summary}
+---"
+          fi
+        fi
+      done
+      if [ -n "$charter_block" ]; then
+        prompt="${prompt}
+
+Charter docs (already fetched — do NOT re-read CONTEXT.md/LOOP.md unless you need detail beyond the excerpt):
+${charter_block}"
       fi
       ;;
   esac
@@ -1921,6 +1970,23 @@ case "$ROLE" in
         echo "[boucle] This breaks the doctor re-trigger loop. CI should escalate to human." >&2
         exit 3
       fi
+      # C4 HARD GATE: reject empty placeholder drafts (lesson #99). The
+      # agent posted SOMETHING (passed agent_posted_note above), but if the
+      # only thing it posted is a bare "verification check" or "DRAFT —..."
+      # with no body, it's noise the human cannot act on (observed on
+      # boucle.dev: 5/30 verdict-role runs posted empty placeholders).
+      # Extract the posted/drafted note body from the log and check its
+      # length. A meaningful draft has at least 50 chars of content (the
+      # marker line itself is ~40 chars, so 50 excludes pure markers).
+      POSTED_BODY=$(grep -oE '(boucle:(triage|verdict|draft)[^"]*|<!-- boucle:(triage|verdict|draft)[^>]*-->.*$)' "$AGENT_LOG" 2>/dev/null | tail -1 || true)
+      if [ -n "$POSTED_BODY" ]; then
+        POSTED_LEN=${#POSTED_BODY}
+        if [ "$POSTED_LEN" -lt 50 ]; then
+          echo "[boucle] ERROR: agent posted an empty placeholder draft (${POSTED_LEN} chars: \"${POSTED_BODY}\") — lesson #99 violation. The draft MUST contain at least the acceptance criteria and a lean verdict. Silent failure (exit 3)." >&2
+          echo "[boucle] CI should escalate to human — the agent produced noise, not a draft." >&2
+          exit 3
+        fi
+      fi
     else
       echo "[boucle] ERROR: agent log is empty — silent failure (exit 3)." >&2
       exit 3
@@ -2118,6 +2184,19 @@ record_skills_used() {
   fi
 
   echo "[boucle:metrics] role=$ROLE iteration=$ITERATION skills_used=${used:-none} observable=$observable" >&2
+
+  # Skills soft gate: warn (not fail) when the agent loaded 0 skills despite
+  # the prompt injecting a skill catalogue and recommending skill usage. The
+  # agent may legitimately not need a skill (trivial diff), so this is a
+  # measurement + warning, not a hard gate. The warning makes the gap
+  # visible in CI logs so trends can be tracked over time.
+  if [ "$observable" = "yes" ] && [ -z "$used" ]; then
+    case "$ROLE" in
+      triage | worker | reviewer)
+        echo "[boucle] WARN: agent loaded 0 skills (role=$ROLE, iteration=$ITERATION). The skill catalogue was injected in the prompt — the agent chose not to load any. This is a soft gate (measurement only, no fail)." >&2
+        ;;
+    esac
+  fi
 
   local file="$STATE_DIR/skills-used.json"
   [ -s "$file" ] || echo '{"entries":[]}' > "$file" 2> /dev/null || return 0

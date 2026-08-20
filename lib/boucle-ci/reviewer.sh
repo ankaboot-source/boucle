@@ -153,6 +153,13 @@ boucle_ci_reviewer() {
   MR_BASE=$(echo "$MR_DATA" | jq -r '.diff_refs.base_sha // .base.sha // empty')
   export MR_BASE
   MR_HEAD=$(echo "$MR_DATA" | jq -r '.diff_refs.head_sha // .head.sha // empty')
+  export MR_HEAD
+  # C3: Export the short SHA so bin/jc can inject it into the reviewer
+  # prompt. The agent must post the verdict marker with sha=<MR_HEAD_SHORT>
+  # — without the correct SHA in the prompt, the agent guesses (or copies
+  # a stale SHA from a previous iteration), and CI rejects the verdict as
+  # foreign-SHA (observed on boucle.dev: 3/16 reviewer runs had wrong SHA).
+  export MR_HEAD_SHORT="${MR_HEAD:0:7}"
   if [ -n "$MR_BASE" ] && [ "$MR_BASE" = "$MR_HEAD" ]; then
     ITERATION="${BOUCLE_ITERATION:-1}"
     MAX_ITER="${BOUCLE_MAX_ITERATIONS:-5}"
@@ -354,6 +361,13 @@ boucle_ci_reviewer() {
   # differs from the MR head is FOREIGN (previous iteration, another MR,
   # or copied from an old verdict — AGENTS.md P4) and MUST be rejected:
   # acting on it validates content that was never reviewed.
+  #
+  # C2 HARD GATE: a verdict WITHOUT the boucle:verdict marker is NOT a
+  # verdict — it's a prose comment that happens to contain "VERDICT: PASS".
+  # The marker is the CI contract (AGENTS.md principle #4). Accepting a
+  # marker-less verdict (observed on boucle.dev: 9/16 reviewer runs had no
+  # marker) defeats the SHA-anchoring gate entirely. Reject it and let the
+  # log-scraping fallback (below) recover the drafted verdict from stdout.
   if [ -z "$VERDICT" ]; then
     COMMENT=$(forge_mr_notes "$MR_IID" \
       | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer"))] | first | .body // empty')
@@ -362,6 +376,11 @@ boucle_ci_reviewer() {
     FOUND_SHA=$(printf '%s' "$COMMENT" | grep -oE 'sha=[a-f0-9]+' | head -1 | cut -d= -f2 || true)
     if [ -n "$FOUND_SHA" ] && [ "$FOUND_SHA" != "$MR_HEAD_SHORT" ]; then
       echo "[boucle] REJECTED foreign-SHA verdict: marker sha=$FOUND_SHA != MR head $MR_HEAD_SHORT. Not accepting."
+      VERDICT=""
+      VERDICT_SHA_MATCHED=false
+    elif [ -z "$COMMENT" ]; then
+      # No boucle:verdict marker found at all — C2 hard gate.
+      echo "[boucle] REJECTED marker-less verdict: no <!-- boucle:verdict --> marker found in any reviewer comment. The log-scraping fallback will attempt recovery from stdout."
       VERDICT=""
       VERDICT_SHA_MATCHED=false
     else
