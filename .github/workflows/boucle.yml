@@ -684,12 +684,17 @@ jobs:
           [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
           $BOUCLE_HOME/bin/boucle-ci post-merge
 
-  # ── catchup: close issue after merge, cascade parent ─────────────────────────
+  # ── catchup: direct merge recovery → chain to post-merge ────────────────
+  # Runs on a direct PR merge (pull_request closed+merged) OR via
+  # workflow_dispatch from dispatch (which extracts the IID from the branch).
+  # Extracts BOUCLE_ISSUE from the branch name (boucle/<iid>), posts an audit
+  # note, sets boucle:merging, and chains to post-merge for deploy + e2e.
   catchup:
     runs-on: ubuntu-latest
     continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     if: |
-      github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
+      (github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true)
+      || (github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'catchup')
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -724,9 +729,27 @@ jobs:
           [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Catchup
+        env:
+          # On workflow_dispatch the IID is in the inputs; on a direct
+          # pull_request event it must be extracted from the branch name
+          # (boucle/<iid>), which dispatch normally does but the direct
+          # catchup path bypasses.
+          BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE || '' }}
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
           [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
+          # Extract BOUCLE_ISSUE from the PR branch if not set (direct
+          # pull_request event path — dispatch chains via workflow_dispatch
+          # and sets it in inputs, but the direct path does not).
+          if [ -z "${BOUCLE_ISSUE:-}" ]; then
+            BRANCH="${{ github.event.pull_request.head.ref }}"
+            BOUCLE_ISSUE=$(printf '%s' "$BRANCH" | sed -n 's/^boucle\/\([0-9]\+\).*/\1/p')
+            if [ -z "$BOUCLE_ISSUE" ]; then
+              echo "Catchup: branch '$BRANCH' is not a boucle branch — skipping."
+              exit 0
+            fi
+            export BOUCLE_ISSUE
+          fi
           $BOUCLE_HOME/bin/boucle-ci catchup
 
   # ── deploy: build + deploy to Cloudflare Pages (on push to default) ───────────

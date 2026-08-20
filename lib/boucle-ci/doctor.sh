@@ -600,14 +600,17 @@ boucle_ci_doctor() {
     fi
 
     # Check if a MR for this issue was already merged (branch boucle/$IID).
-    # If so, the issue should be closed + boucle:done, NOT re-triggered.
-    # This happens when a human merged the MR manually (bypassing the
-    # merger job), leaving the issue stuck at working/review forever.
+    # If so, chain to post-merge for deploy + e2e verification — do NOT
+    # close + boucle:done directly. This happens when a human merged the
+    # MR manually (bypassing the merger job) AND the catchup webhook was
+    # missed, leaving the issue stuck at working/review forever.
+    # Production health is orthogonal to who merged: the merged code is in
+    # production and must be verified by e2e, same as an approved merge.
     #
     # BUT: if there is also an OPEN MR with the same branch, the issue was
     # reopened for a new iteration (e.g. human requested changes after
     # approval, or a new MR was created after the first one was merged).
-    # In that case, do NOT close — the open MR is the active work.
+    # In that case, do NOT chain — the open MR is the active work.
     # forge_mr_lookup_by_branch returns only the IID — fetch the full MR
     # via forge_mr_get for .state. GitHub has no state=merged filter (a
     # merged PR surfaces via state=closed + .merged=true), so normalize
@@ -626,7 +629,7 @@ boucle_ci_doctor() {
         MR_OPEN_STATE=$(forge_mr_get "$MR_OPEN_IID" | jq -r 'if .state == "open" then "opened" else .state // empty end')
       fi
       if [ "$MR_OPEN_STATE" = "opened" ]; then
-        echo "  → #$IID ($ROLE): merged MR exists but an open MR also exists — issue reopened for new iteration, skipping close"
+        echo "  → #$IID ($ROLE): merged MR exists but an open MR also exists — issue reopened for new iteration, skipping post-merge chain"
         # FALL THROUGH (no close, no continue): an open MR means the issue
         # is being worked again, so the re-trigger logic below still
         # applies — the doctor must recover a STUCK worker/reviewer even
@@ -636,9 +639,10 @@ boucle_ci_doctor() {
         # blocked re-triggering for hours while the issue occupied the
         # worker slot).
       else
-        echo "  → #$IID ($ROLE): MR already merged — closing issue + boucle:done"
-        set_boucle_label "$IID" "boucle:done" "boucle::status::done"
-        close_issue "$IID"
+        echo "  → #$IID ($ROLE): MR already merged — chaining to post-merge for e2e verification"
+        set_boucle_label "$IID" "boucle:merging" "boucle::status::bot"
+        chain_to_role "$IID" "post-merge"
+        doctor_mark_triggered "$IID"
         RECOVERED=$((RECOVERED + 1))
         continue
       fi
@@ -847,11 +851,12 @@ boucle_ci_doctor() {
   # ── Recover CLOSED issues stuck at boucle:working/boucle:review ─────────
   # The doctor's main scan filters state=opened, so a closed issue that
   # still has boucle:working or boucle:review is invisible. This happens
-  # when a human merges the MR directly (catchup closes the issue) while
-  # a worker iteration is in flight — the worker's rebase-conflict
-  # re-trigger or the reviewer FAIL handler re-triggers the worker on
-  # the closed issue, creating zombie MRs and failed pipeline cascades
-  # (lesson #44). Recovery: set boucle:done + close any open zombie MRs.
+  # when a human merges the MR directly (catchup chains to post-merge → e2e,
+  # which closes the issue on a PASS verdict) while a worker iteration is
+  # in flight — the worker's rebase-conflict re-trigger or the reviewer
+  # FAIL handler re-triggers the worker on the closed issue, creating
+  # zombie MRs and failed pipeline cascades (lesson #44). Recovery: set
+  # boucle:done + close any open zombie MRs.
   ZOMBIE_WORKING=$(forge_issue_list_by_label "boucle:working" closed | jq -r '.[] | .iid // .number')
   ZOMBIE_REVIEW=$(forge_issue_list_by_label "boucle:review" closed | jq -r '.[] | .iid // .number')
   for IID in $ZOMBIE_WORKING $ZOMBIE_REVIEW; do

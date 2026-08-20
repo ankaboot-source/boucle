@@ -638,7 +638,7 @@
   ✅:
   - 'DO: name branches `boucle/<iid>-<slug>` where `<slug>` is derived deterministically from the issue title (lowercase, kebab-case, max 40 chars). The `<iid>` prefix keeps the protocol identifier stable
     for lookups (prefix match on `boucle/<iid>`).'
-  - 'DO: delete the branch after a successful merge (merger) or after catchup closes the issue. Best-effort: a failed deletion logs a warning but does not fail the job — the branch is stale but harmless.'
+  - 'DO: delete the branch after a successful merge (merger) or after catchup chains to post-merge (the branch is stale once the merge commit is on the default branch). Best-effort: a failed deletion logs a warning but does not fail the job — the branch is stale but harmless.'
   - 'DO: keep `boucle/<iid>` as the lookup key in `forge_mr_lookup_by_branch` — the slug may change if the issue title is edited, so lookups MUST prefix-match on `boucle/<iid>`, not exact-match the full
     branch name.'
   ❌:
@@ -970,3 +970,13 @@
   ✅:
   - 'DO run each command verb as a separate CI job with `resource_group: boucle-cmd-$BOUCLE_ISSUE`, triggered via `chain_to_role` (the existing chaining primitive). The dispatch job parses + authorizes + chains, then exits in milliseconds — it never holds the lock for the work itself.'
   - 'DO apply this to any future inline verb (e.g. a live-tail or cancel), not just the MVP observability verbs.'
+102:
+  title: Merge approval is not production verification — e2e runs on every merge
+  ❌:
+  - 'DO NOT skip e2e verification on a direct (human) merge. Clicking Merge in the forge UI approves the CODE for merge — it does NOT verify the live URL, the deploy pipeline, env differences, or regressions on the merged build. A manual merge that gets LESS verification than an automated one is the wrong direction: the approved-merge path runs e2e, so the direct-merge path must too.'
+  - 'DO NOT set `boucle:done` directly after detecting a merged MR (in catchup, the merger''s already-merged path, or the doctor''s merged-MR recovery). The terminal state is the e2e verdict''s job, not the merge detector''s. Setting `boucle:done` without e2e is a guess based on issue state at merge time — e2e is the authority on production health.'
+  - 'DO NOT conflate "the human approved the merge" with "production is healthy". The merge decision and production health are orthogonal: one is a code-acceptance gate, the other is a deployment-verification gate. A human can merge broken code; e2e is what catches it.'
+  ✅:
+  - 'DO chain to post-merge (deploy-wait + e2e trigger) on EVERY merge, regardless of how the merge happened (approved merger, direct human merge via catchup, or doctor recovering a stuck issue with a merged MR). The e2e verdict routing applies the terminal label (PASS→done, FAIL/UNCERTAIN→human), closes the issue, and cascades — the same path for all merge origins.'
+  - 'DO set `boucle:merging` as a transitional label when a direct merge is detected, so the doctor''s `boucle:merging` scan covers it and the board shows an honest "verifying" state while e2e runs. The terminal label is applied by e2e, not by the merge detector.'
+  - 'DO treat "the human merged it" as a signal that the code is in production and MUST be verified — not as a signal that verification can be skipped. Production health is the loop''s responsibility, not the human''s merge click.'

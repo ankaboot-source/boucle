@@ -1,14 +1,21 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 # shellcheck disable=SC2154,SC2250
-# lib/boucle-ci/catchup.sh — catchup stage: post-merge issue closure and cascade.
+# lib/boucle-ci/catchup.sh — catchup stage: post-merge verification after a
+# direct (human) merge.
 #
 # Triggered by dispatch when a human merges a boucle/<iid> MR directly
 # (merge_request webhook, action=merge), bypassing the approval circuit.
-# Inspects the issue state, sets boucle:done (if was at boucle:approval) or
-# boucle:human (if merged early), posts an audit comment, closes the issue,
-# cascades the parent close, and unblocks dependents. No e2e agent runs —
-# we trust the human's merge judgment.
+# Inspects the issue state, posts an audit comment, sets boucle:merging as a
+# transitional label, deletes the worker branch, and chains to post-merge
+# (deploy-wait + e2e). The e2e verdict routing then applies the terminal
+# label (boucle:done on PASS, boucle:human on FAIL/UNCERTAIN), closes the
+# issue, and cascades the parent close + dependent unblock.
+#
+# E2e runs on a direct merge because production health is orthogonal to who
+# approved the merge: clicking Merge does not verify the live URL, the deploy
+# pipeline, or regressions on the merged build. A manual merge used to get
+# LESS verification than an automated one — that was the wrong direction.
 #
 # Extracted from the .gitlab-ci.yml catchup job (lines 3211-3569).
 
@@ -23,12 +30,13 @@ boucle_ci_catchup() {
   export BOUCLE_ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
 
   # ── Local helpers ──────────────────────────────────────────────────────
-  # close_issue / get_work_item_children / maybe_close_parent /
-  # set_boucle_label / chain_to_role come from lib/boucle.sh (sourced by
-  # the lib/boucle-ci.sh bootstrap) — the local copies that used to live
-  # here are removed. issue_has_active_pipeline stays local;
-  # maybe_unblock_dependents comes from lib/boucle-ci/gates.sh (sourced
-  # above).
+  # set_boucle_label / chain_to_role / boucle_branch_name /
+  # boucle_board_upsert / forge_branch_delete come from lib/boucle.sh
+  # (sourced by the lib/boucle-ci.sh bootstrap) and the forge layer.
+  # issue_has_active_pipeline stays local; the gate functions from
+  # lib/boucle-ci/gates.sh are sourced above but no longer called here —
+  # the terminal close + cascade + dependent unblock is now done by the
+  # e2e verdict routing (lib/boucle-ci/e2e.sh) after production verification.
 
   # Check if a pipeline with BOUCLE_ISSUE=$iid is already active.
   # Used by maybe_unblock_dependents to prevent double-trigger.
@@ -43,7 +51,7 @@ boucle_ci_catchup() {
   # Source the depends-on lib for parse_depends_on.
   source "$BOUCLE_HOME/bin/lib/depends-on.sh"
 
-  # ── Main: inspect issue state, branch, close, cascade ──────────────────
+  # ── Main: inspect issue state, branch, chain to post-merge ───────────
   # Disable errexit for the main flow: grep (no match) / forge API (transient
   # API error) would abort before our explicit error handling can run. We
   # handle errors per-command instead (matches e2e's post-agent section
@@ -96,10 +104,10 @@ boucle_ci_catchup() {
 
   # If there is an OPEN MR with the same branch, the issue was reopened
   # for a new iteration (e.g. human requested changes after approval, or
-  # a new MR was created after the first one was merged). Do NOT close —
-  # the open MR is the active work. This prevents the catchup from
-  # re-closing a reopened issue when an old merged MR exists alongside
-  # the new open one.
+  # a new MR was created after the first one was merged). Do NOT chain to
+  # post-merge — the open MR is the active work. This prevents the catchup
+  # from re-triggering post-merge/e2e on a reopened issue when an old
+  # merged MR exists alongside the new open one.
   MR_OPEN_IID=$(forge_mr_lookup_by_branch "boucle/$BOUCLE_ISSUE" "opened")
   MR_OPEN_STATE=""
   if [ -n "$MR_OPEN_IID" ]; then
@@ -107,72 +115,59 @@ boucle_ci_catchup() {
     MR_OPEN_STATE=$(forge_mr_get "$MR_OPEN_IID" | jq -r '.state // empty' 2> /dev/null || echo "")
   fi
   if [ "$MR_OPEN_STATE" = "opened" ] || [ "$MR_OPEN_STATE" = "open" ]; then
-    echo "Catchup: open MR exists for branch boucle/$BOUCLE_ISSUE — issue reopened for new iteration, skipping close."
+    echo "Catchup: open MR exists for branch boucle/$BOUCLE_ISSUE — issue reopened for new iteration, skipping post-merge chain."
     exit 0
   fi
 
   # Post an audit comment (with hidden tag for idempotence/audit).
   # The MR IID isn't passed as a variable (dispatch only forwards
   # BOUCLE_ISSUE + BOUCLE_ROLE); reference the issue + branch instead.
-  AUDIT_BODY="<!-- boucle:catchup v=1 iid=$BOUCLE_ISSUE state=$CURRENT_BOUCLE target=$TARGET -->"$'\n'"🤖 Automatic catch-up — the $(forge_mr_term) on branch \`boucle/$BOUCLE_ISSUE\` was merged directly without going through the approval flow."$'\n\n'"Issue state at merge time: \`boucle:$CURRENT_BOUCLE\`."$'\n'"Issue marked \`boucle:$TARGET\` and closed."
+  # The target recorded here is the terminal state the loop WOULD have
+  # applied pre-#E2E-on-direct-merge; the actual terminal state is now
+  # decided by the e2e verdict (PASS→done, FAIL/UNCERTAIN→human). We keep
+  # the field for audit continuity with older catchup notes.
+  AUDIT_BODY="<!-- boucle:catchup v=1 iid=$BOUCLE_ISSUE state=$CURRENT_BOUCLE target=$TARGET -->"$'\n'"🤖 Automatic catch-up — the $(forge_mr_term) on branch \`boucle/$BOUCLE_ISSUE\` was merged directly without going through the approval flow."$'\n\n'"Issue state at merge time: \`boucle:$CURRENT_BOUCLE\`."$'\n'"Chaining to post-merge for deploy + e2e verification — the terminal state will be decided by the e2e verdict."
   # The audit note is the only explanation for the transition — if it cannot
-  # be posted, do NOT proceed: a boucle:human/done transition with no note is
-  # a mute state change. Abort BEFORE the label + close, keeping the issue
-  # in its prior state so the loop can retry.
+  # be posted, do NOT proceed: a transition with no note is a mute state
+  # change. Abort BEFORE the label + chain, keeping the issue in its prior
+  # state so the loop can retry.
   if ! forge_issue_note "$BOUCLE_ISSUE" "$AUDIT_BODY"; then
     echo "FAIL: catchup audit note could not be posted on issue #$BOUCLE_ISSUE — aborting the transition (no mute state change)." >&2
     exit 1
   fi
 
-  # Apply the terminal state ONLY after the audit note is confirmed posted.
-  # In the done branch, also post a deploy-success note with the resolved
-  # production URL BEFORE the terminal label (lesson #59: note FIRST, label
-  # SECOND — abort without the label if the note cannot be posted).
-  local catchup_live_url=""
-  if [ "$TARGET" = "done" ]; then
-    catchup_live_url=$(boucle_resolve_live_url "" 2> /dev/null || echo "")
-    if [ -n "$catchup_live_url" ]; then
-      # shfmt off  # preserve exact string content
-      local DEPLOY_NOTE_BODY="✅ Successfully deployed to production (catch-up).
-
-## Production URL
-$catchup_live_url
-
-## Commit
-${CI_COMMIT_SHA:-unknown}"
-      # shfmt on
-      if ! forge_issue_note "$BOUCLE_ISSUE" "$DEPLOY_NOTE_BODY"; then
-        echo "FAIL: could not post deploy-success note on issue #$BOUCLE_ISSUE — aborting transition." >&2
-        exit 1
-      fi
-    fi
-    set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::done"
-  else
-    set_boucle_label "$BOUCLE_ISSUE" "boucle:human" "boucle::status::human"
-  fi
-
-  # Close the issue (boucle:done is a board label, not a close state).
-  close_issue "$BOUCLE_ISSUE"
-  echo "Catchup: closed issue #$BOUCLE_ISSUE"
-  # Refresh the board — the issue moved to closed/done, the board must
-  # reflect it immediately (lesson #97: refresh on transition, not only
-  # on doctor sweep). Without this the board shows a stale "merging" entry
-  # until the next doctor sweep catches up.
+  # Set boucle:merging as a transitional label. The terminal label
+  # (boucle:done / boucle:human) is applied by the e2e verdict routing
+  # (lib/boucle-ci/e2e.sh) AFTER production verification. This means:
+  #   - The doctor's boucle:merging scan covers direct merges too (a
+  #     stuck post-merge/e2e is recovered like any stuck merger).
+  #   - The board shows the issue as "merging" while e2e runs — an
+  #     honest signal that the loop is verifying the merge.
+  # The pre-e2e target (done/human) is NOT applied here; it was a guess
+  # based on the issue state at merge time, and e2e is the authority.
+  set_boucle_label "$BOUCLE_ISSUE" "boucle:merging" "boucle::status::bot"
+  # Refresh the board — the issue moved to merging (lesson #97: refresh
+  # on transition, not only on doctor sweep).
   boucle_board_upsert || true
 
   # Post-merge branch cleanup: delete the worker branch. Best-effort — a
   # failed deletion logs a warning but does not fail the job. lesson #68.
+  # Done BEFORE chaining to post-merge so a stale branch never blocks the
+  # deploy-wait. The merged commit is already on the default branch.
   local branch
   branch=$(boucle_branch_name "$BOUCLE_ISSUE")
   if ! forge_branch_delete "$branch"; then
-    echo "WARN: could not delete branch $branch after catchup close (stale but harmless)" >&2
+    echo "WARN: could not delete branch $branch after catchup (stale but harmless)" >&2
   else
-    echo "Deleted worker branch $branch after catchup close"
+    echo "Deleted worker branch $branch after catchup"
   fi
 
-  # Cascade: if this is a sub-issue, close the parent when all siblings are closed.
-  maybe_close_parent "$BOUCLE_ISSUE" "$catchup_live_url"
-  # Unblock dependents: if this sub-issue was a dependency of a sibling,
-  # check whether that sibling's deps are now all closed and trigger it.
-  maybe_unblock_dependents "$BOUCLE_ISSUE"
+  # Chain to post-merge (deploy-wait + e2e trigger). post-merge resolves
+  # the live URL (self mode: wait for deploy pipeline; external mode: wait
+  # for consumer's check suites) and chains to e2e with BOUCLE_ISSUE set.
+  # e2e's verdict routing then applies the terminal label, closes the
+  # issue, cascades the parent, and unblocks dependents — the same path
+  # as an approved merge through the merger job.
+  echo "Catchup: chaining to post-merge for issue #$BOUCLE_ISSUE (was boucle:$CURRENT_BOUCLE)"
+  chain_to_role "$BOUCLE_ISSUE" "post-merge"
 }

@@ -22,17 +22,21 @@ boucle_ci_merger() {
   if [ -z "$MR_IID" ]; then
     # Before escalating, check if the MR was already merged manually
     # (human merged via GitLab UI before merger job ran). If so,
-    # transition to boucle:done instead of boucle:human — prevents
-    # the race condition where a manual merge triggers a false
-    # "no open MR" escalation + webhook storm.
+    # chain to post-merge for deploy + e2e verification — do NOT set
+    # boucle:done directly. A manual merge still needs production
+    # verification (the human clicked Merge, but that does not verify
+    # the live URL, the deploy pipeline, or regressions on the merged
+    # build). This also prevents the race condition where a manual
+    # merge triggers a false "no open MR" escalation + webhook storm.
     local MERGED_IID MERGED_DATA MERGED_SHA
     MERGED_IID=$(forge_mr_lookup_by_branch "boucle/$BOUCLE_ISSUE" "merged")
     if [ -n "$MERGED_IID" ]; then
       MERGED_DATA=$(forge_mr_get "$MERGED_IID" 2> /dev/null || echo "")
       MERGED_SHA=$(echo "$MERGED_DATA" | jq -r '.merge_commit_sha // .merge_commit_sha // empty' 2> /dev/null)
-      echo "Found merged MR !$MERGED_IID for issue #$BOUCLE_ISSUE (merge_commit=${MERGED_SHA:0:12}) — already merged, transitioning to boucle:done."
-      forge_issue_note "$BOUCLE_ISSUE" "✅ $(forge_mr_term) already merged (merge_commit ${MERGED_SHA:0:12}) — issue resolved.$(job_link)" || true
-      set_boucle_label "$BOUCLE_ISSUE" "boucle:done" "boucle::status::bot"
+      echo "Found merged MR !$MERGED_IID for issue #$BOUCLE_ISSUE (merge_commit=${MERGED_SHA:0:12}) — already merged, chaining to post-merge for e2e verification."
+      forge_issue_note "$BOUCLE_ISSUE" "✅ $(forge_mr_term) already merged (merge_commit ${MERGED_SHA:0:12}) — chaining to post-merge for deploy + e2e verification.$(job_link)" || true
+      # Chain to post-merge so the merged code deploys + e2e runs.
+      chain_to_role "$BOUCLE_ISSUE" "post-merge"
       exit 0
     fi
     echo "FAIL: no open or merged MR found for issue #$BOUCLE_ISSUE (branch boucle/$BOUCLE_ISSUE)" >&2

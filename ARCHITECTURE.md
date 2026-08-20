@@ -171,8 +171,8 @@ flowchart LR
 | `worker` | trigger `BOUCLE_ROLE=worker` | `boucle-issue-$BOUCLE_ISSUE` | implement on `boucle/<iid>`, deploy preview | `lib/boucle-ci/worker.sh` |
 | `reviewer` | trigger `BOUCLE_ROLE=reviewer` | `boucle-issue-$BOUCLE_ISSUE` | adversarial review of MR diff / preview | `lib/boucle-ci/reviewer.sh` |
 | `merger` | trigger `BOUCLE_ROLE=merger` | `boucle-merge` (serial) | rebase + merge after approval | `lib/boucle-ci/merger.sh` |
-| `post-merge` | trigger `BOUCLE_ROLE=merger` (unlocked) | — | deploy-wait + e2e trigger | `lib/boucle-ci/post-merge.sh` |
-| `catchup` | trigger `BOUCLE_ROLE=catchup` | — | post-merge issue closure + cascade | `lib/boucle-ci/catchup.sh` |
+| `post-merge` | trigger `BOUCLE_ROLE=post-merge` (from merger, catchup, or doctor) | — | deploy-wait + e2e trigger | `lib/boucle-ci/post-merge.sh` |
+| `catchup` | trigger `BOUCLE_ROLE=catchup` | — | direct-merge recovery: audit note + chain to post-merge | `lib/boucle-ci/catchup.sh` |
 | `deploy` | push to default branch | — | build + deploy (Cloudflare Pages / GitLab Pages) | `lib/boucle-ci/deploy.sh` |
 | `e2e` | trigger `BOUCLE_ROLE=e2e` | `boucle-issue-$BOUCLE_ISSUE` | verify production URL, SHA-anchored verdict | `lib/boucle-ci/e2e.sh` |
 | `doctor` | schedule (every 10 min) | — | self-healing board sweep | `lib/boucle-ci/doctor.sh` |

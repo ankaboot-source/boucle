@@ -358,7 +358,7 @@ boucle_ci_dispatch() {
   #   unapproved→ reviewer (approval revoked → re-review)
   #   open/merge→ skip (worker chains to reviewer; merger handles merge)
   # Bot-originated events are filtered by the ACTOR guard above, except
-  # merge actions (which trigger catchup to close the issue).
+  # merge actions (which trigger catchup → post-merge → e2e).
   if [ "$OBJECT_KIND" = "merge_request" ]; then
     # Late payload reads: the trigger payload file can vanish mid-job (jq
     # exit 5 "system error" — same failure as pipeline #1433434 on a
@@ -522,8 +522,9 @@ boucle_ci_dispatch() {
         # A boucle/<iid> MR was merged directly (human clicked Merge in the
         # GitLab UI, bypassing the approval circuit → merger job). The
         # push to $BOUCLE_DEFAULT_BRANCH already triggered deploy → smoke e2e (no issue
-        # context). Catch up: trigger the catchup job to close the issue
-        # + cascade the parent, so it doesn't stay stuck at boucle:approval.
+        # context). Catch up: trigger the catchup job, which posts an audit
+        # note, sets boucle:merging, and chains to post-merge for deploy +
+        # e2e verification (same path as an approved merge).
         # MR_ISSUE_IID was extracted from the branch name above (line 173);
         # non-boucle branches already exited at line 174-176.
         echo "MR !${MR_IID} merged directly (action=merge) for issue #$MR_ISSUE_IID — triggering catchup"
