@@ -338,6 +338,22 @@ jobs:
             *) exit 0 ;;
           esac
           [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          # Orphan guard: if the submodule SHA is not reachable from the
+          # engine's main (force-push rewrote history), bin/update at the
+          # orphaned SHA may be buggy and cannot self-update. Recover by
+          # force-updating the submodule to main HEAD directly, bypassing
+          # bin/update. This prevents a bootstrap deadlock where a buggy
+          # old bin/update cannot pull the fix for its own bug.
+          if git -C .boucle fetch origin main 2>/dev/null && \
+             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+            git -C .boucle checkout origin/main 2>/dev/null
+            git add .boucle
+            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Dispatch
         id: dispatch
@@ -399,6 +415,22 @@ jobs:
             *) exit 0 ;;
           esac
           [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          # Orphan guard: if the submodule SHA is not reachable from the
+          # engine's main (force-push rewrote history), bin/update at the
+          # orphaned SHA may be buggy and cannot self-update. Recover by
+          # force-updating the submodule to main HEAD directly, bypassing
+          # bin/update. This prevents a bootstrap deadlock where a buggy
+          # old bin/update cannot pull the fix for its own bug.
+          if git -C .boucle fetch origin main 2>/dev/null && \
+             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+            git -C .boucle checkout origin/main 2>/dev/null
+            git add .boucle
+            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Triage
         env:
@@ -488,6 +520,22 @@ jobs:
             *) exit 0 ;;
           esac
           [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          # Orphan guard: if the submodule SHA is not reachable from the
+          # engine's main (force-push rewrote history), bin/update at the
+          # orphaned SHA may be buggy and cannot self-update. Recover by
+          # force-updating the submodule to main HEAD directly, bypassing
+          # bin/update. This prevents a bootstrap deadlock where a buggy
+          # old bin/update cannot pull the fix for its own bug.
+          if git -C .boucle fetch origin main 2>/dev/null && \
+             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+            git -C .boucle checkout origin/main 2>/dev/null
+            git add .boucle
+            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Worker
         env:
@@ -564,6 +612,22 @@ jobs:
             *) exit 0 ;;
           esac
           [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          # Orphan guard: if the submodule SHA is not reachable from the
+          # engine's main (force-push rewrote history), bin/update at the
+          # orphaned SHA may be buggy and cannot self-update. Recover by
+          # force-updating the submodule to main HEAD directly, bypassing
+          # bin/update. This prevents a bootstrap deadlock where a buggy
+          # old bin/update cannot pull the fix for its own bug.
+          if git -C .boucle fetch origin main 2>/dev/null && \
+             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+            git -C .boucle checkout origin/main 2>/dev/null
+            git add .boucle
+            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Reviewer
         env:
@@ -628,6 +692,22 @@ jobs:
             *) exit 0 ;;
           esac
           [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          # Orphan guard: if the submodule SHA is not reachable from the
+          # engine's main (force-push rewrote history), bin/update at the
+          # orphaned SHA may be buggy and cannot self-update. Recover by
+          # force-updating the submodule to main HEAD directly, bypassing
+          # bin/update. This prevents a bootstrap deadlock where a buggy
+          # old bin/update cannot pull the fix for its own bug.
+          if git -C .boucle fetch origin main 2>/dev/null && \
+             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+            git -C .boucle checkout origin/main 2>/dev/null
+            git add .boucle
+            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Merger
         env:
@@ -675,6 +755,22 @@ jobs:
             *) exit 0 ;;
           esac
           [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          # Orphan guard: if the submodule SHA is not reachable from the
+          # engine's main (force-push rewrote history), bin/update at the
+          # orphaned SHA may be buggy and cannot self-update. Recover by
+          # force-updating the submodule to main HEAD directly, bypassing
+          # bin/update. This prevents a bootstrap deadlock where a buggy
+          # old bin/update cannot pull the fix for its own bug.
+          if git -C .boucle fetch origin main 2>/dev/null && \
+             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+            git -C .boucle checkout origin/main 2>/dev/null
+            git add .boucle
+            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Post-merge
         env:
@@ -727,6 +823,22 @@ jobs:
             *) exit 0 ;;
           esac
           [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          # Orphan guard: if the submodule SHA is not reachable from the
+          # engine's main (force-push rewrote history), bin/update at the
+          # orphaned SHA may be buggy and cannot self-update. Recover by
+          # force-updating the submodule to main HEAD directly, bypassing
+          # bin/update. This prevents a bootstrap deadlock where a buggy
+          # old bin/update cannot pull the fix for its own bug.
+          if git -C .boucle fetch origin main 2>/dev/null && \
+             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+            git -C .boucle checkout origin/main 2>/dev/null
+            git add .boucle
+            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Catchup
         env:
@@ -782,6 +894,22 @@ jobs:
             *) exit 0 ;;
           esac
           [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          # Orphan guard: if the submodule SHA is not reachable from the
+          # engine's main (force-push rewrote history), bin/update at the
+          # orphaned SHA may be buggy and cannot self-update. Recover by
+          # force-updating the submodule to main HEAD directly, bypassing
+          # bin/update. This prevents a bootstrap deadlock where a buggy
+          # old bin/update cannot pull the fix for its own bug.
+          if git -C .boucle fetch origin main 2>/dev/null && \
+             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+            git -C .boucle checkout origin/main 2>/dev/null
+            git add .boucle
+            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Deploy
         run: |
@@ -834,6 +962,22 @@ jobs:
             *) exit 0 ;;
           esac
           [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          # Orphan guard: if the submodule SHA is not reachable from the
+          # engine's main (force-push rewrote history), bin/update at the
+          # orphaned SHA may be buggy and cannot self-update. Recover by
+          # force-updating the submodule to main HEAD directly, bypassing
+          # bin/update. This prevents a bootstrap deadlock where a buggy
+          # old bin/update cannot pull the fix for its own bug.
+          if git -C .boucle fetch origin main 2>/dev/null && \
+             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+            git -C .boucle checkout origin/main 2>/dev/null
+            git add .boucle
+            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: E2E
         env:
@@ -979,6 +1123,22 @@ jobs:
             *) exit 0 ;;
           esac
           [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          # Orphan guard: if the submodule SHA is not reachable from the
+          # engine's main (force-push rewrote history), bin/update at the
+          # orphaned SHA may be buggy and cannot self-update. Recover by
+          # force-updating the submodule to main HEAD directly, bypassing
+          # bin/update. This prevents a bootstrap deadlock where a buggy
+          # old bin/update cannot pull the fix for its own bug.
+          if git -C .boucle fetch origin main 2>/dev/null && \
+             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+            git -C .boucle checkout origin/main 2>/dev/null
+            git add .boucle
+            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Doctor
         run: |
