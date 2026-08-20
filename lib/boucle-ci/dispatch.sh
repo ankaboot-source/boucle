@@ -974,6 +974,39 @@ boucle_ci_dispatch() {
     if [ "$OBJECT_KIND" = "note" ] && dispatch_human_actor; then
       SHOULD_WORK=true
     fi
+  elif echo "$LABELS" | grep -q "boucle:working"; then
+    # Amend-in-flight (issue #2): a human comment on an issue at
+    # boucle:working is a mid-implementation course correction. The worker
+    # is in-flight (no MR yet, or the MR is open but has not reached
+    # boucle:review). Without this branch the comment is a no-op (falls
+    # through to dispatch_noop) and the human must wait for the reviewer
+    # FAIL or manually flip to boucle:human.
+    #
+    # This reuses the existing secondary-worker pattern (the same one the
+    # MR-note handler at dispatch.sh:568-636 uses for boucle:review): a
+    # fresh worker CI job starts with the full issue note thread (including
+    # this comment) injected via BOUCLE_ISSUE_NOTES, plus the prior
+    # state.md / iterations.md. The iteration counter is incremented so the
+    # amend counts against the cap (BOUCLE_MAX_ITERATIONS).
+    #
+    # Concurrency: resource_group: boucle-issue-$BOUCLE_ISSUE serializes
+    # per-issue jobs. The in-flight worker either (a) has already committed
+    # and exited → the amend-worker runs on the preserved branch, or (b) is
+    # still running → the amend-worker queues behind it. The worker's
+    # terminal transition (set_boucle_label boucle:review) is guarded
+    # against clobbering a boucle:todo set by this branch — see the
+    # terminal-transition guard in worker.sh (set_boucle_label
+    # boucle:review).
+    #
+    # No new security surface: this is the same amendment mechanism already
+    # used for boucle:spec-review / boucle:human (issue-author or
+    # maintainer comment). It does not give the commenter bash-on-the-runner
+    # any more than the existing body-edit amendment path does.
+    # dispatch_human_actor handles mono-user mode.
+    if [ "$OBJECT_KIND" = "note" ] && dispatch_human_actor; then
+      echo "Amend-in-flight: human comment on issue #$IID at boucle:working — re-triggering worker with the comment as additional context"
+      SHOULD_WORK=true
+    fi
   elif [ -z "$LABELS" ] || [ "$ACTION" = "open" ]; then
     # New issue with no boucle label → triage
     SHOULD_TRIAGE=true

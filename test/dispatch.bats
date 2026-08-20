@@ -795,3 +795,108 @@ gh_payload() {
   run grep -qE '^\s+types:.*synchronize' .github/workflows/boucle.yml
   assert_success
 }
+
+# ── Amend-in-flight (issue #2): human comment on boucle:working ──────────
+# A human comment on an issue at boucle:working is a mid-implementation
+# course correction. The dispatch must re-trigger the worker (secondary
+# worker with the comment injected via BOUCLE_ISSUE_NOTES), not no-op.
+# The worker's terminal transition to boucle:review is guarded against
+# clobbering the boucle:todo this branch sets — see the terminal-transition
+# guard tests below.
+
+extract_working_amend_block() {
+  awk '
+    /^  elif echo "\$LABELS" \| grep -q "boucle:working"; then$/ { p = 1 }
+    p == 1 { print }
+    p == 1 && /^  elif \[ -z "\$LABELS" \] \|\| \[ "\$ACTION" = "open" \]; then$/ { exit }
+  ' lib/boucle-ci/dispatch.sh
+}
+
+@test "amend-in-flight: a human note on boucle:working sets SHOULD_WORK=true" {
+  block=$(extract_working_amend_block)
+  [ -n "$block" ] || { echo "boucle:working amend block not found"; false; }
+  echo "$block" | grep -q 'OBJECT_KIND" = "note"'
+  echo "$block" | grep -q 'dispatch_human_actor'
+  echo "$block" | grep -q 'SHOULD_WORK=true'
+}
+
+@test "amend-in-flight: the branch is gated on dispatch_human_actor (mono-user-safe)" {
+  block=$(extract_working_amend_block)
+  # The human-actor guard must wrap the note path, same as boucle:human.
+  echo "$block" | grep -q 'dispatch_human_actor'
+  # Non-note events (emoji, issue updates) must NOT trigger the amend —
+  # the note path is gated on OBJECT_KIND == "note" AND dispatch_human_actor.
+  echo "$block" | grep -q 'OBJECT_KIND" = "note"'
+  echo "$block" | grep -q 'dispatch_human_actor; then'
+}
+
+@test "amend-in-flight: the branch sits between boucle:human and the open-issue fallthrough" {
+  # Ordering matters: boucle:working must be checked AFTER boucle:human
+  # (an issue flipped to human by the worker's own escalation takes
+  # precedence) and BEFORE the no-label/open fallthrough.
+  run awk '
+    /elif echo "\$LABELS" \| grep -q "boucle:human"; then/ { human = NR }
+    /elif echo "\$LABELS" \| grep -q "boucle:working"; then/ { working = NR }
+    /elif \[ -z "\$LABELS" \] \|\| \[ "\$ACTION" = "open" \]; then/ { open = NR }
+    END { exit !(human > 0 && working > human && open > working) }
+  ' lib/boucle-ci/dispatch.sh
+  assert_success
+}
+
+@test "amend-in-flight: the block documents the secondary-worker pattern + concurrency" {
+  block=$(extract_working_amend_block)
+  # The comment must explain the reuse of the MR-note secondary-worker pattern.
+  echo "$block" | grep -qi 'secondary.worker\|secondary-worker'
+  # The comment must reference resource_group serialization.
+  echo "$block" | grep -qi 'resource_group'
+  # The comment must reference the terminal-transition guard in worker.sh.
+  echo "$block" | grep -qi 'terminal.transition\|terminal-transition guard'
+}
+
+# ── Worker terminal-transition guard (issue #2): don't clobber a queued amend ─
+# If a human commented during the worker run, dispatch set boucle:todo to
+# queue an amend-worker. The in-flight worker's terminal set_boucle_label
+# boucle:review would clobber that boucle:todo. The guard detects the amend
+# and skips the review transition + reviewer chain.
+
+@test "worker: terminal-transition guard checks for boucle:todo before setting boucle:review" {
+  # The guard must read the current labels and check for boucle:todo BEFORE
+  # the set_boucle_label boucle:review call.
+  run grep -n 'boucle:todo' lib/boucle-ci/worker.sh
+  assert_success
+  # The guard must be in the terminal section (after the push, near the
+  # set_boucle_label boucle:review line).
+  guard_line=$(grep -n 'terminal_labels' lib/boucle-ci/worker.sh | head -1 | cut -d: -f1)
+  review_line=$(grep -n 'set_boucle_label.*boucle:review' lib/boucle-ci/worker.sh | head -1 | cut -d: -f1)
+  [ -n "$guard_line" ] && [ -n "$review_line" ] && [ "$guard_line" -lt "$review_line" ] \
+    || { echo "guard (line $guard_line) must precede boucle:review (line $review_line)"; false; }
+}
+
+@test "worker: the guard skips boucle:review AND the reviewer chain when an amend is queued" {
+  # Extract the guard block and verify it returns 0 (skipping the rest)
+  # when boucle:todo is detected, without calling set_boucle_label boucle:review
+  # or chain_to_role reviewer. The awk exits BEFORE the set_boucle_label
+  # boucle:review line (the guard's return 0 precedes it).
+  guard_block=$(awk '
+    /Amend-in-flight guard/ { p = 1 }
+    p == 1 && /set_boucle_label "\$BOUCLE_ISSUE" "boucle:review"/ { exit }
+    p == 1 { print }
+  ' lib/boucle-ci/worker.sh)
+  [ -n "$guard_block" ] || { echo "guard block not found"; false; }
+  echo "$guard_block" | grep -q 'boucle:todo'
+  echo "$guard_block" | grep -q 'return 0'
+  # The guard must NOT itself call set_boucle_label boucle:review.
+  ! echo "$guard_block" | grep -q 'set_boucle_label.*boucle:review'
+}
+
+@test "worker: the guard records a health outcome for the amended-in-flight run" {
+  # The guard must call boucle_health_outcome so the run is classified
+  # (not silently dropped from the health record).
+  guard_block=$(awk '
+    /Amend-in-flight guard/ { p = 1 }
+    p == 1 && /set_boucle_label "\$BOUCLE_ISSUE" "boucle:review"/ { exit }
+    p == 1 { print }
+  ' lib/boucle-ci/worker.sh)
+  echo "$guard_block" | grep -q 'boucle_health_outcome'
+  echo "$guard_block" | grep -q 'amended-in-flight'
+}

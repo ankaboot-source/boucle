@@ -930,6 +930,27 @@ ${screenshot_urls}"
   fi
 
   # ── Set review label ─────────────────────────────────────────────
+  # Amend-in-flight guard (issue #2): if a human commented on the issue
+  # while this worker was running, dispatch relabeled to boucle:todo to
+  # queue an amend-worker (see dispatch.sh boucle:working branch). This
+  # run's terminal transition to boucle:review would clobber that
+  # boucle:todo, and the queued amend-worker would then refuse to run
+  # (the label-state guard at the top of this function only accepts
+  # boucle:todo / boucle:working). Detect the amend: if the current label
+  # is boucle:todo (not the boucle:working this run set at line 79), skip
+  # the boucle:review transition AND skip chaining to the reviewer — the
+  # amend-worker (already queued by resource_group serialization) will
+  # re-run with the human's comment injected via BOUCLE_ISSUE_NOTES, and
+  # IT will transition to boucle:review when it finishes. This run's
+  # commits are preserved on the branch (pushed above); the amend-worker
+  # rebases onto them.
+  local terminal_labels
+  terminal_labels=$(forge_issue_labels_get "$BOUCLE_ISSUE" 2> /dev/null || echo "")
+  if echo "$terminal_labels" | tr ',' '\n' | grep -qx "boucle:todo"; then
+    echo "[boucle] Amend-in-flight detected: issue #$BOUCLE_ISSUE is at boucle:todo (a human commented during this run). Skipping boucle:review transition — the queued amend-worker will re-run with the comment and transition to review. This run's commits are preserved on branch $BRANCH."
+    boucle_health_outcome "$BOUCLE_ISSUE" "worker" "amended-in-flight" "iteration $ITERATION (human comment queued an amend)" || true
+    return 0
+  fi
   set_boucle_label "$BOUCLE_ISSUE" "boucle:review" "boucle::status::bot"
 
   # ── Chain to reviewer ────────────────────────────────────────────

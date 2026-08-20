@@ -48,6 +48,20 @@ human in the loop at decision points (spec validation, MR approval).
   is consumed (stripped) by the next state transition (`set_boucle_label`
   strips all `boucle:*` labels).
 - **MR approval** — always human-gated.
+- **Amend-in-flight** — a human comment on an issue at `boucle:working`
+  is a mid-implementation course correction. The dispatch re-triggers the
+  worker (a secondary worker CI job) with the full issue note thread —
+  including the new comment — injected via `BOUCLE_ISSUE_NOTES`, plus the
+  prior `state.md` / `iterations.md`. The in-flight worker's commits are
+  preserved on the branch; the amend-worker rebases onto them. The
+  in-flight worker detects the queued amend (the label flipped from
+  `boucle:working` to `boucle:todo`) and skips its terminal transition to
+  `boucle:review` so it does not clobber the queued amend-worker. This
+  reuses the existing secondary-worker pattern (the same one MR comments
+  use at `boucle:review`); it adds no new security surface (same
+  issue-author / maintainer amendment mechanism as `boucle:spec-review`
+  and `boucle:human`). Concurrency is serialized by
+  `resource_group: boucle-issue-$BOUCLE_ISSUE`. See issue #2.
 
 ## Do-Not-Disturb (DND)
 
