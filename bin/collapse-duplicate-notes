@@ -115,6 +115,12 @@ fi
 # pre_id=0 selects all (first run).
 FINAL_IDS="$(printf '%s' "$NOTES_JSON" | jq -r "${FILTER} | select(.id > ${PRE_ID}) | .id" 2> /dev/null | sort -n)"
 
+# Cross-run collapse: also fetch ALL final notes (including previous runs)
+# so stale finals from prior runs are collapsed too. Without this, every
+# triage/verdict re-run posts a new final and old ones survive as duplicate
+# specs (observed on boucle.dev #79: 6 duplicate boucle:triage v=1 comments).
+ALL_FINAL_IDS="$(printf '%s' "$NOTES_JSON" | jq -r "${FILTER} | .id" 2> /dev/null | sort -n)"
+
 # Filter to matching draft note IDs (superseded by any final from this run).
 DRAFT_IDS="$(printf '%s' "$NOTES_JSON" | jq -r "${DRAFT_FILTER} | select(.id > ${PRE_ID}) | .id" 2> /dev/null | sort -n)"
 
@@ -177,11 +183,32 @@ fi
 
 # DELETE every other matching note id (all drafts + all finals except the
 # target). The target now holds the final body; the rest are redundant.
+# Cross-run collapse: also DELETE stale finals from previous runs
+# (ALL_FINAL_IDS includes finals with id <= pre_id). This prevents
+# duplicate specs accumulating across re-runs (observed on boucle.dev #79:
+# 6 duplicate boucle:triage v=1 comments).
 printf '%s\n' "$ALL_IDS" | tail -n +2 | while IFS= read -r DEL_ID; do
   [[ -z "$DEL_ID" ]] && continue
   log "collapse-duplicate-notes: DELETE $ENDPOINT/$DEL_ID (superseded by target $TARGET_ID)"
   forge_note_delete "$KIND" "$NOTE_IID" "$DEL_ID" 2> /dev/null \
     || log "collapse-duplicate-notes: DELETE failed for note $DEL_ID (continuing)"
 done
+
+# Cross-run: delete stale finals from previous runs (id <= pre_id) that
+# are NOT the target. The target is the oldest note from this run; stale
+# finals are older still. They are redundant now that the newest final
+# body is on the target.
+if [[ -n "${ALL_FINAL_IDS:-}" ]]; then
+  printf '%s\n' "$ALL_FINAL_IDS" | while IFS= read -r STALE_ID; do
+    [[ -z "$STALE_ID" ]] && continue
+    # Skip the target (it now holds the newest body).
+    [[ "$STALE_ID" == "$TARGET_ID" ]] && continue
+    # Skip notes already deleted above (this run's finals).
+    printf '%s\n' "$ALL_IDS" | grep -qx "$STALE_ID" && continue
+    log "collapse-duplicate-notes: DELETE $ENDPOINT/$STALE_ID (stale final from previous run, superseded by target $TARGET_ID)"
+    forge_note_delete "$KIND" "$NOTE_IID" "$STALE_ID" 2> /dev/null \
+      || log "collapse-duplicate-notes: DELETE failed for note $STALE_ID (continuing)"
+  done
+fi
 
 exit 0
