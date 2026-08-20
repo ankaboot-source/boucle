@@ -670,6 +670,148 @@ survive the branch force-push, and the tag is named in an issue comment.
 the state cache after checkout. Only the *code* is discarded; the notes on
 why the previous attempt failed are exactly what the fresh run needs.
 
+## Interactive takeover (`boucle takeover`)
+
+When the loop escalates (`boucle:human`), the human can either start fresh
+(`boucle restart <iid>` — a new worker run from `state.md`) or **resume the
+worker's jcode session interactively** with full prior history — steering the
+agent from where it stopped instead of re-explaining the problem.
+
+This is the "human interactive takeover" primitive (#54 item 2). It is
+**opt-in and forge-native** (CONTEXT.md §7): no server, no tunnel, no new
+frontend. The session files travel via the existing CI artifact upload.
+
+### How it works
+
+1. **`bin/jc` captures the session** (worker role only). After the jcode run,
+   it finds the newest session in `~/.jcode/sessions/` whose `working_dir`
+   matches `BOUCLE_WORKSPACE`, copies `session.json` + `session.journal.jsonl`
+   to `.boucle-state/<issue>/session/`, and writes the session ID to
+   `.boucle-state/<issue>/session-id`. Post-hoc discovery (not `--ndjson`,
+   which would break the log-scraping parsers).
+2. **CI uploads the session** as part of the existing agent-transcript artifact
+   (#33) — `.boucle-state/**/session/` is in the upload globs on both forges.
+3. **The escalation diagnostic appends takeover instructions** automatically
+   when a session is available (`boucle_escalation_diagnostic` in
+   `lib/boucle.sh`) — the exact `jcode --resume <id>` command + how to restore
+   the session locally. Rides on every escalation; no extra note per run.
+4. **`boucle takeover <iid>`** prints the same instructions from the CLI.
+
+### The human's flow
+
+```sh
+# 1. Download the worker artifact from the CI run, extract to repo root.
+# 2. Restore the session into your local jcode:
+mkdir -p ~/.jcode/sessions
+cp .boucle-state/<iid>/session/session.json      ~/.jcode/sessions/<sid>.json
+cp .boucle-state/<iid>/session/session.journal.jsonl ~/.jcode/sessions/<sid>.journal.jsonl
+# 3. Resume (TUI — interactive, full prior history replayed to the model):
+jcode --resume <sid>
+#    Or headless (one new instruction, then exit):
+#    jcode run --resume <sid> "<your instruction>"
+# 4. Commit, push, then hand back:
+boucle resume <iid>   # loop runs reviewer on your code
+```
+
+### Invariants
+
+- **Worker role only.** Triage/reviewer/e2e sessions are not takeover-worthy.
+- **Fail-open.** A missing/unreadable session (ephemeral runner, cleaned
+  `~/.jcode`) produces no instructions; `boucle restart` is the durable
+  fallback. The takeover path is a convenience, never a dependency.
+- **No label writes, no state-machine change.** `boucle takeover` is read-only;
+  the human still uses `boucle pause`/`resume`/`restart` for state transitions.
+- **History is replayed by jcode, not assembled by boucle.** jcode loads the
+  session's `messages[]` + journal on resume; boucle does not re-inject
+  `state.md`/`iterations.md` into the resumed session (those stay the durable
+  fallback for `boucle restart`).
+
+## Interactive commands (`/boucle`)
+
+The `/boucle` command is a **forge-native observability surface**: a human
+types `/boucle <verb>` as an issue comment, and a separate fast CI job fetches
+data and posts a stamped reply comment. It is read-only at MVP — **no agent
+invocation, no label writes, no security surface**. It closes the gap labels
+cannot carry: the content of an agent run (`agent-output.log`) and the detail
+of loop health (`bin/health`), in the same channel the loop already posts in
+(CONTEXT.md §7).
+
+### Command surface
+
+Two equivalent trigger forms, one parser, case-insensitive, anchored at the
+first non-empty line of the comment body:
+
+```
+^/boucle <verb> <args>        OR        ^@<BOUCLE_BOT_USERNAME> <verb> <args>
+```
+
+`BOUCLE_BOT_USERNAME` is resolved by the fallback in AGENTS.md lesson #50
+(default `up-bot`). **Issue scope only at MVP** — MR comments are disabled.
+
+| Verb | Action | Backing |
+|---|---|---|
+| `/boucle log [role]` | Fetch the `agent-output.log` artifact of the most recent run of `<role>` (default: the role in flight, else the last completed); post the tail (≤ comment-size limit) as a stamped comment. | GitLab: `GET /projects/:id/jobs/:job_id/artifacts/*artifact_path`. GitHub: list artifacts → `GET .../artifacts/{id}/zip` (post-completion only). |
+| `/boucle status` | Post a projection of `bin/health <issue>` (iterations, outcomes by role, cost total, last verdict SHA, role in flight). | `bin/health` (§Loop-health measurement). |
+| `/boucle help` | Post the verb list + the non-redundancy rationale. | Static text. |
+
+Unknown first token → **no action**: post a one-line "unknown verb, try
+`/boucle help`" reply. The MVP does NOT fall through to `jc`.
+
+### Authorization
+
+- **`log` / `status` / `help`**: actor ∈ {issue author, parent-issue human
+  author via `resolve_reporter_id` (one generation, AGENTS.md lesson #17)}.
+  These are observability of data the actor could already see in the CI UI —
+  no new trust boundary crossed. System notes filtered (lesson #34).
+- **Closed-issue guard** (lesson #44): do not run commands on a closed issue
+  (except `help`, which is pure text).
+- **Fail-open on API error**: the data is observable in the CI UI — no new
+  trust boundary.
+
+### Jobs
+
+Each verb runs as a **separate fast job**, not inline in the dispatch job. The
+dispatch job holds `resource_group: boucle-dispatch` (a static name serializing
+all dispatches globally); an inline artifact fetch + comment post would hold
+that lock for seconds and queue every other webhook behind it (AGENTS.md lesson
+#101). Each verb gets its own job with
+`resource_group: boucle-cmd-$BOUCLE_ISSUE`, triggered via
+`chain_to_role "$IID" "<verb>"` (the existing chaining primitive). The dispatch
+job parses + authorizes + chains, then exits in milliseconds.
+
+| Job | `BOUCLE_ROLE` | Script | Backing |
+|---|---|---|---|
+| `cmd-log` | `cmd-log` | `lib/boucle-ci/cmd-log.sh` | `forge_job_artifact` (bin/forge/{gitlab,github}.sh) |
+| `cmd-status` | `cmd-status` | `lib/boucle-ci/cmd-status.sh` | `bin/health <issue>` |
+| `cmd-help` | `cmd-help` | `lib/boucle-ci/cmd-help.sh` | static text |
+
+### CI variables
+
+No `BOUCLE_COMMAND_*` variable is needed at MVP — there is no agent invocation
+and no secret exfiltration surface (no `bash`, no `write`, no agent at all).
+The future `BOUCLE_COMMAND_ENABLED` master switch becomes necessary in **phase
+2** when the `jc` verb (full-capability "manual worker") lands.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BOUCLE_COMMAND_ENABLED` | *(phase 2)* | Master switch for the `/boucle` command surface. Not needed at MVP (no agent invocation). Becomes mandatory in phase 2 when `jc` lands. |
+
+### Deferral rationale
+
+- **`/boucle jc <instruction>`** — deferred to phase 2 as a full-capability
+  "manual worker" (maintainer-only, produces a commit/MR). A read-only Q&A
+  agent was cut: too weak to produce work, too complex to secure just to
+  answer questions the worker already answers.
+- **`/boucle tail [role]`** — phase 2, **GitLab-only**. GitLab exposes
+  `GET /jobs/:id/trace` (growing live log, fetch-and-diff + edit note).
+  **GitHub Actions has no streaming log API** — impossible via API; the
+  running job would have to self-report. The post-completion `log` verb works
+  on both forges; the asymmetry only affects the future live-tail.
+- **`/boucle cancel`** — phase 2, via native forge API
+  (`POST /pipelines/:pid/cancel` / `POST /actions/runs/:id/cancel`). Does not
+  touch the state machine. High blast radius (lessons #22/#51) — design
+  carefully.
+
 ## Provider probe
 
 Boucle used to discover an exhausted quota the expensive way: provision the

@@ -1964,6 +1964,67 @@ record_skills_used() {
 
 record_skills_used || true
 
+# ── 7b. Capture jcode session for interactive takeover (#54 item 2) ──
+# jcode persists every run as ~/.jcode/sessions/<id>.json + <id>.journal.jsonl.
+# A human can resume that session locally with `jcode --resume <id>` (TUI) or
+# `jcode run --resume <id> "<msg>"` (headless) — the prior history is replayed
+# to the model (verified empirically: 26,516 vs 26,292 upload tokens on a
+# 1-message session). This is the "human interactive takeover" primitive.
+#
+# The session lives on the RUNNER (~/.jcode/); the human is LOCAL. So we copy
+# the session files into .boucle-state/<issue>/session/ — the existing CI
+# artifact upload (#33) catches that path with no CI config change — and write
+# the session ID to .boucle-state/<issue>/session-id so bin/boucle takeover
+# can read it without scraping the log.
+#
+# Worker role only: triage/reviewer/e2e sessions are not takeover-worthy (the
+# worker is the role that produces a half-finished tree a human would steer).
+#
+# Post-hoc discovery (not --ndjson): switching to --ndjson would break the
+# log-scraping parsers (is_agent_looping uses sort|uniq -c, which fails on
+# unique JSON lines). We find the newest session file whose working_dir
+# matches BOUCLE_WORKSPACE — jcode records working_dir in the session JSON.
+#
+# Fail-open: a missing/unreadable session is not a failure. The takeover path
+# is an opt-in convenience; the existing `boucle restart` (fresh run from
+# state.md) is the durable fallback.
+capture_jcode_session() {
+  [ "$ROLE" = "worker" ] || return 0
+  local jcode_home="${JCODE_HOME:-$HOME/.jcode}"
+  local sessions_dir="$jcode_home/sessions"
+  [ -d "$sessions_dir" ] || return 0
+
+  # Find the newest session whose working_dir matches the workspace.
+  # jq -r '.working_dir // empty' on each session JSON; first match wins.
+  local newest_sid="" newest_file=""
+  local f
+  for f in "$sessions_dir"/session_*.json; do
+    [ -f "$f" ] || continue
+    local wd
+    wd=$(jq -r '.working_dir // empty' "$f" 2> /dev/null) || continue
+    [ "$wd" = "$BOUCLE_WORKSPACE" ] || continue
+    # mtime comparison — newest wins.
+    if [ -z "$newest_file" ] || [ "$f" -nt "$newest_file" ]; then
+      newest_file="$f"
+      newest_sid=$(jq -r '.id // empty' "$f" 2> /dev/null) || continue
+    fi
+  done
+  [ -n "$newest_sid" ] || return 0
+
+  # Persist the session ID (one line) + copy the session files for the artifact.
+  local state_session_dir="$STATE_DIR/session"
+  mkdir -p "$state_session_dir" 2> /dev/null || return 0
+  echo "$newest_sid" > "$STATE_DIR/session-id" 2> /dev/null || true
+  cp "$newest_file" "$state_session_dir/session.json" 2> /dev/null || true
+  # Journal file has the same stem with .journal.jsonl.
+  local journal="${newest_file%.json}.journal.jsonl"
+  [ -f "$journal" ] && cp "$journal" "$state_session_dir/session.journal.jsonl" 2> /dev/null || true
+
+  echo "[boucle:session] captured role=$ROLE session_id=$newest_sid → $state_session_dir/" >&2
+}
+
+capture_jcode_session || true
+
 # ── 8. Assert declared side effect ────────────────────────────────────
 # The job (not bin/jc) asserts the side effect after this script exits.
 # bin/jc just runs the agent and logs. The job checks exit code + git/API state.

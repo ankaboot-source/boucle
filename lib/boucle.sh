@@ -684,6 +684,40 @@ boucle_escalation_diagnostic() {
   fi
   echo "---"
   echo "*Diagnostic posted by boucle (doctor — #52).*"
+
+  # ── Interactive takeover instructions (#54 item 2) ───────────────────
+  # When a worker session was captured (bin/jc writes .boucle-state/<iid>/session-id
+  # + session/), append the exact resume command so the human can take over
+  # interactively with full history. Rides on every escalation automatically —
+  # no extra note per run. Fail-open: no session → no instructions (the existing
+  # `boucle restart` is the durable fallback).
+  local session_id_file="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/session-id"
+  local session_dir="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/session"
+  if [ -f "$session_id_file" ] && [ -r "$session_id_file" ]; then
+    local sid
+    sid=$(cat "$session_id_file" 2> /dev/null) || sid=""
+    if [ -n "$sid" ]; then
+      echo ""
+      echo "### 🎯 Interactive takeover (optional)"
+      echo ""
+      echo "A jcode session was captured for this worker run. Resume it locally to steer the agent with full history:"
+      echo ""
+      echo '```sh'
+      echo "# 1. Download the session artifact from this CI run (boucle-agent-log-worker-*)"
+      echo "#    and extract .boucle-state/$iid/session/ to your repo root."
+      echo "# 2. Restore the session into your local jcode:"
+      echo "mkdir -p ~/.jcode/sessions"
+      echo "cp .boucle-state/$iid/session/session.json ~/.jcode/sessions/${sid}.json"
+      echo "cp .boucle-state/$iid/session/session.journal.jsonl ~/.jcode/sessions/${sid}.journal.jsonl"
+      echo "# 3. Resume (TUI — interactive) or re-run headless with a new instruction:"
+      echo "jcode --resume $sid"
+      echo "#   jcode run --resume $sid \"<your instruction>\"   # headless"
+      echo '```'
+      echo ""
+      echo "Then commit, push, and run \`boucle resume $iid\` to hand back to the loop."
+      echo "If the session is unavailable (ephemeral runner, cleaned ~/.jcode), use \`boucle restart $iid\` for a fresh run from state.md."
+    fi
+  fi
 }
 
 # ── Outbound notification (send-only) ───────────────────────────────────

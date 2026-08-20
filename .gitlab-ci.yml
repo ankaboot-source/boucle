@@ -161,6 +161,9 @@ variables:
   paths:
     - .boucle/**/agent-output.log
     - .boucle-state/**/agent-output.log
+    # jcode session files for interactive takeover (#54 item 2). bin/jc copies
+    # the worker's session here so a human can resume it locally.
+    - .boucle-state/**/session/
 
 # ── Default: use node:22-slim (has node, npm, curl — much smaller than node:22) ─
 # The shared runner is a docker executor. node:22-slim is ~250MB vs ~1GB.
@@ -755,6 +758,59 @@ e2e:
   script:
     - boucle-ci e2e
   timeout: 20m
+
+# ── /boucle interactive commands (#61) ─────────────────────────────────
+# Forge-native observability: a human posts `/boucle <verb>` as an issue
+# comment; dispatch parses it, authorizes the actor, and chains to one of
+# these fast jobs via chain_to_role (which sets BOUCLE_ROLE=cmd-log etc.).
+# Each verb is a SEPARATE job with resource_group: boucle-cmd-$BOUCLE_ISSUE
+# so the dispatch job (which holds the static boucle-dispatch lock) never
+# blocks on an artifact fetch + comment post. Lightweight: no agent, no
+# consumer checkout — only lib/boucle.sh + forge helpers + bin/health.
+cmd-log:
+  stage: verify
+  tags: []
+  resource_group: boucle-cmd-$BOUCLE_ISSUE
+  needs:
+    - job: dispatch
+      optional: true
+  rules:
+    - if: $BOUCLE_ENABLED != "true"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "cmd-log"
+  script:
+    - boucle-ci cmd-log
+  timeout: 2m
+
+cmd-status:
+  stage: verify
+  tags: []
+  resource_group: boucle-cmd-$BOUCLE_ISSUE
+  needs:
+    - job: dispatch
+      optional: true
+  rules:
+    - if: $BOUCLE_ENABLED != "true"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "cmd-status"
+  script:
+    - boucle-ci cmd-status
+  timeout: 2m
+
+cmd-help:
+  stage: verify
+  tags: []
+  resource_group: boucle-cmd-$BOUCLE_ISSUE
+  needs:
+    - job: dispatch
+      optional: true
+  rules:
+    - if: $BOUCLE_ENABLED != "true"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "cmd-help"
+  script:
+    - boucle-ci cmd-help
+  timeout: 2m
 
 # ── Doctor (scheduled recovery) ──────────────────────────────────────────
 # Runs on a schedule (every 10 min). Detects orphaned triages: issues with

@@ -15,6 +15,7 @@
 #   boucle status <iid>       # forge label + state.md + iterations.md
 #   boucle check <iid>        # file-gate, deps, siblings
 #   boucle log <iid>          # agent-output.log (last run trace)
+#   boucle takeover <iid>     # print jcode --resume command for interactive takeover (#54 item 2)
 
 set -euo pipefail
 
@@ -383,6 +384,76 @@ cmd_log() {
   fi
 }
 
+# ── takeover <iid> ────────────────────────────────────────────────────────
+#
+# Interactive takeover (#54 item 2). Prints the exact jcode --resume command
+# for the human to run locally, plus how to restore the captured session files
+# from the CI artifact. Read-only — does not change labels or post notes.
+#
+# Prerequisite: bin/jc captured the worker session to
+# .boucle-state/<iid>/session-id + session/. If absent (ephemeral runner,
+# cleaned ~/.jcode, or non-worker role), prints the fallback path.
+cmd_takeover() {
+  local iid="${1:?usage: boucle takeover <iid>}"
+  local session_id_file=".boucle-state/$iid/session-id"
+  local session_dir=".boucle-state/$iid/session"
+
+  if [ ! -f "$session_id_file" ]; then
+    echo "No captured jcode session for issue #$iid." >&2
+    echo "" >&2
+    echo "This happens when:" >&2
+    echo "  - the worker ran on an ephemeral runner (session files do not survive)," >&2
+    echo "  - ~/.jcode was cleaned between the run and now, or" >&2
+    echo "  - the session artifact was not downloaded/extracted yet." >&2
+    echo "" >&2
+    echo "Fallback: run \`boucle restart $iid\` for a fresh worker run from state.md." >&2
+    exit 1
+  fi
+
+  local sid
+  sid=$(cat "$session_id_file" 2> /dev/null) || sid=""
+  if [ -z "$sid" ]; then
+    echo "ERROR: session-id file exists but is empty: $session_id_file" >&2
+    exit 1
+  fi
+
+  echo "=== Interactive takeover — issue #$iid ==="
+  echo ""
+  echo "Captured jcode session: $sid"
+  echo ""
+  echo "## Step 1 — restore the session files locally"
+  echo ""
+  echo "The session was captured to .boucle-state/$iid/session/ on the runner."
+  echo "Download the worker artifact from the CI run (boucle-agent-log-worker-*)"
+  echo "and extract it to your repo root, then:"
+  echo ""
+  echo "  mkdir -p ~/.jcode/sessions"
+  echo "  cp .boucle-state/$iid/session/session.json ~/.jcode/sessions/${sid}.json"
+  echo "  cp .boucle-state/$iid/session/session.journal.jsonl ~/.jcode/sessions/${sid}.journal.jsonl"
+  echo ""
+  echo "## Step 2 — resume the session"
+  echo ""
+  echo "Interactive (TUI — you steer the agent with full prior history):"
+  echo ""
+  echo "  jcode --resume $sid"
+  echo ""
+  echo "Headless (one new instruction, then exit):"
+  echo ""
+  echo "  jcode run --resume $sid \"<your instruction>\""
+  echo ""
+  echo "## Step 3 — hand back to the loop"
+  echo ""
+  echo "After committing and pushing your changes:"
+  echo ""
+  echo "  boucle resume $iid   # loop resumes the flow (runs reviewer on your code)"
+  echo ""
+  echo "Or start fresh if the session approach did not help:"
+  echo ""
+  echo "  boucle restart $iid  # fresh worker run from state.md"
+  echo ""
+  echo "Fallback if the session files are unavailable: \`boucle restart $iid\`."
+}
+
 # ── Main dispatch ────────────────────────────────────────────────────────
 case "${1:-}" in
   pause)
@@ -409,8 +480,12 @@ case "${1:-}" in
     shift
     cmd_log "$@"
     ;;
+  takeover)
+    shift
+    cmd_takeover "$@"
+    ;;
   *)
-    echo "Usage: boucle <pause|resume|restart|status|check|log> <iid>" >&2
+    echo "Usage: boucle <pause|resume|restart|status|check|log|takeover> <iid>" >&2
     exit 1
     ;;
 esac

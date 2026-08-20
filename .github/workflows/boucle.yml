@@ -91,6 +91,9 @@ on:
       BOUCLE_PREVIEW_MARKER_PATH:
         description: "Path for SHA marker probe file"
         required: false
+      BOUCLE_CMD_ARGS:
+        description: "Args for /boucle command jobs (e.g. role for cmd-log)"
+        required: false
 
 # ── Environment ────────────────────────────────────────────────────────────────
 env:
@@ -415,6 +418,8 @@ jobs:
           path: |
             .boucle/**/agent-output.log
             .boucle-state/**/agent-output.log
+            # jcode session files for interactive takeover (#54 item 2).
+            .boucle-state/**/session/
           if-no-files-found: ignore
           retention-days: 7
 
@@ -501,6 +506,8 @@ jobs:
           path: |
             .boucle/**/agent-output.log
             .boucle-state/**/agent-output.log
+            # jcode session files for interactive takeover (#54 item 2).
+            .boucle-state/**/session/
           if-no-files-found: ignore
           retention-days: 7
       - name: Save boucle state cache
@@ -574,6 +581,8 @@ jobs:
           path: |
             .boucle/**/agent-output.log
             .boucle-state/**/agent-output.log
+            # jcode session files for interactive takeover (#54 item 2).
+            .boucle-state/**/session/
           if-no-files-found: ignore
           retention-days: 7
 
@@ -819,8 +828,94 @@ jobs:
           path: |
             .boucle/**/agent-output.log
             .boucle-state/**/agent-output.log
+            # jcode session files for interactive takeover (#54 item 2).
+            .boucle-state/**/session/
           if-no-files-found: ignore
           retention-days: 7
+
+  # ── /boucle interactive commands (#61) ─────────────────────────────────────
+  # Forge-native observability: a human posts `/boucle <verb>` as an issue
+  # comment; dispatch parses it, authorizes the actor, and chains to one of
+  # these fast jobs via chain_to_role (which sets BOUCLE_ROLE=cmd-log etc.).
+  # Each verb is a SEPARATE job with a per-issue concurrency group so the
+  # dispatch job never blocks on an artifact fetch + comment post. Lightweight:
+  # no agent, no consumer checkout — only lib/boucle.sh + forge helpers +
+  # bin/health.
+  cmd-log:
+    runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
+    continue-on-error: true  # boucle manages its own retries — exit 1 is normal
+    if: |
+      github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'cmd-log'
+    timeout-minutes: 2
+    concurrency:
+      group: boucle-cmd-${{ github.event.inputs.BOUCLE_ISSUE }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Setup
+        run: |
+          apt-get update -qq && apt-get install -y -qq curl jq git unzip
+          npm install -g glab 2>/dev/null || true
+      - name: Cmd-log
+        env:
+          BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE }}
+          BOUCLE_CMD_ARGS: ${{ github.event.inputs.BOUCLE_CMD_ARGS }}
+        run: |
+          export BOUCLE_PROJECT_ID="${{ github.repository }}"
+          [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
+          $BOUCLE_HOME/bin/boucle-ci cmd-log
+
+  cmd-status:
+    runs-on: ubuntu-latest
+    continue-on-error: true  # boucle manages its own retries — exit 1 is normal
+    if: |
+      github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'cmd-status'
+    timeout-minutes: 2
+    concurrency:
+      group: boucle-cmd-${{ github.event.inputs.BOUCLE_ISSUE }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Setup
+        run: |
+          apt-get update -qq && apt-get install -y -qq curl jq git
+          npm install -g glab 2>/dev/null || true
+      - name: Cmd
+        env:
+          BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE }}
+        run: |
+          export BOUCLE_PROJECT_ID="${{ github.repository }}"
+          [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
+          $BOUCLE_HOME/bin/boucle-ci cmd-status
+
+  cmd-help:
+    runs-on: ubuntu-latest
+    continue-on-error: true  # boucle manages its own retries — exit 1 is normal
+    if: |
+      github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'cmd-help'
+    timeout-minutes: 2
+    concurrency:
+      group: boucle-cmd-${{ github.event.inputs.BOUCLE_ISSUE }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Setup
+        run: |
+          apt-get update -qq && apt-get install -y -qq curl jq
+          echo "npm install -g glab 2>/dev/null || true"
+      - name: Cmd
+        env:
+          BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE }}
+        run: |
+          export BOUCLE_PROJECT_ID="${{ github.repository }}"
+          [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
+          $BOUCLE_HOME/bin/boucle-ci cmd-help
 
   # ── doctor: periodic recovery (schedule) ──────────────────────────────────────
   doctor:
