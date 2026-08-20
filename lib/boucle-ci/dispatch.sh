@@ -565,6 +565,36 @@ boucle_ci_dispatch() {
         dispatch_noop
       fi
     fi
+    # ── /boucle command parser (issue comments only, #61) ─────────────
+    # After the system-note filter, only genuine human notes reach here.
+    # The agent-marker skip already ran upstream, so boucle's own stamped
+    # replies (which carry <!-- boucle:agent -->) are skipped — no self-
+    # trigger loop (lesson #55). MR notes are handled separately below.
+    # Issue comments only at MVP: gate on the note NOT being on a MR
+    # (.merge_request.iid empty in the payload).
+    if [ "$OBJECT_KIND" = "note" ] && [ -z "${MR_NOTE_IID:-}" ]; then
+      CMD_PAYLOAD_MR=$(jq -r '.merge_request.iid // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
+      if [ -z "$CMD_PAYLOAD_MR" ]; then
+        CMD_PARSED=$(boucle_command_parse "$NOTE_BODY" 2> /dev/null || echo "")
+        if [ -n "$CMD_PARSED" ]; then
+          CMD_VERB=$(printf '%s' "$CMD_PARSED" | cut -d' ' -f1)
+          CMD_ARGS=$(printf '%s' "$CMD_PARSED" | cut -d' ' -f2-)
+          # The issue IID for a note lives in .issue.iid / .work_item.iid /
+          # .epic.iid (GitLab) or .issue.number (GitHub) — same convention
+          # as the IID resolution below (line 637).
+          CMD_IID=$(jq -r '.issue.iid // .work_item.iid // .epic.iid // .issue.number // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || true)
+          if [ -n "$CMD_IID" ]; then
+            if boucle_command_authorize "$CMD_IID" "$ACTOR" "$CMD_VERB"; then
+              boucle_command_run "$CMD_IID" "$CMD_VERB" "$CMD_ARGS"
+              dispatch_noop
+            else
+              forge_issue_note "$CMD_IID" "🔒 @$ACTOR — \`/boucle $CMD_VERB\` is limited to the issue author. Use \`/boucle help\` to see what's available." 2> /dev/null || true
+              dispatch_noop
+            fi
+          fi
+        fi
+      fi
+    fi
     # ── Notes on a MR: human comment → re-trigger worker with feedback ──
     # When a human comments on a boucle MR, they're reviewing it and
     # providing feedback. Re-trigger the worker so it re-runs and can

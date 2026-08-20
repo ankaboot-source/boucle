@@ -166,6 +166,13 @@ on you overnight. You approve the spec over morning coffee; by lunch the
 worker has implemented, the reviewer has verified the preview, and the MR is
 waiting — a calmer workflow, driven by your agenda, not the agent's.
 
+**Peek without leaving the issue** — type `/boucle status` (or
+`@<bot> status`) as an issue comment to see a `bin/health` projection of the
+loop, `/boucle log` to read the tail of the agent's `agent-output.log`, or
+`/boucle help` for the verb list. It is read-only: no label changes, no agent
+invocation — just observability, in the same channel the loop posts in. See
+[LOOP.md](LOOP.md) §"Interactive commands" for the full surface.
+
 boucle is built on gates rather than on model choice. Anthropic's
 ["Building Effective Agents"](https://www.anthropic.com/research/building-effective-agents)
 (Dec 2024) recommends "programmatic checks (gates) on any intermediate steps"

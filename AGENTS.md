@@ -159,6 +159,12 @@ and `✅` (DO) keys. The YAML format enables automated validation
 Cross-references from `.gitlab-ci.yml`, `bin/jc`, and agent prompts use
 stable lesson numbers.
 
+The `/boucle` interactive command (see [ARCHITECTURE.md](ARCHITECTURE.md) §12
+and [LOOP.md](LOOP.md) §"Interactive commands") is governed by two lessons:
+**#100** (commands are recognized by marker, authorized by author — never by
+actor identity alone) and **#101** (inline dispatch operations hold the
+`boucle-dispatch` lock — slow work MUST be a separate job).
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.

@@ -17,7 +17,7 @@ shift || true
 
 if [ -z "$STAGE" ]; then
   echo "Usage: $0 <stage> [args...]" >&2
-  echo "Stages: check dispatch triage worker reviewer merger post-merge catchup deploy e2e doctor" >&2
+  echo "Stages: check dispatch triage worker reviewer merger post-merge catchup deploy e2e doctor cmd-log cmd-status cmd-help" >&2
   exit 1
 fi
 

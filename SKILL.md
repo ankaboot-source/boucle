@@ -511,6 +511,45 @@ take over a boucle issue, work on it interactively, and hand it back to the
 loop. This section documents the commands, the protocol, and the conventions
 the harness MUST respect.
 
+### 8.0 The forge-native `/boucle` command
+
+The `/boucle` command is a **user-facing capability** typed as an issue
+comment — a forge-native observability surface, distinct from the local
+`bin/boucle` harness below. It is read-only at MVP: **no agent invocation, no
+label writes, no MR scope**. It gives the human the one thing labels cannot
+carry: the content of an agent run and the detail of loop health, in the same
+channel the loop already posts in (I1, CONTEXT.md §7).
+
+**When to use it** — you want to see what the agent did without leaving the
+issue; you want a quick health projection of the loop.
+
+**Trigger phrases** (case-insensitive, anchored at the first non-empty line):
+
+| Trigger | Verb | Returns |
+|---|---|---|
+| `/boucle log [role]` | `log` | Tail of `agent-output.log` of the most recent run of `<role>` (default: the role in flight, else the last completed) |
+| `/boucle status` | `status` | `bin/health` projection (iterations, outcomes by role, cost total, last verdict SHA, role in flight) |
+| `/boucle help` | `help` | the verb list + the non-redundancy rationale |
+| `@<BOUCLE_BOT_USERNAME> log` | `log` | same as `/boucle log` (equivalent trigger form) |
+
+**What it does NOT do** — no label changes (labels are control/state; `/boucle`
+is observability — never duplicate label control, I2), no agent invocation at
+MVP, no MR scope (issue comments only at MVP).
+
+**Authorization** — `log`/`status`/`help`: actor ∈ {issue author, parent-issue
+human author via `resolve_reporter_id`, one generation}. These are
+observability of data the actor could already see in the CI UI — no new trust
+boundary. The future `jc` verb is **maintainer-only**. System notes filtered
+(lesson #34); closed-issue guard applies (except `help`, lesson #44).
+
+**Forge asymmetries** — GitHub `log` is **post-completion only** (GitHub
+Actions has no streaming log API); the future `tail` live-log verb is
+**GitLab-only**. The post-completion `log` works on both forges.
+
+**Non-redundancy note** — use labels for control; use `/boucle` for
+observability. NEVER use `/boucle` to write a label, and NEVER use a label to
+carry what `/boucle` observes.
+
 ### Commands
 
 The `bin/boucle` wrapper exposes six verbs. All require forge auth env vars

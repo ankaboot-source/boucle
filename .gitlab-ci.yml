@@ -646,20 +646,23 @@ merger:
   timeout: 10m
 
 # ── Post-merge (deploy-wait + e2e trigger, unlocked) ───────────────────
-# Runs in the same trigger pipeline as the merger (needs: [merger]) but
-# WITHOUT the resource_group: boucle-merge lock. The merger releases the
-# lock as soon as the merge API call succeeds; post-merge then polls the
-# deploy pipeline and triggers e2e in parallel, so the next approved MR
-# can start merging immediately instead of waiting 2+ min for deploy.
+# Triggered by the merger (after an approved merge) OR by catchup (after a
+# direct human merge) OR by the doctor (recovering a stuck issue whose MR was
+# already merged). Runs WITHOUT the resource_group: boucle-merge lock so the
+# next approved MR can start merging immediately instead of waiting 2+ min
+# for deploy. The merger releases the lock as soon as the merge API call
+# succeeds; post-merge then polls the deploy pipeline and triggers e2e in
+# parallel.
 post-merge:
   stage: merge
   tags: []
   needs:
-    - job: merger
+    - job: dispatch
+      optional: true
   rules:
     - if: $BOUCLE_ENABLED != "true"
       when: never
-    - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "merger"
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "post-merge"
   # No before_script override: the global `default:` one already installs the
   # toolchain, resolves BOUCLE_BOT_ID, locates $BOUCLE_HOME and sources the
   # forge layer. The copy that used to live here duplicated all of it and had
@@ -678,10 +681,11 @@ post-merge:
 # Triggered by dispatch when a human merges a boucle/<iid> MR directly
 # (merge_request webhook, action=merge), bypassing the approval circuit.
 # The push to $CI_DEFAULT_BRANCH already triggered deploy → smoke e2e (no issue
-# context). This job catches up: inspects the issue state, sets
-# boucle:done (if was at boucle:approval) or boucle:human (if merged
-# early), posts an audit comment, closes the issue, and cascades the
-# parent close. No e2e agent runs — we trust the human's merge judgment.
+# context). This job catches up: inspects the issue state, posts an audit
+# comment, sets boucle:merging as a transitional label, deletes the worker
+# branch, and chains to post-merge for deploy + e2e verification. The e2e
+# verdict routing then applies the terminal label (boucle:done on PASS,
+# boucle:human on FAIL/UNCERTAIN), closes the issue, and cascades.
 catchup:
   stage: merge
   # Loop-critical control-plane job: API calls only, no build. Run on ANY

@@ -881,3 +881,72 @@ forge_webhook_create() {
   # Only used if a consumer needs a custom webhook for non-workflow events.
   return 0
 }
+
+# ── Artifacts (#61) ─────────────────────────────────────────────────────
+
+# forge_job_artifact <iid> [role]
+#
+# Fetch the agent-output.log artifact of the most recent completed run of
+# <role> (or any boucle role if role omitted) on this issue. Streams the file
+# to stdout. On any error (no run, no artifact) echoes empty and returns 1 —
+# the cmd-log job posts a "no log found" reply, not a failure (fail-open:
+# the data is observable in the CI UI anyway).
+#
+# GitHub: list workflow runs matched to this issue (match BOUCLE_ISSUE from
+# the run's .inputs — workflow_dispatch only). Find the run whose
+# inputs.BOUCLE_ISSUE == <iid>, most recent first. List artifacts for that
+# run, download the zip, extract agent-output.log (the artifact name pattern
+# is boucle-agent-log-<role>-<run_id>-<attempt> — match by role or take the
+# most recent).
+#
+# NOTE: GitHub Actions has NO streaming log API — this is POST-COMPLETION
+# only. A running job's log is not available as an artifact until the job
+# finishes and uploads it. The cmd-log reply documents this asymmetry.
+forge_job_artifact() {
+  local iid="$1" role="${2:-}"
+  local runs run_id run_detail match
+  # List workflow runs, most recent first (per_page=100 default).
+  runs=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/actions/runs?per_page=100") || return 1
+  # GitHub doesn't expose inputs in the list endpoint — fetch each run's detail.
+  for run_id in $(printf '%s' "$runs" | jq -r '.workflow_runs[].id' 2> /dev/null); do
+    run_detail=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/actions/runs/$run_id") || continue
+    match=$(printf '%s' "$run_detail" | jq -r --arg iid "$iid" '.inputs.BOUCLE_ISSUE // empty | select(. == $iid)' 2> /dev/null)
+    [ -n "$match" ] && break
+    run_detail=""
+  done
+  [ -n "$run_detail" ] || return 1
+  run_id=$(printf '%s' "$run_detail" | jq -r '.id // empty' 2> /dev/null) || return 1
+  [ -n "$run_id" ] || return 1
+
+  # List artifacts for this run.
+  local artifacts artifact_id
+  artifacts=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/actions/runs/$run_id/artifacts") || return 1
+  # Match by role (boucle-agent-log-<role>-...) or take the most recent.
+  if [ -n "$role" ]; then
+    artifact_id=$(printf '%s' "$artifacts" | jq -r --arg r "$role" '[.artifacts[] | select(.name | startswith("boucle-agent-log-\($r)-"))] | sort_by(.id) | reverse | .[0].id // empty' 2> /dev/null) || return 1
+  else
+    artifact_id=$(printf '%s' "$artifacts" | jq -r '[.artifacts[] | select(.name | startswith("boucle-agent-log-"))] | sort_by(.id) | reverse | .[0].id // empty' 2> /dev/null) || return 1
+  fi
+  [ -n "$artifact_id" ] || return 1
+
+  # Download the zip and extract agent-output.log.
+  local tmpdir
+  tmpdir=$(mktemp -d) || return 1
+  if ! gh api "/repos/$BOUCLE_PROJECT_ID/actions/artifacts/$artifact_id/zip" > "$tmpdir/artifact.zip" 2> /dev/null; then
+    rm -rf "$tmpdir"
+    return 1
+  fi
+  if ! (cd "$tmpdir" && unzip -o -q artifact.zip 2> /dev/null); then
+    rm -rf "$tmpdir"
+    return 1
+  fi
+  # The artifact contains .boucle-state/<iid>/agent-output.log (or .boucle/...).
+  local logfile
+  logfile=$(find "$tmpdir" -name agent-output.log -type f 2> /dev/null | head -n 1)
+  if [ -z "$logfile" ]; then
+    rm -rf "$tmpdir"
+    return 1
+  fi
+  cat "$logfile"
+  rm -rf "$tmpdir"
+}

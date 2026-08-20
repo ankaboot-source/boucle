@@ -709,3 +709,43 @@ forge_webhook_create() {
   done
   glab api --hostname "$BOUCLE_FORGE_HOST" "${args[@]}" > /dev/null 2>&1 || true
 }
+
+# ── Artifacts (#61) ─────────────────────────────────────────────────────
+
+# forge_job_artifact <iid> [role]
+#
+# Fetch the agent-output.log artifact of the most recent completed run of
+# <role> (or any boucle role if role omitted) on this issue. Streams the file
+# to stdout. On any error (no pipeline, no job, no artifact) echoes empty and
+# returns 1 — the cmd-log job posts a "no log found" reply, not a failure
+# (fail-open: the data is observable in the CI UI anyway).
+#
+# GitLab: find the most recent pipeline for this issue (matched by the
+# BOUCLE_ISSUE variable), list its jobs, find the job whose name matches
+# <role> (or any of triage/worker/reviewer/e2e if role omitted) and whose
+# status is success/failed (completed) — prefer the most recent. Then fetch
+# the artifact at the path segment .boucle-state/<iid>/agent-output.log.
+forge_job_artifact() {
+  local iid="$1" role="${2:-}"
+  local pipelines pid jobs job_id
+  # Most recent pipeline for this issue (order_by=id&sort=desc).
+  pipelines=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
+    "/projects/$BOUCLE_PROJECT_ID/pipelines?variables%5BBOUCLE_ISSUE%5D=$iid&order_by=id&sort=desc&per_page=1" 2> /dev/null) || return 1
+  pid=$(printf '%s' "$pipelines" | jq -r '.[0].id // empty' 2> /dev/null) || return 1
+  [ -n "$pid" ] || return 1
+
+  jobs=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/pipelines/$pid/jobs" 2> /dev/null) || return 1
+  # Select the most recent completed job matching the role (or any boucle role).
+  local filter
+  if [ -n "$role" ]; then
+    filter=".name == \"$role\""
+  else
+    filter='(.name == "triage" or .name == "worker" or .name == "reviewer" or .name == "e2e")'
+  fi
+  job_id=$(printf '%s' "$jobs" | jq -r "[.[] | select(.status == \"success\" or .status == \"failed\") | select($filter)] | sort_by(.id) | reverse | .[0].id // empty" 2> /dev/null) || return 1
+  [ -n "$job_id" ] || return 1
+
+  # Fetch the artifact at the path segment (not query param).
+  glab api --hostname "$BOUCLE_FORGE_HOST" \
+    "/projects/$BOUCLE_PROJECT_ID/jobs/$job_id/artifacts/.boucle-state/$iid/agent-output.log" 2> /dev/null || return 1
+}
