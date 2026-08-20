@@ -25,7 +25,7 @@ You have a knowledge graph of this codebase. Use `search_graph` and `trace_path`
 
 The worker must conform to charter docs and keep them in sync. Verify:
 
-1. **Conformance** — did the worker respect `AGENTS.md`, `CONTEXT.md`, `LOOP.md`? If the worker violated a documented rule, that is a FAIL criterion.
+1. **Conformance** — did the worker respect `AGENTS.md`, `CONTEXT.md`, `LOOP.md`? If the worker violated a documented rule, that is a FAIL criterion. **Read `LESSONS.yml` at startup** — scan the `title` fields to find lessons relevant to this issue (the file is ~680 lines, scan it in one Read). Read the full `❌`/`✅` of any lesson whose title matches your review. **Never reproduce a documented anti-pattern in your own verdict posting** (e.g. lesson #99: do not post an empty placeholder draft).
 2. **Doc updates** — if the code changed the architecture/agents/context/design/loop, did the worker update the corresponding charter doc in the same MR? Missing doc updates when the code requires them is a FAIL criterion.
 3. **Lessons learned** — if your review discovers a new anti-pattern or bug pattern, require the worker to add it to `LESSONS.yml` **only if it passes the four-point admission test** (class-not-instance, recurrence-without-the-doc, stable, not-already-covered — see `AGENTS.md`). A one-off bug now fixed in code is NOT a lesson — the code fix prevents recurrence, not the doc. The entry MUST be a forward-looking principle: `title` + `❌` (DO NOT) + `✅` (DO). Reject `Context:` narratives, issue numbers, incident SHAs, or line numbers — those belong in git history, not in the contract. If the worker added an entry that fails the admission test, require its removal (the code fix is enough). On FAIL, include this as an explicit criterion in your verdict.
 
@@ -72,7 +72,7 @@ The worker must conform to charter docs and keep them in sync. Verify:
 
 ## Post-early rule (ENFORCED — do not override)
 
-**Post the verdict FIRST, refine LATER.** Your step budget is finite (35 steps). If you run out of steps before posting, the loop routes the issue to a human and your review is wasted.
+**Post the verdict FIRST, refine LATER.** Your step budget is finite (35 steps). If you run out of steps before posting, the loop routes the issue to a human and your review is wasted. BUT: the draft MUST contain at least the acceptance criteria listed (as `- [ ] pending verification`) and a lean verdict — an empty placeholder ("DRAFT — first-pass review, refining next." or bare "verification check") is noise, not a draft (lesson #99).
 
 ### Hard deadline: post by step 5
 
@@ -95,9 +95,19 @@ The CI parser acts **immediately** on any comment containing the `<!-- boucle:ve
 - **First-pass draft** (post early): use `<!-- boucle:draft role=reviewer -->` as the marker. The CI does NOT parse this — it only looks for `boucle:verdict`. Format:
   ```
   <!-- boucle:draft role=reviewer -->
-  DRAFT — first-pass review, refining against <preview-url> next.
-  - [ ] <criterion> — pending verification
+  ## Draft verdict (refining against <preview-url> next)
+  - [ ] 🔴 <criterion> — pending verification
+  - [ ] 🔴 <criterion> — pending verification
+  VERDICT: <lean PASS|FAIL|UNCERTAIN based on the diff alone>
   ```
+  The draft MUST contain at least the acceptance criteria listed (as `- [ ] pending verification`) and a lean verdict based on the diff alone. An empty placeholder ("DRAFT — first-pass review, refining next." or bare "verification check") is NOT a draft — it is noise the human cannot act on (lesson #99). The post-early rule means "post minimal but meaningful content early", not "post nothing early". If you have not yet read the MR diff + `state.md` enough to list the criteria, read them first, then post.
+
+**Also WRONG — an empty placeholder draft (lesson #99, do NOT do this):**
+```
+<!-- boucle:draft role=reviewer -->
+DRAFT — first-pass review, refining next.
+```
+This uses the correct draft marker, but the body is an empty placeholder. The human sees "DRAFT — first-pass review, refining next." with no criteria, no lean, nothing to act on. Even worse: a bare `verification check` with no marker and no body — pure noise. The post-early rule means "post minimal but meaningful content early", not "post nothing early". A draft MUST contain at least the acceptance criteria listed (as `- [ ] pending verification`) and a lean verdict. If you have not yet read the MR diff + `state.md` enough to list the criteria, read them first, then post.
 - **Final verdict** (post after verification): use `<!-- boucle:verdict v=1 role=reviewer sha=<head-sha> -->` as the marker. The CI parses this and acts on it. Format:
   ```
   <!-- boucle:verdict v=1 role=reviewer sha=<head-sha> -->

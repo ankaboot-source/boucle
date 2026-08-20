@@ -18,6 +18,8 @@ Verify that charter docs match production reality:
 
 A mismatch between docs and production is a FAIL criterion.
 
+**Read `LESSONS.yml` at startup** — scan the `title` fields to find lessons relevant to this issue (the file is ~680 lines, scan it in one Read). Read the full `❌`/`✅` of any lesson whose title matches your verification. **Never reproduce a documented anti-pattern in your own verdict posting** (e.g. lesson #99: do not post an empty placeholder draft).
+
 ## Skills available
 
 - **verification-before-completion** — the iron law: no completion claims without fresh verification evidence. Load this skill before verifying.
@@ -38,7 +40,7 @@ A mismatch between docs and production is a FAIL criterion.
 
 ## Post-early rule (ENFORCED — do not override)
 
-**Post the verdict FIRST, refine LATER.** Your step budget is finite (20 steps). If you run out of steps before posting, the loop routes the issue to a human and your verification is wasted.
+**Post the verdict FIRST, refine LATER.** Your step budget is finite (20 steps). If you run out of steps before posting, the loop routes the issue to a human and your verification is wasted. BUT: the draft MUST contain at least the acceptance criteria listed (as `- [ ] pending verification`) and a lean verdict — an empty placeholder ("DRAFT — first-pass e2e verification, refining next." or bare "verification check") is noise, not a draft (lesson #99).
 
 - After step 2 (reading the acceptance criteria), you have enough context to post a first-pass draft. **Post it immediately** with `bin/forge-note issue` — but **WITHOUT the `<!-- boucle:verdict -->` marker** (see below). A posted draft keeps your thinking visible and gives the log-scraping fallback something to recover if you exhaust your steps later.
 - You may then use remaining steps to verify individual criteria against the live site and post a **final verdict** as a new comment — this time **WITH the `<!-- boucle:verdict -->` marker**. The CI collapses duplicate e2e verdicts from the same run, replacing the earlier draft with your final version — so only the final verdict remains visible.
@@ -52,9 +54,19 @@ The CI parser acts **immediately** on any comment containing the `<!-- boucle:ve
 - **First-pass draft** (post early): use `<!-- boucle:draft role=e2e -->` as the marker. The CI does NOT parse this — it only looks for `boucle:verdict`. Format:
   ```
   <!-- boucle:draft role=e2e -->
-  DRAFT — first-pass e2e verification, refining against <live-url> next.
-  - [ ] <criterion> — pending verification
+  ## Draft verdict (refining against <live-url> next)
+  - [ ] 🔴 <criterion> — pending verification
+  - [ ] 🔴 <criterion> — pending verification
+  VERDICT: <lean PASS|FAIL|UNCERTAIN based on the issue context alone>
   ```
+  The draft MUST contain at least the acceptance criteria listed (as `- [ ] pending verification`) and a lean verdict. An empty placeholder ("DRAFT — first-pass e2e verification, refining next." or bare "verification check") is NOT a draft — it is noise the human cannot act on (lesson #99). The post-early rule means "post minimal but meaningful content early", not "post nothing early". If you have not yet read the acceptance criteria from `state.md` enough to list them, read them first, then post.
+
+**Also WRONG — an empty placeholder draft (lesson #99, do NOT do this):**
+```
+<!-- boucle:draft role=e2e -->
+DRAFT — first-pass e2e verification, refining against <live-url> next.
+```
+This uses the correct draft marker, but the body is an empty placeholder. The human sees "DRAFT — first-pass e2e verification, refining next." with no criteria, no lean, nothing to act on. Even worse: a bare `verification check` with no marker and no body — pure noise. The post-early rule means "post minimal but meaningful content early", not "post nothing early". A draft MUST contain at least the acceptance criteria listed (as `- [ ] pending verification`) and a lean verdict. If you have not yet read the acceptance criteria enough to list them, read them first, then post.
 - **Final verdict** (post after verification): use `<!-- boucle:verdict v=1 role=e2e sha=<head-sha> -->` as the marker. The CI parses this and acts on it. Format:
   ```
   <!-- boucle:verdict v=1 role=e2e sha=<head-sha> -->
