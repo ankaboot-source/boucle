@@ -74,7 +74,8 @@ for label in $setup_labels; do
 done
 
 # Pruned labels (SKILL.md says Removed) should NOT be in setup
-for label in boucle:approved boucle:spec-approved; do
+# shellcheck disable=SC2043 # single-element loop is intentional (extensible)
+for label in boucle:spec-approved; do
   if echo "$setup_labels" | grep -qx "$label"; then
     fail "label '$label' is pruned (SKILL.md says Removed) but still in bin/setup"
   fi

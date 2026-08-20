@@ -250,7 +250,7 @@ def check_agents_md(lessons):
 
     # Find all numbered lesson entries: lines starting with "N." followed by
     # "**Title**" — the historical format "62. **Title** ..."
-    AGENTS_BASELINE = 11  # Lessons 1-11 are the historical mandatory principles
+    AGENTS_BASELINE = 12  # Lessons 1-12 are the historical mandatory principles
     lesson_nums_in_agents = set()
     for m in re.finditer(r'^(\d+)\.\s+\*\*', content, re.MULTILINE):
         num = int(m.group(1))

@@ -20,7 +20,7 @@ extract_skills_func() {
   TMPF=$(mktemp); T=$(mktemp -d)
   extract_skills_func "$TMPF"
   mkdir -p "$T/.jcode/skills/ui-ux-pro-max" "$T/.jcode/skills/grill-me"
-  printf 'skill tool: ui-ux-pro-max\nLoading skill grill-me now\n' > "$T/agent.log"
+  printf 'skill_manage action=load name=ui-ux-pro-max\nLoading skill grill-me now\n' > "$T/agent.log"
   run bash -c "BOUCLE_WORKSPACE='$T'; source '$TMPF'; extract_skills_used '$T/agent.log'"
   assert_success
   assert_line "grill-me"

@@ -1151,10 +1151,11 @@ if [ "$FORGE" = "gitlab" ]; then
   fi
 else
   # GitHub: forge_label_create (idempotent, uses gh label create)
-  # boucle:* labels (12) — same names/colors as GitLab (approved/spec-approved
-  # removed: dead labels, see GitLab block comment above).
+  # boucle:* labels (13) — same names/colors as GitLab (approved restored:
+  # GitHub primary path for spec approval, see triage.sh:749. spec-approved
+  # remains removed: dead label, see GitLab block comment above).
   # shellcheck disable=SC1010 # 'done' is a label name, not the loop keyword
-  for label in triage needs-info todo working review human blocked done split approval spec-review merging board; do
+  for label in triage needs-info todo working review human blocked done split approval spec-review merging board approved; do
     run "forge_label_create 'boucle:$label' '#0033CC'"
     log_pass "boucle:$label created"
   done

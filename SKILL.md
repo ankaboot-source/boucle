@@ -130,6 +130,7 @@ owns both sides — the question is meaningless).
 | `boucle:triage` | Awaiting triage analysis | bot |
 | `boucle:needs-info` | Triage needs more info from the reporter | human |
 | `boucle:spec-review` | Spec validated by triage, awaiting human spec approval | human |
+| `boucle:approved` | Human approved the spec (GitHub: label added by author) | bot |
 | `boucle:todo` | Spec approved, queued for the worker | bot |
 | `boucle:working` | Worker is running | bot |
 | `boucle:review` | Worker shipped, awaiting reviewer verdict | bot |
@@ -145,11 +146,13 @@ owns both sides — the question is meaningless).
 | `boucle:board` | The status-board issue (never dispatched) | — |
 | `boucle:scheduled` | Issue created by a schedule (cron template) | — |
 
-**Removed (dead labels, pruned from `bin/setup`):** `boucle:approved`,
-`boucle:spec-approved`. MR approval uses the native forge Approve button; spec
-approval uses a canonical emoji reaction (👍 ❤️ 🎉 🚀) on `boucle:spec-review`
-— a text reply amends the spec and re-triggers triage, it does NOT approve.
-Neither uses a label.
+**Removed (dead labels, pruned from `bin/setup`):** `boucle:spec-approved`.
+MR approval uses the native forge Approve button (GitLab) or the
+`boucle:approved` label (GitHub — no native Approve button on issues).
+Spec approval uses a canonical emoji reaction (👍 ❤️ 🎉 🚀) on
+`boucle:spec-review`, the `boucle:approved` label, or the magic word
+`approved` — a text reply amends the spec and re-triggers triage, it
+does NOT approve.
 
 ### 2.2 Gross labels
 
@@ -224,6 +227,8 @@ harness MUST use the markers correctly or dispatch will misroute its writes.
 | `<!-- boucle:draft role=triage -->` | `role=triage` | triage agent (first-pass draft) | collapse-duplicate-notes:73 (filter), triage.sh:178 (promotion source) | Marks a draft triage comment. CI parser does NOT act on drafts; log-scraping fallback promotes to final when the agent exhausts its steps. |
 | `<!-- boucle:obligations v=1 -->` | `v=1` | triage.sh:213 | (informational — marks the obligations section of a triage comment) | Marks the obligations block in a triage comment (what the human must do next). |
 | `<!-- boucle:needs-info v=1 reason=no-key -->` | `v=1 reason=no-key` | triage.sh:92 (no-LLM-key gate) | triage.sh:55 (jq filter, idempotency check) | Marks a needs-info comment posted when the LLM API key is missing. Used for idempotency: triage checks if a no-key needs-info was already posted before re-posting. |
+| `<!-- boucle:diagram-missing v=1 kinds=<kinds> -->` | `v=1 kinds=<closed-set>` | gates.sh:169 (spec-completeness gate) | gates.sh (re-trigger triage) | Marks a spec that declares structural impacts (Size M/L) but is missing the required `## Diagram` section. CI re-triggers triage to add only the missing diagram. |
+| `<!-- boucle:preview-missing v=1 kinds=<kinds> -->` | `v=1 kinds=<closed-set>` | gates.sh:227 (spec-completeness gate) | gates.sh (re-trigger triage) | Marks a spec that declares visual impacts (Size M/L) but is missing the required `preview.html` / `RENDER_REQUEST`. CI re-triggers triage to add only the missing preview. |
 
 ### 3.3 Verdict markers (reviewer / e2e)
 
@@ -250,6 +255,8 @@ harness MUST use the markers correctly or dispatch will misroute its writes.
 | `<!-- boucle:recurring v=1 refs=N,M -->` | `v=1 refs=<comma-separated-IIDs>` | triage agent (optional `## Recurring theme` section) | triage.sh (parse + label), worker.sh (inject refs as context) | Recurring-theme declaration: flags the issue as part of a recurring class and cites prior closed issues. CI applies `boucle:recurring` (context tag surviving transitions). Worker receives prior-issue summaries to find the root cause. Non-blocking: never gates. |
 | `<!-- boucle:impacts v=1 kinds=... -->` | `v=1 kinds=<comma-separated-kinds>` | triage agent (`## Impacts` section in the spec comment) | triage.sh (parse_impacts_marker), gates.sh (check_diagram_gate, check_preview_gate) | Structural/visual impact declaration (LESSONS.yml lesson #102): the triage declares which impacts this issue has from a closed set (architecture, data-model, process, state-machine, data-flow, deployment, ui, ux, design, none). CI cross-checks: a structural kind without a `<!-- boucle:diagram v=1 -->` marker → gate fails → triage re-triggered; a visual kind (ui/ux/design) without a `preview.html` + `RENDER_REQUEST` → gate fails → triage re-triggered. Drives the deterministic diagram/preview gate. |
 | `<!-- boucle:diagram v=1 types=... -->` | `v=1 types=<comma-separated-Mermaid-block-types>` | triage agent (`## Diagram` section in the spec comment) | triage.sh (parse_diagram_marker), gates.sh (check_diagram_gate) | Diagram declaration: lists the Mermaid block types used in the `## Diagram` section (e.g. `erDiagram,flowchart`). CI cross-checks this marker against `## Impacts`: a structural impact declared in `## Impacts` without a `<!-- boucle:diagram v=1 -->` marker → gate fails → triage re-triggered. The Mermaid theme block (boucle.dev light/transparent) is defined in `templates/diagram-theme.md` — the static source of truth. |
+| `<!-- boucle:diagram-missing v=1 kinds=... -->` | `v=1 kinds=<comma-separated-kinds>` | gates.sh:169 (check_diagram_gate) | (informational — re-trigger note) | Posted when a spec declares structural impacts (`## Impacts`) but lacks the required `## Diagram` section. Triage is re-triggered to add ONLY the missing diagram — it must re-read its previous spec in the Prior discussion, not re-analyze from scratch. |
+| `<!-- boucle:preview-missing v=1 kinds=... -->` | `v=1 kinds=<comma-separated-kinds>` | gates.sh:227 (check_preview_gate) | (informational — re-trigger note) | Posted when a spec declares visual impacts (`## Impacts`) but lacks the required `preview.html` / `RENDER_REQUEST`. Triage is re-triggered to add ONLY the missing preview — it must re-read its previous spec in the Prior discussion, not re-analyze from scratch. |
 
 ### 3.5 Operational markers
 

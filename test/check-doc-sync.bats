@@ -68,10 +68,10 @@ teardown() {
 }
 
 @test "check-doc-sync fails when a pruned label is re-added to setup" {
-  sed -i 's/for label in triage/for label in approved triage/' "$REPO_ROOT/bin/setup"
+  sed -i 's/for label in triage/for label in spec-approved triage/' "$REPO_ROOT/bin/setup"
 
   run "$REPO_ROOT/bin/check-doc-sync"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"boucle:approved"* ]]
+  [[ "$output" == *"boucle:spec-approved"* ]]
   [[ "$output" == *"pruned"* ]]
 }
