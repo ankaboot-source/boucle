@@ -352,15 +352,28 @@ jobs:
           # force-updating the submodule to main HEAD directly, bypassing
           # bin/update. This prevents a bootstrap deadlock where a buggy
           # old bin/update cannot pull the fix for its own bug.
-          if git -C .boucle fetch origin main 2>/dev/null && \
-             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
-            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
-            git -C .boucle checkout origin/main 2>/dev/null
-            git add .boucle
-            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
-            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
-            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
-            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          #
+          # Shallow-safety: jobs that check out without fetch-depth: 0 get a
+          # shallow submodule clone (--depth=1), where merge-base cannot see
+          # across the shallow boundary and would flag EVERY pinned SHA as
+          # orphaned each time engine main advances — force-bumping the
+          # engine on every run. Unshallow before checking; if the clone
+          # cannot be deepened, skip recovery (a false positive is worse
+          # than a miss: full-depth jobs like worker still catch orphans).
+          if git -C .boucle fetch origin main 2>/dev/null; then
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" = "true" ]; then
+              git -C .boucle fetch --unshallow origin 2>/dev/null || true
+            fi
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" != "true" ] &&
+              ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+              echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+              git -C .boucle checkout origin/main 2>/dev/null
+              git add .boucle
+              git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+              git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+              git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+              git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+            fi
           fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Dispatch
@@ -429,15 +442,28 @@ jobs:
           # force-updating the submodule to main HEAD directly, bypassing
           # bin/update. This prevents a bootstrap deadlock where a buggy
           # old bin/update cannot pull the fix for its own bug.
-          if git -C .boucle fetch origin main 2>/dev/null && \
-             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
-            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
-            git -C .boucle checkout origin/main 2>/dev/null
-            git add .boucle
-            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
-            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
-            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
-            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          #
+          # Shallow-safety: jobs that check out without fetch-depth: 0 get a
+          # shallow submodule clone (--depth=1), where merge-base cannot see
+          # across the shallow boundary and would flag EVERY pinned SHA as
+          # orphaned each time engine main advances — force-bumping the
+          # engine on every run. Unshallow before checking; if the clone
+          # cannot be deepened, skip recovery (a false positive is worse
+          # than a miss: full-depth jobs like worker still catch orphans).
+          if git -C .boucle fetch origin main 2>/dev/null; then
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" = "true" ]; then
+              git -C .boucle fetch --unshallow origin 2>/dev/null || true
+            fi
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" != "true" ] &&
+              ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+              echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+              git -C .boucle checkout origin/main 2>/dev/null
+              git add .boucle
+              git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+              git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+              git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+              git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+            fi
           fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Triage
@@ -549,15 +575,28 @@ jobs:
           # force-updating the submodule to main HEAD directly, bypassing
           # bin/update. This prevents a bootstrap deadlock where a buggy
           # old bin/update cannot pull the fix for its own bug.
-          if git -C .boucle fetch origin main 2>/dev/null && \
-             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
-            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
-            git -C .boucle checkout origin/main 2>/dev/null
-            git add .boucle
-            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
-            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
-            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
-            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          #
+          # Shallow-safety: jobs that check out without fetch-depth: 0 get a
+          # shallow submodule clone (--depth=1), where merge-base cannot see
+          # across the shallow boundary and would flag EVERY pinned SHA as
+          # orphaned each time engine main advances — force-bumping the
+          # engine on every run. Unshallow before checking; if the clone
+          # cannot be deepened, skip recovery (a false positive is worse
+          # than a miss: full-depth jobs like worker still catch orphans).
+          if git -C .boucle fetch origin main 2>/dev/null; then
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" = "true" ]; then
+              git -C .boucle fetch --unshallow origin 2>/dev/null || true
+            fi
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" != "true" ] &&
+              ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+              echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+              git -C .boucle checkout origin/main 2>/dev/null
+              git add .boucle
+              git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+              git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+              git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+              git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+            fi
           fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Worker
@@ -600,8 +639,12 @@ jobs:
     # only triggers on workflow_dispatch today, but this is defense-in-depth
     # — a future trigger path (e.g. pull_request_review) would otherwise
     # race the workflow_dispatch re-trigger path.
+    # The group prefix MUST differ from the workflow-level concurrency group
+    # (boucle-issue-<N>): an identical string at both levels deadlocks the
+    # scheduler — the job tries to acquire the lock its own run already holds
+    # and GitHub fails it instantly (0 steps, no runner, no logs).
     concurrency:
-      group: boucle-issue-${{ github.event.inputs.BOUCLE_ISSUE }}
+      group: boucle-reviewer-${{ github.event.inputs.BOUCLE_ISSUE }}
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -641,15 +684,28 @@ jobs:
           # force-updating the submodule to main HEAD directly, bypassing
           # bin/update. This prevents a bootstrap deadlock where a buggy
           # old bin/update cannot pull the fix for its own bug.
-          if git -C .boucle fetch origin main 2>/dev/null && \
-             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
-            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
-            git -C .boucle checkout origin/main 2>/dev/null
-            git add .boucle
-            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
-            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
-            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
-            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          #
+          # Shallow-safety: jobs that check out without fetch-depth: 0 get a
+          # shallow submodule clone (--depth=1), where merge-base cannot see
+          # across the shallow boundary and would flag EVERY pinned SHA as
+          # orphaned each time engine main advances — force-bumping the
+          # engine on every run. Unshallow before checking; if the clone
+          # cannot be deepened, skip recovery (a false positive is worse
+          # than a miss: full-depth jobs like worker still catch orphans).
+          if git -C .boucle fetch origin main 2>/dev/null; then
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" = "true" ]; then
+              git -C .boucle fetch --unshallow origin 2>/dev/null || true
+            fi
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" != "true" ] &&
+              ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+              echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+              git -C .boucle checkout origin/main 2>/dev/null
+              git add .boucle
+              git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+              git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+              git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+              git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+            fi
           fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Reviewer
@@ -721,15 +777,28 @@ jobs:
           # force-updating the submodule to main HEAD directly, bypassing
           # bin/update. This prevents a bootstrap deadlock where a buggy
           # old bin/update cannot pull the fix for its own bug.
-          if git -C .boucle fetch origin main 2>/dev/null && \
-             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
-            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
-            git -C .boucle checkout origin/main 2>/dev/null
-            git add .boucle
-            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
-            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
-            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
-            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          #
+          # Shallow-safety: jobs that check out without fetch-depth: 0 get a
+          # shallow submodule clone (--depth=1), where merge-base cannot see
+          # across the shallow boundary and would flag EVERY pinned SHA as
+          # orphaned each time engine main advances — force-bumping the
+          # engine on every run. Unshallow before checking; if the clone
+          # cannot be deepened, skip recovery (a false positive is worse
+          # than a miss: full-depth jobs like worker still catch orphans).
+          if git -C .boucle fetch origin main 2>/dev/null; then
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" = "true" ]; then
+              git -C .boucle fetch --unshallow origin 2>/dev/null || true
+            fi
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" != "true" ] &&
+              ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+              echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+              git -C .boucle checkout origin/main 2>/dev/null
+              git add .boucle
+              git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+              git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+              git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+              git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+            fi
           fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Merger
@@ -784,15 +853,28 @@ jobs:
           # force-updating the submodule to main HEAD directly, bypassing
           # bin/update. This prevents a bootstrap deadlock where a buggy
           # old bin/update cannot pull the fix for its own bug.
-          if git -C .boucle fetch origin main 2>/dev/null && \
-             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
-            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
-            git -C .boucle checkout origin/main 2>/dev/null
-            git add .boucle
-            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
-            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
-            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
-            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          #
+          # Shallow-safety: jobs that check out without fetch-depth: 0 get a
+          # shallow submodule clone (--depth=1), where merge-base cannot see
+          # across the shallow boundary and would flag EVERY pinned SHA as
+          # orphaned each time engine main advances — force-bumping the
+          # engine on every run. Unshallow before checking; if the clone
+          # cannot be deepened, skip recovery (a false positive is worse
+          # than a miss: full-depth jobs like worker still catch orphans).
+          if git -C .boucle fetch origin main 2>/dev/null; then
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" = "true" ]; then
+              git -C .boucle fetch --unshallow origin 2>/dev/null || true
+            fi
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" != "true" ] &&
+              ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+              echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+              git -C .boucle checkout origin/main 2>/dev/null
+              git add .boucle
+              git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+              git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+              git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+              git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+            fi
           fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Post-merge
@@ -852,15 +934,28 @@ jobs:
           # force-updating the submodule to main HEAD directly, bypassing
           # bin/update. This prevents a bootstrap deadlock where a buggy
           # old bin/update cannot pull the fix for its own bug.
-          if git -C .boucle fetch origin main 2>/dev/null && \
-             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
-            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
-            git -C .boucle checkout origin/main 2>/dev/null
-            git add .boucle
-            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
-            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
-            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
-            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          #
+          # Shallow-safety: jobs that check out without fetch-depth: 0 get a
+          # shallow submodule clone (--depth=1), where merge-base cannot see
+          # across the shallow boundary and would flag EVERY pinned SHA as
+          # orphaned each time engine main advances — force-bumping the
+          # engine on every run. Unshallow before checking; if the clone
+          # cannot be deepened, skip recovery (a false positive is worse
+          # than a miss: full-depth jobs like worker still catch orphans).
+          if git -C .boucle fetch origin main 2>/dev/null; then
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" = "true" ]; then
+              git -C .boucle fetch --unshallow origin 2>/dev/null || true
+            fi
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" != "true" ] &&
+              ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+              echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+              git -C .boucle checkout origin/main 2>/dev/null
+              git add .boucle
+              git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+              git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+              git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+              git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+            fi
           fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Catchup
@@ -923,15 +1018,28 @@ jobs:
           # force-updating the submodule to main HEAD directly, bypassing
           # bin/update. This prevents a bootstrap deadlock where a buggy
           # old bin/update cannot pull the fix for its own bug.
-          if git -C .boucle fetch origin main 2>/dev/null && \
-             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
-            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
-            git -C .boucle checkout origin/main 2>/dev/null
-            git add .boucle
-            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
-            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
-            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
-            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          #
+          # Shallow-safety: jobs that check out without fetch-depth: 0 get a
+          # shallow submodule clone (--depth=1), where merge-base cannot see
+          # across the shallow boundary and would flag EVERY pinned SHA as
+          # orphaned each time engine main advances — force-bumping the
+          # engine on every run. Unshallow before checking; if the clone
+          # cannot be deepened, skip recovery (a false positive is worse
+          # than a miss: full-depth jobs like worker still catch orphans).
+          if git -C .boucle fetch origin main 2>/dev/null; then
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" = "true" ]; then
+              git -C .boucle fetch --unshallow origin 2>/dev/null || true
+            fi
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" != "true" ] &&
+              ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+              echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+              git -C .boucle checkout origin/main 2>/dev/null
+              git add .boucle
+              git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+              git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+              git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+              git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+            fi
           fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Deploy
@@ -951,8 +1059,12 @@ jobs:
     # resource_group: boucle-issue-$BOUCLE_ISSUE). Defense-in-depth: the e2e
     # only triggers on workflow_dispatch today, but a future trigger path
     # would otherwise race the workflow_dispatch re-trigger path.
+    # The group prefix MUST differ from the workflow-level concurrency group
+    # (boucle-issue-<N>): an identical string at both levels deadlocks the
+    # scheduler — the job tries to acquire the lock its own run already holds
+    # and GitHub fails it instantly (0 steps, no runner, no logs).
     concurrency:
-      group: boucle-issue-${{ github.event.inputs.BOUCLE_ISSUE }}
+      group: boucle-e2e-${{ github.event.inputs.BOUCLE_ISSUE }}
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -991,15 +1103,28 @@ jobs:
           # force-updating the submodule to main HEAD directly, bypassing
           # bin/update. This prevents a bootstrap deadlock where a buggy
           # old bin/update cannot pull the fix for its own bug.
-          if git -C .boucle fetch origin main 2>/dev/null && \
-             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
-            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
-            git -C .boucle checkout origin/main 2>/dev/null
-            git add .boucle
-            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
-            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
-            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
-            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          #
+          # Shallow-safety: jobs that check out without fetch-depth: 0 get a
+          # shallow submodule clone (--depth=1), where merge-base cannot see
+          # across the shallow boundary and would flag EVERY pinned SHA as
+          # orphaned each time engine main advances — force-bumping the
+          # engine on every run. Unshallow before checking; if the clone
+          # cannot be deepened, skip recovery (a false positive is worse
+          # than a miss: full-depth jobs like worker still catch orphans).
+          if git -C .boucle fetch origin main 2>/dev/null; then
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" = "true" ]; then
+              git -C .boucle fetch --unshallow origin 2>/dev/null || true
+            fi
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" != "true" ] &&
+              ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+              echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+              git -C .boucle checkout origin/main 2>/dev/null
+              git add .boucle
+              git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+              git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+              git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+              git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+            fi
           fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: E2E
@@ -1152,15 +1277,28 @@ jobs:
           # force-updating the submodule to main HEAD directly, bypassing
           # bin/update. This prevents a bootstrap deadlock where a buggy
           # old bin/update cannot pull the fix for its own bug.
-          if git -C .boucle fetch origin main 2>/dev/null && \
-             ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
-            echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
-            git -C .boucle checkout origin/main 2>/dev/null
-            git add .boucle
-            git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
-            git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
-            git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
-            git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+          #
+          # Shallow-safety: jobs that check out without fetch-depth: 0 get a
+          # shallow submodule clone (--depth=1), where merge-base cannot see
+          # across the shallow boundary and would flag EVERY pinned SHA as
+          # orphaned each time engine main advances — force-bumping the
+          # engine on every run. Unshallow before checking; if the clone
+          # cannot be deepened, skip recovery (a false positive is worse
+          # than a miss: full-depth jobs like worker still catch orphans).
+          if git -C .boucle fetch origin main 2>/dev/null; then
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" = "true" ]; then
+              git -C .boucle fetch --unshallow origin 2>/dev/null || true
+            fi
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" != "true" ] &&
+              ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+              echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+              git -C .boucle checkout origin/main 2>/dev/null
+              git add .boucle
+              git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+              git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+              git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+              git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+            fi
           fi
           bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
       - name: Doctor
