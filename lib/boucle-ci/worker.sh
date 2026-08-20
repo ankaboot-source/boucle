@@ -511,7 +511,31 @@ EOF
     build_rc=${build_rc:-0}
     if [ "$build_rc" -ne 0 ]; then
       echo "FAIL: BOUCLE_BUILD_CMD exited $build_rc — feeding build error to next iteration." >&2
-      tail -c 4000 "$build_log" 2> /dev/null | sed 's/\x1b\[[0-9;]*m//g' > ".boucle-state/$BOUCLE_ISSUE/build-feedback.md" 2> /dev/null || true
+      # Exit 127 = "command not found": almost always a missing dependency
+      # install on a fresh runner (node_modules absent) or a BOUCLE_BUILD_CMD
+      # naming a nonexistent command — an environment/config problem the agent
+      # cannot fix by editing project files. Say so in the feedback and the
+      # note, so the next iteration (and the human) do not chase a phantom
+      # code bug. Observed on boucle.dev #81: `npm run build` without `npm ci`
+      # burned every iteration with the same 127.
+      local build_hint note_hint
+      build_hint=""
+      note_hint=""
+      if [ "$build_rc" -eq 127 ]; then
+        build_hint="
+
+Exit 127 = command not found. This is an ENVIRONMENT problem, not a code bug:
+the build tool or its dependencies are missing on the runner (e.g. node_modules
+never installed), or BOUCLE_BUILD_CMD names a command that does not exist.
+BOUCLE_BUILD_CMD must install its own dependencies (default: npm ci && npm run
+build). Editing project files will NOT fix this — report it as an environment
+issue instead of churning code."
+        note_hint=" Exit 127 = command not found — likely BOUCLE_BUILD_CMD missing its dependency install (default: \`npm ci && npm run build\`), not a code bug."
+      fi
+      {
+        tail -c 4000 "$build_log" 2> /dev/null | sed 's/\x1b\[[0-9;]*m//g'
+        [ -n "$build_hint" ] && printf '%s\n' "$build_hint"
+      } > ".boucle-state/$BOUCLE_ISSUE/build-feedback.md" 2> /dev/null || true
       rm -f "$build_log"
       # Clean the build output so it does not dirty the tree / block rebase.
       [ -n "${BOUCLE_BUILD_OUTPUT:-}" ] && [ -d "$BOUCLE_BUILD_OUTPUT" ] && rm -rf "$BOUCLE_BUILD_OUTPUT" 2> /dev/null || true
@@ -520,12 +544,12 @@ EOF
       if [ "$ITERATION" -lt "$max_iter" ]; then
         echo "Re-triggering worker (iteration $((ITERATION + 1))/$max_iter) with build error in feedback." >&2
         set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
-        forge_issue_note "$BOUCLE_ISSUE" "🔄 Build failed on iteration $ITERATION/$max_iter (\`$BOUCLE_BUILD_CMD\` exited $build_rc). Re-running with the build error in the feedback channel (iteration $((ITERATION + 1))/$max_iter).$(job_link)"
+        forge_issue_note "$BOUCLE_ISSUE" "🔄 Build failed on iteration $ITERATION/$max_iter (\`$BOUCLE_BUILD_CMD\` exited $build_rc).$note_hint Re-running with the build error in the feedback channel (iteration $((ITERATION + 1))/$max_iter).$(job_link)"
         chain_to_role "$BOUCLE_ISSUE" "worker" "BOUCLE_ITERATION=$((ITERATION + 1))"
       else
         echo "Escalating to human — build failed after $max_iter attempts." >&2
         # Note BEFORE the terminal label — never a muted boucle:human.
-        if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Build failed after $max_iter attempts (\`$BOUCLE_BUILD_CMD\` exited $build_rc). The worker could not produce a buildable tree. Human intervention needed.$(job_link)"; then
+        if ! forge_issue_note "$BOUCLE_ISSUE" "⚠️ Build failed after $max_iter attempts (\`$BOUCLE_BUILD_CMD\` exited $build_rc).$note_hint The worker could not produce a buildable tree. Human intervention needed.$(job_link)"; then
           echo "FAIL: escalation note could not be posted on issue #$BOUCLE_ISSUE — NOT escalating to boucle:human (retry instead of muting)." >&2
           boucle_health_outcome "$BOUCLE_ISSUE" "worker" "build-fail" "iteration $ITERATION (cap reached, note FAILED)" || true
           exit 1

@@ -1002,3 +1002,19 @@
   - 'DO include a `## Diagram` section with a Mermaid diagram AND a `<!-- boucle:diagram v=1 types=... -->` marker when structural kinds + Size M/L; pick the diagram type from the 27-type catalogue of the diagram-design skill.'
   - 'DO include a `preview.html` + `RENDER_REQUEST` in `.boucle-state/<issue>/` when visual kinds + Size M/L.'
   - 'DO let CI block spec-review approval and re-trigger triage on mismatch (structural impact without diagram, visual impact without preview, `none` with a diagram/preview, unknown kind) + Size M/L.'
+105:
+  title: Git reachability checks MUST assume shallow clones in CI jobs
+  ❌:
+  - 'DO NOT rely on `git merge-base --is-ancestor` (or any ancestry/reachability check) in a job that checks out shallow (GitHub Actions default fetch-depth: 1). Submodules in such jobs are cloned `--depth=1`: the pinned SHA is fetched as a grafted island, the history connecting it to the branch tip is absent, and the ancestry check FAILS even when the SHA is on the branch — turning every "is this commit reachable?" guard into a false positive each time the upstream branch advances.'
+  - 'DO NOT treat an ancestry-check failure in a shallow clone as proof of orphaned/stale state and act destructively on it (force-checkout, engine bump, force-push). On a shallow clone, "not an ancestor" and "unknown" are indistinguishable; a false positive is worse than a miss.'
+  ✅:
+  - 'DO check `git rev-parse --is-shallow-repository` before any ancestry check; if shallow, run `git fetch --unshallow` first, and if the clone cannot be deepened, skip the destructive branch of the guard (fail closed) instead of acting on an unknown answer.'
+  - 'DO give jobs whose whole purpose is reachability logic a full clone (`fetch-depth: 0`) when deepening is not acceptable.'
+106:
+  title: Loop defaults MUST stay identical across forge CI files and LOOP.md
+  ❌:
+  - 'DO NOT change a loop default (BOUCLE_BUILD_CMD, BOUCLE_BUILD_OUTPUT, timeouts, iteration caps) in one forge''s CI file without applying the same change to the other forge and the LOOP.md variable table. The files encode the SAME loop; divergent defaults mean the same consumer behaves differently per forge — the GitLab default installed dependencies before building, the GitHub default did not, so every GitHub build-gate run exited 127 (command not found).'
+  - 'DO NOT assume a fresh CI runner has the consumer''s dependencies: nothing persists between runs, and the build gate runs before any deploy step that might install them.'
+  ✅:
+  - 'DO treat `.gitlab-ci.yml`, `.github/workflows/boucle.yml`, and the LOOP.md variable table as one config surface: edit all three in the same commit.'
+  - 'DO keep dependency installation inside BOUCLE_BUILD_CMD itself (e.g. `npm ci && npm run build`): the build gate evals it verbatim on a fresh runner, so the command must be self-sufficient.'
