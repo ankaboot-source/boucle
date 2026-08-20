@@ -121,3 +121,15 @@ setup() {
   run grep -qE '^  BOUCLE_FORGE: "gitlab"' .gitlab-ci.yml
   assert_success
 }
+
+@test "deploy skips in external mode (consumer CI handles deploy)" {
+  # BOUCLE_DEPLOY_MODE=external means the consumer's own CI deploys (SSH,
+  # Docker, Ansible, etc.). The deploy stage must skip cleanly — not run
+  # npm run build on a repo with no package.json (the engine repo regression:
+  # every push to main failed with ENOENT package.json because the deploy
+  # stage ran the default BOUCLE_BUILD_CMD on a shell project).
+  run grep -q 'boucle_is_external_deploy' lib/boucle-ci/deploy.sh
+  assert_success
+  run grep -q 'consumer CI handles deploy, skipping' lib/boucle-ci/deploy.sh
+  assert_success
+}

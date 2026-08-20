@@ -40,6 +40,16 @@ boucle_ci_deploy() {
     return 0
   fi
 
+  # External deploy mode: the consumer's own CI handles deployment (SSH,
+  # Docker, Ansible, etc.). Skip the build+deploy — there is nothing to
+  # do here. The post-merge job chains to e2e with BOUCLE_LIVE_URL (or
+  # BOUCLE_E2E_COMMAND for command-mode e2e). Mirrors the worker deploy
+  # skip in lib/boucle.sh (boucle_is_external_deploy guard).
+  if boucle_is_external_deploy; then
+    echo "deploy: BOUCLE_DEPLOY_MODE=external — consumer CI handles deploy, skipping"
+    return 0
+  fi
+
   # Build — unless the build output is already populated. On GitLab the
   # build-site job hands this job `public/` as an artifact, and rebuilding
   # here OOMs WASM toolchains on shell executors (framagit, 2026-08). On
