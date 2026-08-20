@@ -574,6 +574,43 @@ for doc in "${CHARTER_DOCS[@]}"; do
 done
 echo ""
 
+# ── 0a-ter. Engine symlinks at the consumer root ──────────────────────
+# LESSONS.yml, .jcode/skills/, and bin/ live under .boucle/ (the engine dir)
+# but agent prompts reference them at the repo root. jcode's `skill` tool
+# resolves `.jcode/skills/` relative to cwd (repo root), `Read LESSONS.yml`
+# assumes repo root, and `bin/forge-note` is called as `bin/forge-note`
+# (relative to cwd). Without these symlinks, 0/68 agent runs could load
+# skills, read LESSONS.yml, or reliably call forge-note (observed on
+# boucle.dev). Symlinks (not copies) so they stay in sync with .boucle/
+# on every bin/update without a re-copy step.
+# Idempotent: replace stale/broken symlinks, never touch a real file.
+echo "=== Engine symlinks ==="
+for lt in "LESSONS.yml" ".jcode/skills" "bin"; do
+  engine_src="$ENGINE_ROOT/$lt"
+  if [ ! -e "$engine_src" ]; then
+    log_skip "$lt not in engine — skipping symlink"
+    continue
+  fi
+  if [ -L "$lt" ] && [ "$(readlink -f "$lt")" = "$(readlink -f "$engine_src")" ]; then
+    log_skip "$lt symlink already points to engine"
+    continue
+  fi
+  if [ -e "$lt" ] && [ ! -L "$lt" ]; then
+    echo "  $lt exists at repo root (not a symlink) — skipping (consumer-owned)"
+    log_skip "$lt exists at repo root (not a symlink)"
+    continue
+  fi
+  if [ "$DRY_RUN" = "true" ]; then
+    echo "  [dry-run] symlink $lt → $engine_src"
+  else
+    [ -L "$lt" ] && rm -f "$lt"
+    mkdir -p "$(dirname "$lt")"
+    ln -s "$engine_src" "$lt"
+  fi
+  log_pass "$lt symlinked to engine"
+done
+echo ""
+
 # ── 0b. Consumer .gitignore — forge-agnostic ──────────────────────────
 # Per-issue state lives in .boucle-state/ at the consumer root (gitignored).
 # Never clobber an existing .gitignore — only append the entry if missing.

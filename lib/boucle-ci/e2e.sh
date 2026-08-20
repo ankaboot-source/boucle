@@ -45,6 +45,19 @@ boucle_ci_e2e() {
   export BOUCLE_LIVE_URL="$LIVE_URL"
   echo "E2E testing URL: $LIVE_URL"
 
+  # ── Define MR_HEAD (the deployed commit SHA) ─────────────────────────
+  # e2e.sh runs independently from the reviewer (after deploy), so it does
+  # not inherit MR_HEAD from the reviewer's environment. Without this
+  # definition, line 168 (MR_HEAD_SHORT="${MR_HEAD:0:7}") crashes under
+  # set -u with "MR_HEAD: unbound variable" — observed on boucle.dev where
+  # every issue-triggered e2e job exited 1 AFTER the agent successfully
+  # posted its verdict. Fall back through the CI-provider SHA env vars,
+  # then to the git HEAD of the workspace.
+  if [ -z "${MR_HEAD:-}" ]; then
+    MR_HEAD="${CI_COMMIT_SHA:-${GITHUB_SHA:-$(cd "$BOUCLE_WORKSPACE" && git rev-parse HEAD 2>/dev/null || echo unknown)}}"
+  fi
+  export MR_HEAD
+
   # Source the depends-on lib for parse_depends_on.
   source "$BOUCLE_HOME/bin/lib/depends-on.sh"
 

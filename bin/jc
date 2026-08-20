@@ -361,7 +361,16 @@ inject_freeride_thinking() {
 is_agent_looping() {
   local log="$1"
   [ -s "$log" ] || return 1
-  sort "$log" | uniq -c | awk '$1 >= 5 { found=1 } END { exit found?0:1 }'
+  # Strip jcode structural formatting tokens ([bash], [edit], →, etc.),
+  # blank lines, timestamps, and short status lines (≤20 chars) before
+  # counting duplicates — these appear 5+ times in a healthy multi-edit
+  # run and caused a false-positive "agent looping" on 100% of
+  # worker+triage runs (observed on boucle.dev: 35/35 runs).
+  grep -vE '^\[[a-z]+\] |^→ |^[[:space:]]*$|^[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$log" 2>/dev/null \
+    | awk 'length > 20' \
+    | sort \
+    | uniq -c \
+    | awk '$1 >= 5 { found=1 } END { exit found?0:1 }'
 }
 
 # Detect whether the agent already posted a forge note (verdict, draft,
@@ -657,6 +666,31 @@ fi
 
 # ── 3. Prepare state directory ────────────────────────────────────────
 mkdir -p "$STATE_DIR"
+
+# ── 3a-bis. Ensure engine symlinks exist at the repo root ──────────────
+# LESSONS.yml, .jcode/skills/, and bin/ live under $BOUCLE_HOME (the engine
+# dir, usually .boucle/) but agent prompts reference them at the repo root.
+# jcode's `skill` tool resolves `.jcode/skills/` relative to cwd (repo
+# root), `Read LESSONS.yml` assumes repo root, and `bin/forge-note` is
+# called as `bin/forge-note` (relative to cwd). bin/setup and bin/update
+# create these symlinks, but this is a runtime fallback for the first CI
+# run after a submodule add (before bin/update has run) or if the symlinks
+# were lost (e.g. a git clean that removes symlinks). Idempotent: only
+# creates the symlink if the root path doesn't exist and the engine path
+# does. Never overwrites a real file/dir (consumer-owned).
+if [ -n "${BOUCLE_HOME:-}" ] && [ "$BOUCLE_HOME" != "$BOUCLE_WORKSPACE" ]; then
+  for lt in "LESSONS.yml" ".jcode/skills" "bin"; do
+    engine_src="$BOUCLE_HOME/$lt"
+    root_path="$BOUCLE_WORKSPACE/$lt"
+    [ -e "$engine_src" ] || continue
+    # Already exists (real file or working symlink) → skip.
+    [ -e "$root_path" ] && continue
+    # Stale/broken symlink → replace.
+    [ -L "$root_path" ] && rm -f "$root_path"
+    mkdir -p "$(dirname "$root_path")"
+    ln -s "$engine_src" "$root_path" 2>/dev/null || true
+  done
+fi
 
 # ── 3a. Load issue attachments (if bin/fetch-issue-attachments ran) ──
 # The fetch script writes .boucle-state/$ISSUE/.attachments.env with
@@ -1627,6 +1661,13 @@ if [ "$FREERIDE_MODE" = "1" ] && [ -n "$FREERIDE_ROTATION_LIST" ] && [ -n "$FALL
       FALLBACK_USED=1
       FR_THINKING="$rot_thinking"
       echo "[boucle:freeride] provider $rot_name succeeded — continuing" >&2
+      # Append the primary log back for the exit-3 guard (same rationale as
+      # the legacy fallback path — see comment there).
+      {
+        echo ""
+        echo "--- [boucle:freeride] primary attempt log (appended for exit-3 guard) ---"
+        cat "${AGENT_LOG}.primary" 2>/dev/null
+      } >> "$AGENT_LOG"
       break
     fi
     echo "[boucle:freeride] provider $rot_name also failed — trying next" >&2
@@ -1660,6 +1701,18 @@ elif [ -n "$FALLBACK_PROVIDER" ] && [ -n "$FALLBACK_REASON" ]; then
   else
     FALLBACK_USED=1
     echo "[boucle:fallback] fallback provider ($FALLBACK_PROVIDER/$FALLBACK_MODEL) succeeded — continuing" >&2
+    # Append the primary log back to $AGENT_LOG so the exit-3 guard
+    # (agent_posted_note) can see the primary's posts. Without this, a
+    # false-positive is_agent_looping (B1) triggers the fallback, which
+    # clears the log; if the fallback agent doesn't post, the exit-3
+    # check sees an empty log and reports "silent failure" even though
+    # the primary agent DID post a verdict. Observed on boucle.dev:
+    # 5/30 verdict-role runs had exit-3 false positives this way.
+    {
+      echo ""
+      echo "--- [boucle:fallback] primary attempt log (appended for exit-3 guard) ---"
+      cat "${AGENT_LOG}.primary" 2>/dev/null
+    } >> "$AGENT_LOG"
   fi
   rm -f "${AGENT_LOG}.primary" 2> /dev/null || true
 fi

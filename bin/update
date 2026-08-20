@@ -269,6 +269,39 @@ propagate_consumer_root_files() {
       propagated="$propagated $f"
     fi
   done
+
+  # ── Symlink engine assets that agents must find at the repo root ──
+  # LESSONS.yml, .jcode/skills/, and bin/ live under .boucle/ (the engine
+  # dir) but agent prompts reference them at the repo root. jcode's
+  # `skill` tool resolves `.jcode/skills/` relative to cwd (repo root),
+  # `Read LESSONS.yml` assumes repo root, and `bin/forge-note` is called
+  # as `bin/forge-note` (relative to cwd). Without these symlinks, 0/68
+  # agent runs could load skills, read LESSONS.yml, or reliably call
+  # forge-note (observed on boucle.dev — the files exist under .boucle/
+  # but are invisible at the root). Symlinks (not copies) so they stay
+  # in sync with .boucle/ on every bin/update without a re-copy step.
+  # Idempotent: replace stale/broken symlinks, never touch a real file.
+  for lt in "LESSONS.yml" ".jcode/skills" "bin"; do
+    local engine_src="$ENGINE_DIR/$lt"
+    [ -e "$engine_src" ] || continue
+    # If the root path is already a symlink pointing at the engine, skip.
+    if [ -L "$lt" ] && [ "$(readlink -f "$lt")" = "$(readlink -f "$engine_src")" ]; then
+      continue
+    fi
+    # If the root path is a real file/dir (not a symlink), never overwrite
+    # it — a consumer may have a custom LESSONS.yml, skills, or bin. Only
+    # create the symlink when the root path does not exist.
+    if [ -e "$lt" ] && [ ! -L "$lt" ]; then
+      echo "[boucle] WARN: $lt exists at repo root (not a symlink) — skipping symlink creation (consumer-owned)" >&2
+      continue
+    fi
+    # Remove a stale/broken symlink if present.
+    [ -L "$lt" ] && rm -f "$lt"
+    mkdir -p "$(dirname "$lt")"
+    ln -s "$engine_src" "$lt"
+    propagated="$propagated $lt"
+  done
+
   echo "$propagated"
 }
 
