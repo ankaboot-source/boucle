@@ -1,8 +1,8 @@
 # web-artifacts-builder
 
-Source: https://github.com/ankaboot-source/boucle
+Source: https://github.com/anthropics/skills/blob/main/skills/web-artifacts-builder/SKILL.md
 License: Apache-2.0
-Copyright: 2026 Badreddine Lejmi.
+Copyright: 2026 Anthropic, PBC.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

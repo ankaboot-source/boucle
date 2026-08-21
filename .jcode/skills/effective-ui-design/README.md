@@ -8,7 +8,7 @@ Works with Claude Code, Cursor, GitHub Copilot, Windsurf, Gemini CLI, and any ot
 
 ## How this differs from the frontend-design skill
 
-The [frontend-design](../frontend-design/SKILL.md) skill handles creative direction: picking a bold aesthetic, choosing distinctive fonts, avoiding generic "AI look" output. It's good at that.
+Anthropic's [frontend-design](https://skills.sh/anthropics/skills/frontend-design) skill handles creative direction: picking a bold aesthetic, choosing distinctive fonts, avoiding generic "AI look" output. It's good at that.
 
 It doesn't touch the technical layer. No contrast ratios, no spacing system, no form patterns, no accessibility rules, no SEO. A visually striking page that fails WCAG or ships without meta tags is still a problem.
 
