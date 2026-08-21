@@ -263,7 +263,7 @@ Not every install path ships every surface in this section. Two distinct install
 
 The PreCompact hook is registered in the SKILL.md frontmatter and works for both routes. The `/plan-goal` and `/plan-loop` slash commands live in `commands/` at the repo root, which only the plugin route copies into `~/.claude/plugins/marketplaces/`. Skill-only installs land at `~/.claude/skills/planning-with-files/` and do not see `commands/`.
 
-Both slash commands also carry `disable-model-invocation: true`, which means the model will not auto-trigger them. You type them. Per known Claude Code behavior (anthropics/claude-code issues #26251, #41417), some sessions interpret `disable-model-invocation: true` as "I cannot use the Skill tool for this entry at all" and refuse to fire even when you type the slash. If that happens, the manual fallback below produces the same effect.
+Both slash commands also carry `disable-model-invocation: true`, which means the model will not auto-trigger them. You type them. Per known behavior (claude-code issues #26251, #41417), some sessions interpret `disable-model-invocation: true` as "I cannot use the Skill tool for this entry at all" and refuse to fire even when you type the slash. If that happens, the manual fallback below produces the same effect.
 
 ### PreCompact hook (auto)
 
