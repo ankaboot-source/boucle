@@ -39,6 +39,11 @@ flowchart TD
     M --> E["🤖 E2E<br/>Verifies production<br/>✅ pass or ❌ fail"]
     E -->|✅ pass| D["✅ Feature validated end-to-end"]
     E -->|❌ fail| W
+    L["🤖 Self-improvement<br/>Lessons learned from each loop"]
+    L -.-> T
+    L -.-> W
+    L -.-> R
+    L -.-> E
 ```
 
 The loop runs asynchronously on CI. The `doctor` job (a scheduled

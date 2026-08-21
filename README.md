@@ -205,6 +205,11 @@ flowchart TD
     M --> E["🤖 E2E — verifies production, ✅ pass / ❌ fail"]
     E -->|"✅ pass"| D["✅ Feature validated end-to-end"]
     E -->|"❌ fail"| W
+    L["🤖 Self-improvement — lessons learned from each loop"]
+    L -.-> T
+    L -.-> W
+    L -.-> R
+    L -.-> E
 ```
 
 The loop runs asynchronously on CI. You intervene at two named gates —
