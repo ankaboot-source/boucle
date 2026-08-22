@@ -1018,3 +1018,8 @@
   ✅:
   - 'DO treat `.gitlab-ci.yml`, `.github/workflows/boucle.yml`, and the LOOP.md variable table as one config surface: edit all three in the same commit.'
   - 'DO keep dependency installation inside BOUCLE_BUILD_CMD itself (e.g. `npm ci && npm run build`): the build gate evals it verbatim on a fresh runner, so the command must be self-sufficient.'
+107:
+  title: Doctor MUST periodically clean up stale worker branches as a backstop
+  ✅:
+  - 'DO: the doctor MUST scan all `boucle/*` branches and delete any whose MR is already merged or closed (no open MR). This is the backstop for the merger/catchup best-effort deletion — MWPS merges, race conditions, and pre-cleanup-era branches accumulate without it. Gate via `BOUCLE_DOCTOR_BRANCH_CLEANUP` (default: true). Use `forge_branch_list "boucle/"` to enumerate, `forge_mr_lookup_by_branch "boucle/$IID" opened` to check for open MRs, and `forge_branch_delete` to clean up.'
+  ❌: 'DO NOT rely solely on the merger/catchup post-merge branch deletion — it is best-effort and silently fails on MWPS merges, race conditions, and network errors. Without a periodic backstop scan, stale branches accumulate (observed: 30+ stale branches across two repos after 3 weeks of operation).'

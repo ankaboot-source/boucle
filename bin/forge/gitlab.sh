@@ -280,6 +280,19 @@ forge_branch_delete() {
     "/projects/$BOUCLE_PROJECT_ID/repository/branches/$encoded" > /dev/null 2>&1
 }
 
+forge_branch_list() {
+  local prefix="${1:-}"
+  local encoded=""
+  [ -n "$prefix" ] && encoded=$(printf '%s' "$prefix" | jq -sRr @uri)
+  local branches
+  if [ -n "$encoded" ]; then
+    branches=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/repository/branches?search=$encoded&per_page=100" 2> /dev/null) || return 1
+  else
+    branches=$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/repository/branches?per_page=100" 2> /dev/null) || return 1
+  fi
+  echo "$branches" | jq -r '.[].name' 2> /dev/null
+}
+
 # ── Note reactions ────────────────────────────────────────────────────────
 
 forge_note_reactions() {

@@ -389,6 +389,17 @@ forge_branch_delete() {
   _gh_api_silent -X DELETE "/repos/$BOUCLE_PROJECT_ID/git/refs/heads/$encoded" || true
 }
 
+forge_branch_list() {
+  local prefix="${1:-}"
+  local branches
+  branches=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/branches?per_page=100" 2> /dev/null) || return 1
+  if [ -n "$prefix" ]; then
+    echo "$branches" | jq -r --arg p "$prefix" '.[] | select(.name | startswith($p)) | .name' 2> /dev/null
+  else
+    echo "$branches" | jq -r '.[].name' 2> /dev/null
+  fi
+}
+
 # ── Note reactions ────────────────────────────────────────────────────────
 
 forge_note_reactions() {

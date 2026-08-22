@@ -1102,6 +1102,40 @@ boucle_ci_doctor() {
   # an entry point that can also produce work.
   boucle_schedules_run || true
 
+  # ── Stale branch cleanup (backstop) ─────────────────────────────────────
+  # The merger and catchup already delete worker branches after merge, but
+  # this is best-effort: MWPS merges, race conditions, and pre-cleanup-era
+  # branches accumulate. This scan is the "bretelles" — it periodically
+  # sweeps stale boucle/* branches whose MR is already merged or closed.
+  # Opt-in via BOUCLE_DOCTOR_BRANCH_CLEANUP (default: true).
+  if [ "${BOUCLE_DOCTOR_BRANCH_CLEANUP:-true}" = "true" ]; then
+    echo "Scanning for stale boucle/* branches..."
+    STALE_BRANCHES=$(forge_branch_list "boucle/" 2>/dev/null || true)
+    if [ -n "$STALE_BRANCHES" ]; then
+      CLEANUP_COUNT=0
+      while IFS= read -r STALE_BRANCH; do
+        [ -z "$STALE_BRANCH" ] && continue
+        # Extract the IID from the branch name: boucle/<iid> or boucle/<iid>-<slug>
+        STALE_IID=$(printf '%s' "$STALE_BRANCH" | sed -n 's|^boucle/\([0-9]\+\).*|\1|p')
+        [ -z "$STALE_IID" ] && continue
+        # Check if there's an open MR for this branch. If not, the branch
+        # is stale (merged or closed MR, or no MR at all).
+        OPEN_MR=$(forge_mr_lookup_by_branch "boucle/$STALE_IID" opened 2>/dev/null || true)
+        if [ -z "$OPEN_MR" ]; then
+          if forge_branch_delete "$STALE_BRANCH"; then
+            echo "  → Deleted stale branch $STALE_BRANCH (no open MR for #$STALE_IID)"
+            CLEANUP_COUNT=$((CLEANUP_COUNT + 1))
+          else
+            echo "  → WARN: could not delete stale branch $STALE_BRANCH" >&2
+          fi
+        fi
+      done <<< "$STALE_BRANCHES"
+      RECOVERED=$((RECOVERED + CLEANUP_COUNT))
+    else
+      echo "  No boucle/* branches found."
+    fi
+  fi
+
   # ── Status board (#36) ─────────────────────────────────────────────────
   # The sweep already holds the data; rendering it costs one read and, when
   # nothing moved, zero writes.

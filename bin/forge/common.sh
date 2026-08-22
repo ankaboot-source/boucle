@@ -477,6 +477,14 @@ forge_reaction_canonical() {
 #   (GitLab: DELETE /projects/:id/repository/branches/:branch;
 #   GitHub: DELETE /repos/:owner/:repo/git/refs/heads/:branch.)
 #
+# forge_branch_list [prefix]
+#   List remote branch names on stdout, one per line, optionally filtered
+#   by prefix. Returns 0 on success, non-zero on failure. Used by the
+#   doctor's stale-branch cleanup scan to find boucle/* branches whose
+#   MR is already merged/closed.
+#   (GitLab: GET /projects/:id/repository/branches?search=<prefix>;
+#   GitHub: GET /repos/:owner/:repo/branches?per_page=100, client-side filter.)
+#
 # forge_mr_merge_status <mr_iid>
 #   Get mergeable status string on stdout. Returns "unknown" on failure.
 #   (GitLab: detailed_merge_status; GitHub: mergeable_state.)
