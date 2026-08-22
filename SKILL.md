@@ -561,17 +561,20 @@ carry what `/boucle` observes.
 
 ### Commands
 
-The `bin/boucle` wrapper exposes six verbs. All require forge auth env vars
-(see §Forge auth below).
+The `bin/boucle` wrapper exposes eight verbs. Forge identity (project,
+host, forge type) is auto-detected from the `origin` git remote when CI
+vars are absent — see §Forge auth below.
 
 | Command | Action |
 |---|---|
+| `bin/boucle help` | Show usage with one-line description per command and examples. Also triggered by `-h`, `--help`, or no argument. |
+| `bin/boucle list [state]` | List open boucle issues from the forge, grouped by boucle state. Optional filter: `list working`, `list human`, `list review`… Alias: `ls`. |
+| `bin/boucle status <iid>` | Synthetic view: title, forge label, assignee, MR status, iteration count, `state.md` content, last 3 iterations. Works even without local `.boucle-state/<iid>/`. |
+| `bin/boucle check <iid>` | Pre-work gate check: file-gate (overlap with in-flight issues), dependency gate, sibling gate. Consultation only — informs, does not block. |
+| `bin/boucle log <iid>` | Prints `.boucle-state/<iid>/agent-output.log` (last run trace: tool calls, file reads, git operations). |
 | `bin/boucle pause <iid>` | Human takes over. Sets `boucle:human`, saves previous state, posts a comment. |
 | `bin/boucle resume <iid>` | Loop resumes. If branch `boucle/<iid>` has commits ahead → `boucle:review` (reviewer + merger). Otherwise restores the previous label. |
 | `bin/boucle restart <iid>` | Loop takes the issue from scratch (`boucle:todo`). Does not restore previous state. |
-| `bin/boucle status <iid>` | Synthetic view: forge label, assignee, MR status, iteration count, `state.md` content, last 3 iterations. |
-| `bin/boucle check <iid>` | Pre-work gate check: file-gate (overlap with in-flight issues), dependency gate, sibling gate. Consultation only — informs, does not block. |
-| `bin/boucle log <iid>` | Prints `.boucle-state/<iid>/agent-output.log` (last run trace: tool calls, file reads, git operations). |
 
 ### Posting comments
 

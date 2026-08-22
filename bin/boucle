@@ -22,12 +22,99 @@ set -euo pipefail
 # ── Resolve BOUCLE_HOME ──────────────────────────────────────────────────
 BOUCLE_HOME="${BOUCLE_HOME:-$(cd "$(dirname "$0")/.." && pwd)}"
 
+# ── Resolve forge identity for local (non-CI) usage ─────────────────────
+# In CI, BOUCLE_PROJECT_ID / BOUCLE_PROJECT_PATH / BOUCLE_FORGE_HOST are
+# set by the CI wrapper. Locally (a harness running bin/boucle from the
+# consumer repo), they are typically unset — so we auto-detect them from
+# the origin git remote, the same way bin/setup does. This lets a harness
+# run `bin/boucle status <iid>` without manually exporting forge vars.
+_resolve_local_forge_identity() {
+  # Only resolve what is missing — never override explicit env vars.
+  if [ -n "${BOUCLE_PROJECT_ID:-}" ] && [ -n "${BOUCLE_PROJECT_PATH:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ]; then
+    return 0
+  fi
+
+  local remote_url
+  remote_url="$(git remote get-url origin 2>/dev/null || true)"
+  if [ -z "$remote_url" ]; then
+    return 0  # no remote — best-effort, forge calls will fail with a clear message
+  fi
+
+  local remote_host="" remote_path=""
+  case "$remote_url" in
+    git@*)
+      remote_host="${remote_url#git@}"
+      remote_host="${remote_host%%:*}"
+      remote_path="${remote_url#*:}"
+      ;;
+    https://*)
+      remote_body="${remote_url#https://}"
+      # Strip embedded credentials (user:pass@) — common in OAuth URLs
+      # like https://oauth2:glpat-xxx@framagit.org/group/proj.git
+      remote_body="${remote_body#*[@]}"
+      remote_host="${remote_body%%/*}"
+      remote_path="${remote_body#*/}"
+      ;;
+    ssh://*)
+      remote_body="${remote_url#ssh://}"
+      # Strip user@ prefix if present (ssh://git@host/...)
+      remote_body="${remote_body#*[@]}"
+      remote_host="${remote_body%%/*}"
+      remote_path="${remote_body#*/}"
+      ;;
+  esac
+  remote_path="${remote_path%.git}"
+
+  [ -z "${BOUCLE_FORGE_HOST:-}" ] && export BOUCLE_FORGE_HOST="$remote_host"
+  [ -z "${BOUCLE_PROJECT_PATH:-}" ] && export BOUCLE_PROJECT_PATH="$remote_path"
+
+  # Auto-detect forge from host if not set.
+  if [ -z "${BOUCLE_FORGE:-}" ] && [ -n "$remote_host" ]; then
+    case "$remote_host" in
+      github.com|*.github.com) export BOUCLE_FORGE="github" ;;
+      *) export BOUCLE_FORGE="gitlab" ;;  # default: GitLab (self-hosted or gitlab.com)
+    esac
+  fi
+
+  # Resolve numeric project ID for GitLab (glab API needs it).
+  if [ -z "${BOUCLE_PROJECT_ID:-}" ] && [ "${BOUCLE_FORGE:-gitlab}" = "gitlab" ] && [ -n "$remote_path" ]; then
+    local encoded
+    encoded="$(echo "$remote_path" | sed 's/\//%2F/g')"
+    local resolved_id
+    resolved_id="$(glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$encoded" 2>/dev/null | jq -r '.id // empty' 2>/dev/null || true)"
+    if [ -n "$resolved_id" ]; then
+      export BOUCLE_PROJECT_ID="$resolved_id"
+    fi
+  fi
+
+  # GitHub: project ID is "owner/repo" (same as path).
+  if [ -z "${BOUCLE_PROJECT_ID:-}" ] && [ "${BOUCLE_FORGE:-}" = "github" ]; then
+    export BOUCLE_PROJECT_ID="$remote_path"
+  fi
+}
+_resolve_local_forge_identity
+
 # ── Source the engine + forge abstraction ────────────────────────────────
 # shellcheck disable=SC1091
 source "$BOUCLE_HOME/lib/boucle.sh"
 # shellcheck disable=SC1091
 source "$BOUCLE_HOME/bin/forge/common.sh"
 forge_init
+
+# ── Forge identity guard ─────────────────────────────────────────────────
+# If we still don't know which project to talk to, fail with a clear message
+# instead of letting forge_issue_get return empty and kill the script under
+# set -euo pipefail.
+_check_forge_identity() {
+  if [ -z "${BOUCLE_PROJECT_ID:-}" ]; then
+    echo "ERROR: could not resolve the forge project identity." >&2
+    echo "       BOUCLE_PROJECT_ID is empty. Either:" >&2
+    echo "         - run from a repo with an 'origin' git remote, or" >&2
+    echo "         - export BOUCLE_PROJECT_ID, BOUCLE_PROJECT_PATH, BOUCLE_FORGE_HOST" >&2
+    echo "       See SKILL.md §'Forge auth in local mode'." >&2
+    return 1
+  fi
+}
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -210,16 +297,29 @@ EOF
 # ── status <iid> ─────────────────────────────────────────────────────────
 #
 # Synthetic view: forge label + assignee + MR status + state.md + iterations.md.
+# Works even without local .boucle-state/<iid>/ — the forge API is the source
+# of truth for label/assignee/MR; local state files are supplementary.
 cmd_status() {
   local iid="${1:?usage: boucle status <iid>}"
+  _check_forge_identity
 
   local issue_json label assignee state
-  issue_json=$(forge_issue_get "$iid" 2> /dev/null || echo "{}")
-  label=$(current_label "$iid")
-  state=$(echo "$issue_json" | jq -r '.state // "unknown"')
-  assignee=$(echo "$issue_json" | jq -r '.assignees[0].username // .assignee.username // "unassigned"')
+  issue_json="$(forge_issue_get "$iid" 2>/dev/null || true)"
+  if [ -z "$issue_json" ] || [ "$issue_json" = "null" ]; then
+    echo "ERROR: could not fetch issue #$iid from the forge." >&2
+    echo "       Check BOUCLE_FORGE_HOST=$BOUCLE_FORGE_HOST and BOUCLE_PROJECT_ID=$BOUCLE_PROJECT_ID" >&2
+    echo "       and that glab/gh is authenticated for this host." >&2
+    exit 1
+  fi
+
+  label="$(current_label "$iid")"
+  state="$(echo "$issue_json" | jq -r '.state // "unknown"')"
+  assignee="$(echo "$issue_json" | jq -r '.assignees[0].username // .assignee.username // "unassigned"')"
+  local title
+  title="$(echo "$issue_json" | jq -r '.title // ""')"
 
   echo "=== Issue #$iid ==="
+  [ -n "$title" ] && echo "Title:    $title"
   echo "State:    $state"
   echo "Label:    boucle:$label"
   echo "Assignee: $assignee"
@@ -454,38 +554,119 @@ cmd_takeover() {
   echo "Fallback if the session files are unavailable: \`boucle restart $iid\`."
 }
 
+# ── list / ls ────────────────────────────────────────────────────────────
+#
+# List boucle issues from the forge, grouped by state. Read-only.
+# Shows open issues with any boucle: label, sorted by boucle state.
+# Optional filter: boucle list <state> (e.g. boucle list working).
+cmd_list() {
+  local filter="${1:-}"
+  _check_forge_identity
+
+  # Fetch all open issues with any boucle: label.
+  local all_issues
+  all_issues="$(forge_issue_list_by_label "boucle:triage,boucle:todo,boucle:spec-review,boucle:working,boucle:review,boucle:approval,boucle:merging,boucle:human,boucle:done,boucle:split" "opened" 2>/dev/null || echo "[]")"
+
+  if [ "$all_issues" = "[]" ] || [ -z "$all_issues" ]; then
+    echo "No open boucle issues found."
+    return 0
+  fi
+
+  # Parse and format. Each issue: iid, title, labels (extract boucle: detail).
+  local rows
+  rows="$(echo "$all_issues" | jq -r '
+    sort_by(.iid)
+    | .[]
+    | .iid as $iid
+    | .title as $title
+    | (.labels | map(select(startswith("boucle:")) | select(startswith("boucle::") | not)) | first // "") as $bl
+    | ($bl | sub("^boucle:"; "")) as $state
+    | [$iid, $state, $title] | @tsv
+  ' 2>/dev/null || true)"
+
+  if [ -z "$rows" ]; then
+    echo "No open boucle issues found."
+    return 0
+  fi
+
+  # Filter by state if requested.
+  if [ -n "$filter" ]; then
+    rows="$(echo "$rows" | awk -F'\t' -v f="$filter" '$2 == f')"
+    if [ -z "$rows" ]; then
+      echo "No open boucle issues with state '$filter'."
+      return 0
+    fi
+  fi
+
+  # Print table.
+  printf "%-6s  %-14s  %s\n" "IID" "STATE" "TITLE"
+  printf "%-6s  %-14s  %s\n" "---" "-----" "-----"
+  echo "$rows" | while IFS=$'\t' read -r iid state title; do
+    # Truncate title to 60 chars for readability.
+    title="${title:0:60}"
+    [ ${#title} -eq 60 ] && title="${title}…"
+    printf "#%-5s  %-14s  %s\n" "$iid" "${state:-(no boucle label)}" "$title"
+  done
+
+  local count
+  count="$(echo "$rows" | wc -l | tr -d ' ')"
+  echo ""
+  echo "Total: $count open boucle issue(s)"
+}
+
+# ── help ─────────────────────────────────────────────────────────────────
+#
+# Print usage with a one-line description per command.
+cmd_help() {
+  cat << 'EOF'
+boucle — interactive harness CLI for boucle issues
+
+USAGE
+  boucle <command> [args]
+
+COMMANDS
+  status <iid>       Forge label + assignee + MR + state.md + iterations
+  list [state]       List open boucle issues (alias: ls)
+                     Optional filter: list working, list human, list review…
+  check <iid>        Pre-work gates: file-gate, dependencies, siblings
+  log <iid>          Print the last agent-output.log trace
+  takeover <iid>     Print the jcode --resume command for interactive takeover
+  pause <iid>        Human takes over (sets boucle:human)
+  resume <iid>       Hand back to the loop (restores previous state)
+  restart <iid>      Loop takes the issue from scratch (boucle:todo)
+  help               Show this help
+
+EXAMPLES
+  boucle list                    # all open boucle issues
+  boucle list working            # only issues being worked on
+  boucle status 105              # detailed view of issue #105
+  boucle check 105               # pre-work gates before coding
+  boucle takeover 105            # interactive session takeover
+  boucle pause 105               # take over issue #105 interactively
+  boucle resume 105              # hand #105 back to the loop
+
+FORGE AUTH (local mode)
+  The forge identity (project, host, forge type) is auto-detected from the
+  'origin' git remote. If auto-detection fails, export:
+    BOUCLE_PROJECT_ID, BOUCLE_PROJECT_PATH, BOUCLE_FORGE_HOST, BOUCLE_FORGE
+  See SKILL.md §"Forge auth in local mode".
+
+SEE ALSO
+  SKILL.md §8 "Interactive mode" — full protocol documentation.
+EOF
+}
+
 # ── Main dispatch ────────────────────────────────────────────────────────
 case "${1:-}" in
-  pause)
-    shift
-    cmd_pause "$@"
-    ;;
-  resume)
-    shift
-    cmd_resume "$@"
-    ;;
-  restart)
-    shift
-    cmd_restart "$@"
-    ;;
-  status)
-    shift
-    cmd_status "$@"
-    ;;
-  check)
-    shift
-    cmd_check "$@"
-    ;;
-  log)
-    shift
-    cmd_log "$@"
-    ;;
-  takeover)
-    shift
-    cmd_takeover "$@"
-    ;;
-  *)
-    echo "Usage: boucle <pause|resume|restart|status|check|log|takeover> <iid>" >&2
-    exit 1
-    ;;
+  pause)    shift; cmd_pause "$@" ;;
+  resume)   shift; cmd_resume "$@" ;;
+  restart)  shift; cmd_restart "$@" ;;
+  status)   shift; cmd_status "$@" ;;
+  check)    shift; cmd_check "$@" ;;
+  log)      shift; cmd_log "$@" ;;
+  takeover) shift; cmd_takeover "$@" ;;
+  list|ls)  shift; cmd_list "$@" ;;
+  help|-h|--help) cmd_help ;;
+  "")       cmd_help; exit 0 ;;
+  *) echo "Unknown command: '$1'" >&2; echo "Run 'boucle help' for usage." >&2; exit 1 ;;
 esac
