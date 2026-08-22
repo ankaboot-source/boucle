@@ -173,7 +173,10 @@ prefer to wire in an existing account instead.
 
 1. Add `BOUCLE_LLM_API_KEY` as a masked secret (GitLab: Settings → CI/CD →
    Variables; GitHub: Settings → Secrets and variables → Actions).
-2. Create an issue with the `boucle:triage` label.
+2. Create an issue. To dispatch the autonomous loop, add the `boucle:triage`
+   label and assign the bot. To work interactively (a local harness drives
+   the work), create the issue with **no** boucle labels — see
+   [AGENTS.md](AGENTS.md) §"Interactive agents (harness)".
 
 From there, the pipeline takes over. You only answer the human prompts:
 spec validation and MR approval. The `doctor` job (a scheduled

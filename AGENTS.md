@@ -28,6 +28,127 @@ and [CONTEXT.md](CONTEXT.md).
 
 See [LOOP.md](LOOP.md) for the pipeline and state machine details.
 
+## Interactive agents (harness) — issue-driven work
+
+An **interactive agent** (a.k.a. "harness" — an orchestrator/agent session
+driven by a human in the loop, e.g. an OpenCode/Claude Code session running
+in this repo) is **NOT** a boucle CI agent. It does not run under `bin/jc`,
+does not consume a runner, and is not triggered by a webhook. But it works
+in the same repo and its changes flow through the same review/merge path.
+
+### Two modes: dispatch the loop vs work interactively
+
+A harness has **two distinct modes**, and the choice is made at issue-creation
+time by which labels are applied:
+
+| Mode | Labels at creation | Who implements | When to use |
+|------|-------------------|----------------|-------------|
+| **Dispatch** | `boucle:triage` (+ assign to bot) | The boucle loop (triage → worker → reviewer → e2e) | The human wants the autonomous loop to own the issue end-to-end |
+| **Interactive** | No boucle labels, no bot assignee | The harness itself (or its specialist subagents) | The human wants to drive the work interactively, with the harness as the worker |
+
+**The `boucle:triage` label is the dispatch trigger.** Adding it to an issue
+tells the loop to take over. A harness that adds `boucle:triage` and then
+implements the work itself produces a **race condition**: the loop triages,
+splits, and dispatches workers in parallel with the harness's own work —
+duplicated effort, conflicting branches, and wasted CI runners.
+
+### Rule: choose the mode explicitly
+
+When a harness creates an issue, it MUST decide upfront:
+
+- **To dispatch the loop**: add `boucle:triage`, assign to the bot. The
+  harness's job ends at issue creation. It does NOT implement.
+- **To work interactively**: create the issue with NO boucle labels and NO
+  bot assignee. The harness owns the issue end-to-end (spec, implementation,
+  review, MR). The loop never touches it.
+
+A harness MUST NOT add `boucle:triage` to an issue it intends to implement
+itself. If the human later asks to hand the issue to the loop, the harness
+adds `boucle:triage` at that point — not before.
+
+```mermaid
+flowchart LR
+    A[Human request] --> B{Trivial?}
+    B -- Yes --> C[Direct edit + verify]
+    B -- No --> D{Dispatch loop or work interactively?}
+    D -- Dispatch --> E[Create issue + boucle:triage + assign bot]
+    D -- Interactive --> F[Create issue, NO boucle labels]
+    E --> G[Loop owns it end-to-end]
+    F --> H[Harness implements: spec → code → review → MR]
+    C --> I[Done]
+    G --> I
+    H --> I
+```
+
+### Issue format (boucle standard)
+
+Either mode, the issue MUST follow the boucle triage structure so it is
+legible to both humans and any future boucle run:
+
+- **Contexte** — what exists today, what the user wants.
+- **Objectif** — the precise change, broken into numbered changes.
+- **Critères d'acceptation** — `Given/When/Then` checklist (happy path,
+  edge case, error state, non-functional).
+- **Questions** — open questions for the human (clarifications,
+  decisions needed).
+- **Docs impact** — which charter docs the change touches (so the
+  worker/reviewer knows what to update).
+
+### Interactive workflow (harness as worker)
+
+Once the issue is created (interactive mode), the harness follows the
+boucle workflow adapted for interactive execution:
+
+1. **Spec** — the issue body IS the spec. If the human answers the
+   questions, amend the issue body (or a comment) — do not keep the spec
+   only in the chat session.
+2. **Implementation** — the harness may implement directly (it is the
+   worker) or delegate to a specialist subagent. Either way, it commits
+   on a branch `boucle/<iid>` (or a feature branch) with conventional
+   commits referencing the issue (`(#<iid>)`).
+3. **Lessons** — if the harness discovers a new class of mistake, it adds
+   a `LESSONS.yml` entry (running the four-point admission test, stating
+   the justification on stdout/inline).
+4. **Review** — the harness reviews its own work against the acceptance
+   criteria. For UI changes, it MUST produce a **preview screenshot**
+   (browser screenshot of the rendered page) and attach it to the issue
+   or MR. The review verdict follows the SHA-anchored format:
+   `<!-- boucle:verdict v=1 role=reviewer sha=<hex> -->`.
+5. **MR/PR** — the harness creates the MR/PR with a description following
+   the boucle MR format: TL;DR, What changed (per file), Preview URL or
+   screenshot, Cost (if tracked), Acceptance criteria checklist.
+6. **Docs** — the harness updates impacted charter docs (AGENTS.md,
+   DESIGN.md, LOOP.md, CONTEXT.md) in the same MR as the code.
+
+### FORBIDDEN for interactive agents
+
+- **NEVER** implement non-trivial work without creating an issue first.
+- **NEVER** keep the spec only in the chat session — the forge issue is
+  the durable record.
+- **NEVER** add `boucle:triage` (or any boucle status label) to an issue
+  the harness intends to implement itself — that dispatches the loop and
+  creates a race condition. Add `boucle:triage` ONLY to hand an issue to
+  the autonomous loop.
+- **NEVER** assign an issue to the boucle bot unless dispatching the loop.
+- **NEVER** skip the review step (preview screenshot + SHA-anchored
+  verdict) for UI changes.
+- **NEVER** bypass the `LESSONS.yml` admission test when adding a lesson.
+
+### Why
+
+The repo runs boucle autonomously on some issues. An interactive agent
+that implements directly (without an issue) produces work that is
+invisible to the loop, has no acceptance criteria, no review trail, and
+no doc-impact analysis. When boucle later touches the same area, it has
+no context for what the interactive agent did. The issue is the seam
+between interactive and autonomous work.
+
+Conversely, an interactive agent that adds `boucle:triage` and then
+implements the work itself races the loop: the loop triages, splits, and
+dispatches workers on the same issue, producing duplicated branches and
+wasted CI runners. The `boucle:triage` label is a **dispatch trigger**,
+not a tag — it means "loop, take this", not "I am working on this".
+
 ## MANDATORY operating principles
 
 These principles are **NON-NEGOTIABLE**. Any agent that violates them introduces a
