@@ -194,26 +194,10 @@ boucle lives in your forge. GitHub, GitLab. No external tool, no dashboard.
 6. **Approve, it's live** — I approve the PR (or boucle merges per config). The feature ships to production. It's live.
 7. **Lessons learned** — boucle captures what worked and what didn't from each loop, and applies those lessons to do better on the next feature.
 
-```mermaid
-flowchart TD
-    H1["👤 Create an issue"] --> T["🤖 Triage — acks with 👀, analyzes, drafts spec"]
-    T --> H2["👤 Approve the spec? — 👍 or 💬"]
-    H2 -->|"👍"| W["🤖 Worker — implements, deploys preview"]
-    H2 -->|"💬 comment"| T
-    W --> R["🤖 Reviewer — adversarial review, ✅ pass / ❌ fail"]
-    R -->|"✅ pass"| H3["👤 Approve the MR? — 👍 or 💬"]
-    R -->|"❌ fail"| W
-    H3 -->|"👍"| M["⚙️ Merge + Deploy"]
-    H3 -->|"💬 comment"| W
-    M --> E["🤖 E2E — verifies production, ✅ pass / ❌ fail"]
-    E -->|"✅ pass"| D["✅ Feature validated end-to-end"]
-    E -->|"❌ fail"| W
-    L["🤖 Self-improvement — lessons learned from each loop"]
-    L -.-> T
-    L -.-> W
-    L -.-> R
-    L -.-> E
-```
+> **Pipeline diagram** — the full 8-stage flowchart (triage → worker →
+> reviewer → e2e, with the Self-improvement feedback node) lives in
+> [ARCHITECTURE.md](ARCHITECTURE.md) §1. It is the single source of truth;
+> this README keeps the prose summary below.
 
 The loop runs asynchronously on CI. You intervene at two named gates —
 spec approval and MR review — not in a live chat. A chat-based agent demands
