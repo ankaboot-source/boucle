@@ -1444,6 +1444,26 @@ if [ "$FORGE" = "gitlab" ]; then
   echo ""
 fi
 
+# ── 7b. Auto-cancel pending pipelines — GitLab only ───────────────────
+# Prevents webhook storms from accumulating un-cancellable trigger pipelines
+# that saturate the runner pool and block deploy. Without this, a burst of
+# issue-update webhooks (e.g. bot label changes on stale issues) creates
+# dozens of trigger pipelines that all sit in pending/waiting_for_resource,
+# each consuming a runner slot for ~40s even though dispatch will no-op.
+# Combined with interruptible: true in the CI config, this ensures stale
+# pipelines are cancelled when a new one arrives on the same ref.
+if [ "$FORGE" = "gitlab" ]; then
+  echo "=== Auto-cancel pending pipelines ==="
+  CURRENT=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID" 2>/dev/null | jq -r '.auto_cancel_pending_pipelines // "disabled"' 2>/dev/null || echo "unknown")
+  if [ "$CURRENT" = "enabled" ]; then
+    log_skip "auto_cancel_pending_pipelines already enabled"
+  else
+    run "glab api --hostname $HOST -X PUT /projects/$PROJECT_ID -f auto_cancel_pending_pipelines=enabled >/dev/null"
+    log_pass "auto_cancel_pending_pipelines enabled (prevents trigger-pipeline accumulation)"
+  fi
+  echo ""
+fi
+
 # ── 8. Cloudflare Pages Project — forge-agnostic, opt-in ──────────────
 # Cloudflare is NOT the default deploy target. The setup skips CF Pages
 # project creation unless --cf-token is explicitly provided. Configure
