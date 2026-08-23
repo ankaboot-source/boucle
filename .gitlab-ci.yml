@@ -8,6 +8,24 @@
 # Dispatcher: single entry, parses webhook payload, routes to triage
 # Runner: shared shell executor — before_script bootstraps tools
 
+# ── Auto-cancel stale pipelines ─────────────────────────────────────────
+# When a webhook storm creates many trigger pipelines in quick succession
+# (e.g. 14 issue events in 15 seconds), old pipelines accumulate in
+# waiting_for_resource and saturate the shared runners, blocking the deploy
+# pipeline. Two mechanisms:
+#   1. workflow:auto_cancel: cancels any prior pipeline when a new one
+#      starts on the same ref. Requires the project setting
+#      auto_cancel_pending_pipelines=enabled (API or Settings → CI/CD).
+#   2. interruptible: true on every job (set in default: below): allows
+#      running jobs to be cancelled mid-execution when superseded.
+# Without these, a no-op dispatch that takes 40s to start + 2s to no-op
+# can block the runner pool for minutes, starving real work (deploy,
+# worker, reviewer).
+workflow:
+  auto_cancel:
+    old_job: true
+    new_job: false
+
 stages:
   - check
   - dispatch
@@ -175,6 +193,13 @@ default:
   # before_script, which probes `command -v` before installing anything — so
   # the same configuration serves both executor types.
   image: docker.io/ankabootops/boucle-agents:latest
+  # interruptible: true allows a running job to be cancelled when a newer
+  # pipeline supersedes it (combined with workflow:auto_cancel above and the
+  # project setting auto_cancel_pending_pipelines=enabled). Without this, a
+  # webhook storm of no-op dispatches saturates the runner pool — each job
+  # runs to completion (~40s) even though it will no-op, blocking real work
+  # (deploy, worker, reviewer) for minutes.
+  interruptible: true
   # NO `tags:` here, on purpose: jobs run UNTAGGED so the instance's shared
   # runners can pick them up. A fresh install therefore needs no runner of its
   # own — see README "Advanced — dedicated runners" to route to one instead.
