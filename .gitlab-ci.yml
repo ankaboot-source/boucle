@@ -13,18 +13,18 @@
 # (e.g. 14 issue events in 15 seconds), old pipelines accumulate in
 # waiting_for_resource and saturate the shared runners, blocking the deploy
 # pipeline. Two mechanisms:
-#   1. workflow:auto_cancel: cancels any prior pipeline when a new one
-#      starts on the same ref. Requires the project setting
-#      auto_cancel_pending_pipelines=enabled (API or Settings → CI/CD).
-#   2. interruptible: true on every job (set in default: below): allows
+#   1. Project setting: auto_cancel_pending_pipelines=enabled (API or
+#      Settings → CI/CD → General pipelines) — cancels pending pipelines
+#      when a new one starts on the same ref.
+#   2. interruptible: true on every job (set in default: below) — allows
 #      running jobs to be cancelled mid-execution when superseded.
+# NOTE: workflow:auto_cancel is intentionally NOT used — it cancels ALL
+# prior pipelines on the same ref, including the deploy pipeline (push
+# source) when a trigger pipeline arrives. The project setting alone is
+# sufficient: it cancels pending pipelines without touching running ones.
 # Without these, a no-op dispatch that takes 40s to start + 2s to no-op
 # can block the runner pool for minutes, starving real work (deploy,
 # worker, reviewer).
-workflow:
-  auto_cancel:
-    old_job: true
-    new_job: false
 
 stages:
   - check
