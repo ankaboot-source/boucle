@@ -504,15 +504,15 @@ dispatch:
   # for the single tagged runner to free up. Without this, a long-running
   # worker job can stall the entire loop by hogging the data runner.
   tags: []
-  # Serialize dispatch jobs so a webhook storm (many issue/MR events firing
-  # trigger pipelines in quick succession) cannot saturate the runner pool
-  # with concurrent no-op dispatches. A no-op dispatch exits in seconds, so
-  # the queue drains fast; without this, 40 concurrent no-ops paralyze the
-  # shared runner for ~20 min (observed on a consumer repo, 2026-08).
-  # Unlike worker/reviewer (boucle-issue-$BOUCLE_ISSUE), this is a STATIC
-  # name — BOUCLE_ISSUE is not available at dispatch eval time, and ALL
-  # dispatches should queue regardless of which issue they target.
-  resource_group: boucle-dispatch
+  # NOTE: resource_group: boucle-dispatch was removed. It serialized dispatch
+  # jobs, but jobs waiting for the resource_group lock are in
+  # `waiting_for_resource` status, which is NOT cancelled by
+  # auto_cancel_pending_pipelines (only `pending`/`created` are). This caused
+  # webhook storms to accumulate un-cancellable dispatch jobs that saturated
+  # the runner pool and blocked deploy. Without the resource_group, dispatch
+  # jobs are `pending` (waiting for a runner) and ARE auto-cancellable.
+  # Concurrent no-op dispatches are safe: they exit in ~2s, and
+  # auto_cancel_pending_pipelines cancels the queued ones before they start.
   rules:
     - if: $BOUCLE_ENABLED != "true"
       when: never
