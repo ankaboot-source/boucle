@@ -180,51 +180,120 @@ PY
 # exactly the class of regression boucle's audience (Product Builders,
 # not full-time developers) cannot read from a diff.
 
-@test "render-preview: parses a viewport list" {
-  run node -e "
-    const {parseViewports} = require('./bin/render-preview.cjs');
-    const v = parseViewports('390x844,1440x900');
-    if (v.length !== 2) process.exit(1);
-    if (v[0].width !== 390 || v[0].height !== 844) process.exit(1);
-    if (v[1].width !== 1440 || v[1].height !== 900) process.exit(1);
-  "
+_rp_have_browser() {
+  [ -n "${AGENT_BROWSER_EXECUTABLE_PATH:-}" ] && [ -x "${AGENT_BROWSER_EXECUTABLE_PATH}" ] && return 0
+  [ -n "${BOUCLE_CHROME:-}" ] && [ -x "${BOUCLE_CHROME}" ] && return 0
+  for c in chromium chromium-browser google-chrome google-chrome-stable; do
+    command -v "$c" > /dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
+_rp_have_agent_browser() {
+  command -v agent-browser > /dev/null 2>&1 || [ -x /tmp/node_modules/.bin/agent-browser ]
+}
+
+@test "render-preview: defaults to one phone and one desktop viewport" {
+  run grep -q "DEFAULT_VIEWPORTS='390x844,1440x900'" bin/render-preview
   assert_success
 }
 
 @test "render-preview: a malformed viewport is skipped, not fatal" {
   # A bad entry must not cost the human the preview entirely.
-  run node -e "
-    const {parseViewports} = require('./bin/render-preview.cjs');
-    const v = parseViewports('390x844, bogus ,1440x900');
-    if (v.length !== 2) process.exit(1);
-  " 2> /dev/null
-  assert_success
-}
-
-@test "render-preview: defaults to one phone and one desktop viewport" {
-  run grep -q "const DEFAULT_VIEWPORTS = '390x844,1440x900';" bin/render-preview.cjs
+  run grep -q 'ignoring malformed viewport' bin/render-preview
   assert_success
 }
 
 @test "render-preview: one failing viewport does not lose the others" {
-  run grep -q "A partial set of" bin/render-preview.cjs
-  assert_success
-  # Every viewport failing is still an error.
-  run grep -q "render-preview: every viewport failed" bin/render-preview.cjs
+  # Each viewport `continue`s on failure; only an empty result set is fatal.
+  run grep -q 'render-preview: every viewport failed' bin/render-preview
   assert_success
 }
 
 @test "render-preview: prints each produced path for the caller" {
-  run grep -q "for (const p of produced) console.log(p);" bin/render-preview.cjs
+  run grep -q "printf '%s' \"\$PRODUCED\"" bin/render-preview
   assert_success
 }
 
-@test "render-preview: requiring the module does not launch Chromium" {
-  # puppeteer-core is not installed in the test environment; a require that
-  # reached the launch path would throw.
-  run node -e "require('./bin/render-preview.cjs'); console.log('ok')"
+@test "render-preview: missing arguments exit 2 with usage" {
+  run bin/render-preview
+  [ "$status" -eq 2 ]
+  assert_output --partial 'Usage: bin/render-preview'
+}
+
+@test "render-preview: a missing local input exits 2" {
+  run bin/render-preview "$BATS_TEST_TMPDIR/absent.html" "$BATS_TEST_TMPDIR/out.png"
+  [ "$status" -eq 2 ]
+  assert_output --partial 'input missing or empty'
+}
+
+# Fraction of non-white pixels, sampled. A capture of about:blank scores ~0.
+# File size cannot stand in for this: a solid-colour page and a blank page
+# compress to within 100 bytes of each other (2827 vs 2726, measured).
+_rp_ink_ratio() {
+  python3 - "$1" <<'INKPY'
+import struct, sys, zlib
+d = open(sys.argv[1], 'rb').read()
+pos, idat, color, w, h = 8, b'', None, 0, 0
+while pos < len(d):
+    ln, typ = struct.unpack('>I4s', d[pos:pos + 8])
+    c = d[pos + 8:pos + 8 + ln]
+    if typ == b'IHDR':
+        w, h, _depth, color = struct.unpack('>IIBB', c[:10])
+    elif typ == b'IDAT':
+        idat += c
+    pos += 12 + ln
+ch = {0: 1, 2: 3, 4: 2, 6: 4}[color]
+raw = zlib.decompress(idat)
+stride = w * ch
+prev = bytearray(stride)
+i = ink = total = 0
+for y in range(h):
+    f = raw[i]; i += 1
+    line = bytearray(raw[i:i + stride]); i += stride
+    if f:
+        for x in range(stride):
+            a = line[x - ch] if x >= ch else 0
+            b = prev[x]
+            c2 = prev[x - ch] if x >= ch else 0
+            if f == 1:   line[x] = (line[x] + a) & 255
+            elif f == 2: line[x] = (line[x] + b) & 255
+            elif f == 3: line[x] = (line[x] + (a + b) // 2) & 255
+            else:
+                pr = a + b - c2
+                pa, pb, pc = abs(pr - a), abs(pr - b), abs(pr - c2)
+                line[x] = (line[x] + (a if (pa <= pb and pa <= pc) else (b if pb <= pc else c2))) & 255
+    if y % 8 == 0:
+        for x in range(0, w, 8):
+            o = x * ch
+            total += 1
+            if not (line[o] > 245 and line[o + 1] > 245 and line[o + 2] > 245):
+                ink += 1
+    prev = line
+print(f"{(ink / total if total else 0):.3f}")
+INKPY
+}
+
+@test "render-preview: renders one non-blank PNG per viewport" {
+  _rp_have_agent_browser || skip "agent-browser not installed"
+  _rp_have_browser || skip "no browser available"
+  cat > "$BATS_TEST_TMPDIR/preview.html" <<'HTML'
+<!doctype html><meta charset="utf-8"><title>fixture</title>
+<style>body{margin:0;background:#5b5bd6}.b{width:60%;height:180px;background:#22c55e;margin:20px auto}</style>
+<div class="b"></div>
+HTML
+  BOUCLE_PREVIEW_VIEWPORTS='320x480,800x600' \
+    run bin/render-preview "$BATS_TEST_TMPDIR/preview.html" "$BATS_TEST_TMPDIR/shot.png"
   assert_success
-  assert_output "ok"
+  # One path per viewport, on stdout, in order.
+  [ "$(printf '%s\n' "$output" | grep -c 'shot-')" -eq 2 ]
+  [ -s "$BATS_TEST_TMPDIR/shot-320x480.png" ]
+  [ -s "$BATS_TEST_TMPDIR/shot-800x600.png" ]
+  # The failure mode the script's URL assertion exists to catch: exit 0 with a
+  # blank capture. The fixture is a solid colour, so ink must dominate.
+  ratio="$(_rp_ink_ratio "$BATS_TEST_TMPDIR/shot-800x600.png")"
+  run python3 -c "import sys; sys.exit(0 if float('$ratio') > 0.5 else 1)"
+  [ "$status" -eq 0 ] || fail "capture looks blank (ink ratio $ratio)"
 }
 
 @test "triage preview: viewport uploads respect the total attachment budget" {

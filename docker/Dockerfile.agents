@@ -21,6 +21,14 @@
 FROM node:22-slim
 
 # apt: curl, jq, git, python3 (stdlib only — ui-ux-pro-max search.py)
+#      chromium — the distribution's own build, used by bin/render-preview for
+#      the triage preview and the worker's screenshots. Baking it in is what
+#      lets those steps download nothing at job time; the previous
+#      @sparticuz/chromium pulled 103 MB from npm and extracted 191 MB into
+#      /tmp on every job, for an AWS-Lambda build of a browser Debian already
+#      packages.
+#      fonts — a Chromium without them renders every glyph as a box, which
+#      would silently ruin the screenshot the human approves the spec on.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -28,6 +36,10 @@ RUN apt-get update \
         git \
         jq \
         python3 \
+        chromium \
+        fonts-dejavu-core \
+        fonts-liberation2 \
+        fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 
 # glab — GitLab CLI
@@ -50,8 +62,18 @@ RUN curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VERS
 RUN curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh | bash \
     || echo "codebase-memory-mcp install failed (non-fatal, before_script retries)"
 
+# agent-browser — the CLI bin/render-preview drives against the Chromium above.
+# Pinned: an unpinned install already bit us once, when @sparticuz/chromium
+# moved its exports to ESM in a minor bump and `headless` silently became
+# undefined.
+ARG AGENT_BROWSER_VERSION=0.34.0
+RUN npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
+    && agent-browser --version
+
 # default env for all boucle jobs
 ENV PATH="/usr/local/bin:${PATH}" \
-    GLAB_NO_UPDATE_NOTIFIER="true"
+    GLAB_NO_UPDATE_NOTIFIER="true" \
+    AGENT_BROWSER_EXECUTABLE_PATH="/usr/bin/chromium" \
+    AGENT_BROWSER_ARGS="--no-sandbox,--disable-dev-shm-usage"
 
 WORKDIR /workspace

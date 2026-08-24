@@ -76,7 +76,7 @@ self-healing sweep) runs automatically — there is nothing to run by hand.
 │   ├── fetch-mr-attachments      # mine /uploads/ from MR notes
 │   ├── forge-note            # marker-stamped note helper
 │   ├── health                # read-only per-issue loop-health summary
-│   └── render-preview.cjs    # preview URL rendering
+│   └── render-preview        # preview URL rendering
 ├── lib/                      # shared shell libraries
 │   ├── boucle.sh             # set_boucle_label, chain_to_role, resolve_reporter_id, ...
 │   ├── boucle-ci.sh          # shared CI stage bootstrap (sources forge + boucle.sh)

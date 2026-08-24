@@ -607,7 +607,7 @@ Use the local alternatives:
 | `bin/fetch-issue-attachments` | Download issue uploads | `glab api projects/:id/issues/<iid>/notes` then `glab api .../uploads/:secret/:filename` (or `gh api ...`) |
 | `bin/fetch-mr-attachments` | Download MR uploads | `glab api projects/:id/merge_requests/<iid>/notes` + download |
 | `bin/build-evidence-pack` | Extract charter docs + diff brief | The agent CLI reads `AGENTS.md`, `CONTEXT.md`, `LOOP.md`, `SKILL.md` directly with `Read` |
-| `bin/render-preview.cjs` | Render preview HTML → PNG | The agent CLI uses the browser tool (opencode browser) or screenshot |
+| `bin/render-preview` | Render preview HTML → PNG | The agent CLI uses the browser tool (opencode browser) or screenshot |
 | `bin/collapse-duplicate-notes` | Dedupe bot notes | Not needed in interactive mode (the human controls what they post) |
 
 ### Forge auth in local mode
