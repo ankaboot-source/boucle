@@ -581,16 +581,33 @@ boucle_cost_summary() {
 # cost.json) plus the run exit code. Survives across iterations via the
 # state cache (like cost.json). Read by bin/health and by the escalation
 # diagnostic below.
+# skills and arm (args 10-11) make this the JOIN table between "what the run
+# was given" and "how the run went". They were previously in a separate
+# skills-used.json that nothing could join against an outcome, which is the
+# whole reason skill effectiveness was unmeasurable.
 boucle_health_record() {
   local iid="$1" role="$2" iteration="$3" exit_code="$4"
   local prompt_chars="${5:-0}" tokens="${6:-}" cost="${7:-}"
   local model="${8:-}" provider="${9:-}"
+  local skills="${10:-}" arm="${11:-}" setup_fail="${12:-}"
   local file="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
   mkdir -p "$(dirname "$file")" 2> /dev/null || true
-  local ts
+  local ts skills_json
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  printf '{"timestamp":"%s","role":"%s","iteration":%s,"exit_code":%s,"prompt_chars":%s,"tokens":"%s","cost_usd":"%s","model":"%s","provider":"%s"}\n' \
+  # Comma-separated in, JSON array out. No jq dependency: this runs on every
+  # agent invocation and must never be the thing that breaks the loop.
+  skills_json="[]"
+  if [ -n "$skills" ]; then
+    skills_json="[$(printf '%s' "$skills" | tr ',' '\n' \
+      | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+      | grep -v '^$' \
+      | sed 's/.*/"&"/' \
+      | paste -sd, - 2> /dev/null || true)]"
+    [ "$skills_json" = "[]" ] || [ -n "$skills_json" ] || skills_json="[]"
+  fi
+  printf '{"timestamp":"%s","role":"%s","iteration":%s,"exit_code":%s,"prompt_chars":%s,"tokens":"%s","cost_usd":"%s","model":"%s","provider":"%s","skills":%s,"arm":"%s","setup_fail":"%s"}\n' \
     "$ts" "$role" "$iteration" "$exit_code" "$prompt_chars" "${tokens:-n/a}" "${cost:-n/a}" "$model" "$provider" \
+    "$skills_json" "${arm:-full}" "$setup_fail" \
     >> "$file" 2> /dev/null || true
 }
 
@@ -606,6 +623,353 @@ boucle_health_outcome() {
   printf '{"timestamp":"%s","role":"%s","outcome":"%s","detail":"%s"}\n' \
     "$ts" "$role" "$outcome" "$detail" \
     >> "$file" 2> /dev/null || true
+}
+
+# ── Skill-effectiveness measurement (docs/skills-audit.md §03) ────────
+#
+# Boucle ships 62 skills, asks every agent to load them, and until now could
+# not answer whether loading them helped: skills-used.json recorded WHICH
+# skills loaded and nothing recorded HOW THE RUN WENT, so the two could never
+# be joined. health.jsonl now carries both (skills + arm + setup_fail on the
+# run record), which makes the join local to one file.
+#
+# Three deliberate choices, each of which is the difference between a number
+# and a number that means something:
+#
+#   1. GRADED outcomes, not a binary verdict. Iterations-to-pass and human
+#      touches carry far more information per issue than pass/fail, and no
+#      consumer has the issue volume to detect a 3-6 pp effect on a binary.
+#
+#   2. RANDOMISED arm, not a correlation. The agent chooses when to load a
+#      skill, and it chooses on the issues it judges hard — which need more
+#      iterations regardless. A raw correlation over the logs would show
+#      skills making things WORSE even if they help. Randomising what the
+#      prompt is given breaks that confound. Opt-in (BOUCLE_EXPERIMENT):
+#      it deliberately degrades some runs, which is the consumer's call.
+#
+#   3. A DURABLE sink. health.jsonl lives in .boucle-state/ (gitignored,
+#      destroyed with the container) and in $BOUCLE_STATE_CACHE (never
+#      survives an ephemeral runner). It is the working table, not the
+#      archive: one row per issue is published to a metrics branch at the
+#      terminal transition, which is the only copy that outlives the job.
+
+BOUCLE_METRICS_BRANCH="${BOUCLE_METRICS_BRANCH:-boucle/metrics}"
+BOUCLE_METRICS_FILE="${BOUCLE_METRICS_FILE:-metrics.jsonl}"
+
+# boucle_metrics_enabled
+#
+# Is the metrics BRANCH write on? Default yes; opt OUT with
+# BOUCLE_METRICS_ENABLED=false (also accepts 0/no/off, any case).
+#
+# Deliberately opt-OUT, and deliberately not `= "true"`: a default-on flag
+# tested for equality against one spelling turns every other spelling into a
+# silent disable, so a consumer who sets BOUCLE_METRICS_ENABLED=1 to be
+# helpful gets the opposite of what they asked for — and gets it silently,
+# which is the worst way to lose a measurement. Only an explicitly falsy
+# value disables; anything unrecognised leaves it on.
+#
+# Scope is the BRANCH WRITE only. health.jsonl keeps being written locally
+# whatever this says: it predates the metrics branch and feeds bin/health and
+# the escalation diagnostic, which are decision-support, not analytics.
+boucle_metrics_enabled() {
+  case "$(printf '%s' "${BOUCLE_METRICS_ENABLED:-true}" | tr '[:upper:]' '[:lower:]')" in
+    false | 0 | no | off) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# boucle_classify_setup_failure <log>
+#
+# Print the setup-failure family when the transcript shows the run was
+# blocked by its ENVIRONMENT rather than by the task; print nothing
+# otherwise. The discriminator is "did the agent reach the work?" — a
+# missing interpreter, an absent dependency or an unresolvable path stops
+# it before the task; a failing test does not.
+#
+# This is ORTHOGONAL to the build-fail outcome, not a competitor to it: a
+# run can be both, and build-fail stays authoritative for "the code did not
+# build". Grouped as one family per the study's environment_infrastructure
+# mode, which is the mode with the largest measured skill effect
+# (5.3% -> 0.2%) and therefore the leading indicator for boucle.
+#
+# Service-lifecycle signatures (EADDRINUSE and friends) are deliberately
+# EXCLUDED: the study measures them as a separate mode with a much smaller
+# effect (2.7% -> 0.8%), and folding them in here would dilute the signal
+# this function exists to catch.
+boucle_classify_setup_failure() {
+  local log="${1:-}"
+  [ -f "$log" ] || return 0
+  [ -s "$log" ] || return 0
+
+  # Ordered most-specific first: the first family that matches wins, so a
+  # log carrying several signatures is attributed to the sharpest one.
+  if grep -qiE 'ModuleNotFoundError|ImportError: cannot import|Cannot find module|Could not resolve dependency|npm ERR!.*(ENOENT|ERESOLVE)|error: externally-managed-environment|no matching distribution found' "$log" 2> /dev/null; then
+    echo "dependency"
+    return 0
+  fi
+  if grep -qiE 'command not found|: not found$|is not recognized as an internal|executable file not found|No such command' "$log" 2> /dev/null; then
+    echo "toolchain"
+    return 0
+  fi
+  if grep -qiE "ENOENT: no such file or directory, (open|stat|scandir)|cannot open .*: No such file or directory|chdir: .*No such file|error: pathspec .* did not match" "$log" 2> /dev/null; then
+    echo "path"
+    return 0
+  fi
+  if grep -qiE 'EACCES|Permission denied \(publickey\)|Operation not permitted' "$log" 2> /dev/null; then
+    echo "permission"
+    return 0
+  fi
+  return 0
+}
+
+# boucle_experiment_arm <iid>
+#
+# Print the experiment arm for an issue: full | lessons | none.
+#
+#   full     the complete prompt (skill catalogue + lessons) — current behaviour
+#   lessons  lessons only, no catalogue      — the study's Workflow Memory arm
+#   none     neither                          — the study's Raw arm
+#
+# OFF BY DEFAULT, and it must stay that way: two arms out of three ship a
+# deliberately degraded prompt, which costs the consumer real iterations.
+# Enable with BOUCLE_EXPERIMENT=on once the consumer has agreed to trade
+# some throughput for an answer. When off, every issue is "full" and the
+# recorded arm still lets the analysis tell an experiment run from a
+# normal one.
+#
+# The assignment is a hash of the issue id, not a coin flip: every role and
+# every iteration of the same issue must land in the SAME arm, or the arm
+# stops being a property of the issue and the comparison collapses.
+boucle_experiment_arm() {
+  local iid="${1:-}"
+  case "${BOUCLE_EXPERIMENT:-off}" in
+    on | true | 1 | 3arm) ;;
+    *)
+      echo "full"
+      return 0
+      ;;
+  esac
+  [ -n "$iid" ] || {
+    echo "full"
+    return 0
+  }
+  local h
+  h=$(printf 'boucle-arm-%s' "$iid" | cksum 2> /dev/null | cut -d' ' -f1)
+  case "$h" in
+    '' | *[!0-9]*)
+      echo "full"
+      return 0
+      ;;
+  esac
+  case $((h % 3)) in
+    0) echo "full" ;;
+    1) echo "lessons" ;;
+    *) echo "none" ;;
+  esac
+}
+
+# boucle_human_touches <iid>
+#
+# Print "<spec>\t<delivery>": how many times a human had to intervene, split
+# by WHICH failure the intervention points at.
+#
+#   spec      human notes on the ISSUE, minus the amend-in-flight ones.
+#             A high count means triage produced a spec the human had to
+#             correct — a triage-quality signal.
+#   delivery  human notes on the MR/PR, plus the amend-in-flight ones (a
+#             human comment landing mid-work IS delivery feedback).
+#             A worker-quality signal, and the one skills act on.
+#
+# Humans are identified by the ABSENCE of the agent marker, never by actor
+# identity — SKILL.md invariant I7, and the only rule that holds in
+# mono-user mode where the bot and the human are the same account.
+boucle_human_touches() {
+  local iid="${1:-}"
+  local spec=0 delivery=0 amends=0
+  [ -n "$iid" ] || {
+    printf '0\t0\n'
+    return 0
+  }
+  command -v jq > /dev/null 2>&1 || {
+    printf '0\t0\n'
+    return 0
+  }
+
+  local marker="${BOUCLE_AGENT_MARKER:-<!-- boucle:agent -->}"
+
+  spec=$(forge_issue_notes "$iid" 2> /dev/null \
+    | jq -r --arg m "$marker" \
+      '[.[] | select((.system // false) | not)
+            | select((.body // "") | contains($m) | not)] | length' \
+      2> /dev/null || echo 0)
+
+  local mr_iid
+  mr_iid=$(forge_mr_lookup_by_branch "boucle/$iid" 2> /dev/null || echo "")
+  if [ -n "$mr_iid" ] && [ "$mr_iid" != "null" ]; then
+    delivery=$(forge_mr_notes "$mr_iid" 2> /dev/null \
+      | jq -r --arg m "$marker" \
+        '[.[] | select((.system // false) | not)
+              | select((.body // "") | contains($m) | not)] | length' \
+        2> /dev/null || echo 0)
+  fi
+
+  local health="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
+  if [ -s "$health" ]; then
+    amends=$(grep -c '"outcome":"amended-in-flight"' "$health" 2> /dev/null || echo 0)
+  fi
+
+  case "$spec" in '' | *[!0-9]*) spec=0 ;; esac
+  case "$delivery" in '' | *[!0-9]*) delivery=0 ;; esac
+  case "$amends" in '' | *[!0-9]*) amends=0 ;; esac
+
+  # An amend-in-flight is a human note on the ISSUE that arrived during
+  # work. It is delivery feedback, so move it across rather than counting
+  # it on both sides.
+  spec=$((spec - amends))
+  [ "$spec" -lt 0 ] && spec=0
+  delivery=$((delivery + amends))
+
+  printf '%s\t%s\n' "$spec" "$delivery"
+}
+
+# boucle_metrics_row <iid> <terminal>
+#
+# Print ONE JSON object summarising the whole issue. <terminal> is the state
+# the issue ended in: done | human.
+#
+# iterations_to_pass is CENSORED at BOUCLE_MAX_ITERATIONS: an escalated issue
+# did not take N iterations, it took "at least N". The censored flag is what
+# stops a later analysis from averaging the two together and reporting a
+# number that is wrong in a direction it cannot detect.
+boucle_metrics_row() {
+  local iid="${1:-}" terminal="${2:-unknown}"
+  local health="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
+  command -v jq > /dev/null 2>&1 || return 0
+  [ -s "$health" ] || return 0
+
+  local touches spec delivery
+  touches=$(boucle_human_touches "$iid" 2> /dev/null || printf '0\t0')
+  spec=$(printf '%s' "$touches" | cut -f1)
+  delivery=$(printf '%s' "$touches" | cut -f2)
+
+  local max_iter="${BOUCLE_MAX_ITERATIONS:-5}"
+  case "$max_iter" in '' | *[!0-9]*) max_iter=5 ;; esac
+
+  jq -s -c \
+    --arg iid "$iid" \
+    --arg terminal "$terminal" \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg project "${BOUCLE_PROJECT_ID:-}" \
+    --argjson spec "${spec:-0}" \
+    --argjson delivery "${delivery:-0}" \
+    --argjson max_iter "$max_iter" \
+    '
+    ([.[] | select(has("iteration")) | .iteration] | map(select(type == "number"))) as $iters
+    | ([.[] | select(has("skills")) | .skills[]] | unique) as $skills
+    | ([.[] | select(has("arm")) | .arm] | map(select(. != null and . != "")) | last // "full") as $arm
+    | ([.[] | select(has("setup_fail")) | .setup_fail] | map(select(. != null and . != ""))) as $setup
+    | ([.[] | select(has("outcome"))]) as $outcomes
+    | (($iters | max) // 0) as $last_iter
+    | {
+        schema: 1,
+        timestamp: $ts,
+        project: $project,
+        issue: $iid,
+        terminal: $terminal,
+        arm: $arm,
+        iterations: $last_iter,
+        iterations_censored: ($terminal != "done"),
+        max_iterations: $max_iter,
+        runs: ([.[] | select(has("iteration"))] | length),
+        skills: $skills,
+        skills_n: ($skills | length),
+        setup_failures: ($setup | length),
+        setup_failure_families: ($setup | unique),
+        human_spec: $spec,
+        human_delivery: $delivery,
+        build_fails: ([$outcomes[] | select(.outcome == "build-fail")] | length),
+        no_changes: ([$outcomes[] | select(.outcome == "no-changes")] | length),
+        tokens: ([.[] | select(has("tokens")) | .tokens
+                  | tonumber? // 0] | add // 0)
+      }' "$health" 2> /dev/null || true
+}
+
+# boucle_metrics_publish <iid> <terminal>
+#
+# Append one row to <metrics branch>:<metrics file>. This is the ONLY copy of
+# the measurement that outlives the job — .boucle-state/ is gitignored and
+# the runner cache never survives an ephemeral runner, which is why the
+# metrics that already existed (cost.json, skills-used.json) were being
+# collected and then thrown away on every consumer running GitHub-hosted
+# runners.
+#
+# An orphan branch, not main: this is an append-only measurement log, it must
+# never enter the consumer's history, trigger their CI, or collide with a
+# worker's branch. Fail-open throughout — a metrics write must never be the
+# thing that blocks a loop from reaching done.
+boucle_metrics_publish() {
+  local iid="${1:-}" terminal="${2:-unknown}"
+  [ -n "$iid" ] || return 0
+  # Say so rather than returning silently: a disabled metric that says nothing
+  # becomes "why is the metrics branch empty?" three weeks later.
+  if ! boucle_metrics_enabled; then
+    echo "[boucle:metrics] disabled (BOUCLE_METRICS_ENABLED=${BOUCLE_METRICS_ENABLED:-}) — issue #$iid not published; health.jsonl is still written locally" >&2
+    return 0
+  fi
+
+  local row
+  row=$(boucle_metrics_row "$iid" "$terminal" 2> /dev/null || echo "")
+  if [ -z "$row" ] || [ "$row" = "null" ]; then
+    echo "[boucle:metrics] no health data for issue #$iid — nothing to publish" >&2
+    return 0
+  fi
+
+  local branch="$BOUCLE_METRICS_BRANCH" file="$BOUCLE_METRICS_FILE"
+  local tmp
+  tmp=$(mktemp -d 2> /dev/null) || return 0
+
+  # Read-modify-append against the remote, in a scratch worktree: the branch
+  # is shared by every issue in the project and two issues can finish at the
+  # same time. A push race loses the row, so retry on rejection.
+  local attempt
+  for attempt in 1 2 3; do
+    rm -rf "${tmp:?}/repo"
+    mkdir -p "$tmp/repo" || break
+    if ! git -C "$tmp/repo" init -q 2> /dev/null; then break; fi
+    git -C "$tmp/repo" remote add origin "$(git remote get-url origin 2> /dev/null || echo "")" 2> /dev/null || true
+
+    if git -C "$tmp/repo" fetch -q --depth 1 origin "$branch" 2> /dev/null; then
+      git -C "$tmp/repo" checkout -q FETCH_HEAD 2> /dev/null || true
+      git -C "$tmp/repo" checkout -q -B "$branch" 2> /dev/null || true
+    else
+      # First row ever: an ORPHAN branch, so the metrics log shares no
+      # history with the consumer's code.
+      git -C "$tmp/repo" checkout -q --orphan "$branch" 2> /dev/null || true
+      printf '%s\n' \
+        "# boucle metrics" "" \
+        "Append-only measurement log, one JSON object per issue." \
+        "Written by \`boucle_metrics_publish\` at the terminal transition." \
+        "Read with \`bin/skills-stats\`. Safe to delete: it is measurement," \
+        "never decision state." > "$tmp/repo/README.md" 2> /dev/null || true
+    fi
+
+    printf '%s\n' "$row" >> "$tmp/repo/$file" 2> /dev/null || break
+    git -C "$tmp/repo" add "$file" README.md 2> /dev/null || true
+    git -C "$tmp/repo" -c user.email="${BOUCLE_BOT_EMAIL:-boucle@localhost}" \
+      -c user.name="${BOUCLE_BOT_NAME:-boucle}" \
+      commit -q -m "metrics: issue #$iid ($terminal)" 2> /dev/null || break
+
+    if git -C "$tmp/repo" push -q origin "$branch" 2> /dev/null; then
+      echo "[boucle:metrics] published issue #$iid ($terminal) to $branch:$file" >&2
+      rm -rf "$tmp"
+      return 0
+    fi
+    echo "[boucle:metrics] push to $branch rejected (attempt $attempt) — refetching" >&2
+  done
+
+  rm -rf "$tmp"
+  echo "[boucle:metrics] WARN: could not publish metrics for issue #$iid — the row is lost, the loop is not" >&2
+  return 0
 }
 
 # Structured escalation diagnostic (#52). Reads health.jsonl + cost.json
@@ -966,6 +1330,17 @@ set_boucle_label() {
     # refresh that failed silently (API hiccup, race). Fail-open: never
     # blocks the loop. See LESSONS.yml lesson #97.
     boucle_board_upsert || true
+    # Publish the per-issue measurement row on the TERMINAL transition —
+    # the same "hook here, not at the ~19 call sites" reasoning as the two
+    # calls above. done and human are the only two states an issue does not
+    # leave, so this fires exactly once per issue and only when the loop has
+    # finished with it (iterations and human touches are final by then).
+    # Fail-open: a metrics write must never be what stops an issue reaching
+    # done. See docs/skills-audit.md §03.
+    case "$new" in
+      boucle:done) boucle_metrics_publish "$iid" "done" || true ;;
+      boucle:human) boucle_metrics_publish "$iid" "human" || true ;;
+    esac
   fi
   # Both reassignments are no-ops in mono-user mode: the issue already
   # belongs to the only human, and forges emit nothing when the assignee

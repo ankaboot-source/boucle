@@ -296,6 +296,10 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_DND_START` / `BOUCLE_DND_END` | `22:00` / `07:00` | Quiet-hours window: HH:MM 24h start/end. |
 | `BOUCLE_DND_TZ` | `UTC` | Quiet-hours timezone (IANA name, e.g. `Europe/Paris`); seeded by `bin/setup` from the machine's timezone. |
 | `BOUCLE_DND_EXCLUDE_DAYS` | *(empty)* | Comma-separated weekday names never in DND (e.g. `Fri,Sat`). |
+| `BOUCLE_EXPERIMENT` | `off` | Skill-effectiveness randomisation. `on` assigns each issue to `full` / `lessons` / `none` by a hash of its id, so `bin/skills-stats --experiment` can be read causally. **Opt-in**: two arms out of three ship a deliberately degraded prompt and cost real iterations. Off = every issue gets the full prompt (current behaviour), and the arm is still recorded. |
+| `BOUCLE_METRICS_ENABLED` | `true` | Publish one measurement row per issue to the metrics branch at the terminal transition. **On by default, opt-out**: only `false` / `0` / `no` / `off` (any case) disable it; any other value leaves it on, so a well-meant `=1` cannot silently switch it off. Disabling is logged, never silent. Scope is the branch write alone — `health.jsonl` keeps being written locally either way, because `bin/health` and the escalation diagnostic depend on it. |
+| `BOUCLE_METRICS_BRANCH` | `boucle/metrics` | Orphan branch holding the append-only measurement log. Shares no history with the consumer's code. |
+| `BOUCLE_METRICS_FILE` | `metrics.jsonl` | File on that branch, one JSON object per issue. |
 | `BOUCLE_DEPLOY_MODE` | `self` | Deploy mode: `self` (boucle runs `BOUCLE_DEPLOY_CMD`) or `external` (consumer's own CI/CD deploys). |
 | `BOUCLE_REVIEW_MODE` | `preview` | Review mode: `preview` (tests deployed preview), `diff` (reviews PR diff + check suites), or `screenshot` (builds locally, captures screenshots of impacted pages, reviewer grades via vision-model descriptions guided by acceptance criteria). **Auto-fallback:** `preview` mode auto-activates `screenshot` when the deploy provider has no per-branch preview (`github-pages`, `gitlab-pages`) — the worker captures screenshots locally instead of overwriting production, and the reviewer grades from those screenshots. A screenshot failure degrades to `diff` review. |
 | `BOUCLE_DEPLOY_PROVIDER` | *(empty)* | Deploy provider profile: `gitlab-pages` (declarative, token-less — leave `BOUCLE_DEPLOY_CMD` empty, live URL = `$CI_PAGES_URL`) or `github-pages` (declarative, token-less — worker pushes `$BOUCLE_BUILD_OUTPUT` to `gh-pages`, live URL = `https://<owner>.github.io/<repo>/`). Empty = deploy via `BOUCLE_DEPLOY_CMD`. |
@@ -594,6 +598,15 @@ transcript that cannot be read is recorded as `observable=no`, never as "no
 skills used": a missing measurement is not a finding of absence, and that
 distinction is what would make a gate built on this data safe.
 
+**Effectiveness measurement.** Knowing which skills loaded says nothing about
+whether loading them helped. The skills a run loaded, the arm it was assigned
+and whether its environment blocked it are therefore recorded **on the run
+record itself** in `health.jsonl`, which makes that file the join between what
+a run was given and how it went; one row per issue is published to the metrics
+branch at the terminal transition. Read it with `bin/skills-stats`. See
+[Skill-effectiveness measurement](#skill-effectiveness-measurement) below and
+[docs/skills-audit.md](docs/skills-audit.md).
+
 ## Cost accounting
 
 Every agent invocation appends one entry to `.boucle-state/<issue>/cost.json`
@@ -636,6 +649,73 @@ The file survives across iterations like `cost.json` and feeds two consumers:
 
 This is the "look at the data" principle applied to the loop itself, and
 the prerequisite for the upstream engine-defect flywheel (#54).
+
+## Skill-effectiveness measurement
+
+Boucle injects a 62-skill catalogue into every domain prompt and tells each
+agent four times that loading skills is "not optional", without ever measuring
+whether loading one changed anything. This is what answers that.
+
+**Graded outcomes, not a verdict.** A pass/fail flag carries almost no
+information per issue, and no consumer has the issue volume to detect a
+3–6 point effect on a binary. Each issue is summarised by how much work it
+cost instead: worker iterations, human comments on the issue (`human_spec` —
+a triage-quality signal), human comments on the MR plus mid-work amends
+(`human_delivery` — a worker-quality signal, and the one skills act on), and
+`setup_fail` runs.
+
+**`setup_fail` is the leading indicator.** It counts runs the *environment*
+blocked before the agent reached the task — a missing dependency, an absent
+binary, an unresolvable path, a permission error. It is orthogonal to the
+`build-fail` outcome, not a competitor: a run can be both, and `build-fail`
+stays authoritative for "the code did not build". It matters because this is
+the failure class skills demonstrably fix — the study behind
+[docs/skills-audit.md](docs/skills-audit.md) measures it dropping 5.3% → 0.2%,
+an effect ~25× the aggregate one, so it is where a real effect becomes
+visible first on a realistic issue volume.
+
+**Iterations are censored.** An escalated issue did not take N iterations, it
+took *at least* N. Rows carry `iterations_censored`, and `bin/skills-stats`
+never averages escalated and completed issues together.
+
+**The observed split is confounded, by construction.** The agent chooses when
+to load a skill, and it chooses on the issues it judges hard — which take more
+iterations whatever the prompt says. Correlating "skills loaded" against
+"iterations taken" therefore reports skills making things *worse* even when
+they help. `bin/skills-stats` prints that caveat next to the numbers rather
+than trusting the reader to remember it.
+
+**The arm is what breaks the confound.** With `BOUCLE_EXPERIMENT=on`, each
+issue is assigned `full` (catalogue + lessons), `lessons` (lessons only) or
+`none` (neither) by a hash of its id — so the assignment is stable across
+every role and iteration of that issue, and independent of how hard the agent
+judged it. **Off by default**: two arms out of three ship a deliberately
+degraded prompt, which costs real iterations, so it is the consumer's call.
+
+**Publishing is optional, and on by default.** `BOUCLE_METRICS_ENABLED=false`
+(or `0` / `no` / `off`) switches off the branch write; the flag is opt-out, so
+any unrecognised value leaves it on rather than silently disabling it, and a
+disabled publish says so on the `[boucle:metrics]` channel instead of returning
+quietly. It gates the branch write **only** — `health.jsonl` keeps being written
+locally either way, because `bin/health` and the escalation diagnostic are
+decision support rather than analytics and must not degrade when a consumer
+opts out of measurement.
+
+**The durable sink is a branch.** `health.jsonl` lives in `.boucle-state/`
+(gitignored, destroyed with the container) and in `BOUCLE_STATE_CACHE` (never
+survives an ephemeral runner) — it is the working table, not the archive. One
+row per issue is appended to `metrics.jsonl` on an **orphan** `boucle/metrics`
+branch when the issue reaches `boucle:done` or `boucle:human`. Orphan so the
+measurement log never enters the consumer's history or triggers their CI, and
+fail-open throughout: a metrics write must never be what stops an issue
+reaching done.
+
+```bash
+bin/skills-stats                # observed split (confounded, always available)
+bin/skills-stats --experiment   # arm split (causal; needs BOUCLE_EXPERIMENT runs)
+bin/skills-stats --per-skill    # one row per skill
+bin/skills-stats --json         # raw aggregate for a dashboard
+```
 
 ## Per-issue state
 

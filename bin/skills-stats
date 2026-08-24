@@ -1,0 +1,242 @@
+#!/usr/bin/env bash
+# bin/skills-stats — read the metrics log and report whether skills help.
+#
+# Boucle ships 62 skills, injects a catalogue into every domain agent's
+# prompt, and told each of them four times that loading skills is "not
+# optional" — without ever measuring whether loading one changed anything.
+# This is the reader that answers that.
+#
+# TWO MODES, and the difference between them is the difference between a
+# number and a number that means something:
+#
+#   --observed (default)
+#       Group issues by whether a skill was loaded. Cheap, always available,
+#       and CONFOUNDED: the agent chooses to load skills on the issues it
+#       judges hard, and hard issues take more iterations whatever the
+#       prompt says. Read it as a description of what happened, never as
+#       "skills caused this". A negative observed delta is the EXPECTED
+#       shape of selection bias, not evidence that skills hurt.
+#
+#   --experiment
+#       Group issues by the arm they were randomly assigned (full /
+#       lessons / none). Requires BOUCLE_EXPERIMENT=on to have been set
+#       while those issues ran. This one supports causal reading, because
+#       what the prompt was GIVEN was decided by a hash of the issue id
+#       rather than by the agent's judgement of difficulty.
+#
+# Metrics reported per group, chosen for information per issue rather than
+# for how good they look on a slide:
+#
+#   iterations        mean worker iterations. CENSORED for escalated issues
+#                     (they took "at least N"), so escalated and completed
+#                     issues are reported separately and never averaged
+#                     together.
+#   human_spec        human comments on the issue = triage quality
+#   human_delivery    human comments on the MR + amends = worker quality
+#   setup_fail        runs the environment blocked before the task. The
+#                     LEADING indicator: the study measures this mode
+#                     dropping 5.3% -> 0.2% with skills, an effect ~25x the
+#                     aggregate one, so it is the first place a real effect
+#                     becomes visible on a consumer's issue volume.
+#
+# Usage:
+#   bin/skills-stats                     # observed split, from the metrics branch
+#   bin/skills-stats --experiment        # arm split (needs BOUCLE_EXPERIMENT runs)
+#   bin/skills-stats --per-skill         # one row per skill
+#   bin/skills-stats --file <path>       # read a local metrics.jsonl instead
+#   bin/skills-stats --json              # raw aggregate, for a dashboard
+
+set -uo pipefail
+
+MODE="observed"
+PER_SKILL=0
+AS_JSON=0
+FILE=""
+BRANCH="${BOUCLE_METRICS_BRANCH:-boucle/metrics}"
+METRICS_FILE="${BOUCLE_METRICS_FILE:-metrics.jsonl}"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --experiment)
+      MODE="experiment"
+      shift
+      ;;
+    --observed)
+      MODE="observed"
+      shift
+      ;;
+    --per-skill)
+      PER_SKILL=1
+      shift
+      ;;
+    --json)
+      AS_JSON=1
+      shift
+      ;;
+    --file)
+      FILE="${2:?--file needs a path}"
+      shift 2
+      ;;
+    -h | --help)
+      sed -n '2,50p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+command -v jq > /dev/null 2>&1 || {
+  echo "ERROR: jq is required" >&2
+  exit 1
+}
+
+# ── Source the rows ───────────────────────────────────────────────────
+# The metrics branch is the only copy that outlives a job: .boucle-state/ is
+# gitignored and the runner cache never survives an ephemeral runner.
+ROWS=""
+if [ -n "$FILE" ]; then
+  [ -f "$FILE" ] || {
+    echo "ERROR: no such file: $FILE" >&2
+    exit 1
+  }
+  ROWS=$(cat "$FILE")
+else
+  git fetch -q --depth 50 origin "$BRANCH" 2> /dev/null || true
+  ROWS=$(git show "FETCH_HEAD:$METRICS_FILE" 2> /dev/null \
+    || git show "origin/$BRANCH:$METRICS_FILE" 2> /dev/null \
+    || echo "")
+fi
+
+if [ -z "$(printf '%s' "$ROWS" | tr -d '[:space:]')" ]; then
+  echo "No metrics yet."
+  echo
+  echo "One row is published per issue when it reaches boucle:done or"
+  echo "boucle:human, to the '$BRANCH' branch."
+  echo
+  echo "If issues have completed and this is still empty, the two likely"
+  echo "causes, in order:"
+  echo "  1. Publishing is switched off — BOUCLE_METRICS_ENABLED is set to"
+  echo "     false/0/no/off somewhere. It defaults to ON; unset it to restore."
+  echo "  2. The write failed. Check the job log for '[boucle:metrics]' lines,"
+  echo "     which say either 'published', 'disabled', or why it could not."
+  exit 0
+fi
+
+TOTAL=$(printf '%s\n' "$ROWS" | grep -c '^{' || echo 0)
+
+# ── Aggregate ─────────────────────────────────────────────────────────
+# Escalated issues are reported apart from completed ones throughout: their
+# iteration count is censored, and averaging a censored value with an
+# uncensored one produces a number that is wrong in a direction you cannot
+# see from the result.
+AGG=$(printf '%s\n' "$ROWS" | jq -s -c --arg mode "$MODE" '
+  map(select(type == "object" and has("issue")))
+  | map(. + {
+      _group: (if $mode == "experiment" then (.arm // "full")
+               else (if ((.skills_n // 0) > 0) then "skills" else "no-skills" end) end)
+    })
+  | group_by(._group)
+  | map({
+      group: .[0]._group,
+      issues: length,
+      done: ([.[] | select(.terminal == "done")] | length),
+      escalated: ([.[] | select(.terminal != "done")] | length),
+      first_pass: ([.[] | select(.terminal == "done" and (.iterations // 0) <= 1)] | length),
+      iterations_done: (
+        ([.[] | select(.terminal == "done") | .iterations // 0]) as $v
+        | if ($v | length) > 0 then (($v | add) / ($v | length)) else null end),
+      human_spec: (
+        ([.[] | .human_spec // 0]) as $v
+        | if ($v | length) > 0 then (($v | add) / ($v | length)) else null end),
+      human_delivery: (
+        ([.[] | .human_delivery // 0]) as $v
+        | if ($v | length) > 0 then (($v | add) / ($v | length)) else null end),
+      setup_fail_issues: ([.[] | select((.setup_failures // 0) > 0)] | length)
+    })
+  | sort_by(.group)' 2> /dev/null || echo "[]")
+
+if [ "$AS_JSON" = "1" ]; then
+  printf '%s\n' "$AGG" | jq .
+  exit 0
+fi
+
+fmt() { # fmt <value> <suffix>
+  if [ "$1" = "null" ]; then echo "n/a"; else printf '%.2f%s' "$1" "${2:-}"; fi
+}
+
+echo "boucle skills-stats — $TOTAL issue(s), grouped by ${MODE}"
+echo
+
+if [ "$MODE" = "experiment" ]; then
+  ARMS=$(printf '%s\n' "$AGG" | jq -r 'length')
+  if [ "${ARMS:-0}" -lt 2 ]; then
+    echo "⚠ Only one arm present. Randomisation was off while these issues ran,"
+    echo "  so this is an observational split wearing an experiment's label."
+    echo "  Set BOUCLE_EXPERIMENT=on to assign arms, then re-read once issues"
+    echo "  have completed under it. Until then prefer --observed, which at"
+    echo "  least does not claim to be causal."
+    echo
+  fi
+fi
+
+printf '%-12s %7s %6s %6s %11s %11s %10s %10s\n' \
+  GROUP ISSUES DONE ESCAL. ITER\(done\) FIRST-PASS HUMAN-SPC HUMAN-DEL
+printf '%s\n' "------------------------------------------------------------------------------------------"
+printf '%s\n' "$AGG" | jq -r '.[] | [.group, .issues, .done, .escalated,
+  (.iterations_done // "null"), .first_pass, (.human_spec // "null"), (.human_delivery // "null"),
+  .setup_fail_issues] | @tsv' \
+  | while IFS=$'\t' read -r g n done_n esc iter fp hs hd sf; do
+    fp_pct="n/a"
+    [ "${done_n:-0}" -gt 0 ] && fp_pct=$(awk -v a="$fp" -v b="$done_n" 'BEGIN{printf "%.0f%%", (a/b)*100}')
+    printf '%-12s %7s %6s %6s %11s %11s %10s %10s\n' \
+      "$g" "$n" "$done_n" "$esc" "$(fmt "$iter")" "$fp_pct" "$(fmt "$hs")" "$(fmt "$hd")"
+    SETUP_LINE="${SETUP_LINE:-}"
+    echo "$g|$sf|$n" >> "${TMPDIR:-/tmp}/boucle-setup-$$"
+  done
+
+echo
+echo "Leading indicator — issues with at least one environment-blocked run:"
+if [ -f "${TMPDIR:-/tmp}/boucle-setup-$$" ]; then
+  while IFS='|' read -r g sf n; do
+    pct="n/a"
+    [ "${n:-0}" -gt 0 ] && pct=$(awk -v a="$sf" -v b="$n" 'BEGIN{printf "%.0f%%", (a/b)*100}')
+    printf '  %-12s %s of %s (%s)\n' "$g" "$sf" "$n" "$pct"
+  done < "${TMPDIR:-/tmp}/boucle-setup-$$"
+  rm -f "${TMPDIR:-/tmp}/boucle-setup-$$"
+fi
+
+if [ "$PER_SKILL" = "1" ]; then
+  echo
+  echo "Per skill (issues where it was loaded):"
+  printf '  %-34s %6s %8s %11s\n' SKILL ISSUES DONE ITER\(done\)
+  printf '%s\n' "$ROWS" | jq -s -r '
+    map(select(type == "object" and has("issue")))
+    | [.[] | . as $r | (.skills // [])[] | {skill: ., row: $r}]
+    | group_by(.skill)
+    | map({skill: .[0].skill, issues: length,
+           done: ([.[] | select(.row.terminal == "done")] | length),
+           iter: (([.[] | select(.row.terminal == "done") | .row.iterations // 0]) as $v
+                  | if ($v | length) > 0 then (($v | add) / ($v | length)) else null end)})
+    | sort_by(-.issues)
+    | .[] | [.skill, .issues, .done, (.iter // "n/a")] | @tsv' 2> /dev/null \
+    | while IFS=$'\t' read -r sk n d it; do
+      printf '  %-34s %6s %8s %11s\n' "$sk" "$n" "$d" "$(fmt "$it")"
+    done
+fi
+
+echo
+if [ "$MODE" = "observed" ]; then
+  echo "⚠ Observed split: the agent chose when to load a skill, and it chooses"
+  echo "  on the issues it judges hard. A worse row for 'skills' is the expected"
+  echo "  shape of that selection, NOT evidence that skills hurt. For a causal"
+  echo "  reading run the loop with BOUCLE_EXPERIMENT=on and use --experiment."
+fi
+
+if [ "$TOTAL" -lt 30 ]; then
+  echo "⚠ $TOTAL issues is a direction, not a result. The effects this is looking"
+  echo "  for are 3-6 points; the environment-blocked indicator above is ~25x"
+  echo "  larger and is what will move first."
+fi
