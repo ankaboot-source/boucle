@@ -34,6 +34,31 @@ set -euo pipefail
 # "BOUCLE_WORKSPACE: unbound variable" (observed on framagit, 2026-08).
 : "${BOUCLE_WORKSPACE:=${CI_PROJECT_DIR:-$(pwd)}}"
 
+# ── Shared library ────────────────────────────────────────────────────
+# bin/jc is EXECUTED as its own process ("$BOUCLE_HOME/bin/jc" worker), not
+# sourced, so it does not inherit the functions the CI before_script loads.
+# It nevertheless calls boucle_health_record — which meant the call resolved
+# to "command not found", was swallowed by its own `|| true`, and health.jsonl
+# never received a single RUN record on any consumer. Only the stage outcomes
+# (written from the sourced CI stages) ever landed there, which is why the
+# half-empty file went unnoticed.
+#
+# Sourced defensively: guarded on the function being absent so a caller that
+# already sourced the library pays nothing, and fail-open so a missing or
+# broken library degrades the metrics rather than the loop. Any name the
+# library and this file share resolves to THIS file's definition, because
+# these definitions come later.
+if ! type boucle_health_record > /dev/null 2>&1; then
+  for _lib in "${BOUCLE_HOME:-}/lib/boucle.sh" "$(dirname "${BASH_SOURCE[0]}")/../lib/boucle.sh"; do
+    if [ -n "$_lib" ] && [ -f "$_lib" ]; then
+      # shellcheck source=/dev/null
+      . "$_lib" 2> /dev/null || true
+      break
+    fi
+  done
+  unset _lib
+fi
+
 # ── Args ──────────────────────────────────────────────────────────────
 ROLE="${1:?usage: bin/jc <role>}"
 ISSUE="${BOUCLE_ISSUE:-}"
@@ -1326,6 +1351,20 @@ Apply the four-point admission test from AGENTS.md. If no candidate passes, emit
       ;;
   esac
 
+  # ── Experiment arm (opt-in, skills audit §03) ────────────────────────
+  # Which prior experience this issue's prompt is allowed to carry:
+  #   full     catalogue + lessons  (the only arm when BOUCLE_EXPERIMENT is off)
+  #   lessons  lessons only         (the study's Workflow Memory arm)
+  #   none     neither              (the study's Raw arm)
+  #
+  # The point is causal, not cosmetic. The agent loads skills on the issues
+  # it judges hard, and hard issues need more iterations whatever the prompt
+  # says — so correlating "skills loaded" against "iterations taken" over
+  # the logs reports skills making things worse even when they help.
+  # Randomising what the prompt is GIVEN is what breaks that confound.
+  local arm
+  arm=$(boucle_experiment_arm "${BOUCLE_ISSUE:-}" 2> /dev/null || echo "full")
+
   # ── Inject relevant lessons (LESSONS.yml) ────────────────────────────
   # Agents never read LESSONS.yml voluntarily (0/68 runs observed on
   # boucle.dev). Instead of relying on the agent to call Read, extract the
@@ -1336,8 +1375,10 @@ Apply the four-point admission test from AGENTS.md. If no candidate passes, emit
   # Only for roles that post verdicts/triage (not e2e — 30-step budget).
   case "$role" in
     triage | worker | reviewer)
+      [ "$arm" = "none" ] && echo "[boucle:metrics] arm=none — lessons withheld from the $role prompt (BOUCLE_EXPERIMENT)" >&2
       local lessons_block=""
       local lessons_file="$BOUCLE_WORKSPACE/LESSONS.yml"
+      [ "$arm" = "none" ] && lessons_file="/nonexistent"
       [ -f "$lessons_file" ] || lessons_file="$BOUCLE_HOME/LESSONS.yml"
       if [ -f "$lessons_file" ]; then
         # Extract keywords from the issue body (lowercase, alphanumeric,
@@ -1486,7 +1527,9 @@ Draft file hygiene: if you write your draft verdict to a file, use \`\$BOUCLE_VE
   case "$role" in
     triage | worker | reviewer)
       local catalogue=""
-      if [ -x "${BOUCLE_HOME:-}/bin/skills-index" ]; then
+      if [ "$arm" != "full" ]; then
+        echo "[boucle:metrics] arm=$arm — skill catalogue withheld from the $role prompt (BOUCLE_EXPERIMENT)" >&2
+      elif [ -x "${BOUCLE_HOME:-}/bin/skills-index" ]; then
         catalogue=$("${BOUCLE_HOME}/bin/skills-index" 2> /dev/null || echo "")
       fi
       if [ -n "$catalogue" ]; then
@@ -2135,8 +2178,10 @@ if [ -n "${BOUCLE_PRICING_JSON:-}" ] && [ -n "$h_pt" ]; then
       2> /dev/null || echo "")
   [ "$h_cost" = "null" ] && h_cost=""
 fi
-boucle_health_record "$ISSUE" "$ROLE" "$ITERATION" "$AGENT_EXIT" \
-  "${prompt_total_chars:-0}" "${h_pt:-}" "${h_cost:-}" "$h_model" "$h_provider" || true
+# The health record is written in 7d, AFTER 7c has extracted the skills:
+# skills, arm and setup_fail are fields ON the run record, which is what
+# makes health.jsonl the join table between what a run was given and how it
+# went. Recording here would mean writing the row before those are known.
 
 record_cost || true
 
@@ -2176,9 +2221,14 @@ extract_skills_used() {
   return 0
 }
 
+# Sets SKILLS_USED (global) so the health record in 7d can carry the same
+# list. skills-used.json stays as a projection for anything already reading
+# it; health.jsonl is the file the analysis joins on.
+SKILLS_USED=""
 record_skills_used() {
   local used observable="yes"
   used=$(extract_skills_used "$AGENT_LOG" | paste -sd, - 2> /dev/null || echo "")
+  SKILLS_USED="$used"
   # A transcript we cannot read is NOT a finding of "no skills used".
   # Missing evidence stays explicit — that distinction is what makes a gate
   # built on this data safe.
@@ -2220,6 +2270,31 @@ record_skills_used() {
 }
 
 record_skills_used || true
+
+# ── 7d. Loop-health record (#52 + skills audit §03) ───────────────────
+# One JSONL line per agent run, derived from what we already emit. Read by
+# bin/health, by boucle_escalation_diagnostic, and by bin/skills-stats.
+#
+# Written HERE rather than in 7b because three of its fields are only known
+# once the transcript has been parsed:
+#   skills      what the agent actually loaded (7c)
+#   arm         which prompt this issue was given (opt-in experiment)
+#   setup_fail  whether the ENVIRONMENT blocked the run before the task
+#
+# setup_fail is orthogonal to the build-fail outcome, not a competitor: a run
+# can be both, and build-fail stays authoritative for "the code did not
+# build". It is recorded because it is the leading indicator — the study
+# measures the environment mode dropping 5.3% -> 0.2% with skills, an effect
+# 25x larger than the aggregate one and therefore the first place a real
+# effect would become visible on a consumer's issue volume.
+h_setup_fail=$(boucle_classify_setup_failure "$AGENT_LOG" 2> /dev/null || echo "")
+h_arm=$(boucle_experiment_arm "$ISSUE" 2> /dev/null || echo "full")
+if [ -n "$h_setup_fail" ]; then
+  echo "[boucle:metrics] role=$ROLE iteration=$ITERATION setup_fail=$h_setup_fail (the environment blocked this run before the task)" >&2
+fi
+boucle_health_record "$ISSUE" "$ROLE" "$ITERATION" "$AGENT_EXIT" \
+  "${prompt_total_chars:-0}" "${h_pt:-}" "${h_cost:-}" "$h_model" "$h_provider" \
+  "${SKILLS_USED:-}" "$h_arm" "$h_setup_fail" || true
 
 # ── 7b. Capture jcode session for interactive takeover (#54 item 2) ──
 # jcode persists every run as ~/.jcode/sessions/<id>.json + <id>.journal.jsonl.

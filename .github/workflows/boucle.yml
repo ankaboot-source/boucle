@@ -486,6 +486,11 @@ jobs:
             .boucle-state/**/agent-output.log
             # jcode session files for interactive takeover (#54 item 2).
             .boucle-state/**/session/
+            # Measurement files (docs/skills-audit.md §03). The durable copy
+            # is the metrics branch; these are the per-run detail behind it.
+            .boucle-state/**/health.jsonl
+            .boucle-state/**/cost.json
+            .boucle-state/**/skills-used.json
           if-no-files-found: ignore
           retention-days: 7
 
@@ -618,6 +623,11 @@ jobs:
             .boucle-state/**/agent-output.log
             # jcode session files for interactive takeover (#54 item 2).
             .boucle-state/**/session/
+            # Measurement files (docs/skills-audit.md §03). The durable copy
+            # is the metrics branch; these are the per-run detail behind it.
+            .boucle-state/**/health.jsonl
+            .boucle-state/**/cost.json
+            .boucle-state/**/skills-used.json
           if-no-files-found: ignore
           retention-days: 7
       - name: Save boucle state cache
@@ -726,6 +736,11 @@ jobs:
             .boucle-state/**/agent-output.log
             # jcode session files for interactive takeover (#54 item 2).
             .boucle-state/**/session/
+            # Measurement files (docs/skills-audit.md §03). The durable copy
+            # is the metrics branch; these are the per-run detail behind it.
+            .boucle-state/**/health.jsonl
+            .boucle-state/**/cost.json
+            .boucle-state/**/skills-used.json
           if-no-files-found: ignore
           retention-days: 7
 
@@ -1145,6 +1160,11 @@ jobs:
             .boucle-state/**/agent-output.log
             # jcode session files for interactive takeover (#54 item 2).
             .boucle-state/**/session/
+            # Measurement files (docs/skills-audit.md §03). The durable copy
+            # is the metrics branch; these are the per-run detail behind it.
+            .boucle-state/**/health.jsonl
+            .boucle-state/**/cost.json
+            .boucle-state/**/skills-used.json
           if-no-files-found: ignore
           retention-days: 7
 

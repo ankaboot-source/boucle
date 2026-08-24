@@ -141,7 +141,7 @@ reports the number needed to pick a ceiling. Set one.
 
 ---
 
-## 4. Skill usage is recorded without its outcome
+## 4. Skill usage is recorded without its outcome — IMPLEMENTED
 
 Withholding success/failure labels during distillation drops downstream success
 sharply — Gemini on Terminal-Bench-2 at `3s2f` falls from 0.7462 to 0.4000
@@ -151,33 +151,97 @@ the no-hint penalty is **negligible when the pool is success-only** (Codex
 Boucle's pool is *entirely* failures (§2), so outcome annotation is not a
 refinement here — it is the load-bearing element.
 
-`LESSONS.yml` has it, in the `❌ / ✅` schema. `skills-used.json` does not:
+`LESSONS.yml` has it, in the `❌ / ✅` schema. `skills-used.json` did not: it
+recorded *which* skills loaded while nothing recorded *how the run went*, so the
+two could never be joined.
 
-```json
-{"timestamp": "…", "role": "worker", "iteration": 2, "observable": true,
- "skills": ["ui-ux-pro-max", "test-driven-development"]}
+### What was built
+
+**The join is now local to one file.** `health.jsonl` already carried the run
+record (role, iteration, exit code, prompt size, tokens, cost, model). It now
+also carries, on the same line, the three things that were missing:
+`skills` (what the agent loaded), `arm` (what the prompt was given), and
+`setup_fail` (whether the environment blocked the run). `skills-used.json`
+survives as a projection for anything already reading it.
+
+**Graded outcomes, not a verdict.** Per issue: worker iterations, `human_spec`
+(human comments on the issue — a triage-quality signal), `human_delivery`
+(human comments on the MR plus mid-work amends — a worker-quality signal, and
+the one skills act on), and `setup_fail` runs. A binary pass/fail carries almost
+no information per issue, and no consumer has the volume to detect a 3–6 point
+effect on one.
+
+**Iterations are censored, and stay marked as such.** An escalated issue did not
+take N iterations, it took *at least* N. `iterations_censored` rides on every
+row and `bin/skills-stats` never averages escalated with completed issues —
+that average is wrong in a direction the reader cannot see from the result.
+
+**`setup_fail` is the leading indicator.** It classifies runs the *environment*
+blocked before the agent reached the task, in four families: `dependency`,
+`toolchain`, `path`, `permission`. Service-lifecycle signatures (`EADDRINUSE`
+and friends) are deliberately excluded — the paper measures those as a separate
+mode with a much smaller effect (2.7% → 0.8% against 5.3% → 0.2%), and folding
+them in would dilute the signal. It is orthogonal to the `build-fail` outcome
+rather than a competitor: a run can be both, and `build-fail` stays
+authoritative for "the code did not build".
+
+**The confound is broken by randomising, not by hoping.** The agent chooses when
+to load a skill, and it chooses on the issues it judges hard — which take more
+iterations whatever the prompt says. Correlating the two over the logs reports
+skills making things *worse* even when they help; this is why the paper built
+528 matched triples instead of correlating its own 8,135 records. With
+`BOUCLE_EXPERIMENT=on`, each issue is assigned `full` / `lessons` / `none` by a
+hash of its id — stable across every role and iteration of that issue, and
+independent of difficulty. **Off by default**: two arms out of three ship a
+deliberately degraded prompt, which costs the consumer real iterations, so it
+is their call. `bin/skills-stats` prints the confound warning next to the
+observed split rather than trusting the reader to remember it.
+
+**A durable sink, because there was none.** One row per issue is appended to
+`metrics.jsonl` on an orphan `boucle/metrics` branch at the terminal transition,
+hooked inside `set_boucle_label` — the same "hook here, not at the ~19 call
+sites" reasoning the notification and board-refresh hooks already use, so it
+fires exactly once per issue and only when iterations and human touches are
+final. Orphan so the log never enters the consumer's history or triggers their
+CI; fail-open throughout, so a metrics write can never be what stops an issue
+reaching done.
+
+### Two pre-existing bugs found while wiring this
+
+1. **`health.jsonl` never received a single run record.** `bin/jc` is *executed*
+   as its own process (`"$BOUCLE_HOME/bin/jc" worker`), not sourced, and never
+   sourced `lib/boucle.sh` — so its call to `boucle_health_record` resolved to
+   `command not found` and was swallowed by its own `|| true`. Only the stage
+   outcomes, written from the sourced CI stages, ever landed in the file. That
+   is why the half-empty file went unnoticed: it was never empty, just missing
+   every row that mattered. `bin/jc` now sources the library defensively
+   (guarded on the function being absent, so a caller that already sourced it
+   pays nothing).
+
+2. **The metrics files were never uploaded.** `lib/boucle.sh` said `cost.json`
+   and `skills-used.json` "belong in the job artifacts" — and neither was ever
+   listed in the artifact paths, on either forge. On an ephemeral runner every
+   run collected them and then destroyed them with the container. Both, plus
+   `health.jsonl`, are now in the artifact paths on GitLab and in all four
+   GitHub upload steps.
+
+### Reading it
+
+```bash
+bin/skills-stats                # observed split (confounded, always available)
+bin/skills-stats --experiment   # arm split (causal; needs BOUCLE_EXPERIMENT runs)
+bin/skills-stats --per-skill    # one row per skill
+bin/skills-stats --json         # raw aggregate for a dashboard
 ```
 
-Nothing says whether that iteration ended in a reviewer `PASS`, a reviewer
-`FAIL`, an e2e verdict, or an escalation. The file answers "were skills loaded?"
-and can never answer "did loading them help?" — which is the question the paper
-spends 8,135 records on, and the one that decides everything below.
+### The limit this does not remove
 
-**Proposed change.**
-
-1. Add `outcome: pass | fail | escalated | unknown` to each entry, back-filled by
-   `lib/boucle-ci/reviewer.sh` and `e2e.sh` when they post their verdict. The
-   iteration index is the join key; the verdict is already in state.
-2. Keep `unknown` explicit and distinct from `fail` — the same discipline that
-   already makes `observable` a separate field from an empty skill list.
-3. Add `bin/skills-index --stats`: per skill, `loaded_n`, `pass_rate`, and the
-   delta against runs that did *not* load it.
-
-This is the cheapest change and the largest unlock. Given §0's first correction
-— Skill vs Raw does not clear zero in the paired sample — boucle cannot assume
-its 62-skill catalogue pays for itself. It has to measure.
-
----
+The paper's effects are 3–6 points. Detecting 5 points on a binary at 80% power
+needs roughly 1,500 issues **per arm**, which no single consumer has. A
+per-consumer read will be **directional, not significant**, except on the
+environment indicator whose effect is ~25× larger. Making it significant means
+pooling across consumers, and that is an opt-in telemetry decision — a product
+question, not a technical one, and deliberately not answered here.
 
 ## 5. Three-quarters of the catalogue is a tutorial, not a runbook
 
@@ -362,7 +426,7 @@ boucle already produces them on every pipeline.
 | --- | --- | --- | --- |
 | **P0** | The four index defects (§6) | ~1 h | Skills the catalogue already claims to ship. Independent of the study |
 | **P0** | Stopword filter + whole-lesson cap on the retriever (§3) | ~2 h | The WM arm's `timeout_budget_exhaustion` is 6× Raw's |
-| **P1** | `outcome` on `skills-used.json` + `--stats` (§4) | ~½ day | Skill vs Raw does not clear zero in the paper. Boucle must measure its own |
+| ~~P1~~ **done** | Measurement: skills + arm + `setup_fail` on the run record, graded per-issue rows on an orphan metrics branch, `bin/skills-stats` (§4) | — | Shipped. Also fixed two pre-existing bugs: `bin/jc` never sourced the library so no run record was ever written, and the metrics files were never uploaded as artifacts |
 | **P1** | Abandonment clause on the load imperatives (§7) | ~1 h | `skill_guidance_misapplied_or_ignored` is 10.0% vs 0.8% Raw |
 | **P2** | Success arm for the lesson pipeline (§2) | ~1 day | Every lesson boucle owns was distilled from a loss — the one regime that goes below baseline |
 | **P3** | Runbook contract, the paper's 6-section template + `doctor --audit` blocker for boucle-owned skills (§5) | ~1 day | The 65.7% mechanism |

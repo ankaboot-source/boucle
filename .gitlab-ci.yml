@@ -182,6 +182,15 @@ variables:
     # jcode session files for interactive takeover (#54 item 2). bin/jc copies
     # the worker's session here so a human can resume it locally.
     - .boucle-state/**/session/
+    # Measurement files. lib/boucle.sh once said these "belong in the job
+    # artifacts" — they were never actually listed here, so on an ephemeral
+    # runner every run collected them and then destroyed them with the
+    # container. The durable copy is the metrics branch (one row per issue);
+    # these are the per-run detail behind that row, for debugging a number
+    # that looks wrong. See docs/skills-audit.md §03.
+    - .boucle-state/**/health.jsonl
+    - .boucle-state/**/cost.json
+    - .boucle-state/**/skills-used.json
 
 # ── Default: use node:22-slim (has node, npm, curl — much smaller than node:22) ─
 # The shared runner is a docker executor. node:22-slim is ~250MB vs ~1GB.
