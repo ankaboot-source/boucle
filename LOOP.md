@@ -297,7 +297,7 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_DND_TZ` | `UTC` | Quiet-hours timezone (IANA name, e.g. `Europe/Paris`); seeded by `bin/setup` from the machine's timezone. |
 | `BOUCLE_DND_EXCLUDE_DAYS` | *(empty)* | Comma-separated weekday names never in DND (e.g. `Fri,Sat`). |
 | `BOUCLE_EXPERIMENT` | `off` | Skill-effectiveness randomisation. `on` assigns each issue to `full` / `lessons` / `none` by a hash of its id, so `bin/skills-stats --experiment` can be read causally. **Opt-in**: two arms out of three ship a deliberately degraded prompt and cost real iterations. Off = every issue gets the full prompt (current behaviour), and the arm is still recorded. |
-| `BOUCLE_METRICS_ENABLED` | `true` | Publish one measurement row per issue at the terminal transition. `false` disables the publish; `health.jsonl` is still written locally. |
+| `BOUCLE_METRICS_ENABLED` | `true` | Publish one measurement row per issue to the metrics branch at the terminal transition. **On by default, opt-out**: only `false` / `0` / `no` / `off` (any case) disable it; any other value leaves it on, so a well-meant `=1` cannot silently switch it off. Disabling is logged, never silent. Scope is the branch write alone — `health.jsonl` keeps being written locally either way, because `bin/health` and the escalation diagnostic depend on it. |
 | `BOUCLE_METRICS_BRANCH` | `boucle/metrics` | Orphan branch holding the append-only measurement log. Shares no history with the consumer's code. |
 | `BOUCLE_METRICS_FILE` | `metrics.jsonl` | File on that branch, one JSON object per issue. |
 | `BOUCLE_DEPLOY_MODE` | `self` | Deploy mode: `self` (boucle runs `BOUCLE_DEPLOY_CMD`) or `external` (consumer's own CI/CD deploys). |
@@ -691,6 +691,15 @@ issue is assigned `full` (catalogue + lessons), `lessons` (lessons only) or
 every role and iteration of that issue, and independent of how hard the agent
 judged it. **Off by default**: two arms out of three ship a deliberately
 degraded prompt, which costs real iterations, so it is the consumer's call.
+
+**Publishing is optional, and on by default.** `BOUCLE_METRICS_ENABLED=false`
+(or `0` / `no` / `off`) switches off the branch write; the flag is opt-out, so
+any unrecognised value leaves it on rather than silently disabling it, and a
+disabled publish says so on the `[boucle:metrics]` channel instead of returning
+quietly. It gates the branch write **only** — `health.jsonl` keeps being written
+locally either way, because `bin/health` and the escalation diagnostic are
+decision support rather than analytics and must not degrade when a consumer
+opts out of measurement.
 
 **The durable sink is a branch.** `health.jsonl` lives in `.boucle-state/`
 (gitignored, destroyed with the container) and in `BOUCLE_STATE_CACHE` (never

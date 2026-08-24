@@ -197,6 +197,17 @@ deliberately degraded prompt, which costs the consumer real iterations, so it
 is their call. `bin/skills-stats` prints the confound warning next to the
 observed split rather than trusting the reader to remember it.
 
+**Publishing is optional, on by default, opt-out.** `BOUCLE_METRICS_ENABLED=false`
+(or `0` / `no` / `off`) switches off the branch write. The flag is deliberately
+opt-out rather than an equality test against one spelling: a default-on flag
+checked with `= "true"` turns every other spelling into a silent disable, so a
+consumer setting `=1` to be helpful would get the opposite of what they asked
+for, silently — the worst way to lose a measurement. A disabled publish logs
+that it was disabled. It gates the branch write **only**: `health.jsonl` keeps
+being written locally either way, because `bin/health` and the escalation
+diagnostic are decision support, not analytics, and must not degrade when a
+consumer opts out of measurement.
+
 **A durable sink, because there was none.** One row per issue is appended to
 `metrics.jsonl` on an orphan `boucle/metrics` branch at the terminal transition,
 hooked inside `set_boucle_label` — the same "hook here, not at the ~19 call

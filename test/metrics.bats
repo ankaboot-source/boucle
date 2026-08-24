@@ -254,6 +254,63 @@ stub_forge() {
   assert_output --partial "rc=0"
 }
 
+@test "toggle: publishing is ON by default" {
+  lib
+  unset BOUCLE_METRICS_ENABLED || true
+  run boucle_metrics_enabled
+  assert_success
+}
+
+@test "toggle: only an explicitly falsy value disables it" {
+  # A default-on flag tested for equality against one spelling turns every
+  # other spelling into a silent disable. Someone setting =1 to be helpful
+  # must not get the opposite of what they asked for.
+  lib
+  for v in false FALSE 0 no off; do
+    BOUCLE_METRICS_ENABLED="$v" run boucle_metrics_enabled
+    assert_failure
+  done
+  for v in true TRUE 1 yes banana; do
+    BOUCLE_METRICS_ENABLED="$v" run boucle_metrics_enabled
+    assert_success
+  done
+}
+
+@test "toggle: disabling skips the branch write and SAYS so" {
+  # Silence is how a disabled metric becomes "why is the branch empty?".
+  lib
+  health_fixture
+  REMOTE="$TMP/remote2.git"
+  git init -q --bare "$REMOTE"
+  WORK="$TMP/work2"
+  git init -q "$WORK"
+  git -C "$WORK" -c user.email=a@b -c user.name=a commit -q --allow-empty -m init
+  git -C "$WORK" remote add origin "$REMOTE"
+  git -C "$WORK" push -q origin HEAD:main
+  mkdir -p "$WORK/.boucle-state/7"
+  cp "$TMP/.boucle-state/7/health.jsonl" "$WORK/.boucle-state/7/"
+
+  run bash -c "cd '$WORK' && . '$REPO/lib/boucle.sh' 2>/dev/null;
+    BOUCLE_METRICS_ENABLED=false BOUCLE_WORKSPACE='$WORK' boucle_metrics_publish 7 done 2>&1"
+  assert_success
+  assert_output --partial "disabled"
+
+  run bash -c "git --git-dir='$REMOTE' rev-parse --verify boucle/metrics 2>&1 || echo ABSENT"
+  assert_output --partial "ABSENT"
+}
+
+@test "toggle: disabling the branch write does NOT stop health.jsonl" {
+  # health.jsonl predates the metrics branch and feeds bin/health and the
+  # escalation diagnostic — decision support, not analytics. Opting out of
+  # the analytics must not degrade the loop's own diagnostics.
+  lib
+  export BOUCLE_METRICS_ENABLED=false
+  boucle_health_record 7 worker 1 0 100 10 n/a m p "astro" full ""
+  run cat "$TMP/.boucle-state/7/health.jsonl"
+  assert_success
+  assert_output --partial '"skills":["astro"]'
+}
+
 @test "publish: the terminal transition is hooked once, not at each call site" {
   run grep -A4 'case "$new" in' "$REPO/lib/boucle.sh"
   assert_success

@@ -114,8 +114,14 @@ if [ -z "$(printf '%s' "$ROWS" | tr -d '[:space:]')" ]; then
   echo "No metrics yet."
   echo
   echo "One row is published per issue when it reaches boucle:done or"
-  echo "boucle:human, to the '$BRANCH' branch. If issues have completed and"
-  echo "this is still empty, check the job log for '[boucle:metrics]' lines."
+  echo "boucle:human, to the '$BRANCH' branch."
+  echo
+  echo "If issues have completed and this is still empty, the two likely"
+  echo "causes, in order:"
+  echo "  1. Publishing is switched off — BOUCLE_METRICS_ENABLED is set to"
+  echo "     false/0/no/off somewhere. It defaults to ON; unset it to restore."
+  echo "  2. The write failed. Check the job log for '[boucle:metrics]' lines,"
+  echo "     which say either 'published', 'disabled', or why it could not."
   exit 0
 fi
 

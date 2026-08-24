@@ -656,6 +656,28 @@ boucle_health_outcome() {
 BOUCLE_METRICS_BRANCH="${BOUCLE_METRICS_BRANCH:-boucle/metrics}"
 BOUCLE_METRICS_FILE="${BOUCLE_METRICS_FILE:-metrics.jsonl}"
 
+# boucle_metrics_enabled
+#
+# Is the metrics BRANCH write on? Default yes; opt OUT with
+# BOUCLE_METRICS_ENABLED=false (also accepts 0/no/off, any case).
+#
+# Deliberately opt-OUT, and deliberately not `= "true"`: a default-on flag
+# tested for equality against one spelling turns every other spelling into a
+# silent disable, so a consumer who sets BOUCLE_METRICS_ENABLED=1 to be
+# helpful gets the opposite of what they asked for — and gets it silently,
+# which is the worst way to lose a measurement. Only an explicitly falsy
+# value disables; anything unrecognised leaves it on.
+#
+# Scope is the BRANCH WRITE only. health.jsonl keeps being written locally
+# whatever this says: it predates the metrics branch and feeds bin/health and
+# the escalation diagnostic, which are decision-support, not analytics.
+boucle_metrics_enabled() {
+  case "$(printf '%s' "${BOUCLE_METRICS_ENABLED:-true}" | tr '[:upper:]' '[:lower:]')" in
+    false | 0 | no | off) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
 # boucle_classify_setup_failure <log>
 #
 # Print the setup-failure family when the transcript shows the run was
@@ -888,7 +910,12 @@ boucle_metrics_row() {
 boucle_metrics_publish() {
   local iid="${1:-}" terminal="${2:-unknown}"
   [ -n "$iid" ] || return 0
-  [ "${BOUCLE_METRICS_ENABLED:-true}" = "true" ] || return 0
+  # Say so rather than returning silently: a disabled metric that says nothing
+  # becomes "why is the metrics branch empty?" three weeks later.
+  if ! boucle_metrics_enabled; then
+    echo "[boucle:metrics] disabled (BOUCLE_METRICS_ENABLED=${BOUCLE_METRICS_ENABLED:-}) — issue #$iid not published; health.jsonl is still written locally" >&2
+    return 0
+  fi
 
   local row
   row=$(boucle_metrics_row "$iid" "$terminal" 2> /dev/null || echo "")
