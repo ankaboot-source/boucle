@@ -40,7 +40,7 @@ _resolve_local_forge_identity() {
     return 0 # no remote — best-effort, forge calls will fail with a clear message
   fi
 
-  local remote_host="" remote_path=""
+  local remote_host="" remote_path="" remote_body=""
   case "$remote_url" in
     git@*)
       remote_host="${remote_url#git@}"
@@ -51,14 +51,14 @@ _resolve_local_forge_identity() {
       remote_body="${remote_url#https://}"
       # Strip embedded credentials (user:pass@) — common in OAuth URLs
       # like https://oauth2:glpat-xxx@framagit.org/group/proj.git
-      remote_body="${remote_body#*[@]}"
+      remote_body="${remote_body#*@}"
       remote_host="${remote_body%%/*}"
       remote_path="${remote_body#*/}"
       ;;
     ssh://*)
       remote_body="${remote_url#ssh://}"
       # Strip user@ prefix if present (ssh://git@host/...)
-      remote_body="${remote_body#*[@]}"
+      remote_body="${remote_body#*@}"
       remote_host="${remote_body%%/*}"
       remote_path="${remote_body#*/}"
       ;;
