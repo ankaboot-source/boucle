@@ -124,13 +124,28 @@ configure_git_push() {
 # URL back in most of its push errors. Redacting here is what makes surfacing
 # the error safe.
 #
+# A protected default branch is called out separately: it is the one failure
+# here that retrying can never clear, so promising a retry would be false.
+#
 # Returns 0 if the push succeeded, 1 otherwise.
 push_update() {
   local out status
   out="$(git push 2>&1)"
   status=$?
   [ "$status" -eq 0 ] && return 0
-  echo "[boucle] WARN: push failed, will retry next pipeline" >&2
+  case "$out" in
+    *"protected branch"* | *"GH006"* | *"must be made through a pull request"* | *"pre-receive hook declined"*)
+      echo "[boucle] ERROR: push rejected — ${BOUCLE_DEFAULT_BRANCH:-the default branch} looks protected." >&2
+      echo "[boucle]   Self-update pushes straight to the default branch, so a protection" >&2
+      echo "[boucle]   rule that requires a pull request blocks it on every run. This will" >&2
+      echo "[boucle]   NOT clear by retrying: allow the boucle bot to bypass the rule, or" >&2
+      echo "[boucle]   turn self-update off (BOUCLE_UPDATE_DISABLE=true) and bump the" >&2
+      echo "[boucle]   engine by hand." >&2
+      ;;
+    *)
+      echo "[boucle] WARN: push failed, will retry next pipeline" >&2
+      ;;
+  esac
   printf '%s\n' "$out" | sed -e 's#://[^@/]*@#://***@#g' -e 's/^/[boucle]   /' >&2
   return 1
 }

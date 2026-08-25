@@ -365,3 +365,44 @@ setup() {
   assert_output --partial "https://***@github.com/acme/site.git"
   unset -f git
 }
+
+@test "push_update names branch protection instead of promising a retry" {
+  # A protected default branch is the one push failure retrying cannot clear.
+  # boucle.dev sat on an old engine for hours while every run logged
+  # "will retry next pipeline" — the retry could never have worked.
+  BOUCLE_DEFAULT_BRANCH="main"
+  git() {
+    echo "remote: error: GH006: Protected branch update failed for refs/heads/main." >&2
+    echo "remote: error: Changes must be made through a pull request." >&2
+    return 1
+  }
+  export -f git
+  run push_update
+  assert_failure
+  assert_output --partial "main looks protected"
+  refute_output --partial "will retry next pipeline"
+  unset -f git
+}
+
+@test "push_update still promises a retry for an ordinary transient failure" {
+  BOUCLE_DEFAULT_BRANCH="main"
+  git() { echo "fatal: unable to access: Could not resolve host: github.com" >&2; return 128; }
+  export -f git
+  run push_update
+  assert_failure
+  assert_output --partial "will retry next pipeline"
+  refute_output --partial "looks protected"
+  unset -f git
+}
+
+@test "push_update does not abort when BOUCLE_DEFAULT_BRANCH is unset (set -u)" {
+  # bin/update runs under `set -u`; the protected-branch branch must not be
+  # the thing that crashes the diagnostic it exists to print.
+  unset BOUCLE_DEFAULT_BRANCH
+  git() { echo "remote: error: GH006: Protected branch update failed." >&2; return 1; }
+  export -f git
+  run push_update
+  assert_failure
+  assert_output --partial "the default branch looks protected"
+  unset -f git
+}
