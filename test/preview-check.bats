@@ -274,6 +274,33 @@ print(f"{(ink / total if total else 0):.3f}")
 INKPY
 }
 
+@test "render-preview: an entirely malformed viewport list falls back to the defaults" {
+  _rp_have_agent_browser || skip "agent-browser not installed"
+  _rp_have_browser || skip "no browser available"
+  cat > "$BATS_TEST_TMPDIR/preview.html" <<'HTML'
+<!doctype html><meta charset="utf-8"><title>fixture</title><body style="background:#5b5bd6">
+HTML
+  BOUCLE_PREVIEW_VIEWPORTS='bogus,nawak' \
+    run bin/render-preview "$BATS_TEST_TMPDIR/preview.html" "$BATS_TEST_TMPDIR/fb.png"
+  assert_success
+  [ -s "$BATS_TEST_TMPDIR/fb-390x844.png" ]
+  [ -s "$BATS_TEST_TMPDIR/fb-1440x900.png" ]
+}
+
+@test "render-preview: a valid viewport that fails to render is not retried with the defaults" {
+  _rp_have_agent_browser || skip "agent-browser not installed"
+  _rp_have_browser || skip "no browser available"
+  # Regression: the fallback keyed on "nothing was produced" instead of
+  # "nothing parsed", so an unreachable page was re-rendered once per default
+  # viewport, burying the real error under repeats.
+  BOUCLE_PREVIEW_VIEWPORTS='800x600' \
+    run bin/render-preview "http://127.0.0.1:59999/nope.html" "$BATS_TEST_TMPDIR/dead.png"
+  [ "$status" -eq 1 ]
+  assert_output --partial 'every viewport failed'
+  refute_output --partial 'retrying with defaults'
+  [ ! -e "$BATS_TEST_TMPDIR/dead-390x844.png" ]
+}
+
 @test "render-preview: renders one non-blank PNG per viewport" {
   _rp_have_agent_browser || skip "agent-browser not installed"
   _rp_have_browser || skip "no browser available"

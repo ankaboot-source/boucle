@@ -125,7 +125,12 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # ── render each viewport ───────────────────────────────────────────────
+# PARSED and PRODUCED are deliberately separate. Falling back to the defaults
+# is right when the list was unusable, and wrong when a valid list simply
+# failed to render — retrying there would re-render an already-broken page
+# once per default viewport and bury the real error under repeats.
 PRODUCED=""
+PARSED=0
 for entry in $(printf '%s' "${BOUCLE_PREVIEW_VIEWPORTS:-$DEFAULT_VIEWPORTS}" | tr ',' ' '); do
   case "$entry" in
     [0-9]*x[0-9]*)
@@ -144,6 +149,7 @@ for entry in $(printf '%s' "${BOUCLE_PREVIEW_VIEWPORTS:-$DEFAULT_VIEWPORTS}" | t
       ;;
   esac
 
+  PARSED=$((PARSED + 1))
   TARGET="${OUT_DIR}/${STEM}-${W}x${H}${EXT}"
 
   if ! "$AB" --session "$SESSION" set viewport "$W" "$H" > /dev/null 2>&1; then
@@ -179,8 +185,9 @@ for entry in $(printf '%s' "${BOUCLE_PREVIEW_VIEWPORTS:-$DEFAULT_VIEWPORTS}" | t
 done
 
 # A viewport list that was entirely malformed falls back to the defaults,
-# matching the script this replaces.
-if [ -z "$PRODUCED" ] && [ "${BOUCLE_PREVIEW_VIEWPORTS:-$DEFAULT_VIEWPORTS}" != "$DEFAULT_VIEWPORTS" ]; then
+# matching the script this replaces. Keyed on PARSED, not PRODUCED: a valid
+# list that failed to render must surface that failure, not be retried.
+if [ "$PARSED" -eq 0 ] && [ "${BOUCLE_PREVIEW_VIEWPORTS:-$DEFAULT_VIEWPORTS}" != "$DEFAULT_VIEWPORTS" ]; then
   echo "render-preview: no usable viewport in BOUCLE_PREVIEW_VIEWPORTS — retrying with defaults" >&2
   BOUCLE_PREVIEW_VIEWPORTS="$DEFAULT_VIEWPORTS" exec "$0" "$INPUT" "$OUTPUT"
 fi
