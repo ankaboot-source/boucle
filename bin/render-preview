@@ -1,0 +1,200 @@
+#!/usr/bin/env sh
+# bin/render-preview — renders preview.html → one PNG per viewport via agent-browser.
+# Called by the triage visual-preview block and by the worker's screenshot step.
+# Usage: bin/render-preview <input.html|http(s)://url> <output.png>
+#
+# Replaces render-preview.cjs (puppeteer-core + @sparticuz/chromium). That pair
+# installed 103 MB from npm and extracted a further 191 MB into /tmp on every
+# job — 9.2 s before the first pixel, measured on a cold cache — to obtain an
+# AWS-Lambda-targeted Chromium that both CI hosts already ship. It also forced
+# Lambda-only launch flags (--single-process, --no-zygote, swiftshader) that
+# cost 3.5x the CPU on a rich page, and its `headless` export disappeared in
+# v149, so the old script passed `headless: undefined` to puppeteer and worked
+# only because that happens to be puppeteer's default.
+#
+# Contract kept identical to the script it replaces:
+#   - viewports from BOUCLE_PREVIEW_VIEWPORTS (comma-separated WxH,
+#     default one phone + one desktop); a malformed entry is skipped with a
+#     warning rather than failing the render
+#   - input may be a local file (rendered via file://) or an http(s):// URL
+#   - output is <stem>-<W>x<H><ext>, one file per viewport, full page
+#   - each produced path is printed on stdout, one per line
+#   - one viewport failing must not lose the others; exit 1 only if all failed
+#
+# Browser resolution order (first hit wins):
+#   1. $AGENT_BROWSER_EXECUTABLE_PATH  — set by the agents image
+#   2. $BOUCLE_CHROME                  — per-consumer override
+#   3. chromium / chromium-browser / google-chrome / google-chrome-stable
+#   4. nothing found → `agent-browser install` (needs network; last resort)
+set -eu
+
+DEFAULT_VIEWPORTS='390x844,1440x900'
+
+INPUT="${1:-}"
+OUTPUT="${2:-}"
+
+if [ -z "$INPUT" ] || [ -z "$OUTPUT" ]; then
+  echo "Usage: bin/render-preview <input.html|http(s)://url> <output.png>" >&2
+  exit 2
+fi
+
+case "$INPUT" in
+  http://* | https://*) : ;;
+  *)
+    if [ ! -s "$INPUT" ]; then
+      echo "render-preview: input missing or empty: $INPUT" >&2
+      exit 2
+    fi
+    ;;
+esac
+
+# ── agent-browser ──────────────────────────────────────────────────────
+# Baked into the agents image; the /tmp install is the fallback for runners
+# that start from a bare node image.
+if command -v agent-browser > /dev/null 2>&1; then
+  AB="agent-browser"
+elif [ -x /tmp/node_modules/.bin/agent-browser ]; then
+  AB="/tmp/node_modules/.bin/agent-browser"
+elif npm install --prefix /tmp agent-browser > /dev/null 2>&1; then
+  AB="/tmp/node_modules/.bin/agent-browser"
+else
+  echo "render-preview: agent-browser unavailable (not installed, npm install failed)" >&2
+  exit 1
+fi
+
+# ── browser executable ─────────────────────────────────────────────────
+if [ -n "${AGENT_BROWSER_EXECUTABLE_PATH:-}" ]; then
+  : # already exported, agent-browser picks it up
+elif [ -n "${BOUCLE_CHROME:-}" ]; then
+  AGENT_BROWSER_EXECUTABLE_PATH="$BOUCLE_CHROME"
+  export AGENT_BROWSER_EXECUTABLE_PATH
+else
+  for candidate in chromium chromium-browser google-chrome google-chrome-stable; do
+    if command -v "$candidate" > /dev/null 2>&1; then
+      AGENT_BROWSER_EXECUTABLE_PATH="$(command -v "$candidate")"
+      export AGENT_BROWSER_EXECUTABLE_PATH
+      break
+    fi
+  done
+fi
+
+if [ -z "${AGENT_BROWSER_EXECUTABLE_PATH:-}" ]; then
+  echo "render-preview: no system browser found — falling back to 'agent-browser install'" >&2
+  if ! "$AB" install > /dev/null 2>&1; then
+    echo "render-preview: agent-browser install failed and no browser is present" >&2
+    exit 1
+  fi
+fi
+
+# CI containers run as root without a usable sandbox, and /dev/shm is small.
+AGENT_BROWSER_ARGS="${AGENT_BROWSER_ARGS:---no-sandbox,--disable-dev-shm-usage}"
+export AGENT_BROWSER_ARGS
+
+# file:// navigation needs this. Note it must be the environment variable, not
+# the documented `--allow-file-access` CLI flag: passing the flag leaves the
+# page on about:blank and yields a blank PNG with a zero exit code (verified on
+# 0.27.0 and 0.34.0, and against agent-browser main at 021d925 where the flag
+# does reach Chrome's argv only through this variable).
+AGENT_BROWSER_ALLOW_FILE_ACCESS=1
+export AGENT_BROWSER_ALLOW_FILE_ACCESS
+
+# ── target URL ─────────────────────────────────────────────────────────
+case "$INPUT" in
+  http://* | https://*) URL="$INPUT" ;;
+  *) URL="file://$(cd "$(dirname "$INPUT")" && pwd)/$(basename "$INPUT")" ;;
+esac
+
+# ── output naming: <stem>-<W>x<H><ext> ─────────────────────────────────
+OUT_DIR="$(dirname "$OUTPUT")"
+OUT_BASE="$(basename "$OUTPUT")"
+case "$OUT_BASE" in
+  *.*)
+    EXT=".${OUT_BASE##*.}"
+    STEM="${OUT_BASE%.*}"
+    ;;
+  *)
+    EXT=".png"
+    STEM="$OUT_BASE"
+    ;;
+esac
+
+SESSION="boucle-preview-$$"
+cleanup() {
+  "$AB" --session "$SESSION" close > /dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+# ── render each viewport ───────────────────────────────────────────────
+# PARSED and PRODUCED are deliberately separate. Falling back to the defaults
+# is right when the list was unusable, and wrong when a valid list simply
+# failed to render — retrying there would re-render an already-broken page
+# once per default viewport and bury the real error under repeats.
+PRODUCED=""
+PARSED=0
+for entry in $(printf '%s' "${BOUCLE_PREVIEW_VIEWPORTS:-$DEFAULT_VIEWPORTS}" | tr ',' ' '); do
+  case "$entry" in
+    [0-9]*x[0-9]*)
+      W="${entry%%x*}"
+      H="${entry##*x}"
+      ;;
+    *)
+      echo "render-preview: ignoring malformed viewport \"$entry\" (expected WxH)" >&2
+      continue
+      ;;
+  esac
+  case "$W$H" in
+    *[!0-9]*)
+      echo "render-preview: ignoring malformed viewport \"$entry\" (expected WxH)" >&2
+      continue
+      ;;
+  esac
+
+  PARSED=$((PARSED + 1))
+  TARGET="${OUT_DIR}/${STEM}-${W}x${H}${EXT}"
+
+  if ! "$AB" --session "$SESSION" set viewport "$W" "$H" > /dev/null 2>&1; then
+    echo "render-preview: viewport ${W}x${H} could not be set" >&2
+    continue
+  fi
+  if ! "$AB" --session "$SESSION" open "$URL" > /dev/null 2>&1; then
+    echo "render-preview: viewport ${W}x${H} failed: navigation to $URL failed" >&2
+    continue
+  fi
+
+  # agent-browser exits 0 on a navigation that silently did not happen,
+  # leaving the page on about:blank and the capture blank. Assert the landed
+  # URL so that failure mode is loud instead of shipping an empty preview.
+  LANDED="$("$AB" --session "$SESSION" get url 2> /dev/null | tr -d '[:space:]' || true)"
+  case "$LANDED" in
+    *about:blank* | '')
+      echo "render-preview: viewport ${W}x${H} failed: page stayed on '${LANDED:-nothing}'" >&2
+      continue
+      ;;
+  esac
+
+  if ! "$AB" --session "$SESSION" screenshot --full "$TARGET" > /dev/null 2>&1; then
+    echo "render-preview: viewport ${W}x${H} failed: screenshot error" >&2
+    continue
+  fi
+  if [ ! -s "$TARGET" ]; then
+    echo "render-preview: viewport ${W}x${H} failed: no file produced" >&2
+    continue
+  fi
+  PRODUCED="${PRODUCED}${TARGET}
+"
+done
+
+# A viewport list that was entirely malformed falls back to the defaults,
+# matching the script this replaces. Keyed on PARSED, not PRODUCED: a valid
+# list that failed to render must surface that failure, not be retried.
+if [ "$PARSED" -eq 0 ] && [ "${BOUCLE_PREVIEW_VIEWPORTS:-$DEFAULT_VIEWPORTS}" != "$DEFAULT_VIEWPORTS" ]; then
+  echo "render-preview: no usable viewport in BOUCLE_PREVIEW_VIEWPORTS — retrying with defaults" >&2
+  BOUCLE_PREVIEW_VIEWPORTS="$DEFAULT_VIEWPORTS" exec "$0" "$INPUT" "$OUTPUT"
+fi
+
+if [ -z "$PRODUCED" ]; then
+  echo "render-preview: every viewport failed" >&2
+  exit 1
+fi
+
+printf '%s' "$PRODUCED"

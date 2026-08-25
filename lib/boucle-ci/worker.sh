@@ -676,7 +676,7 @@ issue instead of churning code."
   # per-branch preview — github-pages, gitlab-pages), the worker builds the
   # site, serves it locally (python3 -m http.server — zero dependencies,
   # available on every CI runner), captures screenshots of impacted pages via
-  # puppeteer/chromium (reusing bin/render-preview.cjs with HTTP URL support),
+  # a browser (reusing bin/render-preview with HTTP URL support),
   # and uploads them as MR attachments. The reviewer then receives the
   # screenshots as text descriptions (via describe-images --criteria) —
   # no deployed preview URL, no token, no CDN propagation wait.
@@ -711,67 +711,64 @@ issue instead of churning code."
       [ -z "$impacted_path" ] && impacted_path="/"
       echo "[boucle] Screenshotting: $impacted_path"
 
-      # Install puppeteer-core + @sparticuz/chromium (same as triage).
-      local npm_tmp render_stderr
-      npm_tmp="/tmp/npm-screenshot-${CI_JOB_ID:-$$}"
+      # Screenshot the impacted page. bin/render-preview drives
+      # agent-browser against the Chromium baked into the agents image, so
+      # there is no per-job npm install or /tmp extraction any more.
+      local render_stderr
       render_stderr="$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE/screenshot-stderr.log"
       mkdir -p "$(dirname "$render_stderr")"
-      if npm install --prefix "$npm_tmp" puppeteer-core @sparticuz/chromium > /dev/null 2>&1; then
-        local screenshot_png
-        screenshot_png="$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE/screenshot.png"
-        # render-preview.cjs now supports HTTP URLs — pass the full
-        # localhost URL so puppeteer navigates to the served page.
-        local rendered_pngs
-        rendered_pngs=$(NODE_PATH="$npm_tmp/node_modules" node "$BOUCLE_HOME/bin/render-preview.cjs" \
-          "http://localhost:${server_port}${impacted_path}" "$screenshot_png" 2> "$render_stderr" || true)
-        if [ -n "$rendered_pngs" ]; then
-          # Upload each PNG to the forge and collect embeddable URLs.
-          local png_bytes=0
-          local png_max="${BOUCLE_IMAGE_TOTAL_MAX_BYTES:-52428800}"
-          while IFS= read -r png; do
-            [ -s "$png" ] || continue
-            local png_size
-            png_size=$(wc -c < "$png" 2> /dev/null || echo 0)
-            if [ "$((png_bytes + png_size))" -gt "$png_max" ]; then
-              echo "[boucle] WARN: screenshot $(basename "$png") skipped — would exceed BOUCLE_IMAGE_TOTAL_MAX_BYTES"
-              continue
-            fi
-            local img_path
-            img_path=$(forge_attachment_upload "$BOUCLE_ISSUE" "$png" "$(basename "$png")" 2> /dev/null || true)
-            if [ -n "$img_path" ]; then
-              png_bytes=$((png_bytes + png_size))
-              local dims label width
-              dims=$(basename "$png" .png | sed 's/^.*-//')
-              width=${dims%%x*}
-              case "$width" in
-                '' | *[!0-9]*) label="$dims" ;;
-                *)
-                  if [ "$width" -lt 600 ]; then
-                    label="📱 Mobile ($dims)"
-                  elif [ "$width" -lt 1024 ]; then
-                    label="📲 Tablet ($dims)"
-                  else
-                    label="🖥️ Desktop ($dims)"
-                  fi
-                  ;;
-              esac
-              screenshot_urls="${screenshot_urls}**${label}**
+      local screenshot_png
+      screenshot_png="$BOUCLE_WORKSPACE/.boucle-state/$BOUCLE_ISSUE/screenshot.png"
+      # render-preview accepts an http(s):// URL — pass the full localhost
+      # URL so the browser navigates to the served page.
+      local rendered_pngs
+      rendered_pngs=$("$BOUCLE_HOME/bin/render-preview" \
+        "http://localhost:${server_port}${impacted_path}" "$screenshot_png" 2> "$render_stderr" || true)
+      if [ -n "$rendered_pngs" ]; then
+        # Upload each PNG to the forge and collect embeddable URLs.
+        local png_bytes=0
+        local png_max="${BOUCLE_IMAGE_TOTAL_MAX_BYTES:-52428800}"
+        while IFS= read -r png; do
+          [ -s "$png" ] || continue
+          local png_size
+          png_size=$(wc -c < "$png" 2> /dev/null || echo 0)
+          if [ "$((png_bytes + png_size))" -gt "$png_max" ]; then
+            echo "[boucle] WARN: screenshot $(basename "$png") skipped — would exceed BOUCLE_IMAGE_TOTAL_MAX_BYTES"
+            continue
+          fi
+          local img_path
+          img_path=$(forge_attachment_upload "$BOUCLE_ISSUE" "$png" "$(basename "$png")" 2> /dev/null || true)
+          if [ -n "$img_path" ]; then
+            png_bytes=$((png_bytes + png_size))
+            local dims label width
+            dims=$(basename "$png" .png | sed 's/^.*-//')
+            width=${dims%%x*}
+            case "$width" in
+              '' | *[!0-9]*) label="$dims" ;;
+              *)
+                if [ "$width" -lt 600 ]; then
+                  label="📱 Mobile ($dims)"
+                elif [ "$width" -lt 1024 ]; then
+                  label="📲 Tablet ($dims)"
+                else
+                  label="🖥️ Desktop ($dims)"
+                fi
+                ;;
+            esac
+            screenshot_urls="${screenshot_urls}**${label}**
 
 ![Screenshot ${dims}](${img_path})
 
 "
-            fi
-          done <<< "$rendered_pngs"
-          echo "[boucle] Screenshots captured and uploaded (${png_bytes} bytes)"
-        else
-          echo "[boucle] WARN: screenshot render failed — falling back to diff review"
-          if [ -s "$render_stderr" ]; then
-            echo "[boucle:screenshot-stderr] last 20 lines:"
-            tail -n 20 "$render_stderr" | sed 's/^/[boucle:screenshot-stderr] /' >&2
           fi
-        fi
+        done <<< "$rendered_pngs"
+        echo "[boucle] Screenshots captured and uploaded (${png_bytes} bytes)"
       else
-        echo "[boucle] WARN: could not install puppeteer/chromium — falling back to diff review"
+        echo "[boucle] WARN: screenshot render failed — falling back to diff review"
+        if [ -s "$render_stderr" ]; then
+          echo "[boucle:screenshot-stderr] last 20 lines:"
+          tail -n 20 "$render_stderr" | sed 's/^/[boucle:screenshot-stderr] /' >&2
+        fi
       fi
     else
       echo "[boucle] WARN: local HTTP server did not start — falling back to diff review"

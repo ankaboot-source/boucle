@@ -10,7 +10,7 @@ BATS := bats
 
 # Shell scripts in the repo: *.sh / *.bash files + scripts in bin/ whose
 # SHEBANG says shell. bin/ is a mixed toolbox — bin/check-lessons is Python,
-# bin/render-preview.cjs is Node — and shellcheck does not skip a file it
+# for instance — and shellcheck does not skip a file it
 # cannot parse: it reports SC1064/SC1073 and fails the whole lint run. Match
 # on the shebang, the way the pre-commit hooks do (`types: [shell]`), so the
 # next non-shell tool dropped into bin/ cannot turn CI red.

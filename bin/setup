@@ -1454,7 +1454,7 @@ fi
 # pipelines are cancelled when a new one arrives on the same ref.
 if [ "$FORGE" = "gitlab" ]; then
   echo "=== Auto-cancel pending pipelines ==="
-  CURRENT=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID" 2>/dev/null | jq -r '.auto_cancel_pending_pipelines // "disabled"' 2>/dev/null || echo "unknown")
+  CURRENT=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID" 2> /dev/null | jq -r '.auto_cancel_pending_pipelines // "disabled"' 2> /dev/null || echo "unknown")
   if [ "$CURRENT" = "enabled" ]; then
     log_skip "auto_cancel_pending_pipelines already enabled"
   else

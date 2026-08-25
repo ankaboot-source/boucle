@@ -1110,7 +1110,7 @@ boucle_ci_doctor() {
   # Opt-in via BOUCLE_DOCTOR_BRANCH_CLEANUP (default: true).
   if [ "${BOUCLE_DOCTOR_BRANCH_CLEANUP:-true}" = "true" ]; then
     echo "Scanning for stale boucle/* branches..."
-    STALE_BRANCHES=$(forge_branch_list "boucle/" 2>/dev/null || true)
+    STALE_BRANCHES=$(forge_branch_list "boucle/" 2> /dev/null || true)
     if [ -n "$STALE_BRANCHES" ]; then
       CLEANUP_COUNT=0
       while IFS= read -r STALE_BRANCH; do
@@ -1120,7 +1120,7 @@ boucle_ci_doctor() {
         [ -z "$STALE_IID" ] && continue
         # Check if there's an open MR for this branch. If not, the branch
         # is stale (merged or closed MR, or no MR at all).
-        OPEN_MR=$(forge_mr_lookup_by_branch "boucle/$STALE_IID" opened 2>/dev/null || true)
+        OPEN_MR=$(forge_mr_lookup_by_branch "boucle/$STALE_IID" opened 2> /dev/null || true)
         if [ -z "$OPEN_MR" ]; then
           if forge_branch_delete "$STALE_BRANCH"; then
             echo "  → Deleted stale branch $STALE_BRANCH (no open MR for #$STALE_IID)"

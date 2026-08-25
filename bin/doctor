@@ -228,8 +228,8 @@ run_config_audit() {
   # silently bypasses the self-update: the engine syncs
   # .boucle/.gitlab-ci.yml, but GitLab uses the root file. A full copy
   # drifts from the engine and references paths that don't exist outside
-  # .boucle/ (e.g. $CI_PROJECT_DIR/bin/render-preview.cjs instead of
-  # $BOUCLE_HOME/bin/render-preview.cjs — the triage render-preview
+  # .boucle/ (e.g. $CI_PROJECT_DIR/bin/render-preview instead of
+  # $BOUCLE_HOME/bin/render-preview — the triage render-preview
   # failure class).
   if [ "$FORGE" = "gitlab" ]; then
     local _root="."

@@ -1750,7 +1750,7 @@ boucle_is_diff_review() {
 #   Returns 0 (true) if BOUCLE_REVIEW_MODE is "screenshot", 1 (false) otherwise.
 #   Screenshot mode: the worker builds the site, serves it locally
 #   (python3 -m http.server), captures screenshots of impacted pages via
-#   puppeteer/chromium, uploads them to the MR. The reviewer receives the
+#   a headless browser, uploads them to the MR. The reviewer receives the
 #   screenshots as text descriptions (via describe-images with criteria)
 #   instead of probing a deployed preview URL. No deploy command, no token,
 #   no CDN propagation wait. Ideal for GitLab CE (no per-branch Pages) or

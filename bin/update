@@ -227,8 +227,8 @@ download_and_extract() {
 # by bin/setup. Overwriting it with the full engine pipeline recreates the
 # stale-copy bug: the self-update syncs .boucle/.gitlab-ci.yml but GitLab
 # uses the root file, which drifts and references paths that don't exist
-# outside .boucle/ (e.g. $CI_PROJECT_DIR/bin/render-preview.cjs instead of
-# $BOUCLE_HOME/bin/render-preview.cjs — the triage render-preview failure
+# outside .boucle/ (e.g. $CI_PROJECT_DIR/bin/render-preview instead of
+# $BOUCLE_HOME/bin/render-preview — the triage render-preview failure
 # class, observed on urgence-palestine.fr #85).
 #
 # On GitHub, the workflow file MUST be at the repo root — GitHub Actions
