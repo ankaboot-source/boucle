@@ -18,6 +18,10 @@ setup() {
 }
 
 @test "lib/boucle.sh passes shfmt -d" {
+  # Guard as test/command.bats and test/dispatch.bats already do: without it a
+  # missing shfmt exits 127 and the test reports "lib/boucle.sh is not
+  # formatted", which is a different — and false — claim.
+  if ! command -v shfmt > /dev/null 2>&1; then skip "shfmt not installed"; fi
   run shfmt -d -i 2 -bn -ci -sr lib/boucle.sh
   assert_success
 }

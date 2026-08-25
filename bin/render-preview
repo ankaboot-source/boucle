@@ -108,8 +108,14 @@ esac
 OUT_DIR="$(dirname "$OUTPUT")"
 OUT_BASE="$(basename "$OUTPUT")"
 case "$OUT_BASE" in
-  *.*) EXT=".${OUT_BASE##*.}"; STEM="${OUT_BASE%.*}" ;;
-  *) EXT=".png"; STEM="$OUT_BASE" ;;
+  *.*)
+    EXT=".${OUT_BASE##*.}"
+    STEM="${OUT_BASE%.*}"
+    ;;
+  *)
+    EXT=".png"
+    STEM="$OUT_BASE"
+    ;;
 esac
 
 SESSION="boucle-preview-$$"

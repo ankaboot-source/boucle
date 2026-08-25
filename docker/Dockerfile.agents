@@ -62,6 +62,16 @@ RUN curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VERS
 RUN curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh | bash \
     || echo "codebase-memory-mcp install failed (non-fatal, before_script retries)"
 
+# Fail the build here, not at job time, if the browser is unusable. Debian
+# bookworm has published chromium ahead of its libc++/libunwind runtime deps
+# before (docker-library/python#991), which apt reports as unmet dependencies;
+# `apt-get install` alone would also succeed for a package that cannot start.
+# If this ever fires, the mitigations are, in order: rebuild once Debian's
+# mirrors catch up, add the missing libc++ packages explicitly, or move the
+# base image to node:22-trixie-slim (note: `node:22-slim` is bookworm-slim —
+# both tags resolve to the same digest).
+RUN chromium --version
+
 # agent-browser — the CLI bin/render-preview drives against the Chromium above.
 # Pinned: an unpinned install already bit us once, when @sparticuz/chromium
 # moved its exports to ESM in a minor bump and `headless` silently became
