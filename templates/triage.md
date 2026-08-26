@@ -3,6 +3,16 @@
 ## TL;DR
 {{tldr}}
 
+## Diagram *(mandatory when ## Metadata declares a structural impact; omit otherwise)*
+{{diagram_caption}}
+
+```mermaid
+%%{init: {"theme":"base","themeVariables":{"background":"transparent","primaryColor":"#f5c842","primaryTextColor":"#0d1117","primaryBorderColor":"#c9a233","lineColor":"#a0a0b8","secondaryColor":"#fdf3d7","tertiaryColor":"#e8e6f5","clusterBkg":"#faf7f2","clusterBorder":"#c9a233","edgeLabelBackground":"#ffffff","fontFamily":"Sora, system-ui, sans-serif","fontSize":"14px"}}}%%
+{{mermaid_body}}
+```
+
+<!-- boucle:diagram v=1 types={{diagram_types}} -->
+
 ## Analysis
 {{analysis}}
 
@@ -22,16 +32,6 @@
 ### Non-goals
 - {{non_goal_1}}
 - {{non_goal_2}}
-
-## Diagram *(mandatory when ## Metadata declares a structural impact; omit otherwise)*
-{{diagram_caption}}
-
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"background":"transparent","primaryColor":"#f5c842","primaryTextColor":"#0d1117","primaryBorderColor":"#c9a233","lineColor":"#a0a0b8","secondaryColor":"#fdf3d7","tertiaryColor":"#e8e6f5","clusterBkg":"#faf7f2","clusterBorder":"#c9a233","edgeLabelBackground":"#ffffff","fontFamily":"Sora, system-ui, sans-serif","fontSize":"14px"}}}%%
-{{mermaid_body}}
-```
-
-<!-- boucle:diagram v=1 types={{diagram_types}} -->
 
 ## Recurring theme *(optional — omit if no prior instances found)*
 🔁 Part of a recurring class (see #{{prior1}}, #{{prior2}}). Consider a root-cause fix, not a patch.

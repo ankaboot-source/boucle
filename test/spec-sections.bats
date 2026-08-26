@@ -423,6 +423,45 @@ React to approve.' | grep '^## ' | paste -sd' ' -" bash "$body"
   assert_output "NEEDS-INFO"
 }
 
+# ── The two visual sections open the spec ─────────────────────────────
+
+@test "layout: ## Diagram comes before ## Analysis in the template" {
+  run bash -c "grep '^## ' templates/triage.md | head -3 | paste -sd' ' -"
+  assert_output --partial '## TL;DR'
+  # TL;DR, then the diagram, then the prose.
+  [[ "$output" =~ TL\;DR.*Diagram.*Analysis ]]
+}
+
+@test "layout: ## Diagram comes before ## Analysis in the prompt's output format" {
+  run bash -c "awk '/^## Output format/,0' .jcode/agents/triage.md | grep -E '^## (TL;DR|Diagram|Analysis)' | paste -sd' ' -"
+  [[ "$output" =~ TL\;DR.*Diagram.*Analysis ]]
+}
+
+@test "layout: the rendered preview lands in the same slot, above the diagram" {
+  # CI inserts ## Preview at the first `## ` header after ## TL;DR — now
+  # the diagram — so preview and diagram sit together at the top.
+  local body='## TL;DR
+Short.
+
+## Diagram
+caption
+
+## Analysis
+prose'
+  run bash -c "printf '%s\n' \"\$1\" | awk -v img='![shot](/uploads/a.png)' '
+    /^## TL;DR/ { in_tldr=1; print; next }
+    in_tldr && /^## / && !inserted { print \"## Preview\"; print img; print \"\"; inserted=1; in_tldr=0 }
+    { print }
+    END { if (!inserted) { print \"\"; print \"## Preview\"; print img } }
+  ' | grep '^## ' | paste -sd' ' -" bash "$body"
+  assert_output '## TL;DR ## Preview ## Diagram ## Analysis'
+}
+
+@test "layout: the preview insertion in triage.sh still anchors on ## TL;DR" {
+  run bash -c "awk '/insert Preview right after/,/inserted=1/' lib/boucle-ci/triage.sh"
+  assert_output --partial '/^## TL;DR/ { in_tldr=1'
+}
+
 # ── The machine block is collapsed by default ─────────────────────────
 
 @test "collapsed: the fields parse through the <details> wrapper" {

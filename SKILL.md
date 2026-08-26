@@ -637,7 +637,7 @@ of truth for the format. To produce a boucle-valid message:
 
 | Template | Purpose |
 |---|---|
-| `templates/triage.md` | Triage comment (marker + TL;DR, Analysis, one `## Criteria` section — acceptance, must-haves, non-goals —, Questions, and one `## Metadata` section: impacts, impacted files, size, validation, disposition) |
+| `templates/triage.md` | Triage comment (marker + TL;DR, Diagram, Analysis, one `## Criteria` section — acceptance, must-haves, non-goals —, Questions, and one collapsed `## Metadata` section: impacts, impacted files, size, validation, disposition) |
 | `templates/verdict-reviewer.md` | Reviewer verdict (marker + VERDICT:) |
 | `templates/verdict-e2e.md` | E2e verdict (marker + VERDICT:) |
 | `templates/state.md` | state.md seed (Goal, Approach, Tried and rejected, Awaiting human) |

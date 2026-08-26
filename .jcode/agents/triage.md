@@ -163,7 +163,10 @@ Rules:
 - **An issue can have both structural and visual impacts** (e.g. `architecture,ui`) — then BOTH a diagram AND a preview are required.
 
 **`## Diagram` section (mandatory when `## Metadata` declares a structural kind).**
-When the Impacts line declares any of `architecture`, `data-model`, `process`,
+It goes **right after `## TL;DR`, before `## Analysis`** — CI inserts the rendered
+`## Preview` in that same slot, so the human opens the spec on what the change will look
+like (preview) and how it will work (diagram), before any prose. When the Impacts line
+declares any of `architecture`, `data-model`, `process`,
 `state-machine`, `data-flow`, `deployment`, include a `## Diagram` section with a
 **Mermaid** diagram. Pick the diagram type from the 27-type catalogue in
 [`templates/diagram-theme.md`](../../templates/diagram-theme.md) — that file is the
@@ -462,6 +465,16 @@ Post your **final triage comment** on the issue with this format:
 ## TL;DR
 <2-4 sentences in plain, non-technical language. Describe the visible result for the user, not the implementation mechanism.>
 
+## Diagram *(mandatory when ## Metadata declares a structural impact; omit otherwise)*
+<one-line caption: what decision the human is validating by reading this diagram>
+
+```mermaid
+%%{init: {"theme":"base","themeVariables":{"background":"transparent","primaryColor":"#f5c842","primaryTextColor":"#0d1117","primaryBorderColor":"#c9a233","lineColor":"#a0a0b8","secondaryColor":"#fdf3d7","tertiaryColor":"#e8e6f5","clusterBkg":"#faf7f2","clusterBorder":"#c9a233","edgeLabelBackground":"#ffffff","fontFamily":"Sora, system-ui, sans-serif","fontSize":"14px"}}}%%
+<flowchart | erDiagram | sequenceDiagram | stateDiagram-v2 | gantt | quadrantChart | xychart-beta | timeline | mindmap> — pick the type from templates/diagram-theme.md that best fits the concept
+```
+
+<!-- boucle:diagram v=1 types=<mermaid-block-types-used> -->
+
 ## Analysis
 <what the issue actually asks for, in your own words — structured via the four problem-framing lenses (see §1): user segment, pain points, business context, success metrics>
 
@@ -481,16 +494,6 @@ Post your **final triage comment** on the issue with this format:
 ### Non-goals
 - <something a reasonable implementer might do that this change must NOT do>
 - <a boundary: a file, subsystem, dependency or behaviour to leave alone>
-
-## Diagram *(mandatory when ## Metadata declares a structural impact; omit otherwise)*
-<one-line caption: what decision the human is validating by reading this diagram>
-
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"background":"transparent","primaryColor":"#f5c842","primaryTextColor":"#0d1117","primaryBorderColor":"#c9a233","lineColor":"#a0a0b8","secondaryColor":"#fdf3d7","tertiaryColor":"#e8e6f5","clusterBkg":"#faf7f2","clusterBorder":"#c9a233","edgeLabelBackground":"#ffffff","fontFamily":"Sora, system-ui, sans-serif","fontSize":"14px"}}}%%
-<flowchart | erDiagram | sequenceDiagram | stateDiagram-v2 | gantt | quadrantChart | xychart-beta | timeline | mindmap> — pick the type from templates/diagram-theme.md that best fits the concept
-```
-
-<!-- boucle:diagram v=1 types=<mermaid-block-types-used> -->
 
 ## Recurring theme *(optional — omit if no prior instances found)*
 🔁 Part of a recurring class (see #<prior1>, #<prior2>). Consider a root-cause fix, not a patch.
