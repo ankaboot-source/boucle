@@ -91,7 +91,7 @@ P1 and P4 are those two holes.
 | Long context stored as a file, searched from the REPL | Note thread trimmed and pushed into the prompt | **Transfers, half** (P3) |
 | `rlm()` async subagents, handle returned immediately | `swarm` in [.jcode/agents/worker.md](../.jcode/agents/worker.md) | **Converged** — but 0 instrumentation (P4) |
 | Subagent **specifications** as typed L3 state | None — swarm prompts improvised per run | **Transfers** (P4) |
-| Memories = facts, local by default | Nothing; `LESSONS.yml` is rules, global, human-curated | **Transfers, inverted** (P1) |
+| Memories = facts, local by default | Nothing; `LESSONS.yml` is rules, global, human-curated, and unwritable from a consumer | **Transfers, inverted** (P1) |
 | `/refine` over trajectory events, any outcome | Candidate emitted **only at escalation** (`bin/jc:1342`) | **Transfers** (P2) |
 | Versioned refinements, provenance, rollback | `pruned:` / `merged_into:` — manual, no provenance | **Transfers** (P1) |
 | Compaction: summary into L1, **originals kept in L3** | Tail-elision 750 → 300 → 120 chars, no retention | **Transfers** (P3) |
@@ -156,11 +156,38 @@ those gates exist to prevent.
 ### P1 — A facts store, per consumer, gated by the MR
 
 Boucle learns in exactly one place: `LESSONS.yml`, 107 entries,
-engine-global, human-curated, pushed to every consumer by `bin/update`.
-Nothing a run discovers about **this repository** outlives the issue:
-`.boucle-state/<issue>/` is per-issue and gitignored, and the state note
-hangs off the issue. Issue N+1 re-discovers the build command, the flaky
-suite, the missing binary.
+engine-global and human-curated. Nothing a run discovers about **this
+repository** outlives the issue: `.boucle-state/<issue>/` is per-issue and
+gitignored, and the state note hangs off the issue. Issue N+1 re-discovers
+the build command, the flaky suite, the missing binary.
+
+**"Is `LESSONS.yml` not already the facts store?"** Partly, by content —
+several of the 107 entries are environment facts written in imperative form
+(#3 is "MCP handshake hangs in CI"). But it cannot serve as one, for three
+reasons, and the third is the blocker:
+
+1. **Scope.** It is engine-global. A fact about consumer X's repository
+   ("build with pnpm, not npm") would ship to every other consumer.
+2. **Admission test.** AGENTS.md §"Lessons learned" demands
+   class-not-instance. Repo facts are instances by definition — the test
+   rejects exactly what a facts store is for.
+3. **The write path is closed.** At a consumer root, `LESSONS.yml` is a
+   **symlink into the engine submodule** (`bin/update:331` creates it;
+   `.boucle/` is a git submodule). An agent writing a lesson there writes
+   into a *different git repository*: `git add` from the consumer stages
+   nothing but a dirty submodule pointer, and `bin/check-boucle-sync`
+   rejects `.boucle/` changes that are not `chore(boucle):` bot commits. The
+   entry evaporates. **No agent can record a per-repo fact today**, whatever
+   the typology says.
+
+The seam nonetheless exists, and C1 should use it: `bin/update:338` refuses
+to symlink over a **real** root `LESSONS.yml` ("a consumer may have a custom
+LESSONS.yml"), and `bin/jc:1382` reads `$BOUCLE_WORKSPACE/LESSONS.yml`
+*before* falling back to `$BOUCLE_HOME/LESSONS.yml`. **But that seam is an
+override, not a merge**: a consumer who materialises a real root
+`LESSONS.yml` silently loses all 107 engine lessons. So the facts store MUST
+be a **separate file** — never a consumer-owned `LESSONS.yml` — unless the
+injection is first changed to concatenate both.
 
 That is the `setup_fail` class — the environment blocking a run before the
 agent reaches the task — which [docs/skills-audit.md](skills-audit.md)
