@@ -343,16 +343,23 @@ boucle's escalation diagnostic:
 > not because the harness dropped state, restricted useful actions,
 > miscounted resources, or terminated prematurely."
 
-Boucle's six failure classes (provider/quota, build-fail, no-changes,
-rebase-conflict, not-mergeable, unknown) already *imply* the split —
-provider/quota, rebase-conflict and not-mergeable are harness-side;
-build-fail and no-changes are model-side — but nothing states it, so nothing
-aggregates on it. Add an explicit `failure_side: harness | model` to the
-`health.jsonl` row and to the escalation comment, plus `budget-exhausted` as
-a seventh class (harness-side: the loop stopped, the task did not fail).
-`setup_fail` is already the harness-side leading indicator; this makes the
-whole escalation stream summable the same way. A consumer whose escalations
-are mostly harness-side has an engine bug to file upstream, not a hard issue.
+Boucle's six failure classes (`lib/boucle.sh:995` — `provider/quota`,
+`build-failure`, `step-budget-exhaustion`, `rebase-conflict`,
+`not-mergeable`, `unknown`) already *imply* the split, but nothing states it,
+so nothing aggregates on it. Add an explicit `failure_side: harness | model`
+to the `health.jsonl` row (`lib/boucle.sh:608`) and to the diagnostic
+comment.
+
+The interesting case is **`step-budget-exhaustion`**, and the paper decides
+it: "terminated prematurely" is listed as a *harness* failure, not a model
+one. A cap that fires is the harness stopping the run, and the action it
+implies — raise the cap, or split the issue — is nothing like the action for
+a model that shipped code which does not build. Labelling the side forces
+that question on the most common escalation class instead of leaving it
+implicit. `setup_fail` is already the harness-side leading indicator; this
+makes the whole escalation stream summable the same way, and a consumer
+whose escalations are mostly harness-side has an engine defect to file
+upstream (the #54 flywheel), not a hard issue.
 
 ## 5. Where boucle is already ahead
 
@@ -399,7 +406,55 @@ are mostly harness-side has an engine bug to file upstream, not a hard issue.
 - **Local-by-default, silent refinement.** Take the mechanism, drop the
   default — §3.
 
-## 7. Reproducing the boucle-side numbers
+## 7. Priorisation — impact vs cost
+
+§4 ranks by strength of argument. This ranks by what to build first. Ten
+atomic, separately shippable items; **S/M/L is implementation cost**, and the
+touch points are named so the estimate is checkable.
+
+| # | Item | Problem class | Impact | Cost | Touch points |
+| --- | --- | --- | --- | --- | --- |
+| **A1** | `failure_side: harness \| model` on the health row + diagnostic | Observability | **Medium** | **S** | `lib/boucle.sh:608` (one field), `:995` (one variable per `case` branch) |
+| **A2** | Count `swarm` spawns per run | Observability | **Medium** (unblocks D1) | **S** | Mirror `extract_skills_used` / `record_skills_used`, `bin/jc:2202–2240` |
+| **A3** | Read the `prompt_chars` already collected; set a default ceiling | Context budget | **Medium** (decides C2) | **S** | Nothing to write — the field exists on every health row |
+| **A4** | Verify `cost.json` counts swarm children | Accounting | **Medium**, **High** if broken | **S** to check | `bin/jc:2141`; the fix depends on what jcode reports |
+| **A5** | Name the remainder under the lessons block (`bin/lessons --grep`) | Context budget | **Low** | **S** | `bin/jc:1368` + a new ~40-line script |
+| **B1** | `BOUCLE_MAX_ISSUE_COST` / `_TOKENS` + `budget-exhausted` class | Control / termination | **Medium** | **M** | Stage entry in `lib/boucle-ci/*.sh`, `boucle_escalation_diagnostic` |
+| **B2** | Emit a refinement candidate at `boucle:done` | Learning | **High** | **M** | `bin/jc:1342` (the candidate path exists; it is the trigger that is wrong) |
+| **C1** | `BOUCLE-MEMORY.yml` — the facts store | Learning / retention | **Highest** | **L** | New file + admission test + `bin/check-memory` + injection scoped to triage/worker + CI guard + size cap |
+| **C2** | `[boucle:digest]` instead of the 120-char rung | Context budget | **Conditional** on A3 | **L** | `bin/jc` trimming ladder + an extra cheap-model call + retrieval pointer |
+| **D1** | Reusable subagent specifications | Coordination | **Unknown** | **M** | Blocked by A2 — do not build before it answers |
+
+**Read the matrix in four quadrants.**
+
+- **Do now (high value / S).** A1–A4. All four are measurement or labelling,
+  none changes agent behaviour, and three of them *decide* a later item —
+  which is boucle's own house rule (LOOP.md §Cost accounting: "measure first,
+  cap second"). A5 is nearly free and belongs in the same batch.
+- **Do next (M).** B2 before B1. B2 corrects an **active harm** — the
+  distillation pool is 100% failure-derived, and failure-only pools are
+  measured producing artifacts *worse than no artifact* — whereas B1 adds a
+  guard that protects spend without touching quality.
+- **The one big build (L).** C1. It is the only item that attacks the
+  `setup_fail` class (5.3% → 0.2%, ~25× the aggregate effect) and the only
+  one that **compounds**: every issue after the first in a given repository
+  benefits, so its value grows with consumer age while every other item's is
+  flat. Ship it after A1–A4 and B2, never before — B2 is what keeps its
+  input pool from being failure-only, and C1 without B2 would persist the
+  same biased distillate, per-repo this time.
+- **Condition or defer.** C2 only if A3 shows consumers running near a
+  ceiling — `BOUCLE_MAX_PROMPT_CHARS` defaults to `0`, so the digest fires
+  for nobody until someone opts in. D1 only if A2 shows `swarm` ever fires:
+  "many harness capabilities remain underused because current models were
+  not trained to operate them" is the paper's own conclusion, and boucle has
+  0 measurements either way.
+
+**Sequencing constraint.** C1 carries the safety requirement from §3 —
+never inject the facts store into the reviewer or e2e prompt — and that
+constraint MUST land with the first line of C1, not after. A memory store
+shipped without it is the Factorio trace with a `git log`.
+
+## 8. Reproducing the boucle-side numbers
 
 ```bash
 grep -cE '^[0-9]+:' LESSONS.yml            # 107 lessons
