@@ -883,7 +883,7 @@ ${screenshot_urls}"
   # ── File-impact marker refresh (F1 guard) ─────────────────────────
   # Refresh the <!-- boucle:files v=1 paths=... --> marker with the actual
   # branch diff. The triage agent embeds the marker inside its spec comment
-  # (the `## Impacted files` section); the refresh MUST NOT target that
+  # (the `## Metadata` section); the refresh MUST NOT target that
   # spec note — updating it with a marker-only body would destroy the
   # human-visible spec. Instead, target the newest marker note that is NOT
   # a triage spec comment (a prior refresh note); if none exists, post a

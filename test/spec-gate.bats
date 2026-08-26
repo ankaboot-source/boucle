@@ -63,8 +63,10 @@ gate() {
 }
 
 @test "gate: triage emits Validation in its comment format" {
-  run bash -c "grep -c 'Validation: author-required | autonomous' .jcode/agents/triage.md"
-  assert_output "2"
+  # The field lives in the merged ## Metadata section: draft format,
+  # Phase-1 final format, and the Output format block.
+  run bash -c "grep -c -- '- \*\*Validation\*\* — author-required | autonomous' .jcode/agents/triage.md"
+  assert_output "3"
 }
 
 @test "gate: the agent is handed the policy instead of the config applying it" {
