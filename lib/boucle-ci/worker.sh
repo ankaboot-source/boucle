@@ -13,6 +13,34 @@
 # All forge API calls go through forge_* functions (bin/forge/*.sh).
 # No direct glab/gh/curl calls. No CI_* or GITHUB_* variable references.
 
+# Extract one block of the triage spec's `## Criteria` section.
+#   $1 = triage comment body
+#   $2 = `### <name>` sub-header inside `## Criteria` (Acceptance,
+#        Must-haves, Non-goals)
+#   $3 = the standalone `## <name>` section the spec used before the
+#        three were grouped under `## Criteria`
+# The acceptance criteria, must-haves and non-goals were three top-level
+# sections; they are now three sub-blocks of one `## Criteria` section, so
+# the human reads one contract instead of three headers. Specs posted
+# before that change are still in flight (an issue paused at needs-info,
+# a spec awaiting approval), so the legacy section is the fallback — and
+# state.md keeps its own three sections either way, because the reviewer
+# and e2e agents read them from there.
+spec_criteria_block() {
+  local body="$1" sub="$2" legacy="$3" out
+  out=$(printf '%s\n' "$body" | awk -v hdr="^### ${sub}[[:space:]]*$" '
+    $0 ~ hdr { f = 1; next }
+    /^#+ / { f = 0 }
+    f')
+  if [ -z "$(printf '%s' "$out" | tr -d '[:space:]')" ]; then
+    out=$(printf '%s\n' "$body" | awk -v hdr="^## ${legacy}[[:space:]]*$" '
+      $0 ~ hdr { f = 1; next }
+      /^## / { f = 0 }
+      f')
+  fi
+  printf '%s\n' "$out"
+}
+
 boucle_ci_worker() {
   set +o pipefail
   export BOUCLE_ISSUE="${BOUCLE_ISSUE:?BOUCLE_ISSUE must be set}"
@@ -210,13 +238,13 @@ boucle_ci_worker() {
 $(echo "$triage_comment" | sed -n '/^## Analysis/,/^## /p' | head -n -1 | tail -n +2)
 
 ## Acceptance criteria
-$(echo "$triage_comment" | sed -n '/^## Draft acceptance criteria/,/^## /p' | head -n -1 | tail -n +2)
+$(spec_criteria_block "$triage_comment" "Acceptance" "Draft acceptance criteria")
 
 ## Must-haves
-$(echo "$triage_comment" | sed -n '/^## Must-haves/,/^## /p' | head -n -1 | tail -n +2)
+$(spec_criteria_block "$triage_comment" "Must-haves" "Must-haves")
 
 ## Non-goals
-$(echo "$triage_comment" | sed -n '/^## Non-goals/,/^## /p' | head -n -1 | tail -n +2)
+$(spec_criteria_block "$triage_comment" "Non-goals" "Non-goals")
 
 ## Spec delta
 (none yet — record amendments here as ADDED/MODIFIED/REMOVED with source)
@@ -883,7 +911,7 @@ ${screenshot_urls}"
   # ── File-impact marker refresh (F1 guard) ─────────────────────────
   # Refresh the <!-- boucle:files v=1 paths=... --> marker with the actual
   # branch diff. The triage agent embeds the marker inside its spec comment
-  # (the `## Impacted files` section); the refresh MUST NOT target that
+  # (the `## Metadata` section); the refresh MUST NOT target that
   # spec note — updating it with a marker-only body would destroy the
   # human-visible spec. Instead, target the newest marker note that is NOT
   # a triage spec comment (a prior refresh note); if none exists, post a

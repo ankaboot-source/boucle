@@ -55,23 +55,24 @@ repository files this issue will touch (source, styles, components, charter
 docs). Use the issue body, attachments, and the knowledge graph
 (`search_graph` / `trace_path` locally; `codebase-memory-mcp cli
 search_graph '{"query":"..."}'` in CI — lesson #23). Embed this prediction
-as a `## Impacted files` section **inside your final triage spec
-comment** (NOT a separate note), so the file claim lives in the spec the
-human reviews, not a distinct comment. The section contains BOTH a visible
-human-readable label AND the machine-readable marker:
+as the **Impacted files** line of the `## Metadata` section **inside your
+final triage spec comment** (NOT a separate note), so the file claim lives
+in the spec the human reviews, not a distinct comment. The section carries
+BOTH the visible human-readable line AND the machine-readable marker:
 
 ```
-## Impacted files
-📁 `src/pages/right-to-resist.astro`, `src/content.config.ts`
-
 <!-- boucle:files v=1 paths=src/content.config.ts,src/pages/right-to-resist.astro -->
+- **Impacted files** — 📁 `src/content.config.ts`, `src/pages/right-to-resist.astro`
 ```
+
+(An excerpt of the collapsed `## Metadata` block, which carries all five
+fields. See "Output format" below for the whole thing.)
 
 The visible line uses the same paths as the marker (comma-separated,
 repo-relative, no `./` prefix, sorted, deduplicated), each wrapped in
 backticks for readability. The marker `<!-- boucle:files v=1 paths=path1,path2 -->`
 is unchanged and machine-readable. If you cannot predict with confidence,
-omit the section (and its marker) — the gate fails open. This marker drives
+omit the line (and its marker) — the gate fails open. This marker drives
 the file-impact gate: a parallel worker whose issue claims the same files
 is deferred (`boucle:blocked`) until this issue's MR merges, avoiding
 rebase/merge conflicts. The worker job (CI, not you) later refreshes the
@@ -106,7 +107,7 @@ matching artifact in your final triage comment so the human can *see* and *valid
 will be built before any code is written.
 
 **This is deterministic, not advisory.** You MUST declare the issue's structural impacts
-in a `## Impacts` section with a machine-readable marker. CI parses that marker and
+on the **Impacts** line of the `## Metadata` section, with a machine-readable marker. CI parses that marker and
 cross-checks it against the `## Diagram` section (for structural kinds) and the
 `preview.html` + `RENDER_REQUEST` files (for visual kinds): if you declare an impact but
 omit the matching artifact, **CI blocks the spec-review approval** and re-triggers
@@ -116,7 +117,7 @@ diagram or its preview.
 **Complexity gate (Size M/L only).** The diagram and preview are required ONLY when the
 issue is **Size M or L**. A Size S issue with a structural or visual kind is probably
 trivial (a one-liner, a single-field rename, a button-label swap) — forcing a full
-diagram or mockup is noise, not clarity. CI combines `## Impacts` with the `## Classification` Size: if Size S, the gate skips (the artifact is optional). If Size M or L, the gate enforces. So: declare the kind honestly, and let the Size you already emit drive whether the artifact is mandatory.
+diagram or mockup is noise, not clarity. CI combines the **Impacts** and **Size** lines of `## Metadata`: if Size S, the gate skips (the artifact is optional). If Size M or L, the gate enforces. So: declare the kind honestly, and let the Size you already emit drive whether the artifact is mandatory.
 
 **Re-trigger etiquette (do NOT re-analyze from scratch).** If CI re-triggers you because
 a diagram or preview was missing, the "Prior discussion" block in your prompt contains
@@ -126,9 +127,9 @@ missing artifact** — do NOT re-analyze the issue, re-ask questions, or re-draf
 acceptance criteria. The spec was already good; it just lacked the artifact. Re-posting
 a full re-analysis wastes your step budget and the human's patience.
 
-**`## Impacts` section (MANDATORY — CI-gated).** Every final triage comment MUST
-include a `## Impacts` section declaring which impacts this issue has, with both a
-human-readable line and a machine-readable marker. Declare exactly the impacts that
+**Impacts declaration (MANDATORY — CI-gated).** Every final triage comment MUST
+declare which impacts this issue has on the **Impacts** line of `## Metadata`, with both
+a human-readable line and a machine-readable marker. Declare exactly the impacts that
 apply from this closed set:
 
 | Impact kind | Meaning | Required artifact |
@@ -144,24 +145,28 @@ apply from this closed set:
 | `design` | Design-system, token, or brand visual change | `preview.html` + `RENDER_REQUEST` |
 | `none` | No structural or visual impact (copy tweak, single-file, config flag) | (none) |
 
-Format (place the section between `## Non-goals` and `## Diagram`):
+Format (inside the collapsed `## Metadata` block, the last section of the comment):
 
 ```
-## Impacts
-🏗️ architecture, data-model
-
 <!-- boucle:impacts v=1 kinds=architecture,data-model -->
+- **Impacts** — 🏗️ architecture, data-model
 ```
+
+(An excerpt of the collapsed `## Metadata` block, which carries all five
+fields. See "Output format" below for the whole thing.)
 
 Rules:
 - The visible line uses the same `kinds` as the marker (comma-separated, from the closed set above, sorted, deduplicated).
 - If the issue has NO structural or visual impact, write `none` in both the visible line and the marker: `<!-- boucle:impacts v=1 kinds=none -->`.
-- **The marker is the source of truth for the CI gate.** A missing `## Impacts` section or marker → CI fails the gate (re-triggers triage). A marker declaring a structural kind (architecture, data-model, process, state-machine, data-flow, deployment) without a matching `## Diagram` section + `<!-- boucle:diagram v=1 -->` marker → CI fails the gate. A marker declaring a visual kind (ui, ux, design) without a `preview.html` + `RENDER_REQUEST` in `.boucle-state/<issue>/` → CI fails the gate.
+- **The marker is the source of truth for the CI gate.** A missing Impacts line or marker → CI fails the gate (re-triggers triage). A marker declaring a structural kind (architecture, data-model, process, state-machine, data-flow, deployment) without a matching `## Diagram` section + `<!-- boucle:diagram v=1 -->` marker → CI fails the gate. A marker declaring a visual kind (ui, ux, design) without a `preview.html` + `RENDER_REQUEST` in `.boucle-state/<issue>/` → CI fails the gate.
 - **Never invent kinds outside the closed set** — CI rejects unknown kinds and fails the gate.
 - **An issue can have both structural and visual impacts** (e.g. `architecture,ui`) — then BOTH a diagram AND a preview are required.
 
-**`## Diagram` section (mandatory when `## Impacts` declares a structural kind).**
-When `## Impacts` declares any of `architecture`, `data-model`, `process`,
+**`## Diagram` section (mandatory when `## Metadata` declares a structural kind).**
+It goes **right after `## TL;DR`, before `## Analysis`** — CI inserts the rendered
+`## Preview` in that same slot, so the human opens the spec on what the change will look
+like (preview) and how it will work (diagram), before any prose. When the Impacts line
+declares any of `architecture`, `data-model`, `process`,
 `state-machine`, `data-flow`, `deployment`, include a `## Diagram` section with a
 **Mermaid** diagram. Pick the diagram type from the 27-type catalogue in
 [`templates/diagram-theme.md`](../../templates/diagram-theme.md) — that file is the
@@ -171,7 +176,7 @@ and the full type catalogue. **Read it before drawing your first diagram** and p
 the theme block from memory — always copy it from `templates/diagram-theme.md` so the
 design system never drifts.
 
-When `## Impacts` declares only visual kinds (`ui`, `ux`, `design`) or `none`, omit the
+When the Impacts line declares only visual kinds (`ui`, `ux`, `design`) or `none`, omit the
 `## Diagram` section — the preview (for visual kinds) or the TL;DR (for `none`) suffices.
 
 **`## Diagram` marker (MANDATORY when a diagram is present).** Place it at the end of
@@ -182,13 +187,13 @@ the section, after the Mermaid fence(s):
 ```
 
 The `types` attribute lists the Mermaid block types you used (comma-separated, from the
-27-type catalogue, sorted, deduplicated). CI cross-checks this marker against `## Impacts`.
+27-type catalogue, sorted, deduplicated). CI cross-checks this marker against the Impacts line.
 
-**Visual preview (mandatory when `## Impacts` declares a visual kind).** When `## Impacts`
+**Visual preview (mandatory when `## Metadata` declares a visual kind).** When the Impacts line
 declares `ui`, `ux`, or `design`, you MUST produce a `preview.html` + `RENDER_REQUEST` in
 `.boucle-state/<issue>/` (see "Visual preview rules" below). This is the same preview
-mechanism that already exists for UI/UX issues — the `## Impacts` marker makes it
-deterministic instead of relying on the agent's judgment. When `## Impacts` declares only
+mechanism that already exists for UI/UX issues — the `<!-- boucle:impacts -->` marker makes it
+deterministic instead of relying on the agent's judgment. When the Impacts line declares only
 structural kinds or `none`, the preview is not required (but still allowed if the issue
 happens to have a visual component).
 
@@ -236,7 +241,7 @@ Restate the issue through four lenses, in order:
 
 If the issue body doesn't state one of these, infer it from context or flag it as a blocking question. Never silently skip a lens.
 
-### §2. Acceptance criteria format (structures your Draft acceptance criteria section)
+### §2. Acceptance criteria format (structures the `### Acceptance` block of `## Criteria`)
 
 Write each criterion as an observable scenario using Given/When/Then:
 - **Happy path** — the primary success flow first.
@@ -256,9 +261,9 @@ Before posting `<!-- boucle:triage v=1 -->`, verify:
 - [ ] **Testability** — each acceptance criterion has one clear outcome a reviewer can pass/fail.
 - [ ] **Dependencies** — implicit dependencies on other teams or integrations are surfaced.
 - [ ] **Scope** — in-scope is explicit; out-of-scope is stated when non-obvious.
-- [ ] **Impacts** — the `## Impacts` section is present with a `<!-- boucle:impacts v=1 kinds=... -->` marker; `kinds` uses only values from the closed set (architecture, data-model, process, state-machine, data-flow, deployment, ui, ux, design, none); a missing section or marker fails the CI gate.
-- [ ] **Diagram** — if `## Impacts` declares any structural kind (architecture, data-model, process, state-machine, data-flow, deployment), a `## Diagram` section with a Mermaid fence AND a `<!-- boucle:diagram v=1 types=... -->` marker is present, uses the boucle.dev light/transparent theme block from `templates/diagram-theme.md`, has ≤9 nodes, and is consistent with the acceptance criteria. If `## Impacts` declares only visual kinds or `none`, the `## Diagram` section and marker are correctly omitted. A mismatch fails the CI gate.
-- [ ] **Preview** — if `## Impacts` declares any visual kind (ui, ux, design), a `preview.html` + `RENDER_REQUEST` exists in `.boucle-state/<issue>/`. If `## Impacts` declares only structural kinds or `none`, the preview is correctly omitted. A mismatch fails the CI gate.
+- [ ] **Metadata** — the `## Metadata` section is the last section of the comment, its fields are wrapped in the `<details>` block (blank line after `<summary>`, blank line before `</details>`) so the forge folds them, and it carries all five fields (Impacts, Impacted files, Size, Validation, Disposition) as `- **Field** — value` bullets, with the `<!-- boucle:impacts v=1 kinds=... -->` and `<!-- boucle:files v=1 paths=... -->` markers first inside the block. `kinds` uses only values from the closed set (architecture, data-model, process, state-machine, data-flow, deployment, ui, ux, design, none); a missing Impacts line or marker fails the CI gate. Never re-open `## Impacts`, `## Impacted files`, `## Classification` or `## Disposition` as separate sections — they were merged into `## Metadata`.
+- [ ] **Diagram** — if the Impacts line declares any structural kind (architecture, data-model, process, state-machine, data-flow, deployment), a `## Diagram` section with a Mermaid fence AND a `<!-- boucle:diagram v=1 types=... -->` marker is present, uses the boucle.dev light/transparent theme block from `templates/diagram-theme.md`, has ≤9 nodes, and is consistent with the acceptance criteria. If the Impacts line declares only visual kinds or `none`, the `## Diagram` section and marker are correctly omitted. A mismatch fails the CI gate.
+- [ ] **Preview** — if the Impacts line declares any visual kind (ui, ux, design), a `preview.html` + `RENDER_REQUEST` exists in `.boucle-state/<issue>/`. If the Impacts line declares only structural kinds or `none`, the preview is correctly omitted. A mismatch fails the CI gate.
 
 If any check fails, fix the comment before posting. A spec with weasel words is not READY.
 
@@ -275,7 +280,7 @@ When the issue is ambiguous, derive blocking questions from these seven dimensio
 
 Pick the dimensions the issue leaves unanswered. Each question must change what the worker would build — if the answer doesn't alter the implementation, it is not blocking (record it in Analysis instead).
 
-### §5. Must-haves (structures your Must-haves section)
+### §5. Must-haves (structures the `### Must-haves` block of `## Criteria`)
 
 The acceptance criteria (§2) describe **behavior** (Given/When/Then). The must-haves describe **structure** — the invariants, deliverables, and relationships that make the implementation complete and verifiable. Both are required; they complement each other.
 
@@ -320,17 +325,17 @@ The CI parser acts **immediately** on any comment containing the `<!-- boucle:tr
 ```
 <!-- boucle:triage v=1 -->
 DRAFT — first-pass triage, refining next.
-## Disposition
-NEEDS-INFO
+## Metadata
+- **Disposition** — NEEDS-INFO
 ```
-The CI sees the final marker + `## Disposition` and acts immediately — it sets `boucle:needs-info`, assigns the issue to the reporter, and pauses the loop. Your refinement never ships. The `## TL;DR` section is the structural signal that distinguishes a final comment from a draft: a draft has only `## Disposition`; a final starts with `## TL;DR`.
+The CI sees the final marker + a `## Metadata` disposition and acts immediately — it sets `boucle:needs-info`, assigns the issue to the reporter, and pauses the loop. Your refinement never ships. The `## TL;DR` section is the structural signal that distinguishes a final comment from a draft: a draft has only `## Metadata`; a final starts with `## TL;DR`.
 
 **Also WRONG — an empty placeholder draft (lesson #99, do NOT do this):**
 ```
 <!-- boucle:draft role=triage -->
 DRAFT — first-pass triage, refining next.
-## Disposition
-NEEDS-INFO
+## Metadata
+- **Disposition** — NEEDS-INFO
 ```
 This uses the correct draft marker, but the body is an empty placeholder. The human sees "DRAFT — first-pass triage, refining next." with no analysis, no questions, no criteria — nothing to act on. The post-early rule means "post minimal but meaningful content early", not "post nothing early". A draft MUST contain at least a rough `## Analysis` section (2-3 sentences restating the issue in your own words). If you have not yet read the issue body enough to write that, read it first (it is in your prompt as `$BOUCLE_ISSUE_BODY`), then post.
 
@@ -339,8 +344,10 @@ This uses the correct draft marker, but the body is an empty placeholder. The hu
   <!-- boucle:draft role=triage -->
   ## Analysis
   <rough 2-3 sentence restatement of the issue and your initial assessment — NOT a placeholder>
-  ## Disposition
-  NEEDS-INFO
+  ## Metadata
+  - **Size** — S | M | L
+  - **Validation** — author-required | autonomous
+  - **Disposition** — NEEDS-INFO
   ```
   The draft MUST contain at least a rough `## Analysis` section (2-3 sentences restating the issue in your own words). An empty placeholder ("DRAFT — first-pass triage, refining next.") is NOT a draft — it is noise the human cannot act on (lesson #99). The post-early rule means "post minimal but meaningful content early", not "post nothing early". If you have not yet read the issue body enough to write 2-3 sentences of analysis, you are not ready to post — read the issue body first (it is in your prompt as `$BOUCLE_ISSUE_BODY`), then post.
   Use a conservative disposition (NEEDS-INFO > NEEDS-SPLIT > READY) so the loop pauses safely if you exhaust your steps after the draft. The draft deliberately omits `## TL;DR` — that section is the structural signal that distinguishes a final comment from a draft (lesson #45). A draft with `## TL;DR` would be promoted by the CI parser immediately, routing the issue before you can refine.
@@ -351,17 +358,27 @@ This uses the correct draft marker, but the body is an empty placeholder. The hu
   <2-4 phrases>
   ## Analysis
   <analysis>
-  ## Draft acceptance criteria
+  ## Criteria
+  ### Acceptance
   - [ ] <criterion>
-  ## Non-goals
+  ### Must-haves
+  - **Truths** — <invariant>
+  ### Non-goals
   - <what this change must NOT do>
-  ## Classification
-  Size: S | M | L
-  Validation: author-required | autonomous
   ## Questions
   1. <question>
-  ## Disposition
-  READY | NEEDS-INFO | NEEDS-SPLIT
+  ## Metadata
+  <details><summary>machine block — CI reads this, you do not have to</summary>
+
+  <!-- boucle:impacts v=1 kinds=<kinds> -->
+  <!-- boucle:files v=1 paths=<path1>,<path2> -->
+  - **Impacts** — 🏗️ <kinds>
+  - **Impacted files** — 📁 `<path1>`, `<path2>`
+  - **Size** — S | M | L
+  - **Validation** — author-required | autonomous
+  - **Disposition** — READY | NEEDS-INFO | NEEDS-SPLIT
+
+  </details>
   ```
 - If you exhaust your steps after posting only a draft (no final comment), the CI log-scraping fallback will scrape your draft from stdout and post it on your behalf — it promotes `boucle:draft` to `boucle:triage` so the loop has a parsable disposition to act on.
 
@@ -372,7 +389,7 @@ This uses the correct draft marker, but the body is an empty placeholder. The hu
 5. **Post your final triage comment** with the `<!-- boucle:triage v=1 -->` marker. If your refined analysis changes the disposition or criteria, the CI automatically collapses duplicate triage comments from the same run, replacing the earlier draft with your final version — so only the final analysis remains visible.
 6. Understand what the issue is actually asking for — restate it in your own words (in the Analysis section), structured via the four problem-framing lenses (§1: user segment, pain points, business context, success metrics).
 7. Draft acceptance criteria that are **verifiable by a machine or by looking at the rendered page**, using the Given/When/Then format (§2) with Happy path / Edge case / Error state / Non-functional labels.
-8. **Write the `## Non-goals` section.** Acceptance criteria say what must become true; non-goals say what must stay false. Without them the worker is graded only on what it must satisfy, so **the cheapest way to satisfy a criterion wins** — a narrow special-case that ticks the box and behaves badly everywhere else. And the reviewer has no basis to FAIL work that satisfies every criterion while doing something nobody wanted.
+8. **Write the `### Non-goals` block of `## Criteria`.** Acceptance criteria say what must become true; non-goals say what must stay false. Without them the worker is graded only on what it must satisfy, so **the cheapest way to satisfy a criterion wins** — a narrow special-case that ticks the box and behaves badly everywhere else. And the reviewer has no basis to FAIL work that satisfies every criterion while doing something nobody wanted.
 
    A good non-goal names something a reasonable implementer might actually do: "do not change the data model", "do not add a runtime dependency", "do not touch the auth flow", "do not refactor the surrounding module". Two to four is usually right.
 
@@ -380,7 +397,8 @@ This uses the correct draft marker, but the body is an empty placeholder. The hu
 
 9. Classify the size: S (one file/component), M (a few files), L (needs splitting).
 
-   **Then decide `Validation:` yourself — this is your call, not a config's.**
+   **Then decide the `Validation` field of `## Metadata` yourself —
+   this is your call, not a config's.**
    `author-required` pauses the loop until the issue's author approves the
    spec; `autonomous` lets the worker start immediately.
 
@@ -396,7 +414,8 @@ This uses the correct draft marker, but the body is an empty placeholder. The hu
    you invented a behaviour for a case they did not mention, or your criteria
    commit them to something irreversible. Say why in the Analysis.
 
-   Emit exactly one value. Boucle acts on what you write here — it does not
+   Emit exactly one value, on the `- **Validation** — ...` line of
+   `## Metadata`. Boucle acts on what you write there — it does not
    re-derive the decision from the size.
 10. Identify any **blocking questions** — derived from the 7 clarifying dimensions (§4: target user, problem, workaround, success, constraints, scope, prior art). **Cross-check each question against the Prior discussion and the charter files: if it is already answered there, it is NOT a blocking question — record the answer in Analysis instead.**
 11. If the issue is too large (size L) AND you have no blocking questions, flag it for splitting.
@@ -446,30 +465,7 @@ Post your **final triage comment** on the issue with this format:
 ## TL;DR
 <2-4 sentences in plain, non-technical language. Describe the visible result for the user, not the implementation mechanism.>
 
-## Analysis
-<what the issue actually asks for, in your own words — structured via the four problem-framing lenses (see §1): user segment, pain points, business context, success metrics>
-
-## Draft acceptance criteria
-- [ ] **Happy path** — Given <context>, When <action>, Then <observable result>
-- [ ] **Edge case** — Given <boundary>, When <action>, Then <result>
-- [ ] **Error state** — Given <failure>, When <action>, Then <recovery/feedback>
-- [ ] **Non-functional** — Given <load/constraint>, When <action>, Then <performance/a11y bar>
-
-## Must-haves
-- **Truths** — <invariant that must hold after implementation (e.g. "page loads in <2s on 3G")>
-- **Artifacts** — <concrete deliverable (e.g. "src/pages/right-to-resist.astro", "public/logo.png")>
-- **Key links** — <critical relationship (e.g. "new page linked from /navbar", "logo referenced in Layout.astro")>
-
-## Non-goals
-- <something a reasonable implementer might do that this change must NOT do>
-- <a boundary: a file, subsystem, dependency or behaviour to leave alone>
-
-## Impacts
-🏗️ <comma-separated kinds from: architecture, data-model, process, state-machine, data-flow, deployment, ui, ux, design, none>
-
-<!-- boucle:impacts v=1 kinds=<same-kinds-comma-separated> -->
-
-## Diagram *(mandatory when ## Impacts declares a structural kind; omit otherwise)*
+## Diagram *(mandatory when ## Metadata declares a structural impact; omit otherwise)*
 <one-line caption: what decision the human is validating by reading this diagram>
 
 ```mermaid
@@ -479,28 +475,36 @@ Post your **final triage comment** on the issue with this format:
 
 <!-- boucle:diagram v=1 types=<mermaid-block-types-used> -->
 
-## Impacted files
-📁 `<path1>`, `<path2>`
+## Analysis
+<what the issue actually asks for, in your own words — structured via the four problem-framing lenses (see §1): user segment, pain points, business context, success metrics>
 
-<!-- boucle:files v=1 paths=<path1>,<path2> -->
+## Criteria
+
+### Acceptance
+- [ ] **Happy path** — Given <context>, When <action>, Then <observable result>
+- [ ] **Edge case** — Given <boundary>, When <action>, Then <result>
+- [ ] **Error state** — Given <failure>, When <action>, Then <recovery/feedback>
+- [ ] **Non-functional** — Given <load/constraint>, When <action>, Then <performance/a11y bar>
+
+### Must-haves
+- **Truths** — <invariant that must hold after implementation (e.g. "page loads in <2s on 3G")>
+- **Artifacts** — <concrete deliverable (e.g. "src/pages/right-to-resist.astro", "public/logo.png")>
+- **Key links** — <critical relationship (e.g. "new page linked from /navbar", "logo referenced in Layout.astro")>
+
+### Non-goals
+- <something a reasonable implementer might do that this change must NOT do>
+- <a boundary: a file, subsystem, dependency or behaviour to leave alone>
 
 ## Recurring theme *(optional — omit if no prior instances found)*
 🔁 Part of a recurring class (see #<prior1>, #<prior2>). Consider a root-cause fix, not a patch.
 
 <!-- boucle:recurring v=1 refs=<prior1>,<prior2> -->
 
-## Classification
-Size: S | M | L
-Validation: author-required | autonomous
-
 ## Questions
 1. <first blocking question — derived from the 7 clarifying dimensions (see §4)>
 2. <second blocking question>
 
 If no blocking questions, write "none" on its own line.
-
-## Disposition
-READY | NEEDS-INFO | NEEDS-SPLIT
 
 ## Creative proposals
 - <opportunity 1 — a materially different approach to the need, not a styling variant>
@@ -510,7 +514,45 @@ READY | NEEDS-INFO | NEEDS-SPLIT
 ## Consequences
 - <consequence 1 — what follows from satisfying this need: a decision, dependency, or new possibility it forces downstream>
 - <consequence 2>
+
+## Metadata
+<details><summary>machine block — CI reads this, you do not have to</summary>
+
+<!-- boucle:impacts v=1 kinds=<same-kinds-comma-separated> -->
+<!-- boucle:files v=1 paths=<path1>,<path2> -->
+- **Impacts** — 🏗️ <comma-separated kinds from: architecture, data-model, process, state-machine, data-flow, deployment, ui, ux, design, none>
+- **Impacted files** — 📁 `<path1>`, `<path2>`
+- **Size** — S | M | L
+- **Validation** — author-required | autonomous
+- **Disposition** — READY | NEEDS-INFO | NEEDS-SPLIT
+
+</details>
 ```
+
+**`## Criteria` is ONE section with three `###` blocks.** Acceptance (what must become
+true), Must-haves (what must exist and hold), Non-goals (what must stay false) used to be
+three top-level `##` sections; they are one contract, so the human reads them in one
+place. Keep the three `###` headers exactly as named — CI reads them to seed `state.md`,
+and the reviewer grades the diff against them. Never promote them back to `##` sections,
+and never drop `### Non-goals`: without it the worker is graded only on what it must
+satisfy, and the cheapest box-ticking implementation wins.
+
+**`## Metadata` is ONE section, always last, collapsed, and it is the only place the
+machine-facing fields live.** Impacts, impacted files, size, validation and disposition
+used to be four separate sections (`## Impacts`, `## Impacted files`,
+`## Classification`, `## Disposition`) scattered through the comment — four headers a
+human scrolls past to reach the next paragraph they actually read. Keep them in the
+single `## Metadata` block, and **wrap the fields in the `<details>` block exactly as
+shown** so the forge renders them folded: the human sees one collapsed line, CI reads
+what is inside. The blank line after `<summary>` and the one before `</details>` are
+required — without them the forge renders the markdown as raw text.
+
+Inside the block: the two markers first (invisible when rendered), then one
+`- **Field** — value` bullet per field, in the order above. CI reads the **bullets**, so
+never state a value anywhere but its bullet, and never write a `Size:`/`Validation:` line
+outside `## Metadata`. **The Disposition bullet is the last field** — CI's step-limit
+recovery scrapes your comment from the log up to that line. Never split these fields back
+out into their own sections.
 
 **The `## Recurring theme`, `## Creative proposals` and `## Consequences` sections are OPTIONAL.** Include `## Recurring theme` only if you found prior closed issues of the same class with confidence; include the creative/consequence sections only if you completed Phase 3. If you exhausted your step budget early, omit all three — the comment is still valid. Never pad the recurring section with a false positive (a superficially similar but unrelated issue) — a spurious recurring flag wastes the worker's attention. 3 sharp bullets beat 5 generic ones.
 
@@ -580,7 +622,7 @@ The CI job auto-validates the spec gate during DND, so a `READY` disposition flo
 
 ## NEEDS-SPLIT output
 
-When Disposition is NEEDS-SPLIT (no blocking questions + Size L), also include this section in your comment (the job parses it to create sub-issues):
+When Disposition is NEEDS-SPLIT (no blocking questions + Size L), also include this section in your comment (the job parses it to create sub-issues). Place it **before `## Metadata`** — that section stays last, and its Disposition line stays the last line of the comment:
 
 ```
 ## Sub-issues

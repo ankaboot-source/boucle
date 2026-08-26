@@ -73,8 +73,9 @@ case "$TYPE" in
   triage)
     KIND="issue"
     ENDPOINT="projects/${PROJECT_ID}/issues/${NOTE_IID}/notes"
-    # boucle:triage marker + ## TL;DR (final only) + ## Disposition section
-    FILTER='.[] | select(.body | test("<!-- boucle:triage")) | select(.body | test("(?m)^## TL;DR")) | select(.body | test("(?m)^## Disposition"))'
+    # boucle:triage marker + ## TL;DR (final only) + the machine section
+    # (## Metadata; ## Disposition for specs predating the section merge)
+    FILTER='.[] | select(.body | test("<!-- boucle:triage")) | select(.body | test("(?m)^## TL;DR")) | select(.body | test("(?m)^## (Metadata|Disposition)"))'
     DRAFT_FILTER='.[] | select(.body | test("<!-- boucle:draft role=triage"))'
     ;;
   reviewer)

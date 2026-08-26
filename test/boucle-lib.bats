@@ -2016,16 +2016,17 @@ print('OK' if any('boucle' in c for c in allow) else 'MISSING: %s' % allow)
 # basis to FAIL work that ticked every box while doing something nobody
 # asked for.
 
-@test "non-goals: triage emits the section in its comment format" {
-  run grep -q '^  ## Non-goals' .jcode/agents/triage.md
+@test "non-goals: triage emits the block in its comment format" {
+  # Non-goals are the third `###` block of the merged `## Criteria` section.
+  run grep -q '^  ### Non-goals' .jcode/agents/triage.md
   assert_success
   # And in the full example, not only the compact listing.
-  run bash -c "grep -c '^## Non-goals' .jcode/agents/triage.md"
+  run bash -c "grep -c '^### Non-goals' .jcode/agents/triage.md"
   assert_output "1"
 }
 
 @test "non-goals: triage is told what one is, and what one is not" {
-  run grep -q 'Write the `## Non-goals` section' .jcode/agents/triage.md
+  run grep -q 'Write the `### Non-goals` block' .jcode/agents/triage.md
   assert_success
   # The distinction that keeps the section from filling with restated criteria.
   run grep -q 'NOT a criterion phrased negatively' .jcode/agents/triage.md
@@ -2036,7 +2037,9 @@ print('OK' if any('boucle' in c for c in allow) else 'MISSING: %s' % allow)
 }
 
 @test "non-goals: state.md carries them from the triage comment" {
-  run grep -q "sed -n '/^## Non-goals/,/^## /p'" lib/boucle-ci/worker.sh
+  # Seeded from the `### Non-goals` block of `## Criteria`, falling back to
+  # the standalone `## Non-goals` section on specs predating the merge.
+  run grep -q 'spec_criteria_block "$triage_comment" "Non-goals" "Non-goals"' lib/boucle-ci/worker.sh
   assert_success
 }
 

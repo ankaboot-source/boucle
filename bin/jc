@@ -1030,7 +1030,7 @@ ${notes}
 "
         fi
         prompt="${prompt}
-Spec-validation policy in force: BOUCLE_SPEC_PROFILE=${BOUCLE_SPEC_PROFILE:-product}. Apply it as your default when you emit \`Validation:\`, and override it toward author-required when you had to make a product decision the author did not state.
+Spec-validation policy in force: BOUCLE_SPEC_PROFILE=${BOUCLE_SPEC_PROFILE:-product}. Apply it as your default when you emit the \`Validation\` field of \`## Metadata\`, and override it toward author-required when you had to make a product decision the author did not state.
 
 Post your analysis as a comment with the boucle:triage marker. Use: bin/forge-note issue ${ISSUE} --message \"\$(cat <<'EOF' ... EOF)\""
       else
