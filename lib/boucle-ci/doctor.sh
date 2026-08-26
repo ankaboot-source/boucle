@@ -669,10 +669,11 @@ boucle_ci_doctor() {
                  elif .mergeable_state == "dirty" then "conflict"
                  else .mergeable_state end)
                 else (.detailed_merge_status // .merge_status // "unknown") end')
-      # forge_mr_approvals returns "true"/"false" — map to 1/0 so the
-      # count-based checks and log messages below keep working.
-      MR_OAPPROVED=$(forge_mr_approvals "$MR_OIID")
-      [ "$MR_OAPPROVED" = "true" ] && MR_OAPPROVED=1 || MR_OAPPROVED=0
+      # boucle_mr_is_approved is the single definition of the merge gate
+      # (native review OR the magic word) — map to 1/0 so the count-based
+      # checks and log messages below keep working.
+      MR_OAPPROVED=0
+      boucle_mr_is_approved "$MR_OIID" && MR_OAPPROVED=1
       # In mono-user mode, there are no formal reviews — the human approves
       # by reacting 👍 on the boucle:approval-request note the reviewer
       # posted on the PR. Poll that note's reactions. The old auto-detect
@@ -820,8 +821,22 @@ boucle_ci_doctor() {
     # approved MR).
     MR_IID=$(forge_mr_lookup_by_branch "boucle/$IID" opened)
     if [ -z "$MR_IID" ]; then
-      echo "  → #$IID: no open MR found — escalating to boucle:human (merger cannot run)"
-      if ! forge_issue_note "$IID" "⚠️ Merger stuck at boucle:merging but no open $(forge_mr_term) found for branch boucle/$IID. Human intervention needed.$(job_link)"; then
+      # No OPEN MR is not the same as no MR. The human may have merged it
+      # themselves — from the forge UI, or by re-running the merger — and
+      # a merged PR is not an open one. Escalating there told the human
+      # their completed merge had failed, and parked a shipped issue at
+      # boucle:human. Check for a MERGED one before concluding anything.
+      MR_MERGED_IID=$(forge_mr_lookup_by_branch "boucle/$IID" merged 2> /dev/null || echo "")
+      if [ -n "$MR_MERGED_IID" ]; then
+        echo "  → #$IID: $(forge_mr_ref "$MR_MERGED_IID") is already merged — resuming the loop at post-merge instead of escalating"
+        forge_issue_note "$IID" "✅ $(forge_mr_ref "$MR_MERGED_IID") was already merged — the loop is resuming at post-merge (deploy + e2e).$(job_link)" || true
+        chain_to_role "$IID" "post-merge"
+        doctor_mark_triggered "$IID"
+        RECOVERED=$((RECOVERED + 1))
+        continue
+      fi
+      echo "  → #$IID: no open or merged MR found — escalating to boucle:human (merger cannot run)"
+      if ! forge_issue_note "$IID" "⚠️ Merger stuck at boucle:merging but no open or merged $(forge_mr_term) found for branch boucle/$IID. Human intervention needed.$(job_link)"; then
         echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
         exit 1
       fi
@@ -829,10 +844,19 @@ boucle_ci_doctor() {
       RECOVERED=$((RECOVERED + 1))
       continue
     fi
-    APPROVED_COUNT=$(forge_mr_approvals "$MR_IID")
-    [ "$APPROVED_COUNT" = "true" ] && APPROVED_COUNT=1 || APPROVED_COUNT=0
+    # Same definition of "approved" the dispatch merge gate uses. This
+    # block used to call forge_mr_approvals alone, which counts only
+    # NATIVE reviews — so a human who approved the way boucle told them to
+    # (replying `approved` on the PR) was reported as "no longer approved"
+    # and escalated. On a mono-user install that check can never pass:
+    # GitHub refuses to let the PR author approve their own PR.
+    APPROVED_COUNT=0
+    if boucle_mr_is_approved "$MR_IID" \
+      || [ "$(doctor_mr_approval_emoji "$MR_IID")" = "1" ]; then
+      APPROVED_COUNT=1
+    fi
     if [ "$APPROVED_COUNT" -eq 0 ]; then
-      echo "  → #$IID: MR !$MR_IID no longer approved — escalating to boucle:human (merger cannot run without approval)"
+      echo "  → #$IID: MR !$MR_IID has no approval (native, magic word or emoji) — escalating to boucle:human (merger cannot run without approval)"
       if ! forge_issue_note "$IID" "⚠️ Merger stuck at boucle:merging but $(forge_mr_ref "$MR_IID") is no longer approved. Human intervention needed.$(job_link)"; then
         echo "FAIL: escalation note could not be posted on issue #$IID — NOT escalating to boucle:human (retry instead of muting)." >&2
         exit 1
@@ -967,10 +991,11 @@ boucle_ci_doctor() {
              elif .mergeable_state == "dirty" then "conflict"
              else .mergeable_state end)
             else (.detailed_merge_status // .merge_status // "unknown") end')
-    # Check approvals on the MR. forge_mr_approvals returns "true"/"false"
-    # — map to 0/1 so the count-based logic and messages keep working.
-    APPROVED_COUNT=$(forge_mr_approvals "$MR_IID")
-    [ "$APPROVED_COUNT" = "true" ] && APPROVED_COUNT=1 || APPROVED_COUNT=0
+    # Check approvals on the MR through the single shared definition
+    # (native review OR the magic word) — map to 0/1 so the count-based
+    # logic and messages keep working.
+    APPROVED_COUNT=0
+    boucle_mr_is_approved "$MR_IID" && APPROVED_COUNT=1
     # In mono-user mode, the human approves via a forge-appropriate signal
     # on the PR: magic word `approved` (GitHub primary — issue_comment
     # webhook fires reliably, but the doctor backstop catches a missed
@@ -978,9 +1003,12 @@ boucle_ci_doctor() {
     # primary — emoji webhooks fire reliably). Poll both so a missed
     # webhook on either forge recovers. The old auto-detect of the PASS
     # verdict merged without a human signal — removed.
-    if [ "$APPROVED_COUNT" -eq 0 ] && [ "${BOUCLE_MONO_USER:-false}" = "true" ]; then
-      APPROVED_COUNT=$(doctor_mr_approval_magic_word "$MR_IID")
-      [ "$APPROVED_COUNT" = "1" ] || APPROVED_COUNT=$(doctor_mr_approval_emoji "$MR_IID")
+    # The magic word is handled by boucle_mr_is_approved above, and is NOT
+    # gated on mono-user — dispatch's gate is not either, and gating them
+    # differently is what let the two drift apart. Only the emoji signal
+    # (GitLab primary) remains here: it needs the approval-request note.
+    if [ "$APPROVED_COUNT" -eq 0 ]; then
+      APPROVED_COUNT=$(doctor_mr_approval_emoji "$MR_IID")
     fi
     # Guard: if the merger already escalated a SEMANTIC merge conflict on
     # this issue (boucle_escalate_merge_conflict posts a note with "Merge
