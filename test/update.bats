@@ -279,3 +279,130 @@ setup() {
   run cat "$tmpdir/README.md"
   assert_output "# consumer README"
 }
+
+# ── configure_git_push ────────────────────────────────────────────────
+
+@test "configure_git_push uses BOUCLE_PROJECT_PATH (the forge-agnostic alias)" {
+  # Regression: the guard keyed on CI_PROJECT_PATH, which only GitLab sets.
+  # On GitHub Actions the function silently did nothing and the push went out
+  # under the workflow token instead of the configured bot PAT.
+  BOUCLE_TOKEN="pat-secret"
+  BOUCLE_FORGE_HOST="github.com"
+  BOUCLE_PROJECT_PATH="acme/site"
+  unset CI_PROJECT_PATH
+  git() { echo "git $*"; }
+  export -f git
+  run configure_git_push
+  assert_success
+  assert_output --partial "https://up-bot:pat-secret@github.com/acme/site.git"
+  unset -f git
+}
+
+@test "configure_git_push still honours CI_PROJECT_PATH as a fallback" {
+  BOUCLE_TOKEN="pat-secret"
+  BOUCLE_FORGE_HOST="framagit.org"
+  unset BOUCLE_PROJECT_PATH
+  CI_PROJECT_PATH="group/proj"
+  git() { echo "git $*"; }
+  export -f git
+  run configure_git_push
+  assert_success
+  assert_output --partial "https://up-bot:pat-secret@framagit.org/group/proj.git"
+  unset -f git
+}
+
+@test "configure_git_push is a no-op without a bot token (local dev)" {
+  unset BOUCLE_TOKEN
+  BOUCLE_FORGE_HOST="github.com"
+  BOUCLE_PROJECT_PATH="acme/site"
+  git() { echo "git $*"; }
+  export -f git
+  run configure_git_push
+  assert_success
+  refute_output --partial "remote set-url"
+  unset -f git
+}
+
+# ── push_update ───────────────────────────────────────────────────────
+
+@test "push_update succeeds quietly when the push lands" {
+  git() { echo "Everything up-to-date"; return 0; }
+  export -f git
+  run push_update
+  assert_success
+  refute_output --partial "push failed"
+  unset -f git
+}
+
+@test "push_update reports the reason the push was rejected" {
+  # Regression: the push was `git push 2> /dev/null`, so a consumer frozen on
+  # an old engine was indistinguishable from an up-to-date one.
+  git() {
+    echo "remote: Permission to acme/site.git denied to up-bot." >&2
+    echo "fatal: unable to access 'https://github.com/acme/site.git/': 403" >&2
+    return 128
+  }
+  export -f git
+  run push_update
+  assert_failure
+  assert_output --partial "push failed"
+  assert_output --partial "denied to up-bot"
+  assert_output --partial "403"
+  unset -f git
+}
+
+@test "push_update redacts the credential git echoes back in its error" {
+  # configure_git_push puts the PAT in the remote URL and git quotes that URL
+  # back on failure. Surfacing the error is only safe because it is redacted.
+  git() {
+    echo "fatal: unable to access 'https://up-bot:ghp_supersecret@github.com/acme/site.git/': 403" >&2
+    return 128
+  }
+  export -f git
+  run push_update
+  assert_failure
+  refute_output --partial "ghp_supersecret"
+  assert_output --partial "https://***@github.com/acme/site.git"
+  unset -f git
+}
+
+@test "push_update names branch protection instead of promising a retry" {
+  # A protected default branch is the one push failure retrying cannot clear.
+  # boucle.dev sat on an old engine for hours while every run logged
+  # "will retry next pipeline" — the retry could never have worked.
+  BOUCLE_DEFAULT_BRANCH="main"
+  git() {
+    echo "remote: error: GH006: Protected branch update failed for refs/heads/main." >&2
+    echo "remote: error: Changes must be made through a pull request." >&2
+    return 1
+  }
+  export -f git
+  run push_update
+  assert_failure
+  assert_output --partial "main looks protected"
+  refute_output --partial "will retry next pipeline"
+  unset -f git
+}
+
+@test "push_update still promises a retry for an ordinary transient failure" {
+  BOUCLE_DEFAULT_BRANCH="main"
+  git() { echo "fatal: unable to access: Could not resolve host: github.com" >&2; return 128; }
+  export -f git
+  run push_update
+  assert_failure
+  assert_output --partial "will retry next pipeline"
+  refute_output --partial "looks protected"
+  unset -f git
+}
+
+@test "push_update does not abort when BOUCLE_DEFAULT_BRANCH is unset (set -u)" {
+  # bin/update runs under `set -u`; the protected-branch branch must not be
+  # the thing that crashes the diagnostic it exists to print.
+  unset BOUCLE_DEFAULT_BRANCH
+  git() { echo "remote: error: GH006: Protected branch update failed." >&2; return 1; }
+  export -f git
+  run push_update
+  assert_failure
+  assert_output --partial "the default branch looks protected"
+  unset -f git
+}

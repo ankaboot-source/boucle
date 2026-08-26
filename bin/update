@@ -95,12 +95,59 @@ curl_with_auth() {
 
 # configure_git_push: configure git remote with the bot token so bin/update
 # can push the auto-update commit from a CI runner. The runner's default
-# token (CI_JOB_TOKEN) has pull-only permissions — push requires the bot
+# token (CI_JOB_TOKEN on GitLab, GITHUB_TOKEN on GitHub) may be pull-only, or
+# may be barred from the branch by a protection rule — pushing needs the bot
 # PAT (BOUCLE_TOKEN). No-op when BOUCLE_TOKEN is unset (local dev).
+#
+# The project path is read from BOUCLE_PROJECT_PATH, the forge-agnostic alias
+# lib/boucle-ci.sh sets on both forges. Keying on CI_PROJECT_PATH alone made
+# this a silent no-op on GitHub Actions, which never sets that GitLab-only
+# variable: the push then went out under the workflow's own token instead of
+# the configured PAT, and nothing said so. CI_PROJECT_PATH stays as a fallback
+# for a GitLab job that runs bin/update without sourcing lib/boucle-ci.sh.
 configure_git_push() {
-  if [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ] && [ -n "${CI_PROJECT_PATH:-}" ]; then
-    git remote set-url origin "https://${BOUCLE_BOT_USERNAME:-up-bot}:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${CI_PROJECT_PATH}.git" 2> /dev/null
+  local project_path="${BOUCLE_PROJECT_PATH:-${CI_PROJECT_PATH:-}}"
+  if [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ] && [ -n "$project_path" ]; then
+    git remote set-url origin "https://${BOUCLE_BOT_USERNAME:-up-bot}:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${project_path}.git" 2> /dev/null
   fi
+}
+
+# push_update: push the auto-update commit, reporting why it failed.
+#
+# The push used to be `git push 2> /dev/null`, which made a consumer stuck one
+# commit behind indistinguishable from one that was up to date: the reason was
+# discarded, the job still exited 0, and the caller still printed
+# "updated to <sha>" — so a repo frozen on an old engine looked healthy.
+#
+# Failure output is echoed with any embedded credential stripped:
+# configure_git_push puts the bot PAT in the remote URL, and git quotes that
+# URL back in most of its push errors. Redacting here is what makes surfacing
+# the error safe.
+#
+# A protected default branch is called out separately: it is the one failure
+# here that retrying can never clear, so promising a retry would be false.
+#
+# Returns 0 if the push succeeded, 1 otherwise.
+push_update() {
+  local out status
+  out="$(git push 2>&1)"
+  status=$?
+  [ "$status" -eq 0 ] && return 0
+  case "$out" in
+    *"protected branch"* | *"GH006"* | *"must be made through a pull request"* | *"pre-receive hook declined"*)
+      echo "[boucle] ERROR: push rejected — ${BOUCLE_DEFAULT_BRANCH:-the default branch} looks protected." >&2
+      echo "[boucle]   Self-update pushes straight to the default branch, so a protection" >&2
+      echo "[boucle]   rule that requires a pull request blocks it on every run. This will" >&2
+      echo "[boucle]   NOT clear by retrying: allow the boucle bot to bypass the rule, or" >&2
+      echo "[boucle]   turn self-update off (BOUCLE_UPDATE_DISABLE=true) and bump the" >&2
+      echo "[boucle]   engine by hand." >&2
+      ;;
+    *)
+      echo "[boucle] WARN: push failed, will retry next pipeline" >&2
+      ;;
+  esac
+  printf '%s\n' "$out" | sed -e 's#://[^@/]*@#://***@#g' -e 's/^/[boucle]   /' >&2
+  return 1
 }
 
 # ── Pure functions (testable, no network) ──────────────────────────────
@@ -433,8 +480,11 @@ main() {
     git add $propagated_files 2> /dev/null || true
     git commit -m "chore(boucle): auto-update submodule to $upstream" > /dev/null 2>&1 || true
     configure_git_push
-    git push 2> /dev/null || echo "[boucle] WARN: push failed, will retry next pipeline" >&2
-    echo "[boucle] submodule updated to $upstream"
+    if push_update; then
+      echo "[boucle] submodule updated to $upstream"
+    else
+      echo "[boucle] submodule pointer committed locally at $upstream but NOT published — this consumer stays on $current until a later pipeline pushes it" >&2
+    fi
     return 0
   fi
 
@@ -471,9 +521,11 @@ main() {
   git add $add_paths $propagated_files
   git commit -m "chore(boucle): auto-update to $upstream" > /dev/null 2>&1 || true
   configure_git_push
-  git push 2> /dev/null || echo "[boucle] WARN: push failed, will retry next pipeline" >&2
-
-  echo "[boucle] updated to $upstream"
+  if push_update; then
+    echo "[boucle] updated to $upstream"
+  else
+    echo "[boucle] update to $upstream committed locally but NOT published — this consumer stays on $current until a later pipeline pushes it" >&2
+  fi
   return 0
 }
 
