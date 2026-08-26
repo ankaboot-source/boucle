@@ -130,7 +130,7 @@ fi
 # ── 3. Mermaid validity ──────────────────────────────────────────────────
 # This used to assert that the string 'stateDiagram-v2' appeared somewhere in
 # SKILL.md, which proves nothing about whether the forge can render it. Ask
-# the real parser instead (LESSONS.yml #108). Exit 3 = the parser is
+# the real parser instead (LESSONS.yml #109). Exit 3 = the parser is
 # unavailable on this host: warn, never fail — infrastructure does not decide
 # whether a diagram is valid.
 MERMAID_CHECK="$REPO_ROOT/bin/check-mermaid"

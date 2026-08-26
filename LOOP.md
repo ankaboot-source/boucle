@@ -1027,7 +1027,7 @@ flowchart LR
 ### How it works
 
 - **Triage** embeds a `<!-- boucle:files v=1 paths=path1,path2 -->` marker
-  in its spec comment (the `## Impacted files` section), predicting the
+  in its spec comment (the `## Metadata` section), predicting the
   files the issue will touch (source, styles, charter docs). The file claim
   lives in the spec the human reviews, not a separate note. Absent marker =
   no claim → fail-open (the gate passes).

@@ -43,12 +43,11 @@ their fields (`erDiagram`); a lifecycle on its states and transitions
 
 **A diagram of the files you are about to edit is never the answer.** Nodes named
 `content_config_ts`, `index_astro`, `config_yml` are the most common wrong diagram: easy
-to draw, impossible to fault, and empty — `## Impacted files` already lists exactly that,
-and a reader who has never opened the repository learns nothing from it. If you are about
-to name a node after a file, you have skipped the question above.
+to draw, impossible to fault, and empty — the spec's Impacted files line already lists
+exactly that, and a reader who has never opened the repository learns nothing from it.
+If you are about to name a node after a file, you have skipped the question above.
 
-When a concept maps to several types, pick the
-dominant axis — do NOT hybridize grammars. Types marked **(no native Mermaid)** have no
+When a concept maps to several types, pick the dominant axis — do NOT hybridize grammars. Types marked **(no native Mermaid)** have no
 first-class Mermaid block; approximate with `flowchart` + `subgraph`, or state in the
 caption that the Mermaid is a structural sketch of a type the skill renders as HTML/SVG.
 

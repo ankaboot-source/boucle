@@ -114,7 +114,7 @@ check_file_gate() {
 # ── Diagram gate (deterministic — LESSONS.yml #104) ──────────────────────
 # Before a spec pauses for human approval, verify that a spec declaring
 # structural impacts (architecture, data-model, process, state-machine,
-# data-flow, deployment) in its `## Impacts` section actually includes the
+# data-flow, deployment) in its `## Metadata` section actually includes the
 # required `## Diagram` section with a Mermaid fence AND a
 # `<!-- boucle:diagram v=1 types=... -->` marker. A mismatch re-triggers
 # triage (sets boucle:triage so the doctor picks it up and the triage agent
@@ -124,7 +124,7 @@ check_file_gate() {
 # or L. A Size S issue with a structural kind is probably trivial (a
 # one-liner, a single-field rename) — forcing a diagram is noise. The
 # size is passed as the 3rd argument by the caller (triage.sh already
-# parses it from ## Classification).
+# parses it from ## Metadata).
 #
 # Fail-open everywhere: missing impacts marker, missing/unknown size,
 # forge API error → return 0 (pass). A flaky forge must never block the
@@ -173,7 +173,7 @@ check_diagram_gate() {
   return 0
 }
 
-# ── Diagram syntax gate (deterministic — LESSONS.yml #108) ───────────────
+# ── Diagram syntax gate (deterministic — LESSONS.yml #109) ───────────────
 # The diagram gate above proves a diagram is PRESENT. It says nothing about
 # whether the forge can render it: boucle.dev#86 shipped a `## Diagram`
 # section with a valid marker and an erDiagram the Mermaid parser rejects
@@ -257,7 +257,7 @@ check_diagram_syntax_gate() {
 
 # ── Preview gate (deterministic — LESSONS.yml #104) ──────────────────────
 # Before a spec pauses for human approval, verify that a spec declaring
-# visual impacts (ui, ux, design) in its `## Impacts` section actually has
+# visual impacts (ui, ux, design) in its `## Metadata` section actually has
 # a `preview.html` AND a non-empty `RENDER_REQUEST` in
 # `.boucle-state/<iid>/`. A mismatch re-triggers triage (sets boucle:triage
 # so the doctor picks it up and the triage agent adds the missing preview).
