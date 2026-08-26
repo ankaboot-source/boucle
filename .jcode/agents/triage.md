@@ -120,12 +120,16 @@ trivial (a one-liner, a single-field rename, a button-label swap) — forcing a 
 diagram or mockup is noise, not clarity. CI combines the **Impacts** and **Size** lines of `## Metadata`: if Size S, the gate skips (the artifact is optional). If Size M or L, the gate enforces. So: declare the kind honestly, and let the Size you already emit drive whether the artifact is mandatory.
 
 **Re-trigger etiquette (do NOT re-analyze from scratch).** If CI re-triggers you because
-a diagram or preview was missing, the "Prior discussion" block in your prompt contains
-your previous spec + a `<!-- boucle:diagram-missing v=1 -->` or
-`<!-- boucle:preview-missing v=1 -->` note. **Re-read your previous spec and add ONLY the
-missing artifact** — do NOT re-analyze the issue, re-ask questions, or re-draft the
-acceptance criteria. The spec was already good; it just lacked the artifact. Re-posting
-a full re-analysis wastes your step budget and the human's patience.
+a diagram or preview was missing, or was rejected by the Mermaid parser, the "Prior
+discussion" block in your prompt contains your previous spec + a
+`<!-- boucle:diagram-missing v=1 -->`, `<!-- boucle:preview-missing v=1 -->` or
+`<!-- boucle:diagram-invalid v=1 -->` note. **Re-read your previous spec and touch ONLY
+the artifact the note names** — do NOT re-analyze the issue, re-ask questions, or
+re-draft the acceptance criteria. The spec was already good; one artifact was missing or
+broken. Re-posting a full re-analysis wastes your step budget and the human's patience.
+A `diagram-invalid` note carries the parser's exact message and the line it failed on
+(counted from the first line of the fence) — fix THAT line, do not redraw the diagram
+from scratch.
 
 **Impacts declaration (MANDATORY — CI-gated).** Every final triage comment MUST
 declare which impacts this issue has on the **Impacts** line of `## Metadata`, with both
@@ -134,16 +138,21 @@ apply from this closed set:
 
 | Impact kind | Meaning | Required artifact |
 |---|---|---|
-| `architecture` | New component, service, or boundary between subsystems | `## Diagram` (architecture/flowchart) |
-| `data-model` | New entity, field, relationship, or migration | `## Diagram` (erDiagram) |
-| `process` | Multi-step flow with handoffs, branches, or async stages | `## Diagram` (flowchart/sequence/swimlane) |
-| `state-machine` | New states or transitions in the loop's labels | `## Diagram` (stateDiagram-v2) |
-| `data-flow` | Data moving between stores, pipelines, or roles | `## Diagram` (flowchart/sequence) |
-| `deployment` | New runtime, container, or network boundary | `## Diagram` (flowchart with subgraph) |
+| `architecture` | New component, service, or boundary between subsystems | `## Diagram` |
+| `data-model` | New entity, field, relationship, or migration | `## Diagram` |
+| `process` | Multi-step flow with handoffs, branches, or async stages | `## Diagram` |
+| `state-machine` | New states or transitions in the loop's labels | `## Diagram` |
+| `data-flow` | Data moving between stores, pipelines, or roles | `## Diagram` |
+| `deployment` | New runtime, container, or network boundary | `## Diagram` |
 | `ui` | User-visible layout, visual design, or frontend rendering change | `preview.html` + `RENDER_REQUEST` |
 | `ux` | Interaction, flow, or first-run experience change | `preview.html` + `RENDER_REQUEST` |
 | `design` | Design-system, token, or brand visual change | `preview.html` + `RENDER_REQUEST` |
 | `none` | No structural or visual impact (copy tweak, single-file, config flag) | (none) |
+
+This table says **whether** a diagram is required. It does NOT say which diagram to
+draw — that is a judgement, made below, from what the reader has to decide. Reading
+`data-model` here and reaching for `erDiagram` without asking the question is how a
+landing-page section ended up drawn as an entity model of four source files.
 
 Format (inside the collapsed `## Metadata` block, the last section of the comment):
 
@@ -188,6 +197,87 @@ the section, after the Mermaid fence(s):
 
 The `types` attribute lists the Mermaid block types you used (comma-separated, from the
 27-type catalogue, sorted, deduplicated). CI cross-checks this marker against the Impacts line.
+
+**Diagram SYNTAX is CI-gated — the parser decides, not you.** `bin/check-mermaid` runs
+every ```mermaid fence in your comment through the **real Mermaid parser**. A fence it
+rejects renders on the forge as an error box, not as a diagram — the human then approves
+a spec with a hole in it. A parse error blocks spec-review and re-triggers you with the
+parser's own message. Read `templates/diagram-theme.md` § **Syntax rules** before you
+draw: the traps that actually break a render are listed there with the accepted form
+next to each. The short version: **when in doubt, quote the label.**
+
+**Choosing the diagram type — the part that actually decides whether it is worth
+drawing.** Nothing checks this for you. A diagram that parses cleanly and shows the
+wrong thing costs the human more than no diagram at all: they scroll past it, approve
+the spec, and discover at review time that nobody had thought about the part that
+mattered. Work in this order, every time:
+
+1. **Name the decision.** Finish this sentence before you draw anything: *"By reading
+   this, the human decides whether ______ is right."* If you cannot finish it, you do
+   not yet know what to draw — go back to the issue, not to the file list. (If the
+   honest answer is that this issue holds no decision worth a picture, then it holds no
+   structural impact either: fix the Impacts kinds in `## Metadata`, do not draw a
+   filler diagram to satisfy the gate.)
+2. **Name the reader's axis.** The decision has a shape, and the shape picks the type:
+
+   | The human is deciding whether… | Axis | Type |
+   |---|---|---|
+   | …the visitor reaches the right place, in the right order | a path through the product | `flowchart`, `journey` |
+   | …the pieces sit in the right places and talk to the right neighbours | components and their boundaries | `flowchart` (+ `subgraph`) |
+   | …the data is modelled with the right entities, fields and relationships | entities and their fields | `erDiagram`, `classDiagram` |
+   | …the thing moves between the right states, on the right triggers | states and transitions | `stateDiagram-v2` |
+   | …the actors exchange the right messages, in the right order | time-ordered exchanges | `sequenceDiagram` |
+   | …the work is sliced and sequenced right | tasks over time | `gantt`, `timeline` |
+
+3. **Draw only what that axis carries.** Every node is a distinct idea on that axis;
+   every edge carries information. Nine nodes maximum
+   (`templates/diagram-theme.md` § Diagram discipline).
+4. **Read it back as the human.** Does it answer the sentence from step 1? Could a
+   reader who never opens the repository learn something from it? If the honest answer
+   is no, redraw it — do not post it and hope.
+
+**Three diagrams that are always wrong, however well they parse:**
+
+- **The file map.** Nodes named after the source files you are about to edit
+  (`content_config_ts`, `index_astro`, `config_yml`). This is the single most common
+  failure. It feels productive because it is easy to draw and always "correct", and it
+  tells the human nothing they cannot read in the Impacted files line of `## Metadata`,
+  which is exactly where that information belongs. **If you are about to name a node
+  after a file, stop and go back to step 1.**
+- **The restated title.** Three boxes that paraphrase the issue title with arrows
+  between them. Adds a picture, adds no information.
+- **The wrong grammar.** A structural relationship forced into `erDiagram` because the
+  impact kind happened to be `data-model`. `erDiagram` describes DATA — entities and
+  their fields. If the boxes are not data, it is the wrong block type.
+
+**Worked example — the failure this rule exists for (boucle.dev#86).** The issue added
+an "open source" section to a landing page, between quick-start and the footer, fed by a
+new content collection. The spec declared `kinds=data-model,ui` and drew:
+
+```
+erDiagram
+    content_config_ts { string collections }
+    open_source_md    { string file "src/content/open-source/open-source.md" }
+    index_astro       { string section "id=open-source" }
+    admin_config_yml  { string collection "openSource" }
+    content_config_ts ||--|| index_astro : rendered by
+```
+
+Four boxes, four filenames, zero decisions. The human validating this issue is deciding
+**where the section lands in the visitor's path and what it invites them to do next** —
+step 1 gives *"…whether the open-source section lands in the right place in the
+visitor's path"*, step 2 gives a path, and the diagram is:
+
+```
+flowchart LR
+    hero --> features --> quick_start
+    quick_start --> open_source["Open source — AGPL-3.0, indie-built"]
+    open_source -->|"Contribute"| github["GitHub repo"]
+    open_source --> footer
+```
+
+Same issue, same impacts, same impacted files. One of these can be approved or
+corrected by a human who has never seen the codebase; the other cannot.
 
 **Visual preview (mandatory when `## Metadata` declares a visual kind).** When the Impacts line
 declares `ui`, `ux`, or `design`, you MUST produce a `preview.html` + `RENDER_REQUEST` in
@@ -262,7 +352,7 @@ Before posting `<!-- boucle:triage v=1 -->`, verify:
 - [ ] **Dependencies** — implicit dependencies on other teams or integrations are surfaced.
 - [ ] **Scope** — in-scope is explicit; out-of-scope is stated when non-obvious.
 - [ ] **Metadata** — the `## Metadata` section is the last section of the comment, its fields are wrapped in the `<details>` block (blank line after `<summary>`, blank line before `</details>`) so the forge folds them, and it carries all five fields (Impacts, Impacted files, Size, Validation, Disposition) as `- **Field** — value` bullets, with the `<!-- boucle:impacts v=1 kinds=... -->` and `<!-- boucle:files v=1 paths=... -->` markers first inside the block. `kinds` uses only values from the closed set (architecture, data-model, process, state-machine, data-flow, deployment, ui, ux, design, none); a missing Impacts line or marker fails the CI gate. Never re-open `## Impacts`, `## Impacted files`, `## Classification` or `## Disposition` as separate sections — they were merged into `## Metadata`.
-- [ ] **Diagram** — if the Impacts line declares any structural kind (architecture, data-model, process, state-machine, data-flow, deployment), a `## Diagram` section with a Mermaid fence AND a `<!-- boucle:diagram v=1 types=... -->` marker is present, uses the boucle.dev light/transparent theme block from `templates/diagram-theme.md`, has ≤9 nodes, and is consistent with the acceptance criteria. If the Impacts line declares only visual kinds or `none`, the `## Diagram` section and marker are correctly omitted. A mismatch fails the CI gate.
+- [ ] **Diagram** — if the Impacts line declares any structural kind (architecture, data-model, process, state-machine, data-flow, deployment), a `## Diagram` section with a Mermaid fence AND a `<!-- boucle:diagram v=1 types=... -->` marker is present, uses the boucle.dev light/transparent theme block from `templates/diagram-theme.md`, has ≤9 nodes, and is consistent with the acceptance criteria. If the Impacts line declares only visual kinds or `none`, the `## Diagram` section and marker are correctly omitted. A mismatch fails the CI gate. Every Mermaid fence parses (CI runs the real parser), and the diagram draws the CHANGE the spec makes — not the files it edits.
 - [ ] **Preview** — if the Impacts line declares any visual kind (ui, ux, design), a `preview.html` + `RENDER_REQUEST` exists in `.boucle-state/<issue>/`. If the Impacts line declares only structural kinds or `none`, the preview is correctly omitted. A mismatch fails the CI gate.
 
 If any check fails, fix the comment before posting. A spec with weasel words is not READY.

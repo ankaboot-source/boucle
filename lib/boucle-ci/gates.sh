@@ -173,6 +173,88 @@ check_diagram_gate() {
   return 0
 }
 
+# ── Diagram syntax gate (deterministic — LESSONS.yml #109) ───────────────
+# The diagram gate above proves a diagram is PRESENT. It says nothing about
+# whether the forge can render it: boucle.dev#86 shipped a `## Diagram`
+# section with a valid marker and an erDiagram the Mermaid parser rejects
+# (`string file src/content/open-source/open-source.md` — a bare path where
+# the grammar allows only `type name [PK|FK|UK] ["comment"]`), so the human
+# was asked to approve a spec whose diagram rendered as an error box.
+#
+# "Looks right to the agent that wrote it" is not a check. This gate runs
+# the REAL Mermaid parser (bin/check-mermaid) over every ```mermaid fence in
+# the comment and blocks on a parse error, exactly the way the file and
+# diagram gates block on a marker mismatch.
+#
+# Fail-open on infrastructure, fail-closed on content:
+#   - no fence in the comment, gate disabled, checker missing, parser
+#     unavailable (exit 3: no node, no modules, no network) → return 0
+#   - a fence the parser REJECTS (exit 1) → block + re-trigger triage
+#
+# Retry bound: unlike the missing-diagram gate, a syntax error can be one
+# the agent is unable to fix, and an unbounded re-triage would spin the
+# loop. After BOUCLE_DIAGRAM_SYNTAX_MAX_RETRIES failed rounds the gate
+# hands the spec to the human with the errors attached instead of looping.
+# The comment body is passed as an argument — NEVER re-fetched from the forge.
+check_diagram_syntax_gate() {
+  local iid="$1" comment_body="$2"
+  [ "${BOUCLE_DIAGRAM_SYNTAX_GATE:-true}" = "true" ] || return 0
+  # No Mermaid fence → nothing to parse (a spec with no diagram is the
+  # missing-diagram gate's business, not this one).
+  printf '%s' "$comment_body" | grep -q '```mermaid' || return 0
+  local checker="${BOUCLE_HOME:-.}/bin/check-mermaid"
+  if [ ! -x "$checker" ]; then
+    echo "[boucle] WARN: #$iid — $checker not executable, skipping the diagram syntax check"
+    return 0
+  fi
+  local tmp status output
+  tmp=$(mktemp "${TMPDIR:-/tmp}/boucle-diagram-$iid.XXXXXX") || return 0
+  printf '%s\n' "$comment_body" > "$tmp"
+  status=0
+  output=$("$checker" "$tmp" 2>&1) || status=$?
+  rm -f "$tmp"
+  case "$status" in
+    0)
+      echo "[boucle] #$iid — diagram syntax OK"
+      return 0
+      ;;
+    1) ;; # invalid → handled below
+    *)
+      echo "[boucle] WARN: #$iid — diagram syntax check unavailable (exit $status), not blocking"
+      return 0
+      ;;
+  esac
+  # Report the FAIL lines only, with the temp path rewritten to something
+  # the human can act on. The line number is the line of the fence body
+  # inside the spec comment.
+  local errors
+  errors=$(printf '%s\n' "$output" | grep '^FAIL ' \
+    | sed "s|$tmp|spec comment|g" | head -10)
+  [ -z "$errors" ] && return 0 # exit 1 with no FAIL line → nothing to report
+  # How many rounds has this already cost?
+  local attempts max
+  max="${BOUCLE_DIAGRAM_SYNTAX_MAX_RETRIES:-2}"
+  attempts=$(forge_issue_notes "$iid" 2> /dev/null \
+    | jq -r '[.[] | select(.body | contains("<!-- boucle:diagram-invalid v=1"))] | length' \
+      2> /dev/null || echo 0)
+  case "$attempts" in
+    '' | *[!0-9]*) attempts=0 ;;
+  esac
+  if [ "$attempts" -ge "$max" ] 2> /dev/null; then
+    echo "[boucle] WARN: #$iid — diagram still invalid after $attempts round(s), handing the spec to the human"
+    local exhausted_body
+    exhausted_body=$(printf '⚠️ The Mermaid diagram in this spec is still invalid after %s triage round(s), so the spec is going to you as-is rather than looping. The forge will render the `## Diagram` section as an error box until it is fixed:\n\n```\n%s\n```\n\n<!-- boucle:diagram-invalid v=1 state=exhausted rounds=%s -->' "$attempts" "$errors" "$attempts")
+    forge_issue_note "$iid" "$exhausted_body"
+    return 0
+  fi
+  echo "[boucle] #$iid blocked — the spec's Mermaid diagram does not parse"
+  set_boucle_label "$iid" "boucle:triage" "boucle::status::bot"
+  local block_body
+  block_body=$(printf '⚠️ The Mermaid diagram in this spec does not parse, so the forge renders it as an error box instead of a diagram. Triage has been re-triggered to fix it — re-read your previous spec in the Prior discussion and fix ONLY the `## Diagram` section, do NOT re-analyze from scratch.\n\n```\n%s\n```\n\nLine numbers are counted from the first line of the Mermaid fence. See `templates/diagram-theme.md` § Syntax rules for the grammar traps that produce these errors.\n\n<!-- boucle:diagram-invalid v=1 rounds=%s -->' "$errors" "$attempts")
+  forge_issue_note "$iid" "$block_body"
+  return 1
+}
+
 # ── Preview gate (deterministic — LESSONS.yml #104) ──────────────────────
 # Before a spec pauses for human approval, verify that a spec declaring
 # visual impacts (ui, ux, design) in its `## Metadata` section actually has

@@ -789,6 +789,17 @@ HELP_EOF
           echo "[boucle] preview gate failed for #$IID — spec missing required preview"
           exit 0
         fi
+        # ── Diagram syntax gate (deterministic — LESSONS.yml #109) ──────
+        # The gate above proves a diagram is present; this one proves the
+        # forge can render it. Runs on ANY spec carrying a Mermaid fence —
+        # size and impact kinds decide whether a diagram is REQUIRED, they
+        # do not make a broken one acceptable.
+        if check_diagram_syntax_gate "$IID" "$COMMENT"; then
+          :
+        else
+          echo "[boucle] diagram syntax gate failed for #$IID — spec diagram does not parse"
+          exit 0
+        fi
         if [ "$SHOULD_GATE" = "true" ]; then
           # Pause for author to validate the spec (acceptance criteria) before
           # the worker runs. Assign to the reporter (handles sub-issues via
