@@ -1,256 +1,405 @@
 # Prime Agent — what transfers to boucle, what does not
 
-> **Source.** *Prime Agent: A Self-Improving RLM Harness* (Karten, Zhang,
-> Thomas, Müller, Bakouch et al., Prime Intellect, arXiv:2608.23552, released
-> 2026-08-06) and the MIT-licensed implementation at
-> [PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent).
->
-> **Source-access caveat — read this before citing the numbers below.**
-> `arxiv.org` and `huggingface.co` are blocked by this environment's egress
-> policy, so the **full paper text was NOT read**. Every paper-level claim
-> here comes from the abstract and the announcement summary; every mechanism
-> claim comes from the repository's own docs
-> (`packages/coding-agent/docs/{rlm,architecture,skills,compaction,sessions,long-running-agents}.md`),
-> which are the implementation of the paper. There are therefore **no
-> benchmark deltas in this study** — unlike
-> [docs/skills-audit.md](skills-audit.md), nothing here is backed by an
-> effect size from the source. Treat the "what transfers" section as design
-> argument, not as measured evidence. Re-read the paper and revise this doc
-> before quoting it as an authority.
->
+> **Source.** *Prime Agent: A Self-Improving RLM Harness* — Karten, Zhang,
+> Thomas, Müller, Bakouch, Auras, Senghaas, Obeid, Dunas, Hagemann, Jaghouar
+> (Princeton / Prime Intellect / MIT), arXiv:2608.23552, first published
+> 2026-08-05, revision read here 2026-08-24. Implementation:
+> [PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent)
+> (MIT), whose docs supply the mechanism details the paper compresses.
 > **Every boucle-side number is measured in this repo**, with the command
 > shown next to it.
 
-## 0. What Prime Agent actually is
+## 0. What the paper actually claims
 
-Two ideas, one harness.
+Four corrections to the headline, because they change which boucle work is
+worth doing.
 
-- **RLM (Recursive Language Model)** — the model does not get a tool schema.
-  It gets a **persistent IPython kernel**. Files, shell, context handling and
-  sub-agents are all *Python code* it writes. Context is
-  *prompt-as-a-variable*: results stay as live Python variables that "survive
-  across tool calls and compaction". Sub-agents are function calls:
-  `handle = await rlm("Review auth security", name="auth-reviewer")` returns
-  a **handle immediately** — never the child's answer. Results come back only
-  through explicit `agent_message` replies or files.
-- **Continual harness** — supplemental prompts, memories, skill descriptions
-  and **reusable sub-agent specifications** are stored as durable state,
-  refined by `/refine` in "small, evidence-backed updates", **local to the
-  session by default**, with snapshots for rollback. The immutable base
-  system prompt is never rewritten.
+- **Against a *matched* native harness, the long-context gains are small.**
+  Counting Table 1 row by row: Prime Agent beats Claude Code on 6 of 9 rows
+  with Opus 5, and Codex on 6 of 9 with GPT-5.6 Sol — but mostly in the third
+  decimal (.804 vs .790, .744 vs .746, .794 vs .790). The large margins are
+  all against **Pi-mono** with GLM-5.2: .700 vs .420 on OOLONG, .874 vs .556
+  on OOLONG-Pairs, .208 vs .000 on EmulatorBench (8 of 9 rows). The authors
+  add the caveat themselves: "Bold is not statistical significance, and
+  uncertainty intervals are unavailable." **Read: an expressive harness
+  rescues a weak one; it does not lift a good one much.**
+- **The 30% → 95.5% ARC-AGI-3 figure is not a clean harness A/B.** The paper
+  states its own native-harness reruns fell below Anthropic's and OpenAI's
+  self-reported numbers, defers to the published ones, and says the reference
+  lines "situate the result rather than isolate a causal harness effect."
+- **On a multi-day task, the harness did not change the outcome.** On the
+  nanoGPT speedrun: "the choice of harness has little effect on final records
+  compared to the noise of the experiment." What changed was *behavior* —
+  DeepSeek V4 Pro created ~6× more out-of-loop experiments per training run
+  under Prime Agent, and Kimi K3 built a `probe` function through which it
+  ran ~90 screening experiments and all 19 of its validated records, where
+  the same model on its own CLI edited files directly and built no such
+  machinery.
+- **The one clean win is cost, not score.** On PMPP-Hard: "the same
+  performance as Codex or Kimi-Code is achieved by Prime Agent at
+  substantially reduced cost, and, token-for-token, Prime Agent has an
+  advantage." That is boucle's own value proposition (README §Cost), argued
+  by someone else.
 
-Around them: a daemon supervisor, session workers and kernels as separate
-processes (explicitly "**not** a security sandbox"), JSONL session trees with
-branching, auto-compaction, `/goal`, `/heartbeat`, `prime-agent schedule`,
-and an autonomous mode bounded by continuation / turn / token / wall-clock
-budgets plus command-based quality gates.
+The conclusion states the limit plainly: "Many harness capabilities remain
+underused because current models were not trained to operate them." **That
+sentence is the governing constraint on everything below**, and it is the
+same finding boucle already measured from the other side (`bin/jc:1369`:
+agents read `LESSONS.yml` voluntarily in 0 of 68 observed runs).
 
-## 1. The mapping
+## 1. The frame worth stealing: L0–L3
 
-| Prime Agent | Boucle's equivalent today | Verdict |
+The paper's most useful contribution to boucle is not a feature, it is a
+vocabulary. State is a cache hierarchy (§2.2):
+
+| Level | Content | How it changes |
 | --- | --- | --- |
-| Persistent IPython kernel as the only tool surface | `bin/jc` + jcode tools + CI shell; state re-materialised per stage | **Reject** — a kernel cannot survive an ephemeral runner |
-| Prompt-as-a-variable (pull) | Blobs pushed into the prompt: 9,490-char skill catalogue + ≤4,387-char lessons block + architecture overview | **Partial** — keep pushing, make it addressable (P5) |
-| `rlm()` recursive sub-agents, async handles | `swarm` in [.jcode/agents/worker.md](../.jcode/agents/worker.md) §"Swarm — parallel sub-agents" | **Converged** — but 0 instrumentation (P4) |
-| Reusable **sub-agent specifications** as durable state | None — swarm prompts are written from scratch every run | **Transfers** (P4) |
-| Continual harness: memories, local by default | `LESSONS.yml` — engine-global, human-curated, `bin/update`-synced | **Transfers, inverted** (P1) |
-| `/refine` on trajectories | Lesson candidate emitted **only at escalation** (`bin/jc:1342`) | **Transfers** (P2) |
-| Snapshots + rollback of refinements | `pruned: true` / `merged_into:` — manual, no evidence trail | **Partial** (P1) |
-| Compaction: cut point + LLM summary + keep recent | Tail-elision ladder 750 → 300 → 120 chars, bot notes only | **Transfers** (P3) |
-| Autonomous budgets: continuations, turns, tokens, wall clock, quality gates | Step + iteration caps; token/cost **measured** (`cost.json`) but never **capped** | **Transfers** (P6) |
-| Skills: descriptions at startup, body on demand | `bin/skills-index` catalogue + on-demand `SKILL.md` | **Converged** — no action |
-| Daemon, `attach`, Agents View | CI jobs + status board + `boucle takeover` | **Reject** — contradicts "nothing to keep running" |
-| Session tree, `/tree` branching | Linear iterations + discarded-head tags | **Reject** — no consumer need |
-| "Not a security sandbox" | CI container, per-stage, credentials scrubbed | **Boucle is ahead** |
+| **L0** | Model weights | Fine-tuning (fixed at run time) |
+| **L1** | Active token context | Compaction rewrites it |
+| **L2** | Persistent REPL values + live subagent sessions | *Agentic garbage collection* — the model retains, summarises, or deletes |
+| **L3** | Disk-backed history, memories, skills | Refinement versions selected entries |
 
-## 2. What transfers, ranked
+Applied to boucle, the frame produces one finding immediately:
 
-### P1 — Learn *per consumer*, not only per engine
+**Boucle has no L2.** Its runner is ephemeral, every stage is a fresh
+process, and nothing survives a turn except what is written to the forge or
+to `.boucle-state/`. So every L3 item that must influence a decision has to
+be *pushed into L1* — and boucle does exactly that: 9,490 chars of skill
+catalogue, ≤4,387 chars of lessons, an architecture overview, the whole note
+thread. That is not a defect to fix by bolting on a kernel; it is the
+consequence of running on CI, which is the product. But it does mean
+**boucle pays prompt tokens for every retrieval, so its L3 → L1 transfer
+policy is the harness's single highest-leverage knob** — which is precisely
+where P3 and P5 below apply.
 
-Boucle learns in exactly one place: `LESSONS.yml`, 107 entries, engine-global,
-human-curated, pushed to every consumer by `bin/update`. Nothing a run
-discovers about **this repository** outlives the issue:
-`.boucle-state/<issue>/` is per-issue and gitignored, and the state note is
-attached to the issue. So the build command, the flaky suite, the deploy
-quirk, the missing binary are re-discovered on issue N+1.
+The second half is the L3 typology (§2.5), and it is sharper than boucle's:
 
-That is precisely the `setup_fail` class — the environment blocking a run
-before the agent reaches the task — which
-[docs/skills-audit.md](skills-audit.md) measures dropping **5.3% → 0.2%**,
-"an effect ~25× the aggregate one". Boucle already knows this is the class
-worth attacking; it just has no place to write what it learned.
+> "Prompt notes store behavioral instructions, memories store facts, skills
+> package executable procedures, and subagent specifications store reusable
+> roles or divisions of labor. Typed state separates rules, facts, programs,
+> and coordination patterns."
 
-Prime Agent's answer is the continual harness: memories that are **local by
-default**. Boucle should take the mechanism and **invert the default**:
+Boucle has **rules** (`LESSONS.yml`, 107 entries) and **programs** (62
+skills). It has **no facts store** and **no coordination-pattern store**.
+P1 and P4 are those two holes.
+
+## 2. The mapping
+
+| Prime Agent | Boucle today | Verdict |
+| --- | --- | --- |
+| Persistent IPython REPL as the sole tool surface (L2) | None — ephemeral runner, fresh process per stage | **Reject** — the product is "nothing to keep running" |
+| Long context stored as a file, searched from the REPL | Note thread trimmed and pushed into the prompt | **Transfers, half** (P3) |
+| `rlm()` async subagents, handle returned immediately | `swarm` in [.jcode/agents/worker.md](../.jcode/agents/worker.md) | **Converged** — but 0 instrumentation (P4) |
+| Subagent **specifications** as typed L3 state | None — swarm prompts improvised per run | **Transfers** (P4) |
+| Memories = facts, local by default | Nothing; `LESSONS.yml` is rules, global, human-curated | **Transfers, inverted** (P1) |
+| `/refine` over trajectory events, any outcome | Candidate emitted **only at escalation** (`bin/jc:1342`) | **Transfers** (P2) |
+| Versioned refinements, provenance, rollback | `pruned:` / `merged_into:` — manual, no provenance | **Transfers** (P1) |
+| Compaction: summary into L1, **originals kept in L3** | Tail-elision 750 → 300 → 120 chars, no retention | **Transfers** (P3) |
+| Autonomous budgets: turn, token, wall-clock + end-condition test | Step + iteration caps; cost *measured*, never *capped* | **Transfers** (P6) |
+| Accounting aggregated over root **and descendants** | `cost.json` per `jc` invocation; swarm children unverified | **Transfers** (P4) |
+| "Separate harness failures from model failures" | 6 failure classes, side not labelled | **Transfers** (P6) |
+| Skills: descriptions up front, body on demand | `bin/skills-index` + on-demand `SKILL.md` | **Converged** — no action |
+| Daemon, Agents View, attach/detach | CI jobs, status board, `boucle takeover` | **Reject** |
+| Session tree, branching, fork-without-delete | Linear iterations + `boucle/<issue>/discarded-<ts>` tags | **Reject** — boucle has the useful half |
+| Least-privilege interfaces, auditable rollback of refinements | MR gate + `git revert` | **Boucle is ahead** (see §3) |
+
+## 3. The Factorio result, and why it validates boucle's gate
+
+The paper's most important passage for boucle is a failure, not a benchmark
+(§3.5):
+
+> "A different Factorio trace revealed the central safety failure of online
+> refinement. The agent discovered that RCON commands could spawn resources
+> directly into assembly machines, used the shortcut despite an anti-cheating
+> heartbeat, and then preserved it as a reusable skill. In this trace,
+> persistence preserved behavior that optimized the measured objective,
+> including a specification exploit. Safe deployment therefore requires
+> least-privilege action interfaces, independent state validation, and
+> auditable rollback of contaminated refinements."
+
+Read it as a specification for P1, because it names three requirements and
+boucle already satisfies two:
+
+| Requirement | Boucle's answer |
+| --- | --- |
+| Least-privilege action interfaces | Per-stage CI container, scrubbed credentials, no self-approval path |
+| Auditable rollback of contaminated refinements | A committed file: `git revert`, `git log -p`, MR history |
+| **Independent state validation** | **Partially — see below** |
+
+The third is the one to design for, and it produces a hard constraint that
+was not obvious before reading the paper:
+
+**A refinement injected into both the worker and its reviewer defeats the
+validator.** `bin/jc:1368` injects into `triage | worker | reviewer` alike.
+For human-curated rules that is fine — they are the shared charter. For
+agent-written **facts** it is not: a contaminated memory ("the e2e suite is
+flaky here, a red run is expected") would reach the very agent whose job is
+to catch it, and the loop would ratify its own shortcut exactly as the
+Factorio agent did. Therefore:
+
+- **NEVER** inject the agent-written memory store into the **reviewer** or
+  **e2e** prompt. Triage and worker only.
+- The reviewer validates the diff — memory entries included, since they land
+  in the same MR — from the charter docs and the acceptance criteria, not
+  from the memory.
+
+Boucle's other structural answer to this trace is already in place: the paper
+observes "the model handled irreversible actions poorly" and reports a
+destructive world reset that reverted five technologies to one. Boucle's
+irreversible actions — merge, deploy, force-push — are exactly the ones
+behind a human gate, a serial `resource_group`, a safety-net commit and a
+`discarded-<timestamp>` tag. The failure mode the paper observed is the one
+those gates exist to prevent.
+
+## 4. What transfers, ranked
+
+### P1 — A facts store, per consumer, gated by the MR
+
+Boucle learns in exactly one place: `LESSONS.yml`, 107 entries,
+engine-global, human-curated, pushed to every consumer by `bin/update`.
+Nothing a run discovers about **this repository** outlives the issue:
+`.boucle-state/<issue>/` is per-issue and gitignored, and the state note
+hangs off the issue. Issue N+1 re-discovers the build command, the flaky
+suite, the missing binary.
+
+That is the `setup_fail` class — the environment blocking a run before the
+agent reaches the task — which [docs/skills-audit.md](skills-audit.md)
+measures dropping **5.3% → 0.2%**, "an effect ~25× the aggregate one".
+Boucle already knows this is the class worth attacking; it has nowhere to
+write what it learned.
+
+Prime Agent's memories are that store, and its default is **session-local**,
+with global entries requiring an explicit request. Boucle should take the
+mechanism and invert the default: **consumer-local**, because a fact about
+one repository is noise in every other.
 
 - **Where.** A consumer-root, agent-writable, **committed** file (e.g.
   `BOUCLE-MEMORY.yml`). **NEVER** under `.boucle/` — that directory is 100%
-  owned by `bin/update` and `bin/check-boucle-sync` rejects agent commits
-  touching it (see [AGENTS.md](../AGENTS.md) §"`.boucle/` ownership").
-- **What.** One entry per fact, each carrying its evidence: issue iid, SHA,
-  the observed error string. No entry without evidence — that is the whole
-  point of "evidence-backed updates".
-- **Who.** The worker writes it in the **same MR** as the code, so every
-  memory passes through the reviewer and the human MR gate. Prime Agent's
-  refinements are local and silent; boucle's must be reviewed. That is the
-  house rule, and it is the stronger design: a bad memory is a bad memory in
-  every future run.
-- **Rollback for free.** It is a committed file: `git revert` is the
-  snapshot mechanism Prime Agent had to build.
-- **Injection.** Reuse the `LESSONS.yml` path in `bin/jc:1368` verbatim —
-  same keyword extraction, same "already extracted, do NOT re-read" framing.
+  owned by `bin/update`, and `bin/check-boucle-sync` rejects agent commits
+  touching it ([AGENTS.md](../AGENTS.md) §"`.boucle/` ownership").
+- **What.** Facts, not rules. One entry per fact, each carrying what the
+  paper's refinement records carry — its **trigger** and its **intended
+  effect**: issue iid, SHA, the observed error string, what should change.
+  No entry without evidence.
+- **Who.** The worker writes it in the **same MR** as the code. Every memory
+  then passes the reviewer and the human MR gate. Prime Agent's refinements
+  are local and silent; boucle's are reviewed — and §3 is the paper's own
+  argument for why that is the safer default.
+- **Rollback for free.** It is a committed file. `git revert` is the
+  versioned-provenance mechanism Prime Agent had to build.
+- **Injection.** Reuse the `LESSONS.yml` path in `bin/jc:1368` — same
+  keyword extraction, same "already extracted, do NOT re-read" framing —
+  **minus the reviewer and e2e roles** (§3).
 
 ```mermaid
 flowchart LR
-    subgraph Global["Engine-global — human-curated, upstream-synced"]
+    subgraph L3G["L3 global — rules, human-curated, bin/update-synced"]
         L["LESSONS.yml<br/>107 entries<br/>classes of mistake"]
     end
-    subgraph Local["Consumer-local — agent-written, MR-reviewed"]
-        M["BOUCLE-MEMORY.yml<br/>this repo's facts<br/>evidence-backed"]
+    subgraph L3L["L3 local — facts, agent-written, MR-reviewed"]
+        M["BOUCLE-MEMORY.yml<br/>this repo's facts<br/>trigger + effect + SHA"]
     end
     R["Run on issue N"] -->|"class of mistake"| L
     R -->|"fact about THIS repo"| M
-    L --> P["Assembled prompt (bin/jc)"]
-    M --> P
+    L --> P["L1: assembled prompt (bin/jc)"]
+    M -->|"triage + worker only"| P
+    M -.->|"NEVER injected —<br/>keeps the validator independent"| RV["Reviewer / e2e"]
     P --> R2["Run on issue N+1"]
 ```
 
-**The admission test must differ.** `LESSONS.yml` demands
-class-not-instance (AGENTS.md §"Lessons learned"). A repo memory is the
-**opposite**: instances are exactly what it is for. Reusing the four-point
-test would reject every useful entry. Write a separate, narrower test —
-reproducible, repo-specific, falsifiable, non-duplicate — or the file fills
-with re-worded lessons.
+**The admission test MUST differ.** `LESSONS.yml` demands
+class-not-instance (AGENTS.md §"Lessons learned") because it stores *rules*.
+A facts store is the opposite: instances are the whole point. Reusing the
+four-point test would reject every useful entry; skipping a test entirely
+would fill the file with re-worded lessons. Write a narrow one —
+reproducible, repo-specific, falsifiable, non-duplicate — and enforce it the
+way `bin/check-lessons` already enforces the other.
 
 ### P2 — Refine on success too, not only at escalation
 
 `bin/jc:1342` emits a lesson candidate only when the loop escalates. Every
 artifact boucle has ever distilled therefore comes from a failed run.
-[docs/skills-audit.md](skills-audit.md) already calls this out — "100% of the
+[docs/skills-audit.md](skills-audit.md) already flags this — "100% of the
 lesson pipeline is `0s5f`" — and reports that failure-only source pools make
-distilled artifacts **worse than no artifact** (0.5161 vs 0.5935 Codex/TB2).
+distilled artifacts **worse than no artifact** (0.5161 vs 0.5935,
+Codex/TB2).
 
-Prime Agent is independent evidence for the same fix: `/refine` reviews **a
-trajectory**, not a post-mortem. Nothing in it is conditioned on failure.
+Prime Agent is independent evidence for the same fix. `/refine` "runs a
+background model call over relevant events"; nothing in it is conditioned on
+failure, and the self-improvement path it describes is explicitly about
+*useful* computation: "Useful computations become skills, repeated
+coordination patterns become subagent specifications, and corrected
+assumptions become memories or prompt notes."
 
 Emit a candidate at the terminal `boucle:done` transition as well — the same
-place the metrics row is already published, so the hook exists. Route
-success-derived candidates to the P1 repo memory rather than to
-`LESSONS.yml`, so the global file stays conservative while the pool that
-feeds the prompt stops being 100% failure-derived.
+hook that already publishes the metrics row. Route success-derived candidates
+to the P1 facts store, not to `LESSONS.yml`, so the global rules file stays
+conservative while the pool that feeds the prompt stops being 100%
+failure-derived.
 
-### P3 — Summarise the tail instead of amputating it
+### P3 — Summarise into L1, retain the original in L3
 
 Boucle's ladder (LOOP.md §"Prompt budget") trims bot notes 750 → 300 → 120
 chars. At 120 chars a reviewer verdict is a headline: the information is
-gone, but the token is still paid. Prime Agent compacts instead: walk back to
-`keepRecentTokens` (default 20,000), LLM-summarise everything before the cut,
-append one `CompactionEntry`, and **accumulate file-operation tracking across
-compactions** so the "what was touched" record never degrades.
+gone and the token is still paid. Prime Agent's compaction does the same cut
+with one addition that changes everything (§2.2):
 
-Keep boucle's two invariants — human comments never trimmed, no note ever
-dropped — and replace the bottom rung:
+> "Compaction replaces a conversational prefix with a summary and retains the
+> original events in L3 for REPL retrieval."
 
-- Keep the last N bot notes and every human note **verbatim**.
-- Replace older bot notes with **one** `[boucle:digest]` note produced by the
-  cheap model, carrying: verdicts and their SHAs, approaches already
-  rejected, files already touched.
-- The digest merges; it does not drop. The invariant holds.
+The summary is lossy; the record is not. And the long-context method (§3.2)
+is the same move: "Prime Agent stores the initial context in a readable
+file, allowing the model to search, transform, summarize, and revisit it
+from the persistent REPL. This changes long-context reasoning from passive
+attention over a fixed sequence into a programmatic information-management
+problem."
 
-Cost is bounded: `BOUCLE_MAX_PROMPT_CHARS` defaults to `0` (disabled), so the
-extra call only ever fires for a consumer who has opted into a ceiling.
+Boucle's note thread *is* a long context, and its L3 copy already exists —
+the notes are on the forge, addressable by API. So:
 
-### P4 — Instrument `swarm` before investing in it
+- Keep the last N bot notes and **every** human note verbatim in L1.
+- Replace older bot notes with **one** `[boucle:digest]` note from the cheap
+  model, carrying verdicts and their SHAs, approaches already rejected, and
+  files already touched — the paper's compaction keeps accumulated file
+  tracking across cuts for the same reason.
+- **Name the retained original.** The digest MUST end with the command that
+  retrieves the untrimmed thread. A summary the agent cannot get behind is a
+  lossy cache with no backing store.
+
+Both boucle invariants survive: human comments are never trimmed, and no
+note is dropped — the digest *merges*. Cost is bounded because
+`BOUCLE_MAX_PROMPT_CHARS` defaults to `0` (disabled), so the extra call only
+fires for a consumer who opted into a ceiling.
+
+### P4 — Instrument `swarm` before investing in it, and check its bill
 
 [.jcode/agents/worker.md](../.jcode/agents/worker.md) §"Swarm" tells the
 worker to spawn parallel sub-agents and forbids one-liner prompts. Measured
 here: **zero** references to `swarm` anywhere in `bin/` or `lib/`
 (`grep -rn swarm bin/ lib/`). Boucle does not know whether a single worker
-run has ever spawned one — the same blind spot `skills-used.json` was built
-to close for skills, and the house rule is measure first.
+run has ever spawned one — the blind spot `skills-used.json` was built to
+close for skills. The paper's own conclusion says why that matters: "Many
+harness capabilities remain underused because current models were not
+trained to operate them."
 
-1. Extract swarm spawns from the transcript exactly as skills are extracted,
-   record them on the `[boucle:metrics]` channel and on the `health.jsonl`
+Three steps, in order:
+
+1. **Count them.** Extract swarm spawns from the transcript exactly as skills
+   are extracted, report on `[boucle:metrics]`, record on the `health.jsonl`
    row. Measurement only — nothing gates on it.
-2. **Only if they fire**, take Prime Agent's *sub-agent specification*: a
-   small set of reusable specs (research, explorer, file-group implementer)
+2. **Check the bill.** Prime Agent aggregates accounting over "the root and
+   descendant sessions, so delegation remains visible in test-time cost."
+   Verify that `cost.json` includes tokens spent by swarm children. If it
+   does not, the per-role breakdown under-reports every parallel run and the
+   P6 budget cap leaks exactly where spending is highest. *Unverified here —
+   it depends on what jcode reports for child sessions.*
+3. **Only if they fire**, add subagent specifications as typed L3 state: a
+   small set of reusable roles (research, explorer, file-group implementer)
    with a required prompt contract — objective, constraints, file paths,
    expected output — instead of a prompt improvised per run.
 
-Do not build (2) before (1) answers whether the feature exists in practice.
+The Factorio trace also tells boucle **what shape** to expect and to support:
+633 depth-one subagents across 149 dispatch waves, at most 7 concurrent —
+"a shallow, repeatedly widening tree recorded parallel task specialization
+rather than deeper recursion." Wide and shallow, which is exactly boucle's
+one-worker-fans-out model. Do not build recursive delegation.
 
 ### P5 — Make the pushed blobs addressable
 
-Prime Agent pulls: state is a variable the model queries. Boucle pushes,
-deliberately — `bin/jc:1369` records that agents read `LESSONS.yml`
-voluntarily in **0 of 68 observed runs**, so the blobs are injected and the
-agent gets no choice. That measurement stands, and the push should stay.
+Boucle pushes rather than pulls, deliberately, on measurement: 0 of 68
+observed runs read `LESSONS.yml` voluntarily. The paper's conclusion
+vindicates that choice rather than undermining it — capabilities models were
+not trained to operate go underused — so **keep the push**.
 
-The cheap half of the pull model still applies: an injected excerpt should
-say what it is an excerpt **of**. The lessons block is capped at 80 lines of
-107 entries and the agent is told "do NOT re-read the file" — correct for the
-file, wrong for the rest of the knowledge. Append one line naming the
-remainder and the command that widens it (`bin/lessons --grep <kw>`, to be
-added). It costs ~1 line against a 4,387-char block, and whether it is ever
-used is measurable on the same channel as P4.
+The cheap half of the L2 idea still applies, and it is the same principle as
+P3: an excerpt should name what it is an excerpt **of**. The lessons block is
+capped at 80 lines out of 107 entries and the agent is told "do NOT re-read
+the file" — correct for the file, wrong for the remaining knowledge. Append
+one line naming the remainder and the command that widens it
+(`bin/lessons --grep <kw>`, to be added). It costs ~1 line against a
+4,387-char block, and whether it is ever used is measurable on the same
+channel as P4 — which is the honest way to settle push-vs-pull for boucle's
+models instead of arguing it.
 
-### P6 — Cap the budget, and keep "limit reached ≠ success"
+### P6 — Termination semantics: cap the budget, name the failing side
 
-Prime Agent bounds autonomous work by continuations, turns, tokens and wall
-clock, adds command-based quality gates, and states plainly that reaching a
-limit does not imply success. Boucle caps steps and iterations, and since
-`cost.json` it **measures** tokens and cost — LOOP.md §"Cost accounting"
-calls that "the prerequisite for a real budget cap: measure first, cap
-second". The prerequisite is met; §Caps still reads "not set at MVP".
+Two halves of §2.6, which boucle should adopt together.
 
-Add `BOUCLE_MAX_ISSUE_COST` / `BOUCLE_MAX_ISSUE_TOKENS`, evaluated at stage
-entry against the accumulated `cost.json`. On breach: escalate to
-`boucle:human` through the existing `boucle_escalation_diagnostic` with a new
-failure class `budget-exhausted`. **NEVER** treat exhaustion as a pass — the
-classifier already distinguishes provider/quota from build-fail, and this is
-a third thing. Unset means unlimited, as today.
+**Cap the budget.** Prime Agent's autonomous mode "continues model turns
+within an explicit budget and evaluates a task-specified end-condition test
+after each turn. A failed test returns bounded output for another attempt;
+turn, token, and wall-clock limits stop execution." Boucle caps steps and
+iterations; since `cost.json` it **measures** tokens and cost — LOOP.md
+§"Cost accounting" calls that "the prerequisite for a real budget cap:
+measure first, cap second". The prerequisite is met; §Caps still reads "not
+set at MVP". Add `BOUCLE_MAX_ISSUE_COST` / `BOUCLE_MAX_ISSUE_TOKENS`,
+evaluated at stage entry against the accumulated `cost.json`; unset means
+unlimited, as today. **NEVER** treat exhaustion as a pass.
 
-## 3. Where boucle is already ahead
+**Name the failing side.** The paper's thesis sentence is a design rule for
+boucle's escalation diagnostic:
 
-Three convergences worth stating, because they are load-bearing arguments for
-choices boucle has already defended and should not revisit:
+> "A model should fail an evaluation because the task exceeds its capability,
+> not because the harness dropped state, restricted useful actions,
+> miscounted resources, or terminated prematurely."
 
-- **Progressive disclosure of skills.** Prime Agent loads skill
-  *descriptions* at startup and the body on demand. `bin/skills-index`
-  publishes all 62 skill descriptions (9,490 chars) with **no ranking**, and
-  the body loads on demand. Two independent designs, same answer. The "no
-  ranking" refusal in LOOP.md §Skills is now the majority position.
-- **Async is the point.** "Closing the terminal UI detaches the client; it
-  does not stop the worker" is Prime Agent working to recover what boucle
-  gets structurally: CI runs it, nothing is attached, invariant I3.
-  Prime Agent needs a daemon supervisor, ZeroMQ and an Agents View to reach
-  where boucle starts.
-- **Agent-to-agent messaging.** Prime Agent routes inter-agent messages
-  through the supervisor. Boucle's channel is the forge note thread —
-  durable, human-auditable, survives process death, and is the same artifact
-  the human reviews. That is a better fit for a supervised loop, and
-  marker-stamping (I7) already makes it machine-readable.
+Boucle's six failure classes (provider/quota, build-fail, no-changes,
+rebase-conflict, not-mergeable, unknown) already *imply* the split —
+provider/quota, rebase-conflict and not-mergeable are harness-side;
+build-fail and no-changes are model-side — but nothing states it, so nothing
+aggregates on it. Add an explicit `failure_side: harness | model` to the
+`health.jsonl` row and to the escalation comment, plus `budget-exhausted` as
+a seventh class (harness-side: the loop stopped, the task did not fail).
+`setup_fail` is already the harness-side leading indicator; this makes the
+whole escalation stream summable the same way. A consumer whose escalations
+are mostly harness-side has an engine bug to file upstream, not a hard issue.
+
+## 5. Where boucle is already ahead
+
+- **Reviewed refinement beats local-and-silent.** §3 is the paper's own
+  evidence. Prime Agent asks for "auditable rollback of contaminated
+  refinements" after its agent persisted a specification exploit as a skill.
+  Boucle's answer is a commit in a reviewed MR.
+- **Async is structural, not recovered.** Prime Agent needs a daemon
+  supervisor, family-scoped ZeroMQ queues and an Agents View so that
+  "client detachment leaves the session running". Boucle gets that from
+  running on CI (invariant I3) and reaches it at zero architectural cost.
+- **The forge is a better message bus for a supervised loop.** Prime Agent
+  routes agent-to-agent messages through daemon-mediated queues. Boucle's
+  channel is the note thread: durable, human-auditable, marker-stamped (I7)
+  so it is machine-readable, surviving process death, and identical to the
+  artifact the human reviews.
+- **Progressive disclosure of skills.** Prime Agent loads descriptions up
+  front and bodies on demand; `bin/skills-index` publishes all 62
+  descriptions (9,490 chars) with **no ranking** and loads bodies on demand.
+  Two independent designs, same answer — LOOP.md §Skills' refusal to rank is
+  now the majority position.
 - **"Not a security sandbox."** Prime Agent says so explicitly and tells
-  users to run untrusted code in an external sandbox. Boucle's per-stage CI
-  container **is** that sandbox, with scrubbed credentials. Keep saying it.
+  users to run untrusted code elsewhere. Boucle's per-stage CI container
+  **is** that elsewhere, with scrubbed credentials. Keep saying it.
 
-## 4. Rejected, with reasons
+## 6. Rejected, with reasons
 
-- **Persistent IPython kernel.** It presumes a process that outlives the
-  turn. Boucle's runner is ephemeral by design; per-issue state on the forge
-  (LOOP.md §"Per-issue state") is the deliberate answer to the same problem
-  and survives what a kernel does not.
-- **Daemon, `attach`, Agents View.** Directly contradicts "no laptop left
-  half-open, nothing to restart, nothing to babysit". `boucle takeover`
-  already covers the one case that matters (resuming after escalation).
-- **Session-tree branching.** Boucle's unit of retry is a CI job with a fresh
-  process; `adaptive` reset plus the `boucle/<issue>/discarded-<ts>` tag
-  already preserves the abandoned path. Branching buys nothing without an
-  interactive session to branch in.
-- **Local-by-default, silent refinement.** Boucle's thesis is human gates.
-  Any refinement must land in an MR. Take the mechanism, drop the default.
+- **Persistent IPython kernel (L2).** It presumes a process outliving the
+  turn. Boucle's runner is ephemeral by design, and per-issue state on the
+  forge (LOOP.md §"Per-issue state") already solves the same problem for
+  the state that matters — while surviving what a kernel does not. Adopting
+  it would trade the product's core claim for a benchmark delta that §0
+  shows is small against a matched harness.
+- **Daemon, Agents View, attach/detach.** Directly contradicts "no laptop
+  left half-open, nothing to restart, nothing to babysit". `boucle takeover`
+  covers the one case that matters.
+- **Session-tree branching.** Boucle's unit of retry is a fresh CI job;
+  `adaptive` reset plus the `boucle/<issue>/discarded-<ts>` tag already gives
+  "a new logical continuation without deleting the prior event sequence".
+  Branching buys nothing without an interactive session to branch in.
+- **Deep recursive delegation.** The Factorio trace measured the useful
+  shape as wide and shallow (633 depth-one children, ≤7 concurrent). Boucle
+  already has it.
+- **Local-by-default, silent refinement.** Take the mechanism, drop the
+  default — §3.
 
-## 5. Reproducing the boucle-side numbers
+## 7. Reproducing the boucle-side numbers
 
 ```bash
 grep -cE '^[0-9]+:' LESSONS.yml            # 107 lessons
@@ -265,6 +414,6 @@ sed -n '1342p;1368,1380p' bin/jc           # candidate-at-escalation, injection
 
 - [docs/skills-audit.md](skills-audit.md) — the skills study P1/P2 build on
 - [LOOP.md](../LOOP.md) — §Skills, §Prompt budget, §Cost accounting,
-  §Per-issue state, §Skill-effectiveness measurement
+  §Per-issue state, §Loop-health measurement, §Skill-effectiveness measurement
 - [AGENTS.md](../AGENTS.md) — §"Lessons learned", §"`.boucle/` ownership"
 - [ARCHITECTURE.md](../ARCHITECTURE.md) — the 8-stage pipeline
