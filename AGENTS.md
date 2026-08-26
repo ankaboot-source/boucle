@@ -322,7 +322,9 @@ with reality.
   [`templates/diagram-theme.md`](templates/diagram-theme.md) § Syntax rules.
 - **Draw the change, never the files.** Pick the diagram type from the decision the
   reader validates — a navigation change on the visitor's path, a data model on its
-  entities. A diagram of the files being edited is what `## Impacted files` is for.
+  entities. Nodes named after the files being edited are the most common wrong diagram:
+  they parse, they cannot be faulted, and they say nothing a file list does not. Nothing
+  in CI checks this — it is a judgement, and it is yours.
 - Use **explicit/imperative tone** ("MUST", "NEVER", "ALWAYS") — not descriptive
   prose.
 - Keep docs **up to date with the code** — never let a doc describe a system

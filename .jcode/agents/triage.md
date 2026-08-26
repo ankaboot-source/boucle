@@ -119,14 +119,16 @@ trivial (a one-liner, a single-field rename, a button-label swap) — forcing a 
 diagram or mockup is noise, not clarity. CI combines `## Impacts` with the `## Classification` Size: if Size S, the gate skips (the artifact is optional). If Size M or L, the gate enforces. So: declare the kind honestly, and let the Size you already emit drive whether the artifact is mandatory.
 
 **Re-trigger etiquette (do NOT re-analyze from scratch).** If CI re-triggers you because
-a diagram or preview was missing, was rejected by the Mermaid parser, or drew the wrong
-thing, the "Prior discussion" block in your prompt contains your previous spec + a
-`<!-- boucle:diagram-missing v=1 -->`, `<!-- boucle:preview-missing v=1 -->`,
-`<!-- boucle:diagram-invalid v=1 -->` or `<!-- boucle:diagram-unfit v=1 -->` note.
-The note carries the exact parse error or the exact mismatch — read it and fix THAT. **Re-read your previous spec and add ONLY the
-missing artifact** — do NOT re-analyze the issue, re-ask questions, or re-draft the
-acceptance criteria. The spec was already good; it just lacked the artifact. Re-posting
-a full re-analysis wastes your step budget and the human's patience.
+a diagram or preview was missing, or was rejected by the Mermaid parser, the "Prior
+discussion" block in your prompt contains your previous spec + a
+`<!-- boucle:diagram-missing v=1 -->`, `<!-- boucle:preview-missing v=1 -->` or
+`<!-- boucle:diagram-invalid v=1 -->` note. **Re-read your previous spec and touch ONLY
+the artifact the note names** — do NOT re-analyze the issue, re-ask questions, or
+re-draft the acceptance criteria. The spec was already good; one artifact was missing or
+broken. Re-posting a full re-analysis wastes your step budget and the human's patience.
+A `diagram-invalid` note carries the parser's exact message and the line it failed on
+(counted from the first line of the fence) — fix THAT line, do not redraw the diagram
+from scratch.
 
 **`## Impacts` section (MANDATORY — CI-gated).** Every final triage comment MUST
 include a `## Impacts` section declaring which impacts this issue has, with both a
@@ -135,16 +137,21 @@ apply from this closed set:
 
 | Impact kind | Meaning | Required artifact |
 |---|---|---|
-| `architecture` | New component, service, or boundary between subsystems | `## Diagram` (architecture/flowchart) |
-| `data-model` | New entity, field, relationship, or migration | `## Diagram` (erDiagram) |
-| `process` | Multi-step flow with handoffs, branches, or async stages | `## Diagram` (flowchart/sequence/swimlane) |
-| `state-machine` | New states or transitions in the loop's labels | `## Diagram` (stateDiagram-v2) |
-| `data-flow` | Data moving between stores, pipelines, or roles | `## Diagram` (flowchart/sequence) |
-| `deployment` | New runtime, container, or network boundary | `## Diagram` (flowchart with subgraph) |
+| `architecture` | New component, service, or boundary between subsystems | `## Diagram` |
+| `data-model` | New entity, field, relationship, or migration | `## Diagram` |
+| `process` | Multi-step flow with handoffs, branches, or async stages | `## Diagram` |
+| `state-machine` | New states or transitions in the loop's labels | `## Diagram` |
+| `data-flow` | Data moving between stores, pipelines, or roles | `## Diagram` |
+| `deployment` | New runtime, container, or network boundary | `## Diagram` |
 | `ui` | User-visible layout, visual design, or frontend rendering change | `preview.html` + `RENDER_REQUEST` |
 | `ux` | Interaction, flow, or first-run experience change | `preview.html` + `RENDER_REQUEST` |
 | `design` | Design-system, token, or brand visual change | `preview.html` + `RENDER_REQUEST` |
 | `none` | No structural or visual impact (copy tweak, single-file, config flag) | (none) |
+
+This table says **whether** a diagram is required. It does NOT say which diagram to
+draw — that is a judgement, made below, from what the reader has to decide. Reading
+`data-model` here and reaching for `erDiagram` without asking the question is how a
+landing-page section ended up drawn as an entity model of four source files.
 
 Format (place the section between `## Non-goals` and `## Diagram`):
 
@@ -194,27 +201,78 @@ parser's own message. Read `templates/diagram-theme.md` § **Syntax rules** befo
 draw: the traps that actually break a render are listed there with the accepted form
 next to each. The short version: **when in doubt, quote the label.**
 
-**Diagram FIT is CI-gated too — draw the change, not the files.** CI cross-checks your
-`## Diagram` section against your OWN `## Impacts` and `## Impacted files` markers, and
-blocks on either of these:
+**Choosing the diagram type — the part that actually decides whether it is worth
+drawing.** Nothing checks this for you. A diagram that parses cleanly and shows the
+wrong thing costs the human more than no diagram at all: they scroll past it, approve
+the spec, and discover at review time that nobody had thought about the part that
+mattered. Work in this order, every time:
 
-1. **A block type none of your declared impact kinds is drawn with.** The mapping CI
-   uses (`architecture` → `flowchart`; `data-model` →
-   `erDiagram`/`classDiagram`; `process` → `flowchart`/`sequenceDiagram`/`journey`/…;
-   `state-machine` → `stateDiagram-v2`; `data-flow` → `flowchart`/`sequenceDiagram`;
-   `deployment` → `flowchart`; `ui`/`ux`/`design` → `flowchart`/`journey`/
-   `sequenceDiagram`/`stateDiagram-v2`/`timeline`/`mindmap`/`quadrantChart`).
-2. **An `erDiagram` whose entities are the files you are about to edit.** If two or more
-   of your declared `## Impacted files` show up as entity names (`src/content.config.ts`
-   → `content_config_ts`), you have drawn the file wiring in ER grammar. That is not a
-   data model, and `## Impacted files` already says which files change.
+1. **Name the decision.** Finish this sentence before you draw anything: *"By reading
+   this, the human decides whether ______ is right."* If you cannot finish it, you do
+   not yet know what to draw — go back to the issue, not to the file list. (If the
+   honest answer is that this issue holds no decision worth a picture, then it holds no
+   structural impact either: fix the `## Impacts` kinds, do not draw a filler diagram to
+   satisfy the gate.)
+2. **Name the reader's axis.** The decision has a shape, and the shape picks the type:
 
-Before you draw, answer one question: **what DECISION does the human validate by reading
-this?** A navigation, section or layout change is validated on the visitor's path
-through the product (`flowchart`, `journey`) — never on a static entity model. A data
-model is validated on its entities and their fields. A lifecycle is validated on its
-states and transitions. Pick the type from that answer, then check it against the
-mapping above.
+   | The human is deciding whether… | Axis | Type |
+   |---|---|---|
+   | …the visitor reaches the right place, in the right order | a path through the product | `flowchart`, `journey` |
+   | …the pieces sit in the right places and talk to the right neighbours | components and their boundaries | `flowchart` (+ `subgraph`) |
+   | …the data is modelled with the right entities, fields and relationships | entities and their fields | `erDiagram`, `classDiagram` |
+   | …the thing moves between the right states, on the right triggers | states and transitions | `stateDiagram-v2` |
+   | …the actors exchange the right messages, in the right order | time-ordered exchanges | `sequenceDiagram` |
+   | …the work is sliced and sequenced right | tasks over time | `gantt`, `timeline` |
+
+3. **Draw only what that axis carries.** Every node is a distinct idea on that axis;
+   every edge carries information. Nine nodes maximum
+   (`templates/diagram-theme.md` § Diagram discipline).
+4. **Read it back as the human.** Does it answer the sentence from step 1? Could a
+   reader who never opens the repository learn something from it? If the honest answer
+   is no, redraw it — do not post it and hope.
+
+**Three diagrams that are always wrong, however well they parse:**
+
+- **The file map.** Nodes named after the source files you are about to edit
+  (`content_config_ts`, `index_astro`, `config_yml`). This is the single most common
+  failure. It feels productive because it is easy to draw and always "correct", and it
+  tells the human nothing they cannot read in `## Impacted files` — which is exactly
+  where that information belongs. **If you are about to name a node after a file, stop
+  and go back to step 1.**
+- **The restated title.** Three boxes that paraphrase the issue title with arrows
+  between them. Adds a picture, adds no information.
+- **The wrong grammar.** A structural relationship forced into `erDiagram` because the
+  impact kind happened to be `data-model`. `erDiagram` describes DATA — entities and
+  their fields. If the boxes are not data, it is the wrong block type.
+
+**Worked example — the failure this rule exists for (boucle.dev#86).** The issue added
+an "open source" section to a landing page, between quick-start and the footer, fed by a
+new content collection. The spec declared `kinds=data-model,ui` and drew:
+
+```
+erDiagram
+    content_config_ts { string collections }
+    open_source_md    { string file "src/content/open-source/open-source.md" }
+    index_astro       { string section "id=open-source" }
+    admin_config_yml  { string collection "openSource" }
+    content_config_ts ||--|| index_astro : rendered by
+```
+
+Four boxes, four filenames, zero decisions. The human validating this issue is deciding
+**where the section lands in the visitor's path and what it invites them to do next** —
+step 1 gives *"…whether the open-source section lands in the right place in the
+visitor's path"*, step 2 gives a path, and the diagram is:
+
+```
+flowchart LR
+    hero --> features --> quick_start
+    quick_start --> open_source["Open source — AGPL-3.0, indie-built"]
+    open_source -->|"Contribute"| github["GitHub repo"]
+    open_source --> footer
+```
+
+Same issue, same impacts, same impacted files. One of these can be approved or
+corrected by a human who has never seen the codebase; the other cannot.
 
 **Visual preview (mandatory when `## Impacts` declares a visual kind).** When `## Impacts`
 declares `ui`, `ux`, or `design`, you MUST produce a `preview.html` + `RENDER_REQUEST` in

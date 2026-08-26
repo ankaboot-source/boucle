@@ -39,9 +39,13 @@ Pick the type by answering one question: **what decision does the human validate
 reading this?** A navigation, section or layout change is validated on the visitor's
 path through the product (`flowchart`, `journey`); a data model on its entities and
 their fields (`erDiagram`); a lifecycle on its states and transitions
-(`stateDiagram-v2`). A diagram of the files the spec is about to edit is never the
-answer — `## Impacted files` already lists those, and CI blocks an `erDiagram` whose
-entities are the spec's own impacted files.
+(`stateDiagram-v2`).
+
+**A diagram of the files you are about to edit is never the answer.** Nodes named
+`content_config_ts`, `index_astro`, `config_yml` are the most common wrong diagram: easy
+to draw, impossible to fault, and empty — `## Impacted files` already lists exactly that,
+and a reader who has never opened the repository learns nothing from it. If you are about
+to name a node after a file, you have skipped the question above.
 
 When a concept maps to several types, pick the
 dominant axis — do NOT hybridize grammars. Types marked **(no native Mermaid)** have no
