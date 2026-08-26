@@ -6,18 +6,20 @@
 ## Analysis
 {{analysis}}
 
-## Draft acceptance criteria
+## Criteria
+
+### Acceptance
 - [ ] **Happy path** — Given {{context}}, When {{action}}, Then {{result}}
 - [ ] **Edge case** — Given {{boundary}}, When {{action}}, Then {{result}}
 - [ ] **Error state** — Given {{failure}}, When {{action}}, Then {{recovery}}
 - [ ] **Non-functional** — Given {{constraint}}, When {{action}}, Then {{bar}}
 
-## Must-haves
+### Must-haves
 - **Truths** — {{truths}}
 - **Artifacts** — {{artifacts}}
 - **Key links** — {{key_links}}
 
-## Non-goals
+### Non-goals
 - {{non_goal_1}}
 - {{non_goal_2}}
 
@@ -48,6 +50,8 @@ If no blocking questions, write "none" on its own line.
 {{consequences}}
 
 ## Metadata
+<details><summary>machine block — CI reads this, you do not have to</summary>
+
 <!-- boucle:impacts v=1 kinds={{impacts_kinds}} -->
 <!-- boucle:files v=1 paths={{impacted_files}} -->
 - **Impacts** — 🏗️ {{impacts_visible}}
@@ -55,3 +59,5 @@ If no blocking questions, write "none" on its own line.
 - **Size** — {{size}}
 - **Validation** — {{validation}}
 - **Disposition** — {{disposition}}
+
+</details>

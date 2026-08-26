@@ -21,7 +21,7 @@ and [CONTEXT.md](CONTEXT.md).
 
 | Agent   | Model                       | Steps | Temp | Role                                                                                                                |
 | ------- | ---------------------------- | ----- | ---- | ------------------------------------------------------------------------------------------------------------------- |
-| triage  | ollama-cloud/glm-5.2        | 200   | 0.3  | Analyzes issue, posts structured comment (TL;DR + Analysis + Acceptance criteria + Questions + a single `## Metadata` section: impacts, impacted files, size S/M/L, validation, disposition) |
+| triage  | ollama-cloud/glm-5.2        | 200   | 0.3  | Analyzes issue, posts structured comment (TL;DR + Analysis + one `## Criteria` section: acceptance, must-haves, non-goals + Questions + one `## Metadata` section: impacts, impacted files, size S/M/L, validation, disposition) |
 | worker  | ollama-cloud/deepseek-v4-flash:0731 | 100   | —    | Implements on branch `boucle/<iid>`, reads `state.md`, uses codebase-memory-mcp, conventional commit                 |
 | reviewer| ollama-cloud/deepseek-v4-flash:0731 | 35    | 0.2  | Adversarial review against preview URL, SHA-anchored verdict                                                       |
 | e2e     | ollama-cloud/glm-5.2         | 30    | —    | Verifies on production URL, SHA-anchored verdict                                                                    |

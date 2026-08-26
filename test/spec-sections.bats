@@ -1,13 +1,15 @@
 #!/usr/bin/env bats
 
-# test/spec-metadata.bats — the merged `## Metadata` section of a triage spec
+# test/spec-sections.bats — the section layout of a triage spec comment
 #
-# The spec's machine-facing fields (impacts, impacted files, size,
-# validation, disposition) used to be four separate sections a human
-# scrolled past: ## Impacts, ## Impacted files, ## Classification and
-# ## Disposition. They are now one `## Metadata` section at the end of the
-# comment. These tests pin BOTH halves of that contract:
-#   1. the new format parses (disposition, size, validation);
+# Two groups of sections were merged so the human reads a spec instead of
+# scrolling past headers:
+#   - the machine-facing fields (## Impacts, ## Impacted files,
+#     ## Classification, ## Disposition) → one `## Metadata` section, last;
+#   - the contract (## Draft acceptance criteria, ## Must-haves,
+#     ## Non-goals) → one `## Criteria` section with three `###` blocks.
+# Each test group pins BOTH halves of the contract:
+#   1. the new shape parses;
 #   2. a spec posted before the merge — still in flight on a paused issue —
 #      keeps parsing through the legacy fallback.
 
@@ -20,7 +22,7 @@ setup() {
   PARSERS="$(mktemp)"
   # The parsers live inside boucle_ci_triage(), indented two spaces.
   awk '
-    /^  (spec_section|parse_disposition|parse_size|parse_validation)\(\) \{/ { p = 1 }
+    /^  (spec_section|spec_field_line|parse_disposition|parse_size|parse_validation)\(\) \{/ { p = 1 }
     p { print }
     p && /^  \}$/ { p = 0 }
   ' lib/boucle-ci/triage.sh > "$PARSERS"
@@ -32,13 +34,41 @@ The page already loads, it just needs a link.
 - [ ] **Happy path** — Given a visitor, When they open /, Then the link is visible
 
 ## Metadata
+<details><summary>machine block — CI reads this, you do not have to</summary>
+
 <!-- boucle:impacts v=1 kinds=architecture,ui -->
 <!-- boucle:files v=1 paths=src/Layout.astro,src/pages/index.astro -->
 - **Impacts** — 🏗️ architecture, ui
 - **Impacted files** — 📁 `src/Layout.astro`, `src/pages/index.astro`
 - **Size** — M
 - **Validation** — author-required
-- **Disposition** — NEEDS-INFO'
+- **Disposition** — NEEDS-INFO
+
+</details>'
+  NEW_CRITERIA='## Criteria
+
+### Acceptance
+- [ ] **Happy path** — Given a visitor, When they open /, Then the link is visible
+
+### Must-haves
+- **Truths** — the page loads in <2s on 3G
+
+### Non-goals
+- do not touch the auth flow
+
+## Metadata
+- **Disposition** — READY'
+  LEGACY_CRITERIA='## Draft acceptance criteria
+- [ ] **Happy path** — legacy criterion
+
+## Must-haves
+- **Truths** — legacy truth
+
+## Non-goals
+- legacy non-goal
+
+## Classification
+Size: M'
   LEGACY_SPEC='<!-- boucle:triage v=1 -->
 ## TL;DR
 The page already loads, it just needs a link.
@@ -202,13 +232,20 @@ Nothing structured here.'
   } > "$log"
   run awk '
     /^<!-- boucle:triage v=1 -->/ { found=1 }
+    found && /^<details>|^<details><summary>/ { det=1 }
     found { print; if (/^## (Metadata|Disposition)/) { disp=1 } }
-    disp && /(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$/ { exit }
+    disp && /(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$/ {
+      if (det) { print ""; print "</details>" }
+      exit
+    }
   ' "$log"
   assert_output --partial '<!-- boucle:impacts v=1 kinds=architecture,ui -->'
   assert_output --partial '<!-- boucle:files v=1 paths=src/Layout.astro,src/pages/index.astro -->'
   assert_output --partial '- **Disposition** — NEEDS-INFO'
   refute_output --partial 'Done in 42 steps.'
+  # The recovered comment closes the <details> it opened — an unbalanced
+  # tag would swallow the rest of the rendered comment.
+  [ "$(printf '%s\n' "$output" | grep -c '<details>')" = "$(printf '%s\n' "$output" | grep -c '</details>')" ]
   rm -f "$log"
 }
 
@@ -221,8 +258,12 @@ Nothing structured here.'
   } > "$log"
   run awk '
     /^<!-- boucle:triage v=1 -->/ { found=1 }
+    found && /^<details>|^<details><summary>/ { det=1 }
     found { print; if (/^## (Metadata|Disposition)/) { disp=1 } }
-    disp && /(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$/ { exit }
+    disp && /(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$/ {
+      if (det) { print ""; print "</details>" }
+      exit
+    }
   ' "$log"
   assert_output --partial '## Disposition'
   refute_output --partial 'Done in 42 steps.'
@@ -241,7 +282,9 @@ Nothing structured here.'
 @test "template: ## Metadata is the last section and ends on the disposition" {
   run bash -c "grep '^## ' templates/triage.md | tail -1"
   assert_output "## Metadata"
-  run bash -c "tail -1 templates/triage.md"
+  # Last field of the block (the collapsed wrapper closes after it): the
+  # step-limit log-scrape stops on the disposition line.
+  run bash -c "grep -v '^</details>\$' templates/triage.md | sed '/^\$/d' | tail -1"
   assert_output '- **Disposition** — {{disposition}}'
 }
 
@@ -268,4 +311,183 @@ Nothing structured here.'
   # the agent copies must not contain them as headers.
   run bash -c "awk '/^## Output format/,0' .jcode/agents/triage.md | grep -cE '^## (Impacts|Impacted files|Classification|Disposition)\$'"
   assert_output "0"
+}
+
+# ── The criteria contract: one ## Criteria section, three ### blocks ───
+
+# Extract spec_criteria_block from worker.sh (a top-level function there).
+criteria() {
+  local fn
+  fn="$(mktemp)"
+  awk '/^spec_criteria_block\(\) \{/ { p = 1 } p { print } p && /^\}$/ { p = 0 }' \
+    lib/boucle-ci/worker.sh > "$fn"
+  bash -c ". '$fn'; spec_criteria_block \"\$1\" \"\$2\" \"\$3\"" bash "$1" "$2" "$3"
+  rm -f "$fn"
+}
+
+@test "criteria: acceptance parses from the ### Acceptance block" {
+  run criteria "$NEW_CRITERIA" Acceptance "Draft acceptance criteria"
+  assert_output --partial '**Happy path**'
+  refute_output --partial 'Truths'
+  refute_output --partial 'do not touch'
+}
+
+@test "criteria: must-haves parses from the ### Must-haves block" {
+  run criteria "$NEW_CRITERIA" Must-haves Must-haves
+  assert_output --partial '**Truths**'
+  refute_output --partial 'Happy path'
+}
+
+@test "criteria: non-goals parses from the ### Non-goals block" {
+  run criteria "$NEW_CRITERIA" Non-goals Non-goals
+  assert_output --partial 'do not touch the auth flow'
+  refute_output --partial 'Truths'
+}
+
+@test "criteria: a block stops before the next ## section" {
+  # ## Metadata follows ### Non-goals — its bullets must not leak into the
+  # non-goals seeded into state.md.
+  run criteria "$NEW_CRITERIA" Non-goals Non-goals
+  refute_output --partial 'Disposition'
+}
+
+@test "criteria: legacy top-level sections still parse (fallback)" {
+  run criteria "$LEGACY_CRITERIA" Acceptance "Draft acceptance criteria"
+  assert_output --partial 'legacy criterion'
+  run criteria "$LEGACY_CRITERIA" Must-haves Must-haves
+  assert_output --partial 'legacy truth'
+  run criteria "$LEGACY_CRITERIA" Non-goals Non-goals
+  assert_output --partial 'legacy non-goal'
+}
+
+@test "criteria: a missing block yields empty, not the whole comment" {
+  run criteria '## TL;DR
+No contract here.' Acceptance "Draft acceptance criteria"
+  refute_output --partial 'No contract here.'
+}
+
+@test "template: templates/triage.md groups the contract under ## Criteria" {
+  run bash -c "grep -c '^## Criteria\$' templates/triage.md"
+  assert_output "1"
+  run bash -c "grep -cE '^### (Acceptance|Must-haves|Non-goals)\$' templates/triage.md"
+  assert_output "3"
+  run grep -qE '^## (Draft acceptance criteria|Must-haves|Non-goals)$' templates/triage.md
+  assert_failure
+}
+
+@test "prompt: triage.md emits ## Criteria with the three ### blocks" {
+  run bash -c "awk '/^## Output format/,0' .jcode/agents/triage.md | grep -cE '^### (Acceptance|Must-haves|Non-goals)\$'"
+  assert_output "3"
+  run bash -c "awk '/^## Output format/,0' .jcode/agents/triage.md | grep -cE '^## (Draft acceptance criteria|Must-haves|Non-goals)\$'"
+  assert_output "0"
+}
+
+@test "state.md keeps its own three sections (reviewer and e2e read them there)" {
+  run bash -c "awk '/Seed state.md on first run/,/^  fi\$/' lib/boucle-ci/worker.sh"
+  assert_output --partial '## Acceptance criteria'
+  assert_output --partial '## Must-haves'
+  assert_output --partial '## Non-goals'
+}
+
+# ── The approval call to action sits at the very end ──────────────────
+
+@test "approval: the ## Validation block is appended last" {
+  # `## Metadata` renders as a single collapsed line, so the call to
+  # action stays the last thing in the comment.
+  local body='## TL;DR
+Short.
+
+## Metadata
+<details><summary>machine block — CI reads this, you do not have to</summary>
+
+- **Disposition** — READY
+
+</details>'
+  run bash -c "printf '%s\n\n%s' \"\$1\" '## Validation
+
+React to approve.' | grep '^## ' | paste -sd' ' -" bash "$body"
+  assert_output '## TL;DR ## Metadata ## Validation'
+}
+
+@test "approval: triage.sh appends the block rather than inserting it" {
+  run bash -c "awk '/Idempotency guard: skip if the validation section/,/UPDATED_BODY=/' lib/boucle-ci/triage.sh"
+  assert_output --partial 'The call to action goes LAST'
+  assert_output --partial 'UPDATED_BODY=$(printf'
+}
+
+@test "approval: the appended block does not disturb field parsing" {
+  # ## Validation closes the ## Metadata section — the fields are before
+  # it, so the disposition still parses after CI appends the block.
+  run parse parse_disposition "$NEW_SPEC
+\n## Validation\n\nReact with 👍 to approve."
+  assert_output "NEEDS-INFO"
+}
+
+# ── The machine block is collapsed by default ─────────────────────────
+
+@test "collapsed: the fields parse through the <details> wrapper" {
+  run parse parse_disposition "$NEW_SPEC"
+  assert_output "NEEDS-INFO"
+  run parse parse_size "$NEW_SPEC"
+  assert_output "M"
+  run parse parse_validation "$NEW_SPEC"
+  assert_output "author-required"
+}
+
+@test "collapsed: the <summary> line is chrome, never a field value" {
+  # A summary naming the fields would poison a section-wide grep. The
+  # parsers read the `- **Field** — value` bullets only.
+  run parse parse_size '## Metadata
+<details><summary>impacts · size · validation · disposition</summary>
+
+- **Size** — L
+
+</details>'
+  assert_output "L"
+  run parse parse_disposition '## Metadata
+<details><summary>size · validation · disposition (READY when green)</summary>
+
+- **Disposition** — NEEDS-SPLIT
+
+</details>'
+  assert_output "NEEDS-SPLIT"
+}
+
+@test "collapsed: a field written without its bullet still parses" {
+  # Tolerance for an agent that drops the dashes — the second pass skips
+  # the HTML chrome rather than the whole section.
+  run parse parse_disposition '## Metadata
+<details><summary>machine block</summary>
+
+Disposition: NEEDS-SPLIT
+
+</details>'
+  assert_output "NEEDS-SPLIT"
+  run parse parse_size '## Metadata
+<details><summary>machine block</summary>
+
+Size: L
+
+</details>'
+  assert_output "L"
+}
+
+@test "collapsed: template wraps the fields and leaves the header outside" {
+  # The header stays a real `## ` section: CI anchors the field parsing
+  # and the ## Validation insertion on it.
+  run bash -c "grep -A1 '^## Metadata\$' templates/triage.md | tail -1"
+  assert_output --partial '<details>'
+  run bash -c "awk '/^## Metadata\$/{f=1;next}/^## /{f=0}f' templates/triage.md | grep -c '</details>'"
+  assert_output "1"
+  # Blank line after <summary> and before </details> — without them the
+  # forge renders the markdown inside as raw text.
+  run bash -c "awk '/^## Metadata\$/,0' templates/triage.md | sed -n '3p'"
+  assert_output ""
+}
+
+@test "collapsed: the prompt shows the wrapper in its output format" {
+  run bash -c "awk '/^## Output format/,0' .jcode/agents/triage.md | grep -c '<details><summary>'"
+  assert_output "1"
+  run grep -q 'wrap the fields in the `<details>` block exactly as' .jcode/agents/triage.md
+  assert_success
 }

@@ -61,13 +61,12 @@ in the spec the human reviews, not a distinct comment. The section carries
 BOTH the visible human-readable line AND the machine-readable marker:
 
 ```
-## Metadata
 <!-- boucle:files v=1 paths=src/content.config.ts,src/pages/right-to-resist.astro -->
 - **Impacted files** — 📁 `src/content.config.ts`, `src/pages/right-to-resist.astro`
 ```
 
-(An excerpt — `## Metadata` is ONE section carrying all five fields. See
-"Output format" below for the whole block.)
+(An excerpt of the collapsed `## Metadata` block, which carries all five
+fields. See "Output format" below for the whole thing.)
 
 The visible line uses the same paths as the marker (comma-separated,
 repo-relative, no `./` prefix, sorted, deduplicated), each wrapped in
@@ -146,16 +145,15 @@ apply from this closed set:
 | `design` | Design-system, token, or brand visual change | `preview.html` + `RENDER_REQUEST` |
 | `none` | No structural or visual impact (copy tweak, single-file, config flag) | (none) |
 
-Format (inside `## Metadata`, the last section of the comment):
+Format (inside the collapsed `## Metadata` block, the last section of the comment):
 
 ```
-## Metadata
 <!-- boucle:impacts v=1 kinds=architecture,data-model -->
 - **Impacts** — 🏗️ architecture, data-model
 ```
 
-(An excerpt — `## Metadata` is ONE section carrying all five fields. See
-"Output format" below for the whole block.)
+(An excerpt of the collapsed `## Metadata` block, which carries all five
+fields. See "Output format" below for the whole thing.)
 
 Rules:
 - The visible line uses the same `kinds` as the marker (comma-separated, from the closed set above, sorted, deduplicated).
@@ -240,7 +238,7 @@ Restate the issue through four lenses, in order:
 
 If the issue body doesn't state one of these, infer it from context or flag it as a blocking question. Never silently skip a lens.
 
-### §2. Acceptance criteria format (structures your Draft acceptance criteria section)
+### §2. Acceptance criteria format (structures the `### Acceptance` block of `## Criteria`)
 
 Write each criterion as an observable scenario using Given/When/Then:
 - **Happy path** — the primary success flow first.
@@ -260,7 +258,7 @@ Before posting `<!-- boucle:triage v=1 -->`, verify:
 - [ ] **Testability** — each acceptance criterion has one clear outcome a reviewer can pass/fail.
 - [ ] **Dependencies** — implicit dependencies on other teams or integrations are surfaced.
 - [ ] **Scope** — in-scope is explicit; out-of-scope is stated when non-obvious.
-- [ ] **Metadata** — the `## Metadata` section is the last section of the comment and carries all five fields (Impacts, Impacted files, Size, Validation, Disposition), with the `<!-- boucle:impacts v=1 kinds=... -->` and `<!-- boucle:files v=1 paths=... -->` markers directly under the header. `kinds` uses only values from the closed set (architecture, data-model, process, state-machine, data-flow, deployment, ui, ux, design, none); a missing Impacts line or marker fails the CI gate. Never re-open `## Impacts`, `## Impacted files`, `## Classification` or `## Disposition` as separate sections — they were merged into `## Metadata`.
+- [ ] **Metadata** — the `## Metadata` section is the last section of the comment, its fields are wrapped in the `<details>` block (blank line after `<summary>`, blank line before `</details>`) so the forge folds them, and it carries all five fields (Impacts, Impacted files, Size, Validation, Disposition) as `- **Field** — value` bullets, with the `<!-- boucle:impacts v=1 kinds=... -->` and `<!-- boucle:files v=1 paths=... -->` markers first inside the block. `kinds` uses only values from the closed set (architecture, data-model, process, state-machine, data-flow, deployment, ui, ux, design, none); a missing Impacts line or marker fails the CI gate. Never re-open `## Impacts`, `## Impacted files`, `## Classification` or `## Disposition` as separate sections — they were merged into `## Metadata`.
 - [ ] **Diagram** — if the Impacts line declares any structural kind (architecture, data-model, process, state-machine, data-flow, deployment), a `## Diagram` section with a Mermaid fence AND a `<!-- boucle:diagram v=1 types=... -->` marker is present, uses the boucle.dev light/transparent theme block from `templates/diagram-theme.md`, has ≤9 nodes, and is consistent with the acceptance criteria. If the Impacts line declares only visual kinds or `none`, the `## Diagram` section and marker are correctly omitted. A mismatch fails the CI gate.
 - [ ] **Preview** — if the Impacts line declares any visual kind (ui, ux, design), a `preview.html` + `RENDER_REQUEST` exists in `.boucle-state/<issue>/`. If the Impacts line declares only structural kinds or `none`, the preview is correctly omitted. A mismatch fails the CI gate.
 
@@ -279,7 +277,7 @@ When the issue is ambiguous, derive blocking questions from these seven dimensio
 
 Pick the dimensions the issue leaves unanswered. Each question must change what the worker would build — if the answer doesn't alter the implementation, it is not blocking (record it in Analysis instead).
 
-### §5. Must-haves (structures your Must-haves section)
+### §5. Must-haves (structures the `### Must-haves` block of `## Criteria`)
 
 The acceptance criteria (§2) describe **behavior** (Given/When/Then). The must-haves describe **structure** — the invariants, deliverables, and relationships that make the implementation complete and verifiable. Both are required; they complement each other.
 
@@ -357,13 +355,18 @@ This uses the correct draft marker, but the body is an empty placeholder. The hu
   <2-4 phrases>
   ## Analysis
   <analysis>
-  ## Draft acceptance criteria
+  ## Criteria
+  ### Acceptance
   - [ ] <criterion>
-  ## Non-goals
+  ### Must-haves
+  - **Truths** — <invariant>
+  ### Non-goals
   - <what this change must NOT do>
   ## Questions
   1. <question>
   ## Metadata
+  <details><summary>machine block — CI reads this, you do not have to</summary>
+
   <!-- boucle:impacts v=1 kinds=<kinds> -->
   <!-- boucle:files v=1 paths=<path1>,<path2> -->
   - **Impacts** — 🏗️ <kinds>
@@ -371,6 +374,8 @@ This uses the correct draft marker, but the body is an empty placeholder. The hu
   - **Size** — S | M | L
   - **Validation** — author-required | autonomous
   - **Disposition** — READY | NEEDS-INFO | NEEDS-SPLIT
+
+  </details>
   ```
 - If you exhaust your steps after posting only a draft (no final comment), the CI log-scraping fallback will scrape your draft from stdout and post it on your behalf — it promotes `boucle:draft` to `boucle:triage` so the loop has a parsable disposition to act on.
 
@@ -381,7 +386,7 @@ This uses the correct draft marker, but the body is an empty placeholder. The hu
 5. **Post your final triage comment** with the `<!-- boucle:triage v=1 -->` marker. If your refined analysis changes the disposition or criteria, the CI automatically collapses duplicate triage comments from the same run, replacing the earlier draft with your final version — so only the final analysis remains visible.
 6. Understand what the issue is actually asking for — restate it in your own words (in the Analysis section), structured via the four problem-framing lenses (§1: user segment, pain points, business context, success metrics).
 7. Draft acceptance criteria that are **verifiable by a machine or by looking at the rendered page**, using the Given/When/Then format (§2) with Happy path / Edge case / Error state / Non-functional labels.
-8. **Write the `## Non-goals` section.** Acceptance criteria say what must become true; non-goals say what must stay false. Without them the worker is graded only on what it must satisfy, so **the cheapest way to satisfy a criterion wins** — a narrow special-case that ticks the box and behaves badly everywhere else. And the reviewer has no basis to FAIL work that satisfies every criterion while doing something nobody wanted.
+8. **Write the `### Non-goals` block of `## Criteria`.** Acceptance criteria say what must become true; non-goals say what must stay false. Without them the worker is graded only on what it must satisfy, so **the cheapest way to satisfy a criterion wins** — a narrow special-case that ticks the box and behaves badly everywhere else. And the reviewer has no basis to FAIL work that satisfies every criterion while doing something nobody wanted.
 
    A good non-goal names something a reasonable implementer might actually do: "do not change the data model", "do not add a runtime dependency", "do not touch the auth flow", "do not refactor the surrounding module". Two to four is usually right.
 
@@ -460,18 +465,20 @@ Post your **final triage comment** on the issue with this format:
 ## Analysis
 <what the issue actually asks for, in your own words — structured via the four problem-framing lenses (see §1): user segment, pain points, business context, success metrics>
 
-## Draft acceptance criteria
+## Criteria
+
+### Acceptance
 - [ ] **Happy path** — Given <context>, When <action>, Then <observable result>
 - [ ] **Edge case** — Given <boundary>, When <action>, Then <result>
 - [ ] **Error state** — Given <failure>, When <action>, Then <recovery/feedback>
 - [ ] **Non-functional** — Given <load/constraint>, When <action>, Then <performance/a11y bar>
 
-## Must-haves
+### Must-haves
 - **Truths** — <invariant that must hold after implementation (e.g. "page loads in <2s on 3G")>
 - **Artifacts** — <concrete deliverable (e.g. "src/pages/right-to-resist.astro", "public/logo.png")>
 - **Key links** — <critical relationship (e.g. "new page linked from /navbar", "logo referenced in Layout.astro")>
 
-## Non-goals
+### Non-goals
 - <something a reasonable implementer might do that this change must NOT do>
 - <a boundary: a file, subsystem, dependency or behaviour to leave alone>
 
@@ -506,6 +513,8 @@ If no blocking questions, write "none" on its own line.
 - <consequence 2>
 
 ## Metadata
+<details><summary>machine block — CI reads this, you do not have to</summary>
+
 <!-- boucle:impacts v=1 kinds=<same-kinds-comma-separated> -->
 <!-- boucle:files v=1 paths=<path1>,<path2> -->
 - **Impacts** — 🏗️ <comma-separated kinds from: architecture, data-model, process, state-machine, data-flow, deployment, ui, ux, design, none>
@@ -513,18 +522,34 @@ If no blocking questions, write "none" on its own line.
 - **Size** — S | M | L
 - **Validation** — author-required | autonomous
 - **Disposition** — READY | NEEDS-INFO | NEEDS-SPLIT
+
+</details>
 ```
 
-**`## Metadata` is ONE section, always last, and it is the only place the machine-facing
-fields live.** Impacts, impacted files, size, validation and disposition used to be four
-separate sections (`## Impacts`, `## Impacted files`, `## Classification`,
-`## Disposition`) scattered through the comment — four headers a human scrolls past to
-reach the next paragraph they actually read. Keep them in the single `## Metadata` block:
-the two markers directly under the header (invisible when rendered), then one bullet per
-field, in the order above. **Disposition is the last line of the comment** — CI's
-step-limit recovery scrapes your comment from the log up to that line. Never split these
-fields back out into their own sections, and never write a `Size:`/`Validation:` line
-outside `## Metadata`.
+**`## Criteria` is ONE section with three `###` blocks.** Acceptance (what must become
+true), Must-haves (what must exist and hold), Non-goals (what must stay false) used to be
+three top-level `##` sections; they are one contract, so the human reads them in one
+place. Keep the three `###` headers exactly as named — CI reads them to seed `state.md`,
+and the reviewer grades the diff against them. Never promote them back to `##` sections,
+and never drop `### Non-goals`: without it the worker is graded only on what it must
+satisfy, and the cheapest box-ticking implementation wins.
+
+**`## Metadata` is ONE section, always last, collapsed, and it is the only place the
+machine-facing fields live.** Impacts, impacted files, size, validation and disposition
+used to be four separate sections (`## Impacts`, `## Impacted files`,
+`## Classification`, `## Disposition`) scattered through the comment — four headers a
+human scrolls past to reach the next paragraph they actually read. Keep them in the
+single `## Metadata` block, and **wrap the fields in the `<details>` block exactly as
+shown** so the forge renders them folded: the human sees one collapsed line, CI reads
+what is inside. The blank line after `<summary>` and the one before `</details>` are
+required — without them the forge renders the markdown as raw text.
+
+Inside the block: the two markers first (invisible when rendered), then one
+`- **Field** — value` bullet per field, in the order above. CI reads the **bullets**, so
+never state a value anywhere but its bullet, and never write a `Size:`/`Validation:` line
+outside `## Metadata`. **The Disposition bullet is the last field** — CI's step-limit
+recovery scrapes your comment from the log up to that line. Never split these fields back
+out into their own sections.
 
 **The `## Recurring theme`, `## Creative proposals` and `## Consequences` sections are OPTIONAL.** Include `## Recurring theme` only if you found prior closed issues of the same class with confidence; include the creative/consequence sections only if you completed Phase 3. If you exhausted your step budget early, omit all three — the comment is still valid. Never pad the recurring section with a false positive (a superficially similar but unrelated issue) — a spurious recurring flag wastes the worker's attention. 3 sharp bullets beat 5 generic ones.
 

@@ -301,10 +301,24 @@ HELP_EOF
       /^## / { f = 0 }
       f'
   }
+  # One `- **Field** — value` bullet of the ## Metadata section. The
+  # section is wrapped in a collapsed <details> block, so bullets are
+  # matched first: the <summary> line is chrome, never a value. An agent
+  # that dropped the bullet dashes still parses through the second pass,
+  # which skips the HTML chrome instead of the whole section.
+  spec_field_line() {
+    local sect line
+    sect=$(spec_section "$1" "Metadata")
+    line=$(printf '%s\n' "$sect" | grep -iE "^[[:space:]]*[-*][^A-Za-z]*$2")
+    if [ -z "$line" ]; then
+      line=$(printf '%s\n' "$sect" | grep -v '^[[:space:]]*<' | grep -iE "$2")
+    fi
+    printf '%s\n' "$line"
+  }
   # READY | NEEDS-INFO | NEEDS-SPLIT (uppercase), empty when unparsable.
   parse_disposition() {
     local v
-    v=$(spec_section "$1" "Metadata" | grep -iE 'Disposition' \
+    v=$(spec_field_line "$1" "Disposition" \
       | grep -oiE '(NEEDS-INFO|NEEDS-SPLIT|READY)' | head -1)
     [ -z "$v" ] && v=$(spec_section "$1" "Disposition" \
       | grep -oiE '^(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$' | head -1)
@@ -313,7 +327,7 @@ HELP_EOF
   # S | M | L (uppercase), empty when unparsable.
   parse_size() {
     local v
-    v=$(spec_section "$1" "Metadata" | grep -iE 'Size' | head -1 \
+    v=$(spec_field_line "$1" "Size" | head -1 \
       | sed -E 's/.*[Ss]ize[^A-Za-z]*//' | grep -oiE '^[SML]' | head -1)
     [ -z "$v" ] && v=$(spec_section "$1" "Classification" \
       | grep -oiE 'Size:[[:space:]]*[SML]' | grep -oiE '[SML][[:space:]]*$' | head -1)
@@ -322,7 +336,8 @@ HELP_EOF
   # author-required | autonomous (lowercase), empty when unparsable.
   parse_validation() {
     local v
-    v=$(spec_section "$1" "Metadata" | grep -oiE '(author-required|autonomous)' | head -1)
+    v=$(spec_field_line "$1" "Validation" \
+      | grep -oiE '(author-required|autonomous)' | head -1)
     [ -z "$v" ] && v=$(spec_section "$1" "Classification" \
       | grep -oiE 'Validation:[[:space:]]*(author-required|autonomous)' \
       | grep -oiE '(author-required|autonomous)' | head -1)
@@ -431,8 +446,12 @@ HELP_EOF
       # #47): a marker quoted in prose must not start the scrape.
       DRAFTED_COMMENT=$(awk '
                 /^<!-- boucle:triage v=1 -->/ { found=1 }
+                found && /^<details>|^<details><summary>/ { det=1 }
                 found { print; if (/^## (Metadata|Disposition)/) { disp=1 } }
-                disp && /(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$/ { exit }
+                disp && /(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$/ {
+                    if (det) { print ""; print "</details>" }
+                    exit
+                }
             ' "$AGENT_LOG" 2> /dev/null || echo "")
       # If no boucle:triage found, try the boucle:draft marker (first-pass
       # draft posted early per the post-early rule). Promote it to a
@@ -440,8 +459,12 @@ HELP_EOF
       if [ -z "$DRAFTED_COMMENT" ]; then
         DRAFTED_COMMENT=$(awk '
                     /^<!-- boucle:draft role=triage -->/ { found=1 }
+                    found && /^<details>|^<details><summary>/ { det=1 }
                     found { print; if (/^## (Metadata|Disposition)/) { disp=1 } }
-                    disp && /(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$/ { exit }
+                    disp && /(READY|NEEDS-INFO|NEEDS-SPLIT)[[:space:]]*$/ {
+                        if (det) { print ""; print "</details>" }
+                        exit
+                    }
                 ' "$AGENT_LOG" 2> /dev/null || echo "")
         if [ -n "$DRAFTED_COMMENT" ]; then
           echo "[boucle] WARN: no boucle:triage in log — promoting boucle:draft to triage (step-limit fallback)."
@@ -814,6 +837,9 @@ HELP_EOF
             # Idempotency guard: skip if the validation section is already
             # present (re-runs of triage on the same issue).
             if [ -n "$EXISTING_BODY" ] && ! echo "$EXISTING_BODY" | grep -q "## Validation"; then
+              # The call to action goes LAST, after `## Metadata` — that
+              # section is a single collapsed line, so nothing stands
+              # between the spec the human reads and how they approve it.
               UPDATED_BODY=$(printf '%s\n\n%s' "$EXISTING_BODY" "$SPEC_MSG")
               if forge_issue_note_update "$IID" "$TRIAGE_NOTE_ID" "$UPDATED_BODY"; then
                 SPEC_MSG_APPENDED=true
