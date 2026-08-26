@@ -315,6 +315,14 @@ with reality.
 ### Doc rules
 
 - Use **Mermaid syntax** (` ```mermaid ` fenced blocks) for all diagrams.
+- **Every Mermaid fence MUST parse.** `bin/check-mermaid` runs the real Mermaid
+  parser over the repo's own docs (`make test`) and over every spec comment the
+  triage posts; a fence it rejects renders as an error box, not a diagram. The
+  grammar traps that actually break a render are listed in
+  [`templates/diagram-theme.md`](templates/diagram-theme.md) § Syntax rules.
+- **Draw the change, never the files.** Pick the diagram type from the decision the
+  reader validates — a navigation change on the visitor's path, a data model on its
+  entities. A diagram of the files being edited is what `## Impacted files` is for.
 - Use **explicit/imperative tone** ("MUST", "NEVER", "ALWAYS") — not descriptive
   prose.
 - Keep docs **up to date with the code** — never let a doc describe a system

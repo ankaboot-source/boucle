@@ -127,11 +127,26 @@ if [ "$FAIL" -eq 0 ]; then
   pass "markers in sync ($(echo "$code_markers" | wc -l | tr -d ' ') code markers checked)"
 fi
 
-# ── 3. Mermaid validity (basic) ──────────────────────────────────────────
-if grep -q 'stateDiagram-v2' "$SKILL_FILE" 2> /dev/null; then
-  pass "Mermaid stateDiagram-v2 present in SKILL.md"
+# ── 3. Mermaid validity ──────────────────────────────────────────────────
+# This used to assert that the string 'stateDiagram-v2' appeared somewhere in
+# SKILL.md, which proves nothing about whether the forge can render it. Ask
+# the real parser instead (LESSONS.yml #108). Exit 3 = the parser is
+# unavailable on this host: warn, never fail — infrastructure does not decide
+# whether a diagram is valid.
+MERMAID_CHECK="$REPO_ROOT/bin/check-mermaid"
+if [ ! -x "$MERMAID_CHECK" ]; then
+  warn "bin/check-mermaid missing — skipping the diagram syntax check"
 else
-  warn "no stateDiagram-v2 found in SKILL.md — skipping diagram check"
+  MERMAID_STATUS=0
+  MERMAID_OUT=$("$MERMAID_CHECK" "$SKILL_FILE" 2>&1) || MERMAID_STATUS=$?
+  case "$MERMAID_STATUS" in
+    0) pass "every Mermaid fence in SKILL.md parses" ;;
+    1)
+      echo "$MERMAID_OUT" | grep '^FAIL ' || true
+      fail "SKILL.md contains a Mermaid diagram the parser rejects"
+      ;;
+    *) warn "diagram syntax check unavailable ($MERMAID_OUT)" ;;
+  esac
 fi
 
 # ── Summary ─────────────────────────────────────────────────────────────

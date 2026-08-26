@@ -14,6 +14,7 @@
 #   - glab 1.50.0                   — GitLab CLI (API calls)
 #   - jcode v0.73.0                 — agent runtime (Rust binary, replaces opencode/pi)
 #   - codebase-memory-mcp           — knowledge-graph MCP server
+#   - mermaid + jsdom               — bin/check-mermaid (diagram syntax gate)
 #
 # NOTE: lib/boucle.sh is sourced from ${CI_PROJECT_DIR} at job runtime,
 # it is NOT baked into the image (it ships with each consumer repo).
@@ -79,6 +80,20 @@ RUN chromium --version
 ARG AGENT_BROWSER_VERSION=0.34.0
 RUN npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
     && agent-browser --version
+
+# mermaid + jsdom — the parser bin/check-mermaid runs the spec's `## Diagram`
+# section through (the diagram syntax gate). Baked in for the same reason as
+# chromium above: without it every triage job that carries a diagram would
+# npm-install ~180 MB before it could answer a yes/no question. jsdom is not
+# optional — mermaid.parse() sanitizes labels through DOMPurify, which throws
+# on every flowchart when there is no DOM, and the gate would then report
+# every valid diagram as broken.
+# Pinned: mermaid's grammar changes between minors, and an unpinned parser
+# means the gate's verdict drifts under the loop without a commit. Keep these
+# in sync with the defaults in bin/check-mermaid.
+ARG MERMAID_VERSION=11.17.2
+ARG JSDOM_VERSION=30.0.1
+RUN npm install -g "mermaid@${MERMAID_VERSION}" "jsdom@${JSDOM_VERSION}"
 
 # default env for all boucle jobs
 ENV PATH="/usr/local/bin:${PATH}" \

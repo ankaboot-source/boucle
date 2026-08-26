@@ -173,6 +173,231 @@ check_diagram_gate() {
   return 0
 }
 
+# ── Diagram syntax gate (deterministic — LESSONS.yml #108) ───────────────
+# The diagram gate above proves a diagram is PRESENT. It says nothing about
+# whether the forge can render it: boucle.dev#86 shipped a `## Diagram`
+# section with a valid marker and an erDiagram the Mermaid parser rejects
+# (`string file src/content/open-source/open-source.md` — a bare path where
+# the grammar allows only `type name [PK|FK|UK] ["comment"]`), so the human
+# was asked to approve a spec whose diagram rendered as an error box.
+#
+# "Looks right to the agent that wrote it" is not a check. This gate runs
+# the REAL Mermaid parser (bin/check-mermaid) over every ```mermaid fence in
+# the comment and blocks on a parse error, exactly the way the file and
+# diagram gates block on a marker mismatch.
+#
+# Fail-open on infrastructure, fail-closed on content:
+#   - no fence in the comment, gate disabled, checker missing, parser
+#     unavailable (exit 3: no node, no modules, no network) → return 0
+#   - a fence the parser REJECTS (exit 1) → block + re-trigger triage
+#
+# Retry bound: unlike the missing-diagram gate, a syntax error can be one
+# the agent is unable to fix, and an unbounded re-triage would spin the
+# loop. After BOUCLE_DIAGRAM_SYNTAX_MAX_RETRIES failed rounds the gate
+# hands the spec to the human with the errors attached instead of looping.
+# The comment body is passed as an argument — NEVER re-fetched from the forge.
+check_diagram_syntax_gate() {
+  local iid="$1" comment_body="$2"
+  [ "${BOUCLE_DIAGRAM_SYNTAX_GATE:-true}" = "true" ] || return 0
+  # No Mermaid fence → nothing to parse (a spec with no diagram is the
+  # missing-diagram gate's business, not this one).
+  printf '%s' "$comment_body" | grep -q '```mermaid' || return 0
+  local checker="${BOUCLE_HOME:-.}/bin/check-mermaid"
+  if [ ! -x "$checker" ]; then
+    echo "[boucle] WARN: #$iid — $checker not executable, skipping the diagram syntax check"
+    return 0
+  fi
+  local tmp status output
+  tmp=$(mktemp "${TMPDIR:-/tmp}/boucle-diagram-$iid.XXXXXX") || return 0
+  printf '%s\n' "$comment_body" > "$tmp"
+  status=0
+  output=$("$checker" "$tmp" 2>&1) || status=$?
+  rm -f "$tmp"
+  case "$status" in
+    0)
+      echo "[boucle] #$iid — diagram syntax OK"
+      return 0
+      ;;
+    1) ;; # invalid → handled below
+    *)
+      echo "[boucle] WARN: #$iid — diagram syntax check unavailable (exit $status), not blocking"
+      return 0
+      ;;
+  esac
+  # Report the FAIL lines only, with the temp path rewritten to something
+  # the human can act on. The line number is the line of the fence body
+  # inside the spec comment.
+  local errors
+  errors=$(printf '%s\n' "$output" | grep '^FAIL ' \
+    | sed "s|$tmp|spec comment|g" | head -10)
+  [ -z "$errors" ] && return 0 # exit 1 with no FAIL line → nothing to report
+  # How many rounds has this already cost?
+  local attempts max
+  max="${BOUCLE_DIAGRAM_SYNTAX_MAX_RETRIES:-2}"
+  attempts=$(forge_issue_notes "$iid" 2> /dev/null \
+    | jq -r '[.[] | select(.body | contains("<!-- boucle:diagram-invalid v=1"))] | length' \
+      2> /dev/null || echo 0)
+  case "$attempts" in
+    '' | *[!0-9]*) attempts=0 ;;
+  esac
+  if [ "$attempts" -ge "$max" ] 2> /dev/null; then
+    echo "[boucle] WARN: #$iid — diagram still invalid after $attempts round(s), handing the spec to the human"
+    local exhausted_body
+    exhausted_body=$(printf '⚠️ The Mermaid diagram in this spec is still invalid after %s triage round(s), so the spec is going to you as-is rather than looping. The forge will render the `## Diagram` section as an error box until it is fixed:\n\n```\n%s\n```\n\n<!-- boucle:diagram-invalid v=1 state=exhausted rounds=%s -->' "$attempts" "$errors" "$attempts")
+    forge_issue_note "$iid" "$exhausted_body"
+    return 0
+  fi
+  echo "[boucle] #$iid blocked — the spec's Mermaid diagram does not parse"
+  set_boucle_label "$iid" "boucle:triage" "boucle::status::bot"
+  local block_body
+  block_body=$(printf '⚠️ The Mermaid diagram in this spec does not parse, so the forge renders it as an error box instead of a diagram. Triage has been re-triggered to fix it — re-read your previous spec in the Prior discussion and fix ONLY the `## Diagram` section, do NOT re-analyze from scratch.\n\n```\n%s\n```\n\nLine numbers are counted from the first line of the Mermaid fence. See `templates/diagram-theme.md` § Syntax rules for the grammar traps that produce these errors.\n\n<!-- boucle:diagram-invalid v=1 rounds=%s -->' "$errors" "$attempts")
+  forge_issue_note "$iid" "$block_body"
+  return 1
+}
+
+# ── Diagram fit gate (deterministic — LESSONS.yml #108) ──────────────────
+# Syntax is the floor, not the bar. boucle.dev#86 also picked the WRONG
+# diagram: a landing-page navigation change — what the human validates is
+# where the section sits in the visitor's path — was drawn as an `erDiagram`
+# whose "entities" were the four source files the spec touches
+# (content_config_ts, open_source_md, index_astro, admin_config_yml). It
+# rendered nothing the human could approve the navigation on.
+#
+# Both rules below cross-check the spec against ITS OWN declarations — the
+# `<!-- boucle:impacts kinds=... -->`, `<!-- boucle:diagram types=... -->`
+# and `<!-- boucle:files paths=... -->` markers all live in the same
+# comment — so neither is a judgement call about the drawing:
+#
+#   R1 type↔kind — every declared Mermaid block type must be a type at
+#       least one declared impact kind is drawn with (the table below,
+#       which mirrors the one in .jcode/agents/triage.md). A `journey` on a
+#       spec that declares only `data-model` is a diagram of something the
+#       spec does not claim to change.
+#   R2 ER-of-files — an `erDiagram` whose entities ARE the spec's declared
+#       impacted files is a wiring diagram wearing ER grammar. This is the
+#       one that catches #86, and its fix is well-defined: draw the flow
+#       (`flowchart`), or draw the actual entity/field model.
+#
+# Fail-open on anything unreadable: no diagram marker, no impacts marker, an
+# impact kind outside the closed set, kinds=none. The comment body is passed
+# as an argument — NEVER re-fetched from the forge.
+
+# The Mermaid block types each impact kind is legitimately drawn with. Kept
+# generous on purpose: the gate exists to catch a diagram of the wrong
+# SUBJECT, not to litigate flowchart-vs-sequence.
+diagram_types_for_kind() {
+  case "$1" in
+    architecture) echo "flowchart graph block-beta C4Context" ;;
+    data-model) echo "erDiagram classDiagram" ;;
+    process) echo "flowchart graph sequenceDiagram stateDiagram-v2 journey gantt" ;;
+    state-machine) echo "stateDiagram-v2 stateDiagram flowchart graph" ;;
+    data-flow) echo "flowchart graph sequenceDiagram" ;;
+    deployment) echo "flowchart graph block-beta C4Deployment" ;;
+    # A visual change is validated on a PATH through the product — where the
+    # section sits, what the visitor does next — never on a static model.
+    ui | ux | design) echo "flowchart graph journey sequenceDiagram stateDiagram-v2 timeline mindmap quadrantChart" ;;
+    *) echo "" ;;
+  esac
+}
+
+# Bodies of the `mermaid` fences that declare an erDiagram, concatenated.
+er_diagram_bodies() {
+  awk '
+    /^[[:space:]]*(```+|~~~+)[[:space:]]*mermaid/ { fence=1; buf=""; is_er=0; next }
+    fence && /^[[:space:]]*(```+|~~~+)[[:space:]]*$/ { if (is_er) printf "%s", buf; fence=0; next }
+    fence {
+      if ($0 ~ /^[[:space:]]*erDiagram([[:space:]]|$)/) is_er=1
+      buf = buf $0 "\n"
+    }
+  '
+}
+
+check_diagram_fit_gate() {
+  local iid="$1" comment_body="$2"
+  [ "${BOUCLE_DIAGRAM_FIT_GATE:-true}" = "true" ] || return 0
+  local kinds types
+  kinds=$(printf '%s' "$comment_body" | grep -oE '<!-- boucle:impacts v=1 kinds=[^ >]+' \
+    | head -1 | sed 's/.*kinds=//')
+  types=$(printf '%s' "$comment_body" | grep -oE '<!-- boucle:diagram v=1 types=[^ >]+' \
+    | head -1 | sed 's/.*types=//')
+  # No diagram, no impacts, or an explicit "nothing structural" → the
+  # missing-diagram gate's business, not this one.
+  [ -z "$kinds" ] && return 0
+  [ -z "$types" ] && return 0
+  echo ",$kinds," | grep -q ",none," && return 0
+
+  local reason="" k t allowed fit
+  # ── R1: every declared type must be drawn for a declared kind ──────────
+  # An unknown kind means the closed set moved without this table; judging
+  # fit against a table we know is stale would block a correct diagram.
+  local kinds_known=true
+  for k in $(printf '%s' "$kinds" | tr ',' ' '); do
+    [ -z "$(diagram_types_for_kind "$k")" ] && kinds_known=false
+  done
+  if [ "$kinds_known" = "true" ]; then
+    for t in $(printf '%s' "$types" | tr ',' ' '); do
+      [ -z "$t" ] && continue
+      fit=false
+      for k in $(printf '%s' "$kinds" | tr ',' ' '); do
+        allowed=" $(diagram_types_for_kind "$k") "
+        case "$allowed" in *" $t "*) fit=true ;; esac
+      done
+      if [ "$fit" = "false" ]; then
+        reason="the \`$t\` diagram does not draw any impact this spec declares (\`$kinds\`)"
+        break
+      fi
+    done
+  fi
+
+  # ── R2: an erDiagram whose entities are the spec's own impacted files ──
+  if [ -z "$reason" ] && echo ",$types," | grep -q ",erDiagram,"; then
+    local paths er_body token hits threshold
+    paths=$(printf '%s' "$comment_body" | grep -oE '<!-- boucle:files v=1 paths=[^ >]+' \
+      | head -1 | sed 's/.*paths=//')
+    er_body=$(printf '%s\n' "$comment_body" | er_diagram_bodies)
+    if [ -n "$paths" ] && [ -n "$er_body" ]; then
+      hits=0
+      threshold="${BOUCLE_DIAGRAM_FIT_ER_FILE_THRESHOLD:-2}"
+      # A file path becomes the entity name an agent would write for it:
+      # basename, every non-alphanumeric turned into an underscore
+      # (src/content.config.ts → content_config_ts).
+      for token in $(printf '%s' "$paths" | tr ',' '\n' | sed 's|.*/||' \
+        | sed 's/[^A-Za-z0-9]/_/g' | grep -E '^[A-Za-z0-9_]+$'); do
+        if printf '%s' "$er_body" | grep -qE "^[[:space:]]*$token([[:space:]]|\{|\|)"; then
+          hits=$((hits + 1))
+        fi
+      done
+      if [ "$hits" -ge "$threshold" ] 2> /dev/null; then
+        reason="the \`erDiagram\` draws $hits of the spec's own impacted FILES as entities — that is the file wiring, not a data model"
+      fi
+    fi
+  fi
+
+  [ -z "$reason" ] && return 0
+
+  local attempts max
+  max="${BOUCLE_DIAGRAM_FIT_MAX_RETRIES:-1}"
+  attempts=$(forge_issue_notes "$iid" 2> /dev/null \
+    | jq -r '[.[] | select(.body | contains("<!-- boucle:diagram-unfit v=1"))] | length' \
+      2> /dev/null || echo 0)
+  case "$attempts" in
+    '' | *[!0-9]*) attempts=0 ;;
+  esac
+  if [ "$attempts" -ge "$max" ] 2> /dev/null; then
+    echo "[boucle] WARN: #$iid — diagram still unfit after $attempts round(s), handing the spec to the human"
+    local exhausted_body
+    exhausted_body=$(printf '⚠️ The diagram in this spec still does not match what it changes after %s triage round(s), so the spec is going to you as-is rather than looping: %s.\n\n<!-- boucle:diagram-unfit v=1 state=exhausted rounds=%s -->' "$attempts" "$reason" "$attempts")
+    forge_issue_note "$iid" "$exhausted_body"
+    return 0
+  fi
+  echo "[boucle] #$iid blocked — diagram does not fit the declared impacts ($kinds / $types)"
+  set_boucle_label "$iid" "boucle:triage" "boucle::status::bot"
+  local block_body
+  block_body=$(printf '⚠️ The `## Diagram` section does not draw what this spec changes: %s.\n\nTriage has been re-triggered to redraw it — re-read your previous spec in the Prior discussion and fix ONLY the `## Diagram` section, do NOT re-analyze from scratch. Ask what DECISION the human validates by reading it, then pick the type from the catalogue in `templates/diagram-theme.md`: a navigation or layout change is validated on the visitor'"'"'s path (`flowchart`, `journey`), a data model on its entities and fields (`erDiagram`), a lifecycle on its states (`stateDiagram-v2`). A diagram of the files you are about to edit is never the answer — that is what `## Impacted files` is for.\n\n<!-- boucle:diagram-unfit v=1 kinds=%s types=%s rounds=%s -->' "$reason" "$kinds" "$types" "$attempts")
+  forge_issue_note "$iid" "$block_body"
+  return 1
+}
+
 # ── Preview gate (deterministic — LESSONS.yml #104) ──────────────────────
 # Before a spec pauses for human approval, verify that a spec declaring
 # visual impacts (ui, ux, design) in its `## Impacts` section actually has

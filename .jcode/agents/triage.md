@@ -119,9 +119,11 @@ trivial (a one-liner, a single-field rename, a button-label swap) — forcing a 
 diagram or mockup is noise, not clarity. CI combines `## Impacts` with the `## Classification` Size: if Size S, the gate skips (the artifact is optional). If Size M or L, the gate enforces. So: declare the kind honestly, and let the Size you already emit drive whether the artifact is mandatory.
 
 **Re-trigger etiquette (do NOT re-analyze from scratch).** If CI re-triggers you because
-a diagram or preview was missing, the "Prior discussion" block in your prompt contains
-your previous spec + a `<!-- boucle:diagram-missing v=1 -->` or
-`<!-- boucle:preview-missing v=1 -->` note. **Re-read your previous spec and add ONLY the
+a diagram or preview was missing, was rejected by the Mermaid parser, or drew the wrong
+thing, the "Prior discussion" block in your prompt contains your previous spec + a
+`<!-- boucle:diagram-missing v=1 -->`, `<!-- boucle:preview-missing v=1 -->`,
+`<!-- boucle:diagram-invalid v=1 -->` or `<!-- boucle:diagram-unfit v=1 -->` note.
+The note carries the exact parse error or the exact mismatch — read it and fix THAT. **Re-read your previous spec and add ONLY the
 missing artifact** — do NOT re-analyze the issue, re-ask questions, or re-draft the
 acceptance criteria. The spec was already good; it just lacked the artifact. Re-posting
 a full re-analysis wastes your step budget and the human's patience.
@@ -183,6 +185,36 @@ the section, after the Mermaid fence(s):
 
 The `types` attribute lists the Mermaid block types you used (comma-separated, from the
 27-type catalogue, sorted, deduplicated). CI cross-checks this marker against `## Impacts`.
+
+**Diagram SYNTAX is CI-gated — the parser decides, not you.** `bin/check-mermaid` runs
+every ```mermaid fence in your comment through the **real Mermaid parser**. A fence it
+rejects renders on the forge as an error box, not as a diagram — the human then approves
+a spec with a hole in it. A parse error blocks spec-review and re-triggers you with the
+parser's own message. Read `templates/diagram-theme.md` § **Syntax rules** before you
+draw: the traps that actually break a render are listed there with the accepted form
+next to each. The short version: **when in doubt, quote the label.**
+
+**Diagram FIT is CI-gated too — draw the change, not the files.** CI cross-checks your
+`## Diagram` section against your OWN `## Impacts` and `## Impacted files` markers, and
+blocks on either of these:
+
+1. **A block type none of your declared impact kinds is drawn with.** The mapping CI
+   uses (`architecture` → `flowchart`; `data-model` →
+   `erDiagram`/`classDiagram`; `process` → `flowchart`/`sequenceDiagram`/`journey`/…;
+   `state-machine` → `stateDiagram-v2`; `data-flow` → `flowchart`/`sequenceDiagram`;
+   `deployment` → `flowchart`; `ui`/`ux`/`design` → `flowchart`/`journey`/
+   `sequenceDiagram`/`stateDiagram-v2`/`timeline`/`mindmap`/`quadrantChart`).
+2. **An `erDiagram` whose entities are the files you are about to edit.** If two or more
+   of your declared `## Impacted files` show up as entity names (`src/content.config.ts`
+   → `content_config_ts`), you have drawn the file wiring in ER grammar. That is not a
+   data model, and `## Impacted files` already says which files change.
+
+Before you draw, answer one question: **what DECISION does the human validate by reading
+this?** A navigation, section or layout change is validated on the visitor's path
+through the product (`flowchart`, `journey`) — never on a static entity model. A data
+model is validated on its entities and their fields. A lifecycle is validated on its
+states and transitions. Pick the type from that answer, then check it against the
+mapping above.
 
 **Visual preview (mandatory when `## Impacts` declares a visual kind).** When `## Impacts`
 declares `ui`, `ux`, or `design`, you MUST produce a `preview.html` + `RENDER_REQUEST` in
@@ -257,7 +289,7 @@ Before posting `<!-- boucle:triage v=1 -->`, verify:
 - [ ] **Dependencies** — implicit dependencies on other teams or integrations are surfaced.
 - [ ] **Scope** — in-scope is explicit; out-of-scope is stated when non-obvious.
 - [ ] **Impacts** — the `## Impacts` section is present with a `<!-- boucle:impacts v=1 kinds=... -->` marker; `kinds` uses only values from the closed set (architecture, data-model, process, state-machine, data-flow, deployment, ui, ux, design, none); a missing section or marker fails the CI gate.
-- [ ] **Diagram** — if `## Impacts` declares any structural kind (architecture, data-model, process, state-machine, data-flow, deployment), a `## Diagram` section with a Mermaid fence AND a `<!-- boucle:diagram v=1 types=... -->` marker is present, uses the boucle.dev light/transparent theme block from `templates/diagram-theme.md`, has ≤9 nodes, and is consistent with the acceptance criteria. If `## Impacts` declares only visual kinds or `none`, the `## Diagram` section and marker are correctly omitted. A mismatch fails the CI gate.
+- [ ] **Diagram** — if `## Impacts` declares any structural kind (architecture, data-model, process, state-machine, data-flow, deployment), a `## Diagram` section with a Mermaid fence AND a `<!-- boucle:diagram v=1 types=... -->` marker is present, uses the boucle.dev light/transparent theme block from `templates/diagram-theme.md`, has ≤9 nodes, and is consistent with the acceptance criteria. If `## Impacts` declares only visual kinds or `none`, the `## Diagram` section and marker are correctly omitted. A mismatch fails the CI gate. Every Mermaid fence parses (CI runs the real parser), and the diagram draws the CHANGE the spec makes — not the files it edits.
 - [ ] **Preview** — if `## Impacts` declares any visual kind (ui, ux, design), a `preview.html` + `RENDER_REQUEST` exists in `.boucle-state/<issue>/`. If `## Impacts` declares only structural kinds or `none`, the preview is correctly omitted. A mismatch fails the CI gate.
 
 If any check fails, fix the comment before posting. A spec with weasel words is not READY.
