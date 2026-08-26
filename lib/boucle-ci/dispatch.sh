@@ -801,9 +801,20 @@ boucle_ci_dispatch() {
   # echos fire (lesson #5).
   echo "dispatch: fetching labels for #$IID (forge=$BOUCLE_FORGE_HOST, project=$BOUCLE_PROJECT_ID)"
   LABELS=$(forge_issue_labels_get "$IID")
+  # An empty list is NOT a failure: a freshly opened issue has no labels, and
+  # that is precisely the case this function exists to route to triage. Empty
+  # used to abort here, which made the "new issue with no boucle label"
+  # branch below unreachable and left every new issue to be rescued by the
+  # doctor's orphan scan minutes later. The two states are indistinguishable
+  # on stdout — forge_issue_labels_get prints nothing either way — so tell
+  # them apart by probing the issue itself. One extra API call, and only on
+  # the empty path.
   if [ -z "$LABELS" ]; then
-    echo "dispatch: ABORT — forge_issue_labels_get failed to fetch labels for #$IID (BOUCLE_FORGE_HOST=${BOUCLE_FORGE_HOST:-unset}, exit non-zero)"
-    exit 1
+    if [ -z "$(forge_issue_get "$IID" | jq -r '.state // empty' 2> /dev/null)" ]; then
+      echo "dispatch: ABORT — cannot reach issue #$IID to read its labels (BOUCLE_FORGE_HOST=${BOUCLE_FORGE_HOST:-unset}, project=${BOUCLE_PROJECT_ID:-unset})"
+      exit 1
+    fi
+    echo "dispatch: #$IID has no labels — treating as a new issue"
   fi
   echo "dispatch: labels for #$IID: $LABELS"
 

@@ -917,3 +917,40 @@ extract_working_amend_block() {
   run grep -q 'ISSUE_STATE" = "closed"' lib/boucle-ci/dispatch.sh
   assert_success
 }
+
+# ── new-issue routing: an empty label list is not a failure ───────────
+
+@test "guard shape: an empty label list no longer aborts dispatch" {
+  # Regression. dispatch used to run:
+  #     LABELS=$(forge_issue_labels_get "$IID")
+  #     if [ -z "$LABELS" ]; then echo "ABORT ... exit non-zero"; exit 1; fi
+  # A freshly opened issue has no labels, so this aborted on exactly the case
+  # the routing table handles as "new issue with no boucle label → triage",
+  # making that branch unreachable and leaving every new issue to the doctor's
+  # orphan scan minutes later. Observed on boucle.dev#84.
+  #
+  # The old message also lied: forge_issue_labels_get ends in `|| true`, so it
+  # never exits non-zero. Its absence is the regression anchor.
+  run grep -c 'ABORT — forge_issue_labels_get failed to fetch labels' lib/boucle-ci/dispatch.sh
+  assert_output "0"
+}
+
+@test "guard shape: the empty-label path probes reachability before aborting" {
+  # Empty output means either "no labels" or "the fetch failed" — stdout
+  # cannot tell them apart, so the abort must be gated on the issue being
+  # unreachable. Scoped to the block itself: an unrelated forge_issue_get
+  # call elsewhere in the file (the closed-issue guard has one) must not
+  # satisfy this.
+  block=$(awk '/LABELS=\$\(forge_issue_labels_get "\$IID"\)/{f=1} f{print} /labels for #\$IID: \$LABELS/{if(f)exit}' lib/boucle-ci/dispatch.sh)
+  echo "$block" | grep -q 'forge_issue_get' || {
+    echo "no reachability probe inside the empty-label block:"
+    echo "$block"
+    return 1
+  }
+}
+
+@test "guard shape: the new-issue-to-triage branch is still reachable" {
+  # The branch the old guard made unreachable.
+  run grep -q 'elif \[ -z "$LABELS" \] || \[ "$ACTION" = "open" \]; then' lib/boucle-ci/dispatch.sh
+  assert_success
+}
