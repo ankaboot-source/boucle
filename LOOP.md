@@ -317,6 +317,7 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_PREVIEW_PROPAGATION_WAIT` | `60` | Seconds to wait for preview CDN propagation. |
 | `BOUCLE_PREVIEW_DISABLE` | `false` | Skip Chromium visual preview in triage: `true` or `false`. |
 | `BOUCLE_PREVIEW_VIEWPORTS` | `390x844,1440x900` | Viewports rendered for the triage mockup, comma-separated `WxH`. One screenshot per entry, labelled by device class in the triage comment. Total bytes respect `BOUCLE_IMAGE_TOTAL_MAX_BYTES`; a malformed entry is skipped, and one failing viewport never loses the others. |
+| `BOUCLE_PREVIEW_SETTLE_MS` | `1200` | Milliseconds to wait after `networkidle` before capturing a screenshot, so CSS/JS entrance animations (fade-in, slide-up) finish before the capture. Covers typical 300–800 ms entrance animations with headroom. Set `0` to disable the settle (capture immediately after network idle). |
 | `BOUCLE_EXTERNAL_DEPLOY_WAIT` | `600` | Max seconds to wait for consumer's own CI on merged commit. |
 | `BOUCLE_FILE_GATE` | `true` | Enable the file-impact gate. MR 1: declared marker + `check_file_gate` defers a worker whose issue claims files already claimed by an in-flight issue. MR 2 (deferred): adds a `git merge-tree` safety-net gate. `false` = disabled (fail-open, legacy behavior). |
 | `BOUCLE_REVIEW_CHECKS_WAIT` | `900` | Max seconds to wait for PR check suites in diff mode. |

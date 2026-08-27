@@ -12,6 +12,10 @@ public/
 .jcode-*.db-shm
 .jcode-*.db-wal
 
+# jcode prompt overlay (written at runtime by bin/jc, never tracked —
+# tracking it causes the worker to commit its own system prompt)
+.jcode/prompt-overlay.md
+
 # logs
 npm-debug.log*
 yarn-debug.log*

@@ -128,8 +128,9 @@ setup() {
 
 @test "SYNC_PATHS includes .jcode as a whole (not just subdirs)" {
   # .jcode/ is owned entirely by the engine (agents/, skills/,
-  # UPSTREAM-FIX-WORKFLOW.md, DESIGN-template.md, prompt-overlay.md).
-  # Syncing it as a whole is simpler and catches new top-level files
+  # UPSTREAM-FIX-WORKFLOW.md, DESIGN-template.md). prompt-overlay.md is
+  # runtime-only (written by bin/jc, gitignored, never tracked).
+  # Syncing .jcode as a whole is simpler and catches new top-level files
   # (e.g. a future .jcode/config.toml) without needing a SYNC_PATHS bump.
   run bash -c 'source bin/update && echo "$SYNC_PATHS"'
   assert_success
@@ -405,4 +406,55 @@ setup() {
   assert_failure
   assert_output --partial "the default branch looks protected"
   unset -f git
+}
+
+# ── untrack_prompt_overlay ────────────────────────────────────────────
+
+@test "untrack_prompt_overlay adds .jcode/prompt-overlay.md to .gitignore if missing" {
+  tmp=$(mktemp -d)
+  cd "$tmp" || exit 1
+  printf 'node_modules/\n' > .gitignore
+  git init -q
+  # File not tracked, gitignore entry absent → function should add the entry.
+  run untrack_prompt_overlay
+  assert_success
+  assert_output --partial ".gitignore"
+  # The entry must be present.
+  run grep -qxF '.jcode/prompt-overlay.md' .gitignore
+  assert_success
+  cd - >/dev/null || exit 1
+  rm -rf "$tmp"
+}
+
+@test "untrack_prompt_overlay is idempotent (gitignore entry already present)" {
+  tmp=$(mktemp -d)
+  cd "$tmp" || exit 1
+  printf 'node_modules/\n.jcode/prompt-overlay.md\n' > .gitignore
+  git init -q
+  run untrack_prompt_overlay
+  assert_success
+  # No files to stage (entry already present, file not tracked).
+  refute_output --partial ".gitignore"
+  cd - >/dev/null || exit 1
+  rm -rf "$tmp"
+}
+
+@test "untrack_prompt_overlay git rm --cached a tracked prompt-overlay.md" {
+  tmp=$(mktemp -d)
+  cd "$tmp" || exit 1
+  printf 'node_modules/\n' > .gitignore
+  git init -q
+  mkdir -p .jcode
+  touch .jcode/prompt-overlay.md
+  git add .jcode/prompt-overlay.md
+  git commit -q -m init
+  run untrack_prompt_overlay
+  assert_success
+  # The file should no longer be tracked.
+  run git ls-files --error-unmatch .jcode/prompt-overlay.md
+  assert_failure
+  # But the file should still exist on disk.
+  [ -f .jcode/prompt-overlay.md ]
+  cd - >/dev/null || exit 1
+  rm -rf "$tmp"
 }

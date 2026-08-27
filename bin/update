@@ -396,6 +396,40 @@ propagate_consumer_root_files() {
   echo "$propagated"
 }
 
+# untrack_prompt_overlay
+# Transition: .jcode/prompt-overlay.md was previously a tracked (empty) file
+# in consumer repos. bin/jc writes the role-specific system prompt into it at
+# runtime; a tracked file causes the worker to commit its own system prompt
+# (race: bin/jc writes → worker commits → EXIT trap empties, but the commit
+# already captured the content). This function:
+#   1. Adds .jcode/prompt-overlay.md to the consumer .gitignore if missing.
+#   2. git rm --cached the file if it is still tracked.
+# Returns 0. Idempotent — a no-op on consumers already migrated.
+untrack_prompt_overlay() {
+  local entry=".jcode/prompt-overlay.md"
+  local gitignore_changed=""
+
+  # 1. Ensure the .gitignore entry exists.
+  if [ -f .gitignore ]; then
+    if ! grep -qxF "$entry" .gitignore 2>/dev/null; then
+      printf '\n# boucle runtime prompt overlay (written by bin/jc, never tracked)\n%s\n' "$entry" >> .gitignore
+      gitignore_changed=".gitignore"
+    fi
+  else
+    printf '# boucle runtime prompt overlay (written by bin/jc, never tracked)\n%s\n' "$entry" > .gitignore
+    gitignore_changed=".gitignore"
+  fi
+
+  # 2. Untrack the file if git knows about it (staged or committed).
+  if git ls-files --error-unmatch "$entry" >/dev/null 2>&1; then
+    git rm --cached --quiet "$entry" 2>/dev/null || true
+    gitignore_changed="$gitignore_changed $entry"
+  fi
+
+  [ -n "$gitignore_changed" ] && echo "$gitignore_changed"
+  return 0
+}
+
 # ── Main ──────────────────────────────────────────────────────────────
 
 main() {
@@ -520,8 +554,11 @@ main() {
     # be copied out). The CI checkout materializes .boucle/ so the docs
     # are available there, but agents read them from the parent root.
     propagated_files=$(propagate_consumer_root_files)
+    # Transition: untrack .jcode/prompt-overlay.md (was tracked empty, now
+    # runtime-only — see untrack_prompt_overlay).
+    overlay_untracked=$(untrack_prompt_overlay)
     # shellcheck disable=SC2086
-    git add $propagated_files 2> /dev/null || true
+    git add $propagated_files $overlay_untracked 2> /dev/null || true
     git commit -m "chore(boucle): auto-update submodule to $upstream" > /dev/null 2>&1 || true
     configure_git_push
     if push_update; then
@@ -543,6 +580,10 @@ main() {
   # LOOP.md, CONTEXT.md) are NOT overwritten.
   propagated_files=$(propagate_consumer_root_files)
 
+  # Transition: untrack .jcode/prompt-overlay.md (was tracked empty, now
+  # runtime-only — see untrack_prompt_overlay).
+  overlay_untracked=$(untrack_prompt_overlay)
+
   # Record the new version in the forge Variable so the next run sees it.
   # This replaces the old .boucle-version file write. The forge Variable
   # persists across CI runs (GitHub Actions Variables, GitLab CI/CD Variables).
@@ -562,7 +603,7 @@ main() {
     add_paths="$add_paths $ENGINE_DIR/$path"
   done
   # shellcheck disable=SC2086 # word-splitting is intentional: add_paths is a space-separated list.
-  git add $add_paths $propagated_files
+  git add $add_paths $propagated_files $overlay_untracked
   git commit -m "chore(boucle): auto-update to $upstream" > /dev/null 2>&1 || true
   configure_git_push
   if push_update; then
