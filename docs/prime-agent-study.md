@@ -155,10 +155,10 @@ those gates exist to prevent.
 
 ## 4. What transfers, ranked
 
-### P1 — `LESSONS.local.yml`: the consumer's own lessons
+### P1 — A consumer-scoped `LESSONS.yml`
 
-Boucle learns in exactly one place: `LESSONS.yml`, 107 entries,
-engine-global and human-curated. Nothing a run discovers about **this
+Boucle learns in exactly one place: the engine's `LESSONS.yml`, 107 entries,
+human-curated, reaching a consumer read-only. Nothing a run discovers about **this
 repository** outlives the issue: `.boucle-state/<issue>/` is per-issue and
 gitignored, and the state note hangs off the issue. Issue N+1 re-discovers
 the same trap.
@@ -174,44 +174,68 @@ boucle already has better homes for facts. One type, two scopes.
 | Config value | build command, deploy mode, review mode | CI variable / root CI shim | The documented consumer seam (AGENTS.md §"`.boucle/` ownership") |
 | Project context | stack, constraints, conventions | consumer `AGENTS.md` / `CONTEXT.md` / `DESIGN.md` | Human-authored charter, already read by the worker |
 | Class of mistake, universal | "NEVER `PUT` a label that is already present" | engine `LESSONS.yml`, upstream MR | Every consumer benefits |
-| **Class of mistake, this repo only** | "NEVER run the e2e suite before seeding the fixture DB" | **`LESSONS.local.yml`** ← the gap | Noise upstream, load-bearing here |
+| **Class of mistake, this repo only** | "NEVER run the e2e suite before seeding the fixture DB" | **`LESSONS.yml` at the consumer root** ← the gap | Noise upstream, load-bearing here |
 | One-off instance | "issue #42 failed, the token had expired" | Nowhere — git history | Fails the four-point test, by design |
 
-**Why not the existing `LESSONS.yml`.** Not for scope — a lesson added in a
-consumer is never propagated anywhere, the sync is one-way (engine →
-consumer) and `SYNC_PATHS` (`bin lib .jcode <ci> LOOP.md`) excludes
-`LESSONS.yml` entirely. The blocker is the **write path**: at a consumer
-root, `LESSONS.yml` is a symlink into the `.boucle/` submodule
-(`bin/update:331`). An agent writing there writes into a *different git
-repository* — `git add` from the consumer stages nothing but a dirty
-submodule pointer, and `bin/check-boucle-sync` rejects `.boucle/` changes
-that are not `chore(boucle):` bot commits. The entry evaporates.
+**One name, two locations.** The convention is positional, not lexical:
 
-`bin/update:338` does refuse to symlink over a **real** root `LESSONS.yml`,
-and `bin/jc:1382` prefers `$BOUCLE_WORKSPACE/LESSONS.yml` over
-`$BOUCLE_HOME/LESSONS.yml` — so the seam exists. **But it is an override,
-not a merge**: a consumer materialising a real root `LESSONS.yml` silently
-loses all 107 engine lessons. Hence a separate file.
+| Path | Scope | Owner | Written by |
+| --- | --- | --- | --- |
+| `LESSONS.yml` (consumer root) | **This repository's lessons** | The consumer repo | The worker, in the MR |
+| `.boucle/LESSONS.yml` | **The engine's 107 universal lessons** | `bin/update` / the submodule | Upstream MR only |
+
+Nothing new is invented: `bin/jc:1382` already reads
+`$BOUCLE_WORKSPACE/LESSONS.yml` and falls back to `$BOUCLE_HOME/LESSONS.yml`,
+and `bin/update:338` already refuses to overwrite a **real** root
+`LESSONS.yml` ("a consumer may have a custom LESSONS.yml"). The design is
+half-implemented already. Two things must change to finish it.
+
+**Change 1 — the fallback becomes a merge.** Today the first path that
+exists wins, so a consumer that writes its own lessons **silently loses all
+107 engine lessons**. Concatenate instead: engine block first, consumer block
+second, each labelled, with engine precedence stated on conflict (§3).
+Guard the dogfood case — in the engine repo `ENGINE_DIR="."`, so both paths
+resolve to the same file: compare `readlink -f` and inject once.
+
+**Change 2 — drop `LESSONS.yml` from the three symlink loops.** At a
+consumer root the file is a symlink into the `.boucle/` submodule, created
+in three places (`bin/jc:707`, `bin/update:331`, `bin/setup:588`, all
+iterating `"LESSONS.yml" ".jcode/skills" "bin"`). That symlink is what makes
+the root file the *engine's*, and it is why an agent cannot write a lesson
+today: the write lands in a different git repository, `git add` stages
+nothing but a dirty submodule pointer, and `bin/check-boucle-sync` rejects
+`.boucle/` changes that are not `chore(boucle):` bot commits. Remove
+`LESSONS.yml` from the three lists — keep `.jcode/skills` and `bin`, which
+are genuinely engine-owned — and seed an empty consumer file at install.
+
+**Migration is safe.** An existing consumer has a root symlink carrying no
+consumer content, so `bin/update` replaces it with an empty real file
+in place. Nothing is lost, and the 107 engine lessons keep arriving through
+the injection.
 
 | Aspect | Decision | Rationale |
 | --- | --- | --- |
-| Path | `LESSONS.local.yml`, consumer root | Outside `.boucle/` (no guard trip), distinct from the symlink (no override trap) |
-| Ownership | Consumer repo, committed, agent-writable | Reviewed in the MR, revertible with `git revert` |
-| Format | **Identical** to `LESSONS.yml` (`n: title / ❌ / ✅`) | Reuses the validator, the injection code and the candidate pipeline unchanged |
-| Numbering | From `1`, independent namespace | `check_numbering` requires `1..max` with no unmarked gaps — an offset would fail |
-| Admission | The four-point test **plus a fifth**: *repo-specific* — would this be noise in another consumer? Yes → here. No → upstream MR | Keeps class-not-instance; routes universal lessons to the engine |
+| Naming | Same filename, location carries the scope | One convention to learn; matches the paths `bin/jc` already reads |
+| Format | **Identical** to the engine file (`n: title / ❌ / ✅`) | Reuses the validator, the injection code and the candidate pipeline unchanged |
+| Numbering | From `1` in each file, independent namespaces | `check_numbering` requires `1..max` with no unmarked gaps — an offset would fail |
+| Admission | The four-point test **plus a fifth**: *repo-specific* — would this be noise in another consumer? Yes → root file. No → upstream MR | Keeps class-not-instance; routes universal lessons to the engine |
 | Provenance | `git blame` | `check-lessons` **forbids** issue numbers, MR numbers, SHAs and line numbers in lesson text: "those live in git history". The commit is the evidence record |
-| Validation | `bin/check-lessons LESSONS.local.yml --against .boucle/LESSONS.yml` | Same format gate, plus cross-file dedupe so a consumer cannot restate engine lesson #3 |
-| Injection | Engine block first, consumer block second, both labelled; engine wins on conflict | Concatenate, never override |
-| `bin/update` | Untouched | Not in `SYNC_PATHS`, not in `CONSUMER_ROOT_DOCS`, not in the symlink list |
+| Validation | `bin/check-lessons LESSONS.yml --against .boucle/LESSONS.yml` | Same format gate, plus cross-file dedupe so a consumer cannot restate engine lesson #3 |
+| Injection | Engine block, then consumer block, both labelled; engine wins on conflict | Concatenate, never override |
 | Write moment | The worker, in the **same MR** as the code | A human approves it before it ever reaches a prompt |
+
+**The one cost.** With the symlink gone, an agent that runs
+`Read LESSONS.yml` at the root sees only the consumer's lessons, not the
+engine's 107. Acceptable, and cheap to mitigate: the injected block names
+`.boucle/LESSONS.yml` as the engine path. Injection is the real channel
+anyway — voluntary reads are 0 of 68 observed runs (`bin/jc:1369`).
 
 ```mermaid
 flowchart LR
-    subgraph ENG["Engine — .boucle/LESSONS.yml (symlinked to root)"]
+    subgraph ENG[".boucle/LESSONS.yml — the engine"]
         L["107 universal lessons<br/>upstream MR only"]
     end
-    subgraph LOC["Consumer — LESSONS.local.yml"]
+    subgraph LOC["LESSONS.yml — the consumer root"]
         M["this repo's lessons<br/>same format, same test<br/>+ repo-specific"]
     end
     R["Run on issue N"] -->|"universal class"| U["upstream MR"]
@@ -251,9 +275,9 @@ assumptions become memories or prompt notes."
 
 Emit a candidate at the terminal `boucle:done` transition as well — the same
 hook that already publishes the metrics row. Route success-derived candidates
-to `LESSONS.local.yml` (P1) when the class is repo-specific, so the engine
-file stays conservative while the pool that feeds the prompt stops being
-100% failure-derived.
+to the consumer's root `LESSONS.yml` (P1) when the class is repo-specific,
+so the engine file stays conservative while the pool that feeds the prompt
+stops being 100% failure-derived.
 
 ### P3 — Summarise into L1, retain the original in L3
 
@@ -439,7 +463,7 @@ touch points are named so the estimate is checkable.
 | **A5** | Name the remainder under the lessons block (`bin/lessons --grep`) | Context budget | **Low** | **S** | `bin/jc:1368` + a new ~40-line script |
 | **B1** | `BOUCLE_MAX_ISSUE_COST` / `_TOKENS` + `budget-exhausted` class | Control / termination | **Medium** | **M** | Stage entry in `lib/boucle-ci/*.sh`, `boucle_escalation_diagnostic` |
 | **B2** | Emit a refinement candidate at `boucle:done` | Learning | **High** | **M** | `bin/jc:1342` (the candidate path exists; it is the trigger that is wrong) |
-| **C1** | `LESSONS.local.yml` — the consumer's own lessons | Learning / retention | **Highest** | **M** | Second injection source in `bin/jc:1368`; `--against` cross-file dedupe in `bin/check-lessons`; candidate routing; a fifth admission question; `bin/setup` seed |
+| **C1** | A consumer-scoped `LESSONS.yml` | Learning / retention | **Highest** | **M** | Merge instead of fallback at `bin/jc:1368`; drop `LESSONS.yml` from the symlink loops at `bin/jc:707`, `bin/update:331`, `bin/setup:588`; `--against` dedupe in `bin/check-lessons`; candidate routing; a fifth admission question |
 | **C2** | `[boucle:digest]` instead of the 120-char rung | Context budget | **Conditional** on A3 | **L** | `bin/jc` trimming ladder + an extra cheap-model call + retrieval pointer |
 | **D1** | Reusable subagent specifications | Coordination | **Unknown** | **M** | Blocked by A2 — do not build before it answers |
 
@@ -472,10 +496,11 @@ first, local second, engine wins on conflict — and the `--against` dedupe
 MUST land with the first line of C1, not after. They are what keep a local
 entry from quietly relaxing an engine invariant.
 
-**Why C1 is M, not L.** Reusing the lesson contract instead of inventing a
-separate store means the format, the validator, the injection path and the
-candidate pipeline all already exist. The build is a second source and a
-dedupe flag, not a new subsystem.
+**Why C1 is M, not L.** Reusing the lesson contract — same filename, same
+format, scope carried by location — means the validator, the injection path
+and the candidate pipeline all already exist. The build is a merge instead
+of a fallback, three symlink lists to shorten, and a dedupe flag. Not a new
+subsystem.
 
 ## 8. Reproducing the boucle-side numbers
 
