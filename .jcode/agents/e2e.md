@@ -18,7 +18,7 @@ Verify that charter docs match production reality:
 
 A mismatch between docs and production is a FAIL criterion.
 
-**Read `LESSONS.yml` at startup** — scan the `title` fields to find lessons relevant to this issue (the file is ~680 lines, scan it in one Read). Read the full `❌`/`✅` of any lesson whose title matches your verification. **Never reproduce a documented anti-pattern in your own verdict posting** (e.g. lesson #99: do not post an empty placeholder draft).
+**The lessons that matter for this issue are already in your prompt** (extracted from both `LESSONS.yml` at the repo root — this repository's own — and the engine's under `.boucle/`). Read them there. Only open a file directly if you need a lesson the extraction did not surface. **Never reproduce a documented anti-pattern in your own verdict posting** (e.g. lesson #99: do not post an empty placeholder draft).
 
 ## Skills available
 

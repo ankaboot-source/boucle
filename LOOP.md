@@ -607,6 +607,76 @@ branch at the terminal transition. Read it with `bin/skills-stats`. See
 [Skill-effectiveness measurement](#skill-effectiveness-measurement) below and
 [docs/skills-audit.md](docs/skills-audit.md).
 
+## Lessons — two files, one name
+
+Boucle reads lessons from **two** files and **merges** them into every
+triage, worker and reviewer prompt. The scope is carried by the location,
+not by the filename:
+
+| Path | Scope | Owner | Written by |
+| --- | --- | --- | --- |
+| `LESSONS.yml` (repo root) | **This repository's own lessons** | The consumer repo | The worker, in the MR |
+| `.boucle/LESSONS.yml` | The engine's universal lessons | `bin/update` / the submodule | Upstream MR only |
+
+**They are merged, never overridden.** The engine block is injected first,
+the repository's second, and the prompt states that **an engine lesson wins
+on conflict**. The previous behaviour was first-match-wins: a consumer that
+wrote a single lesson of its own silently lost every engine lesson. In the
+engine repo both paths resolve to one file, and it is injected once.
+
+**The root file is no longer a symlink.** It used to be symlinked into
+`.boucle/`, which is why no agent could ever record a lesson: the write
+landed in the submodule, `git add` staged nothing but a dirty pointer, and
+`bin/check-boucle-sync` rejected it. `bin/update` removes that symlink on the
+next run. Nothing is seeded in its place — an absent file is the honest state
+until a first lesson is recorded, and `bin/check-lessons` rejects an empty
+one. `.jcode/skills/` and `bin/` stay symlinked; they are engine-owned.
+
+**What belongs where.** Boucle keeps class-not-instance for everything it
+persists, in both files:
+
+| Kind of knowledge | Home |
+| --- | --- |
+| Config value (build command, deploy mode) | CI variable / root CI shim |
+| Project context (stack, conventions) | `AGENTS.md`, `CONTEXT.md`, `DESIGN.md` |
+| Class of mistake, universal | `.boucle/LESSONS.yml`, via an upstream MR |
+| Class of mistake, this repo only | `LESSONS.yml` at the repo root |
+| A one-off instance | Nowhere — git history |
+
+Validate a repository file against the engine's:
+
+```bash
+bin/check-lessons LESSONS.yml --against .boucle/LESSONS.yml
+```
+
+`--against` flags an entry that merely restates an engine lesson (>0.6
+keyword overlap). Both files reach every prompt, so a restatement is paid for
+twice. In that mode the AGENTS.md guard is skipped: it protects an engine
+document the consumer does not own.
+
+## Refinement — when a lesson is proposed
+
+Boucle used to distil a lesson **only at escalation**, so everything it had
+ever learned came from runs that failed — a pool measured as producing
+artifacts worse than no artifact at all
+([docs/skills-audit.md](docs/skills-audit.md) §1). Two triggers now exist:
+
+| Trigger | Who | When |
+| --- | --- | --- |
+| Escalation | Reviewer → worker | The final iteration, before `boucle:human`. Unchanged |
+| **Recovery** | Worker | **Iteration ≥ 2** — a previous attempt did not land and this one is fixing it |
+
+A **first-pass success proposes nothing**: it did the obvious thing and it
+worked, and asking for a lesson there would fill the file with restatements
+of the charter. The trajectory worth distilling is the recovered one, where
+the delta between what failed and what worked is visible in `iterations.md`
+and in `state.md`'s *Tried and rejected*.
+
+A lesson proposed at iteration 2 may still be premature — that fix might fail
+too. **The MR gate carries that risk**: if the iteration fails, its code never
+merges and neither does the lesson. The reviewer validates entries against
+the four-point admission test and may require removal.
+
 ## Cost accounting
 
 Every agent invocation appends one entry to `.boucle-state/<issue>/cost.json`
@@ -633,9 +703,18 @@ This is the prerequisite for a real budget cap (§Caps below still reads
 ## Loop-health measurement
 
 Every agent run appends one JSONL line to `.boucle-state/<issue>/health.jsonl`
-(role, iteration, exit_code, prompt_chars, tokens, cost, model, provider),
-and every stage outcome appends another (worker: committed/no-changes/
-build-fail; reviewer/e2e: PASS/FAIL/UNCERTAIN; merger: merged/conflict).
+(role, iteration, exit_code, prompt_chars, tokens, cost, model, provider,
+skills, arm, setup_fail, **swarm_spawns**), and every stage outcome appends
+another (worker: committed/no-changes/build-fail; **reviewer/e2e:
+PASS/FAIL/UNCERTAIN**; merger: merged/conflict). The reviewer and e2e rows
+were documented but never written until now, which is why the escalation
+diagnostic's reviewer-FAIL count always read 0.
+
+`swarm_spawns` counts sub-agent spawns found in the transcript. Measurement
+only, and deliberately an undercount: a line carrying two spawns counts once,
+and only explicit call shapes match. Unlike a skill name — validated against
+`.jcode/skills/<name>` on disk — `swarm` has no backstop, so a loose pattern
+would count the prompt's own instructions as spawns.
 The file survives across iterations like `cost.json` and feeds two consumers:
 
 - `bin/health <issue>` — a read-only per-issue health summary (iterations,
@@ -643,9 +722,19 @@ The file survives across iterations like `cost.json` and feeds two consumers:
 - **Structured escalation diagnostics** — when the loop escalates to
   `boucle:human`, the generic "human intervention needed" comment is
   replaced by `boucle_escalation_diagnostic`, which classifies the failure
-  (provider/quota, build-fail, no-changes, rebase-conflict,
+  (provider/quota, build-failure, step-budget-exhaustion, rebase-conflict,
   not-mergeable, unknown) from the health record and posts a structured
-  diagnostic: failure class + evidence + recommended next action.
+  diagnostic: failure class + **failing side** + evidence + recommended
+  next action.
+
+  The **side** says whether the *harness* stopped the run or the *model*
+  failed the task, because the two call for opposite actions — raise a cap
+  or fix the engine, versus re-spec or split the issue. A cap that fires
+  terminated the run prematurely; it did not establish that the task was
+  beyond the agent, so `step-budget-exhaustion` is **harness**-side, as are
+  `provider/quota`, `rebase-conflict` and `not-mergeable`. `build-failure`
+  is **model**-side. An unclassified trigger stays `unknown` — guessing a
+  side would be worse than not labelling one.
 
 This is the "look at the data" principle applied to the loop itself, and
 the prerequisite for the upstream engine-defect flywheel (#54).
@@ -709,6 +798,13 @@ branch when the issue reaches `boucle:done` or `boucle:human`. Orphan so the
 measurement log never enters the consumer's history or triggers their CI, and
 fail-open throughout: a metrics write must never be what stops an issue
 reaching done.
+
+That row is therefore the **only** copy of a measurement that outlives the
+job, so anything absent from it is unmeasurable in practice however
+faithfully it was written per run. It now carries `prompt_chars_max` (the
+largest assembled prompt seen on the issue — the input to any future context
+ceiling), `swarm_spawns`, and the reviewer/e2e `verdicts`, which are what
+tell a recovered trajectory apart from a first-pass success.
 
 ```bash
 bin/skills-stats                # observed split (confounded, always available)
