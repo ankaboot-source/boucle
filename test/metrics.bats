@@ -377,10 +377,10 @@ stub_forge() {
 }
 
 # ── prompt size and verdicts on the published row (A3, A7) ────────────
-# health.jsonl is gitignored and the state cache never survives an
-# ephemeral runner, so the per-issue row is the ONLY copy of a measurement
-# that outlives the job. Anything absent from it is unmeasurable in
-# practice, however faithfully it was written per run.
+# The raw log now reaches the branch as it is written, so these fields are
+# durable per run either way. The summary row is what a dashboard reads
+# without parsing every line, and a field missing from it is a field nobody
+# will aggregate.
 
 @test "row: carries the largest assembled prompt seen on the issue" {
   lib
@@ -424,4 +424,214 @@ EOF
   run bash -c "cd '$REPO' && BOUCLE_WORKSPACE='$TMP' bash -c '. lib/boucle.sh 2>/dev/null; boucle_metrics_row 7 done' | jq -c '{verdicts, prompt_chars_max, swarm_spawns}'"
   assert_success
   assert_output '{"verdicts":[],"prompt_chars_max":100,"swarm_spawns":0}'
+}
+
+# ── Durability of the raw health log ─────────────────────────────────────
+#
+# The defect these cover: health.jsonl is written into .boucle-state/ inside
+# whichever ephemeral job produced it, but the TERMINAL label is usually
+# applied by a different job with an empty workspace (a doctor sweep, a
+# post-merge e2e). The publish then summarised a table that did not exist and
+# reported "nothing to publish" for an issue that had just finished a full
+# loop. These tests pin the two halves of the fix: the raw log leaves the job
+# as it is written, and the reader finds it again when the local copy is gone.
+
+metrics_remote() {
+  # A bare repo standing in for origin, plus a working clone whose `origin`
+  # points at it — boucle_metrics_git_append reads the remote off `origin`.
+  git init -q --bare "$TMP/origin.git"
+  git init -q "$TMP/work"
+  git -C "$TMP/work" remote add origin "$TMP/origin.git"
+  cd "$TMP/work" || return 1
+}
+
+remote_file() {
+  git -C "$TMP/origin.git" show "$BOUCLE_METRICS_BRANCH:$1" 2> /dev/null
+}
+
+@test "metrics: health lines reach the branch as they are written" {
+  lib
+  metrics_remote
+  health_fixture
+  boucle_metrics_sync_health 7
+  run remote_file "raw/7.jsonl"
+  assert_success
+  assert_output --partial '"role":"worker","iteration":1'
+  assert_output --partial '"outcome":"build-fail"'
+}
+
+@test "metrics: re-syncing the same log does not duplicate lines" {
+  lib
+  metrics_remote
+  health_fixture
+  boucle_metrics_sync_health 7
+  boucle_metrics_sync_health 7
+  run bash -c "git -C '$TMP/origin.git' show '$BOUCLE_METRICS_BRANCH:raw/7.jsonl' | wc -l"
+  assert_output "3"
+}
+
+@test "metrics: a later append adds only the new line" {
+  lib
+  metrics_remote
+  health_fixture
+  boucle_metrics_sync_health 7
+  echo '{"timestamp":"2026-08-24T11:00:00Z","role":"e2e","outcome":"PASS","detail":""}' \
+    >> "$TMP/.boucle-state/7/health.jsonl"
+  boucle_metrics_sync_health 7
+  run bash -c "git -C '$TMP/origin.git' show '$BOUCLE_METRICS_BRANCH:raw/7.jsonl' | wc -l"
+  assert_output "4"
+}
+
+@test "metrics: BOUCLE_METRICS_SYNC=false keeps the local write and skips the push" {
+  lib
+  metrics_remote
+  health_fixture
+  BOUCLE_METRICS_SYNC=false boucle_metrics_sync_health 7
+  run remote_file "raw/7.jsonl"
+  assert_failure
+  assert [ -s "$TMP/.boucle-state/7/health.jsonl" ]
+}
+
+@test "metrics: disabling metrics entirely also disables the raw sync" {
+  lib
+  metrics_remote
+  health_fixture
+  BOUCLE_METRICS_ENABLED=false boucle_metrics_sync_health 7
+  run remote_file "raw/7.jsonl"
+  assert_failure
+}
+
+@test "metrics: hydrate prefers the local health file" {
+  lib
+  metrics_remote
+  health_fixture
+  run boucle_metrics_hydrate_health 7
+  assert_success
+  assert_output "$TMP/.boucle-state/7/health.jsonl"
+}
+
+@test "metrics: hydrate falls back to the branch when the workspace is empty" {
+  lib
+  metrics_remote
+  health_fixture
+  boucle_metrics_sync_health 7
+  rm -f "$TMP/.boucle-state/7/health.jsonl"
+  run boucle_metrics_hydrate_health 7
+  assert_success
+  assert [ -s "$output" ]
+  run bash -c "grep -c 'build-fail' '$(boucle_metrics_hydrate_health 7)'"
+  assert_output "1"
+}
+
+@test "metrics: hydrate prints nothing when the issue never ran an agent" {
+  lib
+  metrics_remote
+  run boucle_metrics_hydrate_health 7
+  assert_success
+  assert_output ""
+}
+
+@test "metrics: a terminal transition in a FRESH job still publishes a row" {
+  # The regression that started this: the doctor recovered a closed issue,
+  # the hook fired, and the row was empty because the doctor's workspace had
+  # never seen health.jsonl. The raw log on the branch is what closes it.
+  lib
+  metrics_remote
+  stub_forge
+  health_fixture
+  boucle_metrics_sync_health 7
+  rm -rf "$TMP/.boucle-state/7"
+  run boucle_metrics_row 7 done
+  assert_success
+  assert_output --partial '"issue":"7"'
+  assert_output --partial '"terminal":"done"'
+  assert_output --partial '"iterations":2'
+}
+
+@test "metrics: git_append reports failure when there is no origin to push to" {
+  lib
+  git init -q "$TMP/noremote"
+  cd "$TMP/noremote" || return 1
+  echo 'x' > "$TMP/line"
+  run boucle_metrics_git_append "metrics.jsonl" "$TMP/line" "msg"
+  assert_failure
+}
+
+# ── The credential bug, pinned ───────────────────────────────────────────
+#
+# The first implementation did the read-modify-append in a scratch `git init`
+# under /tmp. That inherits none of the checkout's configuration — on a CI
+# runner the token lives in the working repo's `http.<host>.extraheader`, so
+# the scratch repo's push was unauthenticated and failed. The whole suite
+# passed anyway, because a local file:// remote needs no credentials.
+#
+# `insteadOf` reproduces the class faithfully without a network: the remote
+# URL is only resolvable through config that lives in THIS repo. Anything
+# that shells out to a fresh clone cannot reach origin; anything that uses
+# the working repo's own remote can.
+
+metrics_remote_config_only() {
+  git init -q --bare "$TMP/origin.git"
+  git init -q "$TMP/work"
+  git -C "$TMP/work" remote add origin "boucle-test://origin"
+  git -C "$TMP/work" config \
+    "url.$TMP/origin.git.insteadOf" "boucle-test://origin"
+  cd "$TMP/work" || return 1
+}
+
+@test "metrics: the append reaches origin through the working repo's own config" {
+  lib
+  metrics_remote_config_only
+  health_fixture
+  boucle_metrics_sync_health 7
+  run remote_file "raw/7.jsonl"
+  assert_success
+  assert_output --partial '"role":"worker","iteration":1'
+}
+
+@test "metrics: hydrate also reads through the working repo's own config" {
+  lib
+  metrics_remote_config_only
+  health_fixture
+  boucle_metrics_sync_health 7
+  rm -f "$TMP/.boucle-state/7/health.jsonl"
+  run boucle_metrics_hydrate_health 7
+  assert_success
+  assert [ -s "$output" ]
+}
+
+@test "metrics: the append never touches HEAD, the index or the working tree" {
+  lib
+  metrics_remote
+  health_fixture
+  echo 'code' > "$TMP/work/file.txt"
+  git -C "$TMP/work" add file.txt
+  git -C "$TMP/work" -c user.email=t@t -c user.name=t commit -q -m "work"
+  echo 'uncommitted' > "$TMP/work/dirty.txt"
+  local head_before status_before
+  head_before=$(git -C "$TMP/work" rev-parse HEAD)
+  status_before=$(git -C "$TMP/work" status --porcelain)
+
+  boucle_metrics_sync_health 7
+
+  assert_equal "$(git -C "$TMP/work" rev-parse HEAD)" "$head_before"
+  assert_equal "$(git -C "$TMP/work" status --porcelain)" "$status_before"
+  # The metrics branch must not appear as a local branch either.
+  run git -C "$TMP/work" rev-parse --verify --quiet "$BOUCLE_METRICS_BRANCH"
+  assert_failure
+}
+
+@test "metrics: a failed sync SAYS so instead of returning quietly" {
+  # The bug behind the bug: the sync swallowed stderr, so an unauthenticated
+  # push left no trace anywhere. The branch simply never appeared.
+  lib
+  git init -q "$TMP/noremote"
+  cd "$TMP/noremote" || return 1
+  mkdir -p "$TMP/.boucle-state/7"
+  health_fixture
+  # No origin at all — the append cannot succeed.
+  run boucle_metrics_sync_health 7
+  assert_success
+  assert_output --partial "[boucle:metrics] WARN"
+  assert_output --partial "issue #7"
 }

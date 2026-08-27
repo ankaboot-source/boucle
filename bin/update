@@ -355,6 +355,8 @@ propagate_consumer_root_files() {
   # submodule, `git add` staged nothing but a dirty pointer, and
   # bin/check-boucle-sync rejected it. The engine's lessons still reach every
   # prompt — bin/jc injects both files and MERGES them.
+  # shellcheck source=bin/lib/engine-symlink.sh
+  . "$ENGINE_DIR/bin/lib/engine-symlink.sh"
   for lt in ".jcode/skills" "bin"; do
     local engine_src="$ENGINE_DIR/$lt"
     [ -e "$engine_src" ] || continue
@@ -369,10 +371,25 @@ propagate_consumer_root_files() {
       echo "[boucle] WARN: $lt exists at repo root (not a symlink) — skipping symlink creation (consumer-owned)" >&2
       continue
     fi
+    # The TARGET is not "$engine_src": ln -s resolves a relative target from
+    # the directory containing the LINK, not from the repo root, and
+    # $ENGINE_DIR is absolute ($(cd .. && pwd)). Passing $engine_src wrote
+    # either a link that never resolved (.jcode/skills, missing its "../")
+    # or one carrying this machine's checkout path. See
+    # bin/lib/engine-symlink.sh.
+    local link_target
+    link_target=$(engine_symlink_target "$ENGINE_DIR" "$lt" "$PWD") || continue
     # Remove a stale/broken symlink if present.
     [ -L "$lt" ] && rm -f "$lt"
     mkdir -p "$(dirname "$lt")"
-    ln -s "$engine_src" "$lt"
+    ln -s "$link_target" "$lt"
+    # `ln -s` succeeds on a dangling target, so a wrong target is invisible
+    # until a skill load fails much later and reads as a model problem.
+    if [ ! -e "$lt" ]; then
+      echo "[boucle] WARN: $lt → $link_target does not resolve — removing the broken symlink" >&2
+      rm -f "$lt"
+      continue
+    fi
     propagated="$propagated $lt"
   done
 

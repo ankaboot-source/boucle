@@ -3,30 +3,7 @@
 ## TL;DR
 {{tldr}}
 
-## Analysis
-{{analysis}}
-
-## Draft acceptance criteria
-- [ ] **Happy path** — Given {{context}}, When {{action}}, Then {{result}}
-- [ ] **Edge case** — Given {{boundary}}, When {{action}}, Then {{result}}
-- [ ] **Error state** — Given {{failure}}, When {{action}}, Then {{recovery}}
-- [ ] **Non-functional** — Given {{constraint}}, When {{action}}, Then {{bar}}
-
-## Must-haves
-- **Truths** — {{truths}}
-- **Artifacts** — {{artifacts}}
-- **Key links** — {{key_links}}
-
-## Non-goals
-- {{non_goal_1}}
-- {{non_goal_2}}
-
-## Impacts
-{{impacts_visible}}
-
-<!-- boucle:impacts v=1 kinds={{impacts_kinds}} -->
-
-## Diagram *(mandatory when ## Impacts declares a structural kind; omit otherwise)*
+## Diagram *(mandatory when ## Metadata declares a structural impact; omit otherwise)*
 {{diagram_caption}}
 
 ```mermaid
@@ -36,30 +13,51 @@
 
 <!-- boucle:diagram v=1 types={{diagram_types}} -->
 
-## Impacted files
-📁 `{{impacted_files}}`
+## Analysis
+{{analysis}}
 
-<!-- boucle:files v=1 paths={{impacted_files}} -->
+## Criteria
+
+### Acceptance
+- [ ] **Happy path** — Given {{context}}, When {{action}}, Then {{result}}
+- [ ] **Edge case** — Given {{boundary}}, When {{action}}, Then {{result}}
+- [ ] **Error state** — Given {{failure}}, When {{action}}, Then {{recovery}}
+- [ ] **Non-functional** — Given {{constraint}}, When {{action}}, Then {{bar}}
+
+### Must-haves
+- **Truths** — {{truths}}
+- **Artifacts** — {{artifacts}}
+- **Key links** — {{key_links}}
+
+### Non-goals
+- {{non_goal_1}}
+- {{non_goal_2}}
 
 ## Recurring theme *(optional — omit if no prior instances found)*
 🔁 Part of a recurring class (see #{{prior1}}, #{{prior2}}). Consider a root-cause fix, not a patch.
 
 <!-- boucle:recurring v=1 refs={{prior1}},{{prior2}} -->
 
-## Classification
-Size: {{size}}
-Validation: {{validation}}
-
 ## Questions
 {{questions}}
 
 If no blocking questions, write "none" on its own line.
-
-## Disposition
-{{disposition}}
 
 ## Creative proposals
 {{creative_proposals}}
 
 ## Consequences
 {{consequences}}
+
+## Metadata
+<details><summary>machine block — CI reads this, you do not have to</summary>
+
+<!-- boucle:impacts v=1 kinds={{impacts_kinds}} -->
+<!-- boucle:files v=1 paths={{impacted_files}} -->
+- **Impacts** — 🏗️ {{impacts_visible}}
+- **Impacted files** — 📁 `{{impacted_files}}`
+- **Size** — {{size}}
+- **Validation** — {{validation}}
+- **Disposition** — {{disposition}}
+
+</details>

@@ -611,6 +611,7 @@ boucle_health_record() {
     "$ts" "$role" "$iteration" "$exit_code" "$prompt_chars" "${tokens:-n/a}" "${cost:-n/a}" "$model" "$provider" \
     "$skills_json" "${arm:-full}" "$setup_fail" "$swarm" \
     >> "$file" 2> /dev/null || true
+  boucle_metrics_sync_health "$iid" || true
 }
 
 # Append a verdict/outcome line to health.jsonl. Called by the jobs
@@ -625,6 +626,62 @@ boucle_health_outcome() {
   printf '{"timestamp":"%s","role":"%s","outcome":"%s","detail":"%s"}\n' \
     "$ts" "$role" "$outcome" "$detail" \
     >> "$file" 2> /dev/null || true
+  boucle_metrics_sync_health "$iid" || true
+}
+
+# ── Merge-gate approval ───────────────────────────────────────────────
+#
+# ONE definition of "approved", because there were two and they disagreed.
+#
+# dispatch.sh accepts the magic word: a human replying `approved` on the PR
+# moves the issue to boucle:merging and chains the merger. That contract
+# exists because GitHub emoji reactions have NO webhook (LESSONS.yml #85,
+# #89), and it is NOT gated on mono-user — it fires on the boucle:approval
+# label alone.
+#
+# doctor.sh then re-checked the same question with forge_mr_approvals, which
+# counts only NATIVE reviews (`state == "APPROVED"`). A comment produces
+# none, so every issue that sat at boucle:merging long enough for a doctor
+# sweep was escalated with "no longer approved" — wording that implies an
+# approval was withdrawn when none ever existed on that path.
+#
+# On a mono-user install the two can never agree: the PR author and the
+# approver are the same account, and GitHub refuses to let anyone approve
+# their own pull request. The native check is not merely stricter there, it
+# is unsatisfiable — so the comment path is the only one, and the doctor
+# rejected it.
+#
+# Callers must use this rather than calling forge_mr_approvals directly.
+# The emoji signal stays in doctor.sh (it needs the approval-request note),
+# so a caller that wants it ORs it with this.
+
+# boucle_mr_is_approved <mr_iid>
+#   Exit 0 when the merge gate is satisfied, non-zero otherwise.
+boucle_mr_is_approved() {
+  local mr_iid="${1:-}"
+  [ -n "$mr_iid" ] || return 1
+
+  # 1. Native review approval (multi-user installs, or a second reviewer).
+  [ "$(forge_mr_approvals "$mr_iid" 2> /dev/null)" = "true" ] && return 0
+
+  command -v jq > /dev/null 2>&1 || return 1
+
+  # 2. The magic word, matched exactly as dispatch matches it: the FIRST
+  #    line of the comment, trimmed, case-insensitively equal to "approved".
+  #    Anything else at boucle:approval is feedback, not an approval.
+  #
+  #    Humans are told from the bot by the ABSENCE of the agent marker, not
+  #    by actor identity — SKILL.md invariant I7, and the only rule that
+  #    holds in mono-user mode where the bot posts as the human's account.
+  local marker="${BOUCLE_AGENT_MARKER:-<!-- boucle:agent -->}"
+  forge_mr_notes "$mr_iid" 2> /dev/null | jq -e --arg m "$marker" '
+        [.[]
+          | select((.system // false) | not)
+          | select((.body // "") | contains($m) | not)
+          | ((.body // "") | split("\n")[0] | gsub("^\\s+|\\s+$"; "") | ascii_downcase == "approved")]
+        | any' > /dev/null 2>&1 && return 0
+
+  return 1
 }
 
 # ── Skill-effectiveness measurement (docs/skills-audit.md §03) ────────
@@ -657,6 +714,18 @@ boucle_health_outcome() {
 
 BOUCLE_METRICS_BRANCH="${BOUCLE_METRICS_BRANCH:-boucle/metrics}"
 BOUCLE_METRICS_FILE="${BOUCLE_METRICS_FILE:-metrics.jsonl}"
+# Per-issue RAW health log on the same branch. health.jsonl is written into
+# .boucle-state/ inside whichever job produced it, and every boucle job runs
+# on a fresh ephemeral runner with an empty workspace. The job that applies
+# the TERMINAL label is almost never the job that did the work — a doctor
+# sweep, a post-merge e2e — so at publish time the local health.jsonl is a
+# file that has never existed in that container, and the summary row was
+# computed over an empty table: "no health data for issue #N — nothing to
+# publish", on an issue that had just completed a full loop. That is the same
+# class of defect this measurement exists to catch — an operation that
+# succeeds while its effect is null. The raw log is therefore pushed as it is
+# written, not read back at the end from a file that is not there.
+BOUCLE_METRICS_RAW_DIR="${BOUCLE_METRICS_RAW_DIR:-raw}"
 
 # boucle_metrics_enabled
 #
@@ -815,8 +884,9 @@ boucle_human_touches() {
         2> /dev/null || echo 0)
   fi
 
-  local health="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
-  if [ -s "$health" ]; then
+  local health
+  health=$(boucle_metrics_hydrate_health "$iid")
+  if [ -n "$health" ] && [ -s "$health" ]; then
     amends=$(grep -c '"outcome":"amended-in-flight"' "$health" 2> /dev/null || echo 0)
   fi
 
@@ -853,9 +923,10 @@ boucle_human_touches() {
 # number that is wrong in a direction it cannot detect.
 boucle_metrics_row() {
   local iid="${1:-}" terminal="${2:-unknown}"
-  local health="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
   command -v jq > /dev/null 2>&1 || return 0
-  [ -s "$health" ] || return 0
+  local health
+  health=$(boucle_metrics_hydrate_health "$iid")
+  [ -n "$health" ] && [ -s "$health" ] || return 0
 
   local touches spec delivery
   touches=$(boucle_human_touches "$iid" 2> /dev/null || printf '0\t0')
@@ -939,51 +1010,200 @@ boucle_metrics_publish() {
     return 0
   fi
 
-  local branch="$BOUCLE_METRICS_BRANCH" file="$BOUCLE_METRICS_FILE"
+  local rowfile
+  rowfile=$(mktemp 2> /dev/null) || return 0
+  printf '%s\n' "$row" > "$rowfile"
+  if boucle_metrics_git_append "$BOUCLE_METRICS_FILE" "$rowfile" \
+    "metrics: issue #$iid ($terminal)"; then
+    echo "[boucle:metrics] published issue #$iid ($terminal) to $BOUCLE_METRICS_BRANCH:$BOUCLE_METRICS_FILE" >&2
+  else
+    echo "[boucle:metrics] WARN: could not publish metrics for issue #$iid — the row is lost, the loop is not" >&2
+  fi
+  rm -f "$rowfile"
+  return 0
+}
+
+# boucle_metrics_git_append <relpath> <src-file> <commit-msg>
+#
+# Append the lines of <src-file> to <relpath> on the metrics branch, skipping
+# any line the branch already carries, and push. Returns 0 only when the data
+# is on the branch (including "it was already there"); non-zero means it is
+# not.
+#
+# Built on plumbing inside the EXISTING repository rather than a scratch
+# clone, for one reason that cost a full loop to find: a `git init` in a temp
+# directory inherits none of the checkout's credentials. On a CI runner the
+# token lives in the working repo's `http.<host>.extraheader`, so a scratch
+# repo's push is unauthenticated and fails — silently, when the caller has
+# redirected stderr. Using the working repo's own remote means the push is
+# authenticated exactly like every other push the job makes.
+#
+# hash-object / update-index / write-tree / commit-tree / push, with a
+# private GIT_INDEX_FILE: HEAD, the index and the working tree are never
+# touched, so this is safe to call from the middle of any role.
+#
+# The branch is shared by every issue in the project and two jobs can finish
+# at the same moment. A push race loses data silently, so retry on rejection.
+boucle_metrics_git_append() {
+  local relpath="${1:-}" src="${2:-}" msg="${3:-metrics}"
+  local branch="$BOUCLE_METRICS_BRANCH"
+  [ -n "$relpath" ] || return 1
+  git rev-parse --git-dir > /dev/null 2>&1 || return 1
+  git remote get-url origin > /dev/null 2>&1 || return 1
+
   local tmp
-  tmp=$(mktemp -d 2> /dev/null) || return 0
+  tmp=$(mktemp -d 2> /dev/null) || return 1
+  if ! cat "$src" > "$tmp/payload" 2> /dev/null; then
+    rm -rf "$tmp"
+    return 1
+  fi
+  if [ ! -s "$tmp/payload" ]; then
+    rm -rf "$tmp"
+    return 0
+  fi
 
-  # Read-modify-append against the remote, in a scratch worktree: the branch
-  # is shared by every issue in the project and two issues can finish at the
-  # same time. A push race loses the row, so retry on rejection.
-  local attempt
+  local attempt base existing fresh grc blob tree commit idx rc=1
   for attempt in 1 2 3; do
-    rm -rf "${tmp:?}/repo"
-    mkdir -p "$tmp/repo" || break
-    if ! git -C "$tmp/repo" init -q 2> /dev/null; then break; fi
-    git -C "$tmp/repo" remote add origin "$(git remote get-url origin 2> /dev/null || echo "")" 2> /dev/null || true
-
-    if git -C "$tmp/repo" fetch -q --depth 1 origin "$branch" 2> /dev/null; then
-      git -C "$tmp/repo" checkout -q FETCH_HEAD 2> /dev/null || true
-      git -C "$tmp/repo" checkout -q -B "$branch" 2> /dev/null || true
-    else
-      # First row ever: an ORPHAN branch, so the metrics log shares no
-      # history with the consumer's code.
-      git -C "$tmp/repo" checkout -q --orphan "$branch" 2> /dev/null || true
-      printf '%s\n' \
-        "# boucle metrics" "" \
-        "Append-only measurement log, one JSON object per issue." \
-        "Written by \`boucle_metrics_publish\` at the terminal transition." \
-        "Read with \`bin/skills-stats\`. Safe to delete: it is measurement," \
-        "never decision state." > "$tmp/repo/README.md" 2> /dev/null || true
+    base=""
+    existing="$tmp/existing"
+    : > "$existing"
+    if git fetch -q --depth 1 origin "$branch" 2> /dev/null; then
+      base=$(git rev-parse FETCH_HEAD 2> /dev/null || echo "")
+      git cat-file -p "$base:$relpath" > "$existing" 2> /dev/null || : > "$existing"
     fi
 
-    printf '%s\n' "$row" >> "$tmp/repo/$file" 2> /dev/null || break
-    git -C "$tmp/repo" add "$file" README.md 2> /dev/null || true
-    git -C "$tmp/repo" -c user.email="${BOUCLE_BOT_EMAIL:-boucle@localhost}" \
-      -c user.name="${BOUCLE_BOT_NAME:-boucle}" \
-      commit -q -m "metrics: issue #$iid ($terminal)" 2> /dev/null || break
-
-    if git -C "$tmp/repo" push -q origin "$branch" 2> /dev/null; then
-      echo "[boucle:metrics] published issue #$iid ($terminal) to $branch:$file" >&2
+    # Only the lines the branch does not already carry. Health lines are
+    # pushed after every append, so each push re-offers everything written so
+    # far; without this the raw log grows quadratically.
+    fresh="$tmp/fresh"
+    grc=0
+    grep -F -x -v -f "$existing" "$tmp/payload" > "$fresh" 2> /dev/null || grc=$?
+    # Exit 1 is "no fresh lines", a valid answer. Above 1 is grep itself
+    # failing, and dropping the payload there would be silent data loss —
+    # offer everything and let the next dedupe sort it out.
+    if [ "$grc" -gt 1 ]; then
+      cp "$tmp/payload" "$fresh" 2> /dev/null || break
+    fi
+    if [ ! -s "$fresh" ]; then
       rm -rf "$tmp"
       return 0
+    fi
+    cat "$existing" "$fresh" > "$tmp/merged" 2> /dev/null || break
+
+    idx="$tmp/index"
+    rm -f "$idx"
+    if [ -n "$base" ]; then
+      GIT_INDEX_FILE="$idx" git read-tree "$base" 2> /dev/null || rm -f "$idx"
+    fi
+    blob=$(git hash-object -w "$tmp/merged" 2> /dev/null) || break
+    GIT_INDEX_FILE="$idx" git update-index --add \
+      --cacheinfo "100644,$blob,$relpath" 2> /dev/null || break
+
+    # First write ever: an ORPHAN commit, so the measurement log shares no
+    # history with the consumer's code and can never enter it.
+    if [ -z "$base" ]; then
+      printf '%s\n' \
+        "# boucle metrics" "" \
+        "Append-only measurement log." "" \
+        "- \`$BOUCLE_METRICS_FILE\` — one JSON object per finished issue." \
+        "- \`$BOUCLE_METRICS_RAW_DIR/<issue>.jsonl\` — the raw per-run health" \
+        "  lines that row was computed from, pushed as they are written so" \
+        "  they outlive the ephemeral job that produced them." "" \
+        "Read with \`bin/skills-stats\`. Safe to delete: it is measurement," \
+        "never decision state." > "$tmp/readme" 2> /dev/null || true
+      blob=$(git hash-object -w "$tmp/readme" 2> /dev/null) || true
+      [ -n "$blob" ] && GIT_INDEX_FILE="$idx" git update-index --add \
+        --cacheinfo "100644,$blob,README.md" 2> /dev/null || true
+    fi
+
+    tree=$(GIT_INDEX_FILE="$idx" git write-tree 2> /dev/null) || break
+    [ -n "$tree" ] || break
+    if [ -n "$base" ]; then
+      commit=$(git -c "user.email=${BOUCLE_BOT_EMAIL:-boucle@localhost}" \
+        -c "user.name=${BOUCLE_BOT_NAME:-boucle}" \
+        commit-tree "$tree" -p "$base" -m "$msg" 2> /dev/null) || break
+    else
+      commit=$(git -c "user.email=${BOUCLE_BOT_EMAIL:-boucle@localhost}" \
+        -c "user.name=${BOUCLE_BOT_NAME:-boucle}" \
+        commit-tree "$tree" -m "$msg" 2> /dev/null) || break
+    fi
+    [ -n "$commit" ] || break
+
+    if git push -q origin "$commit:refs/heads/$branch" 2> /dev/null; then
+      rc=0
+      break
     fi
     echo "[boucle:metrics] push to $branch rejected (attempt $attempt) — refetching" >&2
   done
 
   rm -rf "$tmp"
-  echo "[boucle:metrics] WARN: could not publish metrics for issue #$iid — the row is lost, the loop is not" >&2
+  return "$rc"
+}
+
+# boucle_metrics_sync_health <iid>
+#
+# Push the local health.jsonl for <iid> to <metrics branch>:<raw>/<iid>.jsonl.
+# Called after every health append, so the measurement is durable from the
+# moment it exists rather than at a terminal transition that runs in a
+# different container.
+#
+# Fail-open — this is instrumentation, it must never break a loop — but NOT
+# silent. The first version swallowed stderr, and when the push turned out to
+# be unauthenticated there was nothing in any log to say so: the branch was
+# simply never created, and the only symptom was a metric that did not exist.
+# A failure that says nothing is the failure mode this whole measurement was
+# built to catch.
+boucle_metrics_sync_health() {
+  local iid="${1:-}"
+  [ -n "$iid" ] || return 0
+  boucle_metrics_enabled || return 0
+  # Opt out of the per-append push alone, keeping the summary row: a consumer
+  # on a slow forge may not want a network round-trip per agent run.
+  case "$(printf '%s' "${BOUCLE_METRICS_SYNC:-true}" | tr '[:upper:]' '[:lower:]')" in
+    false | 0 | no | off) return 0 ;;
+  esac
+  local health="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
+  [ -s "$health" ] || return 0
+  if ! boucle_metrics_git_append "$BOUCLE_METRICS_RAW_DIR/${iid}.jsonl" "$health" \
+    "metrics: raw health for issue #$iid"; then
+    echo "[boucle:metrics] WARN: could not sync raw health for issue #$iid to $BOUCLE_METRICS_BRANCH — the loop is unaffected, the measurement is not durable for this run" >&2
+  fi
+  return 0
+}
+
+# boucle_metrics_hydrate_health <iid>
+#
+# Print the path to a health.jsonl for <iid>, preferring the local file and
+# falling back to the copy on the metrics branch. Prints nothing when neither
+# exists — the callers already treat "no health" as "no row", which is the
+# correct answer for an issue that never ran an agent.
+#
+# Reads through the working repo's own remote, for the same credential reason
+# boucle_metrics_git_append does: a scratch clone cannot authenticate against
+# a private repository.
+boucle_metrics_hydrate_health() {
+  local iid="${1:-}"
+  [ -n "$iid" ] || return 0
+  local health="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
+  if [ -s "$health" ]; then
+    printf '%s\n' "$health"
+    return 0
+  fi
+  boucle_metrics_enabled || return 0
+  git rev-parse --git-dir > /dev/null 2>&1 || return 0
+  git remote get-url origin > /dev/null 2>&1 || return 0
+
+  local tmp out
+  tmp=$(mktemp -d 2> /dev/null) || return 0
+  out="$tmp/health.jsonl"
+  if git fetch -q --depth 1 origin "$BOUCLE_METRICS_BRANCH" 2> /dev/null \
+    && git cat-file -p "FETCH_HEAD:$BOUCLE_METRICS_RAW_DIR/${iid}.jsonl" \
+      > "$out" 2> /dev/null \
+    && [ -s "$out" ]; then
+    printf '%s\n' "$out"
+    return 0
+  fi
+  rm -rf "$tmp"
   return 0
 }
 

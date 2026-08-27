@@ -1,0 +1,113 @@
+#!/usr/bin/env sh
+# bin/check-mermaid — deterministic syntax check for Mermaid diagrams.
+#
+# Usage: bin/check-mermaid <file.md|-> [file.md ...]
+#
+# Extracts every ```mermaid fence from the given markdown (a spec comment, a
+# doc, stdin) and parses it with the REAL Mermaid parser. A diagram the parser
+# rejects is a diagram the forge renders as "Unable to render rich display" —
+# the failure this gate exists to catch (boucle.dev#86: an erDiagram whose
+# attribute line carried a bare path as a third token).
+#
+# Exit codes:
+#   0 — every fence parsed (or was skipped); nothing is broken
+#   1 — at least one fence is INVALID (callers block on this, and only this)
+#   2 — usage error
+#   3 — the parser is unavailable (no node, no modules, no network).
+#       Callers MUST treat 3 as pass: a runner without node is broken
+#       infrastructure, and infrastructure never blocks the loop
+#       (CONTEXT.md §7).
+#
+# Module resolution (first hit wins) — mirrors bin/render-preview's
+# agent-browser order, for the same reason: the agents image pre-bakes the
+# modules, and the npm install is the fallback for a bare node runner.
+#   1. $BOUCLE_MERMAID_NODE_PATH   — explicit override (a node_modules dir)
+#   2. `npm root -g`               — baked into docker/Dockerfile.agents
+#   3. ./node_modules              — a consumer repo that already depends on it
+#   4. $BOUCLE_MERMAID_CACHE       — installed by a previous run in this job
+#   5. npm install into the cache  — needs network; set
+#                                    BOUCLE_MERMAID_INSTALL=false to forbid it
+#
+# Pinned versions: an unpinned install already bit this repo once, when
+# @sparticuz/chromium moved its exports to ESM in a minor bump. Mermaid's
+# grammar changes between minors too — an unpinned parser would make the
+# gate's verdict drift under the loop without a commit.
+set -eu
+
+MERMAID_VERSION="${BOUCLE_MERMAID_VERSION:-11.17.2}"
+JSDOM_VERSION="${BOUCLE_JSDOM_VERSION:-30.0.1}"
+CACHE="${BOUCLE_MERMAID_CACHE:-/tmp/boucle-mermaid}"
+
+REPO_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+RUNNER="$REPO_ROOT/lib/mermaid-parse.mjs"
+
+if [ "$#" -eq 0 ]; then
+  echo "Usage: bin/check-mermaid <file.md|-> [file.md ...]" >&2
+  exit 2
+fi
+
+if [ ! -r "$RUNNER" ]; then
+  echo "check-mermaid: runner missing: $RUNNER" >&2
+  exit 3
+fi
+
+if ! command -v node > /dev/null 2>&1; then
+  echo "check-mermaid: node not found — skipping the diagram syntax check" >&2
+  exit 3
+fi
+
+# has_modules <dir> — true when <dir> holds BOTH packages the runner imports.
+has_modules() {
+  [ -n "${1:-}" ] && [ -d "$1/mermaid" ] && [ -d "$1/jsdom" ]
+}
+
+MODULES=""
+if has_modules "${BOUCLE_MERMAID_NODE_PATH:-}"; then
+  MODULES="$BOUCLE_MERMAID_NODE_PATH"
+elif GLOBAL_ROOT=$(npm root -g 2> /dev/null) && has_modules "$GLOBAL_ROOT"; then
+  MODULES="$GLOBAL_ROOT"
+elif has_modules "$PWD/node_modules"; then
+  MODULES="$PWD/node_modules"
+elif has_modules "$CACHE/node_modules"; then
+  MODULES="$CACHE/node_modules"
+elif [ "${BOUCLE_MERMAID_INSTALL:-true}" = "true" ] && command -v npm > /dev/null 2>&1; then
+  mkdir -p "$CACHE"
+  if npm install --prefix "$CACHE" --no-audit --no-fund --loglevel=error \
+    "mermaid@$MERMAID_VERSION" "jsdom@$JSDOM_VERSION" > /dev/null 2>&1 \
+    && has_modules "$CACHE/node_modules"; then
+    MODULES="$CACHE/node_modules"
+  fi
+fi
+
+if [ -z "$MODULES" ]; then
+  echo "check-mermaid: mermaid/jsdom unavailable (no global install, no cache, npm install failed) — skipping the diagram syntax check" >&2
+  exit 3
+fi
+
+# ESM bare-specifier resolution walks up from the SCRIPT's directory and
+# ignores NODE_PATH entirely, so the runner has to live next to the modules.
+# Copy it into a scratch dir whose node_modules points at whatever we
+# resolved above; the caller's cwd is untouched, so relative file arguments
+# still resolve the way the caller wrote them.
+WORK="$CACHE/run"
+mkdir -p "$WORK"
+if [ "$MODULES" != "$WORK/node_modules" ]; then
+  rm -rf "$WORK/node_modules"
+  ln -sfn "$MODULES" "$WORK/node_modules"
+fi
+cp "$RUNNER" "$WORK/mermaid-parse.mjs"
+
+set +e
+node "$WORK/mermaid-parse.mjs" "$@"
+STATUS=$?
+set -e
+
+# Anything other than the runner's documented verdicts (0/1/2) is a crashed
+# parser, not a broken diagram — report it as unavailable so callers pass.
+case "$STATUS" in
+  0 | 1 | 2 | 3) exit "$STATUS" ;;
+  *)
+    echo "check-mermaid: parser exited $STATUS — treating the check as unavailable" >&2
+    exit 3
+    ;;
+esac

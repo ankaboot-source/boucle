@@ -300,6 +300,8 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_METRICS_ENABLED` | `true` | Publish one measurement row per issue to the metrics branch at the terminal transition. **On by default, opt-out**: only `false` / `0` / `no` / `off` (any case) disable it; any other value leaves it on, so a well-meant `=1` cannot silently switch it off. Disabling is logged, never silent. Scope is the branch write alone — `health.jsonl` keeps being written locally either way, because `bin/health` and the escalation diagnostic depend on it. |
 | `BOUCLE_METRICS_BRANCH` | `boucle/metrics` | Orphan branch holding the append-only measurement log. Shares no history with the consumer's code. |
 | `BOUCLE_METRICS_FILE` | `metrics.jsonl` | File on that branch, one JSON object per issue. |
+| `BOUCLE_METRICS_RAW_DIR` | `raw` | Directory on that branch holding `<issue>.jsonl` — the raw per-run health lines the summary row is computed from, pushed as they are written so they outlive the ephemeral job that produced them. |
+| `BOUCLE_METRICS_SYNC` | `true` | Push each health line to the branch as it is appended. Opt-out, same falsy spellings as `BOUCLE_METRICS_ENABLED`. Turning it off costs a network round-trip per agent run and gives up the summary row for any issue whose terminal label is applied by a different job than the one that did the work — which is most of them. |
 | `BOUCLE_DEPLOY_MODE` | `self` | Deploy mode: `self` (boucle runs `BOUCLE_DEPLOY_CMD`) or `external` (consumer's own CI/CD deploys). |
 | `BOUCLE_REVIEW_MODE` | `preview` | Review mode: `preview` (tests deployed preview), `diff` (reviews PR diff + check suites), or `screenshot` (builds locally, captures screenshots of impacted pages, reviewer grades via vision-model descriptions guided by acceptance criteria). **Auto-fallback:** `preview` mode auto-activates `screenshot` when the deploy provider has no per-branch preview (`github-pages`, `gitlab-pages`) — the worker captures screenshots locally instead of overwriting production, and the reviewer grades from those screenshots. A screenshot failure degrades to `diff` review. |
 | `BOUCLE_DEPLOY_PROVIDER` | *(empty)* | Deploy provider profile: `gitlab-pages` (declarative, token-less — leave `BOUCLE_DEPLOY_CMD` empty, live URL = `$CI_PAGES_URL`) or `github-pages` (declarative, token-less — worker pushes `$BOUCLE_BUILD_OUTPUT` to `gh-pages`, live URL = `https://<owner>.github.io/<repo>/`). Empty = deploy via `BOUCLE_DEPLOY_CMD`. |
@@ -799,12 +801,35 @@ measurement log never enters the consumer's history or triggers their CI, and
 fail-open throughout: a metrics write must never be what stops an issue
 reaching done.
 
-That row is therefore the **only** copy of a measurement that outlives the
-job, so anything absent from it is unmeasurable in practice however
-faithfully it was written per run. It now carries `prompt_chars_max` (the
-largest assembled prompt seen on the issue — the input to any future context
+**The raw log is pushed as it is written, not read back at the end.** Every
+boucle job runs on a fresh ephemeral runner, and the job that applies the
+terminal label is almost never the job that did the work — a doctor sweep
+recovering a closed issue, a post-merge e2e. Summarising `health.jsonl` at
+that moment meant summarising a file that had never existed in that
+container, so the publish reported *"no health data for issue #N — nothing to
+publish"* on issues that had just completed a full loop: an operation that
+succeeded while its effect was null, which is precisely the failure mode this
+measurement exists to detect. Each health append is therefore pushed to
+`raw/<issue>.jsonl` on the same branch (deduplicated line-wise, so the
+repeated pushes do not grow quadratically), and the summary row hydrates from
+there when the local file is absent.
+
+Both the append and the read go through the **working repository's own
+remote**, using git plumbing (`hash-object` / `update-index` / `write-tree` /
+`commit-tree` / `push`) against a private `GIT_INDEX_FILE`. HEAD, the index
+and the working tree are never touched. The reason is credentials: a
+`git init` in a temp directory inherits none of the checkout's configuration,
+so on a CI runner — where the token lives in the working repo's
+`http.<host>.extraheader` — a scratch clone's push is unauthenticated and
+fails. It failed silently for one full loop before the sync was made to
+report it.
+
+The summary row itself now also carries `prompt_chars_max` (the largest
+assembled prompt seen on the issue — the input to any future context
 ceiling), `swarm_spawns`, and the reviewer/e2e `verdicts`, which are what
-tell a recovered trajectory apart from a first-pass success.
+tell a recovered trajectory apart from a first-pass success. The raw log
+carries them per run; the row is what a dashboard reads without parsing
+every line.
 
 ```bash
 bin/skills-stats                # observed split (confounded, always available)
@@ -1123,7 +1148,7 @@ flowchart LR
 ### How it works
 
 - **Triage** embeds a `<!-- boucle:files v=1 paths=path1,path2 -->` marker
-  in its spec comment (the `## Impacted files` section), predicting the
+  in its spec comment (the `## Metadata` section), predicting the
   files the issue will touch (source, styles, charter docs). The file claim
   lives in the spec the human reviews, not a separate note. Absent marker =
   no claim → fail-open (the gate passes).

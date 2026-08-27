@@ -21,7 +21,7 @@ and [CONTEXT.md](CONTEXT.md).
 
 | Agent   | Model                       | Steps | Temp | Role                                                                                                                |
 | ------- | ---------------------------- | ----- | ---- | ------------------------------------------------------------------------------------------------------------------- |
-| triage  | ollama-cloud/glm-5.2        | 200   | 0.3  | Analyzes issue, posts structured comment (TL;DR + Analysis + Acceptance criteria + Classification S/M/L + Questions + Disposition) |
+| triage  | ollama-cloud/glm-5.2        | 200   | 0.3  | Analyzes issue, posts structured comment (TL;DR + Diagram + Analysis + one `## Criteria` section: acceptance, must-haves, non-goals + Questions + one collapsed `## Metadata` section: impacts, impacted files, size S/M/L, validation, disposition) |
 | worker  | ollama-cloud/deepseek-v4-flash:0731 | 100   | —    | Implements on branch `boucle/<iid>`, reads `state.md`, uses codebase-memory-mcp, conventional commit                 |
 | reviewer| ollama-cloud/deepseek-v4-flash:0731 | 35    | 0.2  | Adversarial review against preview URL, SHA-anchored verdict                                                       |
 | e2e     | ollama-cloud/glm-5.2         | 30    | —    | Verifies on production URL, SHA-anchored verdict                                                                    |
@@ -159,7 +159,7 @@ known recurring bug, documented in LESSONS.yml.
    posting) is bug #1. **Rule**: an incomplete draft posted is ALWAYS better than a
    refinement never posted. **BUT**: the draft MUST contain at least the content the
    human needs to act on it — for triage, a rough `## Analysis` section (2-3 sentences
-   restating the issue) and a `## Disposition`. An empty placeholder ("DRAFT —
+   restating the issue) and a `## Metadata` section carrying a `Disposition`. An empty placeholder ("DRAFT —
    first-pass triage, refining next.") is noise, not a draft (lesson #99). "Post
    early" means minimal but meaningful, not "post nothing early".
 
@@ -350,6 +350,16 @@ with reality.
 ### Doc rules
 
 - Use **Mermaid syntax** (` ```mermaid ` fenced blocks) for all diagrams.
+- **Every Mermaid fence MUST parse.** `bin/check-mermaid` runs the real Mermaid
+  parser over the repo's own docs (`make test`) and over every spec comment the
+  triage posts; a fence it rejects renders as an error box, not a diagram. The
+  grammar traps that actually break a render are listed in
+  [`templates/diagram-theme.md`](templates/diagram-theme.md) § Syntax rules.
+- **Draw the change, never the files.** Pick the diagram type from the decision the
+  reader validates — a navigation change on the visitor's path, a data model on its
+  entities. Nodes named after the files being edited are the most common wrong diagram:
+  they parse, they cannot be faulted, and they say nothing a file list does not. Nothing
+  in CI checks this — it is a judgement, and it is yours.
 - Use **explicit/imperative tone** ("MUST", "NEVER", "ALWAYS") — not descriptive
   prose.
 - Keep docs **up to date with the code** — never let a doc describe a system

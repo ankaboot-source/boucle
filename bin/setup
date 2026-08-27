@@ -593,6 +593,8 @@ echo ""
 # bin/check-boucle-sync rejected it. The engine's lessons still reach every
 # prompt — bin/jc injects both files and MERGES them.
 echo "=== Engine symlinks ==="
+# shellcheck source=bin/lib/engine-symlink.sh
+. "$ENGINE_ROOT/bin/lib/engine-symlink.sh"
 for lt in ".jcode/skills" "bin"; do
   engine_src="$ENGINE_ROOT/$lt"
   if [ ! -e "$engine_src" ]; then
@@ -608,12 +610,32 @@ for lt in ".jcode/skills" "bin"; do
     log_skip "$lt exists at repo root (not a symlink)"
     continue
   fi
+  # The TARGET is not "$engine_src": ln -s resolves a relative target from
+  # the directory containing the LINK, and $engine_src is built from the
+  # repo root. ".jcode/skills" needs a "../" that a root-level link does
+  # not — and $ENGINE_ROOT is absolute ($(cd .. && pwd)), which would bake
+  # this machine's checkout path into a versioned symlink. See
+  # bin/lib/engine-symlink.sh for both failure modes.
+  link_target=$(engine_symlink_target "$ENGINE_ROOT" "$lt" "$PWD") || {
+    log_skip "$lt — engine is the repo root, nothing to link"
+    continue
+  }
   if [ "$DRY_RUN" = "true" ]; then
-    echo "  [dry-run] symlink $lt → $engine_src"
+    echo "  [dry-run] symlink $lt → $link_target"
   else
     [ -L "$lt" ] && rm -f "$lt"
     mkdir -p "$(dirname "$lt")"
-    ln -s "$engine_src" "$lt"
+    ln -s "$link_target" "$lt"
+    # Fail loudly on a link that does not resolve. `ln -s` succeeds on a
+    # dangling target, so without this the only symptom is every skill load
+    # failing later with "skill not found" — which reads as a model problem,
+    # not a filesystem one. That misreading is why the broken skills link
+    # survived this long.
+    if [ ! -e "$lt" ]; then
+      echo "  → WARN: $lt → $link_target does not resolve (broken symlink)"
+      log_skip "$lt symlink is broken ($link_target)"
+      continue
+    fi
   fi
   log_pass "$lt symlinked to engine"
 done

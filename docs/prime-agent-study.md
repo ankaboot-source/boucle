@@ -639,15 +639,16 @@ that retires entries — never got written down. A8, C3 and B3 close that.
 ### The two that changed on review
 
 **A3 was wrong.** It claimed the prompt-size data already exists and only
-needs reading. It does not survive: `prompt_chars` is written per run into
-`health.jsonl`, which lives in `.boucle-state/` (gitignored, destroyed with
-the container) and in `BOUCLE_STATE_CACHE` (never survives an ephemeral
-runner). The only thing that outlives a job is the per-issue row built by
-`boucle_metrics_row` (`lib/boucle.sh:844`) — and that row carries
-iterations, skills, arm, setup failures, human touches, build-fails,
-no-changes and tokens, but **not prompt size**. So A3 is a *write*, not a
-read: add one field to a row already being published. With P3 not planned,
-nothing consumes it today, so it drops to lowest priority.
+needs reading. At the time it did not survive a job at all: `prompt_chars`
+went into `health.jsonl`, which lives in `.boucle-state/` (gitignored) and in
+`BOUCLE_STATE_CACHE` (never survives an ephemeral runner), and the per-issue
+summary row carried iterations, skills, arm, setup failures, human touches,
+build-fails, no-changes and tokens — but **not prompt size**. Since then the
+engine also pushes the raw log to the metrics branch as it is written, so the
+per-run value is durable; the field is still missing from the summary row
+that anything would actually aggregate. Either way A3 is a *write*, not a
+read. With P3 not planned, nothing consumes it today, so it stays lowest
+priority.
 
 **A4 was pointed the wrong way.** `extract_token_usage` (`bin/jc:2103`)
 **sums** every `prompt_tokens` / `input_tokens` occurrence in the agent log
@@ -669,7 +670,7 @@ answers both directions — and the figure it protects is a public claim
 | **A4** | Check the token sum for double-counting | Accounting | Medium | Verify the summed usage is not counting both per-turn lines and a cumulative total. Protects the cost figure boucle publishes on every MR | `bin/jc:2103`; one run with a swarm spawn, compare against the provider's own reported total |
 | **A5** | Fix the "do NOT re-read the file" clause | Context budget | Low | The agent receives at most **18 of 107** lessons — exactly **5** when nothing matches the issue body — and is told the file is done with. Say "the lessons above", not "the file" | `bin/jc:1368`, one string. No new script: voluntary reads are 0 of 68 |
 | **A2** | Count `swarm` spawns | Observability | Low | The worker is told to fan out into parallel sub-agents; nobody knows whether it ever does. **The payoff is a deletion**: if it never fires, drop the section from `worker.md` and recover the prompt space | Mirror `extract_skills_used` (`bin/jc:2202`) on the same log. **Careful**: skills are validated against `.jcode/skills/<name>` on disk; swarm has no such backstop, so match a strict tool-call shape or prose mentions inflate the count |
-| **A3** | Publish the prompt size | Context budget | Low | Nothing today records how much text agents actually receive in a way that survives the job. One field on a row already written, then wait for data | `boucle_metrics_row`, `lib/boucle.sh:874–893` |
+| **A3** | Publish the prompt size | Context budget | Low | Nothing summarises how much text agents actually receive. One field on a row already written, then wait for data | `boucle_metrics_row`, `lib/boucle.sh` |
 
 ### Batch 2 — the two that change behaviour
 

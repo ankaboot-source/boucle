@@ -35,8 +35,19 @@ light surface while keeping the brand identity (gold, violet, cyan).
 
 ## Diagram-type catalogue (27 types — from [diagram-design](https://github.com/cathrynlavery/diagram-design))
 
-Pick the type that best fits the concept. When a concept maps to several, pick the
-dominant axis — do NOT hybridize grammars. Types marked **(no native Mermaid)** have no
+Pick the type by answering one question: **what decision does the human validate by
+reading this?** A navigation, section or layout change is validated on the visitor's
+path through the product (`flowchart`, `journey`); a data model on its entities and
+their fields (`erDiagram`); a lifecycle on its states and transitions
+(`stateDiagram-v2`).
+
+**A diagram of the files you are about to edit is never the answer.** Nodes named
+`content_config_ts`, `index_astro`, `config_yml` are the most common wrong diagram: easy
+to draw, impossible to fault, and empty — the spec's Impacted files line already lists
+exactly that, and a reader who has never opened the repository learns nothing from it.
+If you are about to name a node after a file, you have skipped the question above.
+
+When a concept maps to several types, pick the dominant axis — do NOT hybridize grammars. Types marked **(no native Mermaid)** have no
 first-class Mermaid block; approximate with `flowchart` + `subgraph`, or state in the
 caption that the Mermaid is a structural sketch of a type the skill renders as HTML/SVG.
 
@@ -69,6 +80,30 @@ caption that the Mermaid is a structural sketch of a type the skill renders as H
 | 25 | Data flow | `flowchart LR` with `subgraph` per role/step | Role-scoped data flow: who does what at each pipeline step |
 | 26 | DP integration | `flowchart LR` (sources → core → consumers) | Integration topology of a data platform |
 | 27 | DP security matrix | **(no native Mermaid)** — table in prose or note | Per-role / per-component access permissions matrix |
+
+## Syntax rules — the traps that break a render
+
+A diagram the Mermaid parser rejects renders as an **error box**, not as a diagram
+(boucle.dev#86 shipped one). `bin/check-mermaid` parses every `mermaid` fence in the
+spec with the real Mermaid parser and blocks the spec gate on a parse error, so these
+are not style preferences — a spec that breaks one of them goes back to triage.
+
+Every rule below was verified against the parser; the wrong column is a real error,
+not a guess.
+
+| Trap | ❌ Rejected | ✅ Accepted |
+|---|---|---|
+| **`erDiagram` attributes take exactly `type name`** — a third bare token (a path, a value, an expression) is a parse error | `string file src/content/x.md` | `string file "src/content/x.md"` |
+| … unless the third token is a key, which may then carry a quoted comment | — | `string id PK "primary key"` |
+| **Parentheses inside an unquoted label** — in a node label or an edge label | `A[check-mermaid (parser)]`<br>`A -->\|reads (json)\| B` | `A["check-mermaid (parser)"]`<br>`A -->\|"reads (json)"\| B` |
+| **Mermaid keywords as node ids** — `end`, `graph`, `subgraph`, `class`, `click`, `style` | `end --> A` | `gate_end["end"] --> A` |
+
+Two things that are **allowed**, so do not contort the diagram to avoid them: a slash or
+a dot in an unquoted label (`A[src/lib/x.sh]`, `content.config.ts --> B`), and a
+multi-word `erDiagram` relationship label (`a ||--|| b : validated by`).
+
+When in doubt, **quote the label**. A quoted label is never a syntax error; an unquoted
+one is a bet on which characters the grammar happens to allow.
 
 ## Diagram discipline
 

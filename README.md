@@ -1,8 +1,12 @@
-# ➰ boucle — zero-code autonomous product builder
+<div align="center">
+  <img src="https://boucle.dev/boucle-logo.gif" height="200" alt="boucle's logo"/>
+
+  # boucle — zero-code autonomous product builder
 
 > From a ticket in your forge to a feature in production — without running
 > agents on your own machine. No laptop left half-open overnight. No Mac
 > Mini purchase required.
+</div>
 
 boucle is zero-code **loop engineering**: you express a need in an issue,
 and boucle handles the rest — analysis, implementation, review, merge,
@@ -11,22 +15,22 @@ never touch the engine itself.
 
 ## 📑 Table of contents
 
-- [✨ Why boucle?](#why-boucle)
+- [✨ Why boucle?](#-why-boucle)
 - [How to install](#how-to-install)
   - [🚀 Quick start](#-quick-start)
   - [No terminal? Use a prompt](#no-terminal-use-a-prompt)
   - [Detailed install — CLI](#detailed-install--cli)
   - [Prerequisite](#prerequisite)
   - [After install](#after-install)
-- [⚙️ How it works](#how-it-works)
-- [💰 Cost](#cost)
-- [🛠️ Configuration](#configuration)
+- [⚙️ How it works](#-how-it-works)
+- [💰 Cost](#-cost)
+- [🛠️ Configuration](#-configuration)
   - [The bot user](#the-bot-user)
   - [Running without a bot account (mono-user)](#running-without-a-bot-account-mono-user)
   - [Advanced — dedicated runners](#advanced--dedicated-runners)
-- [🗺️ Roadmap](#roadmap)
-- [⚖️ License](#license)
-- [📚 Docs](#docs)
+- [🗺️ Roadmap](#-roadmap)
+- [⚖️ License](#-license)
+- [📚 Docs](#-docs)
 
 ## ✨ Why boucle?
 
