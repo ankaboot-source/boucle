@@ -79,23 +79,27 @@ boucle_ci_post_merge() {
 
     echo "External deploy complete. Target URL: $live_url"
   else
-    # ── Self mode: wait for deploy pipeline ─────────────────────
-    echo "Self deploy mode — waiting for deploy pipeline to complete..."
-    local deploy_log
-    for i in $(seq 1 60); do
-      DEPLOY_STATUS=$(forge_pipeline_status_for_ref "$BOUCLE_DEFAULT_BRANCH" "push") || DEPLOY_STATUS="unknown"
-      if [ "$DEPLOY_STATUS" = "success" ] || [ "$DEPLOY_STATUS" = "failed" ] || [ "$DEPLOY_STATUS" = "canceled" ]; then
-        echo "Deploy pipeline status: $DEPLOY_STATUS"
-        break
-      fi
-      sleep 15
-    done
+    # ── Self mode: build + deploy directly ─────────────────────────
+    # The merge commit carries [skip ci] (inherited from the worker commits),
+    # so the push-triggered deploy job never fires. Post-merge performs the
+    # deploy itself via boucle_do_deploy instead of polling for a pipeline
+    # that can never be observed.
+    echo "Self deploy mode — building and deploying..."
+    local deploy_url
+    deploy_url=$(boucle_do_deploy) || {
+      echo "FAIL: deploy failed in post-merge self mode" >&2
+      exit 1
+    }
 
-    # Resolve live URL: BOUCLE_LIVE_URL → BOUCLE_PRODUCTION_URL → regex → pages.dev fallback
-    # In self mode there's no deploy_log to regex-extract from in post-merge (the deploy
-    # pipeline ran separately), so boucle_resolve_live_url with empty log falls through
-    # to BOUCLE_LIVE_URL → BOUCLE_PRODUCTION_URL → pages.dev fallback
-    live_url=$(boucle_resolve_live_url "")
+    # Resolve live URL: use the deploy URL if boucle_do_deploy returned one,
+    # otherwise fall through to boucle_resolve_live_url (handles $CI_PAGES_URL
+    # for gitlab-pages, boucle_github_pages_url for github-pages, and
+    # BOUCLE_LIVE_URL / BOUCLE_PRODUCTION_URL overrides).
+    if [ -n "$deploy_url" ]; then
+      live_url="$deploy_url"
+    else
+      live_url=$(boucle_resolve_live_url "")
+    fi
   fi
 
   # Trigger e2e WITH BOUCLE_ISSUE set → enables maybe_close_parent

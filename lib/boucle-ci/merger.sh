@@ -199,9 +199,9 @@ boucle_ci_merger() {
   # so the next approved MR can start merging instead of waiting 2+ min
   # for the deploy to finish.
   #
-  # Chain to post-merge so it builds + deploys + triggers e2e. Without this,
-  # the merged code never deploys (the merge commit has [skip ci], so the
-  # push trigger doesn't fire, and the post-merge job only runs on
-  # workflow_dispatch BOUCLE_ROLE=post-merge).
+  # Chain to post-merge so it builds + deploys + triggers e2e. The merge
+  # commit carries [skip ci] (inherited from the worker commits), so the
+  # push-triggered deploy job never fires — post-merge performs the deploy
+  # itself in self mode (calls boucle_do_deploy directly).
   chain_to_role "$BOUCLE_ISSUE" "post-merge"
 }

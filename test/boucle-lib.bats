@@ -1292,6 +1292,78 @@ HELPER
   assert_output --partial "FAILURE_DETECTED"
 }
 
+@test "post-merge self mode calls boucle_do_deploy and chains to e2e with the URL" {
+  # The merge commit carries [skip ci], so the push-triggered deploy job never
+  # fires. Post-merge self mode must build + deploy directly via
+  # boucle_do_deploy (NOT poll for a pipeline) and chain to e2e with the URL.
+  local helper_script
+  helper_script=$(mktemp)
+  cat > "$helper_script" << 'HELPER'
+#!/usr/bin/env bash
+BOUCLE_ISSUE=42
+BOUCLE_DEPLOY_CMD="echo DEPLOYED https://example.com"
+BOUCLE_DEPLOY_URL_REGEX="https://[a-zA-Z0-9./-]+"
+BOUCLE_BUILD_CMD="echo BUILD_RAN"
+BOUCLE_BUILD_OUTPUT=""
+BOUCLE_DEFAULT_BRANCH=main
+BOUCLE_FORGE_HOST=github.com
+BOUCLE_PROJECT_ID=1
+forge_issue_get() { :; }
+forge_issue_labels_get() { echo ""; }
+forge_issue_labels_set() { :; }
+forge_trigger_role() { echo "TRIGGERED:$1:$2:$3"; }
+curl() { echo "200"; }
+source lib/boucle.sh
+source lib/boucle-ci/post-merge.sh
+boucle_ci_post_merge
+HELPER
+  chmod +x "$helper_script"
+  run "$helper_script"
+  rm -f "$helper_script"
+  assert_success
+  assert_output --partial "TRIGGERED:42:e2e:BOUCLE_LIVE_URL=https://example.com"
+  refute_output --partial "waiting for deploy pipeline"
+  refute_output --partial "forge_pipeline_status_for_ref"
+}
+
+@test "post-merge self mode exits 1 when boucle_do_deploy fails" {
+  local helper_script
+  helper_script=$(mktemp)
+  cat > "$helper_script" << 'HELPER'
+#!/usr/bin/env bash
+BOUCLE_ISSUE=42
+BOUCLE_DEPLOY_CMD="echo FAILED; exit 1"
+BOUCLE_DEPLOY_URL_REGEX="https://[a-zA-Z0-9./-]+"
+BOUCLE_BUILD_CMD="echo BUILD_RAN"
+BOUCLE_BUILD_OUTPUT=""
+BOUCLE_DEFAULT_BRANCH=main
+BOUCLE_FORGE_HOST=github.com
+BOUCLE_PROJECT_ID=1
+forge_issue_get() { :; }
+forge_issue_labels_get() { echo ""; }
+forge_issue_labels_set() { :; }
+forge_trigger_role() { echo "TRIGGERED:$1:$2:$3"; }
+source lib/boucle.sh
+source lib/boucle-ci/post-merge.sh
+boucle_ci_post_merge
+HELPER
+  chmod +x "$helper_script"
+  run "$helper_script"
+  rm -f "$helper_script"
+  assert_failure
+  assert_output --partial "FAIL: deploy failed in post-merge self mode"
+}
+
+@test "post-merge self mode no longer polls for a push pipeline" {
+  # The 60-iteration polling loop over forge_pipeline_status_for_ref is dead
+  # code — the merge commit carries [skip ci], so the push-triggered deploy
+  # pipeline never fires. It must be gone from post-merge.sh.
+  run grep -q 'forge_pipeline_status_for_ref' lib/boucle-ci/post-merge.sh
+  assert_failure
+  run grep -q 'waiting for deploy pipeline' lib/boucle-ci/post-merge.sh
+  assert_failure
+}
+
 @test ".gitlab-ci.yml: forge backend sourced BEFORE lib/boucle.sh (before_script bootstrap)" {
   # Regression (consumer framagit, 2026-08): the before_script sourced
   # lib/boucle.sh without bin/forge/*, so set_boucle_label failed with

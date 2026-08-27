@@ -2222,6 +2222,136 @@ boucle_worker_deploy() {
   return 0
 }
 
+# boucle_do_deploy
+#   Build + deploy to production and echo the deploy URL on stdout. The
+#   caller owns the e2e chain (this function does NOT chain). Returns empty
+#   on stdout for declarative Pages providers (gitlab-pages / external)
+#   where the URL is resolved separately by the caller via
+#   boucle_resolve_live_url. Exits non-zero on deploy failure.
+#   Handles every provider exactly as boucle_ci_deploy did:
+#     - github-pages: build (if output not already populated) +
+#       boucle_worker_deploy (push to gh-pages) + echo boucle_github_pages_url.
+#     - empty BOUCLE_DEPLOY_CMD (GitLab Pages declarative / external):
+#       echo empty (no-op — the caller resolves the URL).
+#     - boucle_is_external_deploy: echo empty (no-op).
+#     - Cloudflare/other: build + eval "$BOUCLE_DEPLOY_CMD" + regex-extract
+#       URL from deploy log + 200-verify with retry + echo URL.
+boucle_do_deploy() {
+  set +o pipefail
+
+  # GitHub Pages declarative mode: the post-merge deploy re-pushes the
+  # merged build to the gh-pages branch and hands e2e the canonical URL.
+  # No CLOUDFLARE_* secrets needed — the bot PAT has contents:write.
+  if [ "${BOUCLE_DEPLOY_PROVIDER:-}" = "github-pages" ]; then
+    echo "deploy: GitHub Pages mode — building and pushing to gh-pages" >&2
+    if [ -n "${BOUCLE_BUILD_OUTPUT:-}" ] && [ -d "$BOUCLE_BUILD_OUTPUT" ] \
+      && [ -n "$(ls -A "$BOUCLE_BUILD_OUTPUT" 2> /dev/null)" ]; then
+      echo "deploy: $BOUCLE_BUILD_OUTPUT already populated (build artifact) — skipping build" >&2
+    else
+      eval "$BOUCLE_BUILD_CMD" >&2
+    fi
+    local deploy_log
+    deploy_log=$(mktemp)
+    # Discard boucle_worker_deploy's stdout (it echoes the site URL for the
+    # worker's preview extraction); boucle_do_deploy returns the canonical
+    # URL separately via boucle_github_pages_url.
+    boucle_worker_deploy "$deploy_log" > /dev/null || {
+      rm -f "$deploy_log"
+      echo "FAIL: GitHub Pages deploy failed" >&2
+      return 1
+    }
+    rm -f "$deploy_log"
+    local url
+    url=$(boucle_github_pages_url)
+    echo "Deployed to $url" >&2
+    echo "$url"
+    return 0
+  fi
+
+  # No deploy command (e.g. GitLab Pages mode / external): skip cleanly.
+  # The site is served by the forge's own Pages (the pages job builds
+  # and publishes it), so there is no URL to extract and no e2e chain
+  # here — the caller resolves the URL via boucle_resolve_live_url.
+  if [ -z "${BOUCLE_DEPLOY_CMD:-}" ]; then
+    echo "deploy: BOUCLE_DEPLOY_CMD is empty (Pages/external mode) — skipping" >&2
+    echo ""
+    return 0
+  fi
+
+  # External deploy mode: the consumer's own CI handles deployment (SSH,
+  # Docker, Ansible, etc.). Skip the build+deploy — there is nothing to
+  # do here. The caller chains to e2e with BOUCLE_LIVE_URL (or
+  # BOUCLE_E2E_COMMAND for command-mode e2e). Mirrors the worker deploy
+  # skip in lib/boucle.sh (boucle_is_external_deploy guard).
+  if boucle_is_external_deploy; then
+    echo "deploy: BOUCLE_DEPLOY_MODE=external — consumer CI handles deploy, skipping" >&2
+    echo ""
+    return 0
+  fi
+
+  # Build — unless the build output is already populated. On GitLab the
+  # build-site job hands this job `public/` as an artifact, and rebuilding
+  # here OOMs WASM toolchains on shell executors (framagit, 2026-08). On
+  # GitHub there is no build-site job, so the tree is empty and this builds
+  # exactly as before.
+  if [ -n "${BOUCLE_BUILD_OUTPUT:-}" ] && [ -d "$BOUCLE_BUILD_OUTPUT" ] \
+    && [ -n "$(ls -A "$BOUCLE_BUILD_OUTPUT" 2> /dev/null)" ]; then
+    echo "deploy: $BOUCLE_BUILD_OUTPUT already populated (build artifact) — skipping build" >&2
+  else
+    eval "$BOUCLE_BUILD_CMD" >&2
+  fi
+
+  # Deploy to production (configurable via BOUCLE_DEPLOY_CMD, force default branch)
+  local branch deploy_log deploy_rc url
+  branch="$BOUCLE_DEFAULT_BRANCH"
+  deploy_log=$(mktemp)
+  (eval "$BOUCLE_DEPLOY_CMD") > "$deploy_log" 2>&1
+  deploy_rc=$?
+  url=$(grep -oE "$BOUCLE_DEPLOY_URL_REGEX" "$deploy_log" | head -1)
+  if [ "$deploy_rc" -ne 0 ] && [ -n "$url" ]; then
+    echo "WARN: deploy exited non-zero ($deploy_rc) but emitted a URL — proceeding (may be a partial deploy)" >&2
+  fi
+  if [ "$deploy_rc" -ne 0 ] && [ -z "$url" ]; then
+    echo "FAIL: deploy exited $deploy_rc with no URL" >&2
+    cat "$deploy_log" >&2
+    rm -f "$deploy_log"
+    return 1
+  fi
+  rm -f "$deploy_log"
+
+  # Assert: deployment URL returns 200 (production domain may not have DNS yet).
+  if [ -z "$url" ]; then
+    echo "FAIL: no deployment URL from deploy command" >&2
+    return 1
+  fi
+  # Retry with exponential backoff — CDN edge propagation can lag.
+  local deploy_ok attempt delay http_code
+  deploy_ok=false
+  attempt=0
+  delay=5
+  while [ "$attempt" -lt 6 ]; do
+    attempt=$((attempt + 1))
+    http_code=$(curl -sL -o /dev/null -w "%{http_code}" "$url" 2> /dev/null || echo "000")
+    if [ "$http_code" = "200" ]; then
+      echo "Deployment URL 200 OK (attempt $attempt/6)" >&2
+      deploy_ok=true
+      break
+    fi
+    if [ "$attempt" -lt 6 ]; then
+      echo "Deployment URL returned $http_code (attempt $attempt/6) — retrying in ${delay}s..." >&2
+      sleep "$delay"
+      delay=$((delay * 2))
+    fi
+  done
+  if [ "$deploy_ok" != "true" ]; then
+    echo "FAIL: deployment URL $url not 200 after $attempt attempts (last code: $http_code)" >&2
+    return 1
+  fi
+  echo "Deployed to $url (200 OK)" >&2
+  echo "$url"
+  return 0
+}
+
 # ── Cross-role variable forwarding ──────────────────────────────────────
 
 # chain_to_role <issue_iid> <role> [var=value ...]
