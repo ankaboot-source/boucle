@@ -172,6 +172,25 @@ for entry in $(printf '%s' "${BOUCLE_PREVIEW_VIEWPORTS:-$DEFAULT_VIEWPORTS}" | t
       ;;
   esac
 
+  # Wait for the page to be capture-ready before screenshotting. Two phases:
+  #
+  #   1. networkidle — fonts, images, async chunks, and XHR have settled.
+  #      Catches the common "screenshot fired mid-load" failure where a
+  #      section is blank or unstyled because its assets hadn't arrived.
+  #      Best-effort: a timeout here does NOT fail the viewport (the page may
+  #      be a static file with no network activity to go idle on); the
+  #      screenshot still proceeds.
+  #
+  #   2. settle delay — CSS/JS entrance animations (fade-in, slide-up, etc.)
+  #      fire after load and run for a few hundred ms. Capturing during the
+  #      animation ships a half-rendered section (e.g. a "why boucle" block
+  #      that hasn't revealed yet). The delay lets those animations complete.
+  #      Configurable via BOUCLE_PREVIEW_SETTLE_MS; default 1200 ms covers
+  #      typical 300–800 ms entrance animations with headroom.
+  "$AB" --session "$SESSION" wait --load networkidle > /dev/null 2>&1 || true
+  SETTLE_MS="${BOUCLE_PREVIEW_SETTLE_MS:-1200}"
+  "$AB" --session "$SESSION" wait "$SETTLE_MS" > /dev/null 2>&1 || true
+
   if ! "$AB" --session "$SESSION" screenshot --full "$TARGET" > /dev/null 2>&1; then
     echo "render-preview: viewport ${W}x${H} failed: screenshot error" >&2
     continue
