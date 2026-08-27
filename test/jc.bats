@@ -62,6 +62,15 @@ extract_prompt_funcs() {
   extract_func forge_aware_prompt "$tmp2"
   cat "$tmp2" >> "$1"
   rm -f "$tmp2"
+  # select_lessons / select_default_lessons are called by build_prompt's
+  # lessons injection. Without them the sourced snippet hits "command not
+  # found" and drops the whole block silently — no lessons, no error.
+  extract_func select_lessons "$tmp2"
+  cat "$tmp2" >> "$1"
+  rm -f "$tmp2"
+  extract_func select_default_lessons "$tmp2"
+  cat "$tmp2" >> "$1"
+  rm -f "$tmp2"
   extract_func build_prompt "$tmp"
   cat "$tmp" >> "$1"
   rm -f "$tmp"
@@ -1497,3 +1506,313 @@ probe_with_code() {
 # ── Evidence pack (build-evidence-pack integration) ──────────────────
 # bin/build-evidence-pack produces .evidence-pack.md (charter docs at the
 # base branch + diff brief). bin/jc loads it (3c) and injects it into the
+
+# ── extract_swarm_spawns (A2) ─────────────────────────────────────────
+# worker.md tells the worker to fan out with the `swarm` tool and nothing
+# has ever recorded whether it does. The pattern must be STRICT: unlike a
+# skill name, `swarm` has no on-disk backstop, so a loose match would count
+# the prompt's own instructions and every prose mention as a spawn.
+
+@test "extract_swarm_spawns counts call shapes and ignores prose" {
+  TMPF=$(mktemp)
+  LOGF=$(mktemp)
+  extract_func extract_swarm_spawns "$TMPF"
+  cat > "$LOGF" <<'LOG'
+You have the swarm tool available. Use swarm when the task has independent parts.
+I could use swarm here but the task is small.
+  swarm(prompt="review the auth module", name="auth")
+{"tool_call": {"name": "swarm", "arguments": {}}}
+Considering a swarm of agents would be overkill.
+  swarm spawn researcher
+LOG
+  run bash -c "source '$TMPF'; extract_swarm_spawns '$LOGF'"
+  assert_success
+  assert_output "3"
+  rm -f "$TMPF" "$LOGF"
+}
+
+@test "extract_swarm_spawns returns 0 when the transcript only mentions swarm in prose" {
+  TMPF=$(mktemp)
+  LOGF=$(mktemp)
+  extract_func extract_swarm_spawns "$TMPF"
+  printf 'The swarm tool is available but this task has no independent parts.\n' > "$LOGF"
+  run bash -c "source '$TMPF'; extract_swarm_spawns '$LOGF'"
+  assert_success
+  assert_output "0"
+  rm -f "$TMPF" "$LOGF"
+}
+
+@test "extract_swarm_spawns is silent on a missing transcript" {
+  TMPF=$(mktemp)
+  extract_func extract_swarm_spawns "$TMPF"
+  run bash -c "source '$TMPF'; extract_swarm_spawns /nonexistent.log"
+  assert_success
+  assert_output ""
+  rm -f "$TMPF"
+}
+
+# ── select_lessons / select_default_lessons (A6) ──────────────────────
+# The two LESSONS.yml (engine under .boucle/, consumer at the repo root)
+# are MERGED, never overridden: the previous first-match-wins fallback made
+# a consumer that wrote its own lessons lose every engine lesson.
+
+lessons_fixture() {
+  cat > "$1" <<'YAML'
+1:
+  title: Seed the fixture volume first
+  ✅: 'DO: run the seed task before invoking any browser suite.'
+  ❌: DO NOT invoke the browser suite against an unseeded fixture volume.
+2:
+  title: Something unrelated
+  ✅: 'DO: keep the deploy pipeline serial.'
+  ❌: DO NOT parallelize the deploy pipeline.
+5:
+  title: Another one
+  ✅: 'DO: name the authority.'
+  ❌: DO NOT enforce an unnamed authority.
+7:
+  title: Outside the critical set
+  ✅: 'DO: nothing in particular.'
+  ❌: DO NOT expect this one in the default injection.
+6:
+  title: Yet another
+  ✅: 'DO: post before refining.'
+  ❌: DO NOT refine before posting.
+99:
+  title: The last one
+  ✅: 'DO: post a real draft.'
+  ❌: DO NOT post an empty placeholder draft.
+YAML
+}
+
+@test "select_lessons returns only the lessons matching the keywords" {
+  TMPF=$(mktemp)
+  FIX=$(mktemp)
+  extract_func select_lessons "$TMPF"
+  lessons_fixture "$FIX"
+  run bash -c "source '$TMPF'; select_lessons '$FIX' 'browser|fixture' 80 | grep -cE '^[0-9]+:'"
+  assert_success
+  assert_output "1"
+  rm -f "$TMPF" "$FIX"
+}
+
+@test "select_lessons returns nothing when no keyword matches" {
+  TMPF=$(mktemp)
+  FIX=$(mktemp)
+  extract_func select_lessons "$TMPF"
+  lessons_fixture "$FIX"
+  run bash -c "source '$TMPF'; select_lessons '$FIX' 'zzznomatch' 80"
+  assert_success
+  assert_output ""
+  rm -f "$TMPF" "$FIX"
+}
+
+@test "select_lessons is silent on a missing file or empty keywords" {
+  TMPF=$(mktemp)
+  FIX=$(mktemp)
+  extract_func select_lessons "$TMPF"
+  lessons_fixture "$FIX"
+  run bash -c "source '$TMPF'; select_lessons /nonexistent.yml 'browser' 80"
+  assert_success
+  assert_output ""
+  run bash -c "source '$TMPF'; select_lessons '$FIX' '' 80"
+  assert_success
+  assert_output ""
+  rm -f "$TMPF" "$FIX"
+}
+
+@test "select_default_lessons returns the critical set when nothing matched" {
+  TMPF=$(mktemp)
+  FIX=$(mktemp)
+  extract_func select_default_lessons "$TMPF"
+  lessons_fixture "$FIX"
+  run bash -c "source '$TMPF'; select_default_lessons '$FIX' | grep -cE '^[0-9]+:'"
+  assert_success
+  assert_output "5"
+  rm -f "$TMPF" "$FIX"
+}
+
+@test "select_default_lessons returns whole entries, not bare numbers" {
+  # The regression: the keep flag was reset on the header line itself, so
+  # the body was never accumulated and this injected five bare numbers
+  # (21 bytes) under a heading calling them mandatory operating principles.
+  TMPF=$(mktemp)
+  FIX=$(mktemp)
+  extract_func select_default_lessons "$TMPF"
+  lessons_fixture "$FIX"
+  run bash -c "source '$TMPF'; select_default_lessons '$FIX'"
+  assert_success
+  assert_output --partial "title: Seed the fixture volume first"
+  assert_output --partial "DO NOT invoke the browser suite"
+  assert_output --partial "title: The last one"
+  # And nothing outside the critical set leaks in.
+  refute_output --partial "Outside the critical set"
+  rm -f "$TMPF" "$FIX"
+}
+
+@test "bin/jc no longer symlinks LESSONS.yml into the engine directory" {
+  # The root LESSONS.yml belongs to the CONSUMER. Symlinking it into
+  # .boucle/ is what made an agent-written lesson evaporate: the write
+  # landed in the submodule and check-boucle-sync rejected it.
+  run grep -n 'for lt in ".jcode/skills" "bin"' bin/jc
+  assert_success
+  run grep -c 'for lt in "LESSONS.yml"' bin/jc
+  assert_output "0"
+}
+
+# ── refinement on a recovered run (B2) ────────────────────────────────
+# Boucle used to distil a lesson only at escalation, so 100% of what it has
+# ever learned came from runs that failed — a pool measured as producing
+# artifacts worse than no artifact. The trajectory worth distilling is the
+# RECOVERED one, and iteration >= 2 is exactly where the worker stands in
+# it. A first-pass success must ask for nothing.
+
+@test "build_prompt: a first-pass worker run is asked for no lesson" {
+  TMPF=$(mktemp)
+  extract_prompt_funcs "$TMPF"
+  run bash -c "ISSUE=42; BOUCLE_ITERATION=1; source '$TMPF'; build_prompt worker"
+  assert_success
+  refute_output --partial "Refinement (you are recovering"
+  rm -f "$TMPF"
+}
+
+@test "build_prompt: a worker recovering a failed iteration is asked for a lesson" {
+  TMPF=$(mktemp)
+  extract_prompt_funcs "$TMPF"
+  run bash -c "ISSUE=42; BOUCLE_ITERATION=2; source '$TMPF'; build_prompt worker"
+  assert_success
+  assert_output --partial "Refinement (you are recovering a failed iteration)"
+  assert_output --partial "four-point admission test"
+  # Silence must stay the expected outcome, or the file fills with
+  # restatements of the charter.
+  assert_output --partial "emit NOTHING"
+  rm -f "$TMPF"
+}
+
+@test "build_prompt: in a consumer, the refinement names the repo file and refuses the engine's" {
+  TMPF=$(mktemp)
+  W=$(mktemp -d)
+  H=$(mktemp -d)
+  printf '1:\n  title: x\n' > "$W/LESSONS.yml"
+  printf '1:\n  title: y\n' > "$H/LESSONS.yml"
+  extract_prompt_funcs "$TMPF"
+  run bash -c "ISSUE=42; BOUCLE_ITERATION=3; BOUCLE_WORKSPACE='$W'; BOUCLE_HOME='$H'; source '$TMPF'; build_prompt worker"
+  assert_success
+  assert_output --partial "Specific to this repository"
+  assert_output --partial "--against $H/LESSONS.yml"
+  assert_output --partial "do NOT commit it here"
+  rm -rf "$TMPF" "$W" "$H"
+}
+
+@test "build_prompt: in the engine repo, the refinement does not offer a second file" {
+  # Dogfood: BOUCLE_WORKSPACE == BOUCLE_HOME, so both paths are one file
+  # and the consumer/engine routing would be nonsense.
+  TMPF=$(mktemp)
+  H=$(mktemp -d)
+  printf '1:\n  title: y\n' > "$H/LESSONS.yml"
+  extract_prompt_funcs "$TMPF"
+  run bash -c "ISSUE=42; BOUCLE_ITERATION=2; BOUCLE_WORKSPACE='$H'; BOUCLE_HOME='$H'; source '$TMPF'; build_prompt worker"
+  assert_success
+  assert_output --partial "Refinement (you are recovering a failed iteration)"
+  refute_output --partial "Specific to this repository"
+  rm -rf "$TMPF" "$H"
+}
+
+# ── the two lesson files are merged, never overridden (A6) ────────────
+
+@test "build_prompt: both lesson files reach the prompt, engine block first" {
+  TMPF=$(mktemp)
+  W=$(mktemp -d)
+  H=$(mktemp -d)
+  cat > "$H/LESSONS.yml" <<'YAML'
+1:
+  title: Engine rule about labels
+  ✅: 'DO: check the label first.'
+  ❌: DO NOT PUT a label that is already present.
+YAML
+  cat > "$W/LESSONS.yml" <<'YAML'
+1:
+  title: Repo rule about fixtures
+  ✅: 'DO: seed the fixture volume first.'
+  ❌: DO NOT run the suite against an unseeded label fixture.
+YAML
+  extract_prompt_funcs "$TMPF"
+  run bash -c "ISSUE=42; BOUCLE_ISSUE_BODY='the label fixture is wrong'; BOUCLE_WORKSPACE='$W'; BOUCLE_HOME='$H'; source '$TMPF'; build_prompt worker"
+  assert_success
+  assert_output --partial "Engine lessons — universal"
+  assert_output --partial "This repository's own lessons"
+  assert_output --partial "Engine rule about labels"
+  assert_output --partial "Repo rule about fixtures"
+  assert_output --partial "the ENGINE lesson wins"
+  rm -rf "$TMPF" "$W" "$H"
+}
+
+@test "build_prompt: a consumer with its own lessons does NOT lose the engine's" {
+  # The regression this guards: the old first-match-wins fallback read the
+  # workspace file and never looked at the engine's, so writing a single
+  # local lesson silently dropped all 107.
+  TMPF=$(mktemp)
+  W=$(mktemp -d)
+  H=$(mktemp -d)
+  cat > "$H/LESSONS.yml" <<'YAML'
+1:
+  title: Engine rule about labels
+  ✅: 'DO: check the label first.'
+  ❌: DO NOT PUT a label that is already present.
+YAML
+  printf '1:\n  title: Repo rule\n  ✅: %s\n  ❌: %s\n' "'DO: something unrelated.'" "DO NOT do something unrelated." > "$W/LESSONS.yml"
+  extract_prompt_funcs "$TMPF"
+  run bash -c "ISSUE=42; BOUCLE_ISSUE_BODY='a label is present'; BOUCLE_WORKSPACE='$W'; BOUCLE_HOME='$H'; source '$TMPF'; build_prompt worker"
+  assert_success
+  assert_output --partial "Engine rule about labels"
+  rm -rf "$TMPF" "$W" "$H"
+}
+
+@test "build_prompt: one file is never injected twice when both paths resolve to it" {
+  TMPF=$(mktemp)
+  H=$(mktemp -d)
+  cat > "$H/LESSONS.yml" <<'YAML'
+1:
+  title: Engine rule about labels
+  ✅: 'DO: check the label first.'
+  ❌: DO NOT PUT a label that is already present.
+YAML
+  extract_prompt_funcs "$TMPF"
+  run bash -c "ISSUE=42; BOUCLE_ISSUE_BODY='a label is present'; BOUCLE_WORKSPACE='$H'; BOUCLE_HOME='$H'; source '$TMPF'; build_prompt worker"
+  assert_success
+  count=$(printf '%s' "$output" | grep -c "Engine rule about labels")
+  [ "$count" -eq 1 ]
+  refute_output --partial "This repository's own lessons"
+  rm -rf "$TMPF" "$H"
+}
+
+@test "build_prompt: with nothing matching, the engine's critical set is still injected" {
+  TMPF=$(mktemp)
+  W=$(mktemp -d)
+  H=$(mktemp -d)
+  cat > "$H/LESSONS.yml" <<'YAML'
+1:
+  title: Post before refining
+  ✅: 'DO: post first.'
+  ❌: DO NOT refine before posting.
+YAML
+  extract_prompt_funcs "$TMPF"
+  run bash -c "ISSUE=42; BOUCLE_ISSUE_BODY='zzzznomatch'; BOUCLE_WORKSPACE='$W'; BOUCLE_HOME='$H'; source '$TMPF'; build_prompt worker"
+  assert_success
+  assert_output --partial "Post before refining"
+  rm -rf "$TMPF" "$W" "$H"
+}
+
+@test "build_prompt: arm=none still withholds both lesson files" {
+  TMPF=$(mktemp)
+  W=$(mktemp -d)
+  H=$(mktemp -d)
+  printf '1:\n  title: Engine rule about labels\n  ✅: %s\n  ❌: %s\n' "'DO: check.'" "DO NOT PUT a label present." > "$H/LESSONS.yml"
+  printf '1:\n  title: Repo rule about labels\n  ✅: %s\n  ❌: %s\n' "'DO: seed.'" "DO NOT skip the label seed." > "$W/LESSONS.yml"
+  extract_prompt_funcs "$TMPF"
+  run bash -c "ISSUE=42; BOUCLE_EXPERIMENT=on; BOUCLE_ISSUE_BODY='a label is present'; BOUCLE_WORKSPACE='$W'; BOUCLE_HOME='$H'; boucle_experiment_arm() { echo none; }; source '$TMPF'; build_prompt worker"
+  assert_success
+  refute_output --partial "Engine rule about labels"
+  refute_output --partial "Repo rule about labels"
+  rm -rf "$TMPF" "$W" "$H"
+}

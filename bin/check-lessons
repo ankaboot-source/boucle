@@ -18,6 +18,10 @@ Validates:
 
 Usage: bin/check-lessons [LESSONS.yml]
        bin/check-lessons --strict   (treat warnings as errors)
+       bin/check-lessons LESSONS.yml --against .boucle/LESSONS.yml
+           (a consumer's own lessons, checked for restatements of the
+            engine's; skips the AGENTS.md check, which guards the engine
+            document a consumer does not own)
 """
 import os
 import re
@@ -190,9 +194,8 @@ def check_cross_refs(lessons):
     return errors
 
 
-def check_duplicates(lessons):
-    warnings = []
-    # Build token sets for each active lesson
+def build_token_sets(lessons):
+    """Token set per active lesson, keyed by lesson number."""
     token_sets = {}
     for num, entry in sorted(lessons.items()):
         if not isinstance(entry, dict):
@@ -213,6 +216,12 @@ def check_duplicates(lessons):
         tokens = tokenize(combined)
         if len(tokens) >= MIN_TOKENS:
             token_sets[num] = tokens
+    return token_sets
+
+
+def check_duplicates(lessons):
+    warnings = []
+    token_sets = build_token_sets(lessons)
 
     # Compare all pairs
     nums = sorted(token_sets.keys())
@@ -227,6 +236,31 @@ def check_duplicates(lessons):
                     f'(shared: {", ".join(sorted(shared)[:8])})'
                 )
 
+    return warnings
+
+
+def check_cross_file_duplicates(lessons, other_lessons, other_path):
+    """Flag a lesson that restates one from another file.
+
+    A consumer keeps its own LESSONS.yml at the repo root while the engine's
+    lives under .boucle/, and bin/jc injects BOTH. Without this check the
+    same principle is paid for twice in every prompt, and the repository file
+    fills up with re-worded engine lessons instead of what is specific to it.
+    """
+    warnings = []
+    mine = build_token_sets(lessons)
+    theirs = build_token_sets(other_lessons)
+
+    for num in sorted(mine):
+        for other_num in sorted(theirs):
+            sim = jaccard(mine[num], theirs[other_num])
+            if sim > SIMILARITY_THRESHOLD:
+                shared = mine[num] & theirs[other_num]
+                warnings.append(
+                    f'#{num} restates #{other_num} in {other_path}: '
+                    f'{sim:.0%} keyword overlap '
+                    f'(shared: {", ".join(sorted(shared)[:8])})'
+                )
     return warnings
 
 
@@ -276,6 +310,9 @@ def main():
     parser.add_argument('path', nargs='?', default='LESSONS.yml')
     parser.add_argument('--strict', action='store_true',
                         help='treat duplicate warnings as errors')
+    parser.add_argument('--against', metavar='FILE', default=None,
+                        help='also flag lessons that restate one in FILE '
+                             '(a consumer file checked against the engine\'s)')
     args = parser.parse_args()
 
     lessons = load_lessons(args.path)
@@ -295,11 +332,24 @@ def main():
     errors = check_cross_refs(lessons)
     all_errors.extend(errors)
 
-    errors = check_agents_md(lessons)
-    all_errors.extend(errors)
+    # The AGENTS.md check is about the ENGINE's lessons section; a consumer
+    # file has no such section to guard, and running it there would report on
+    # a document the consumer does not own.
+    if args.against is None:
+        errors = check_agents_md(lessons)
+        all_errors.extend(errors)
 
     warnings = check_duplicates(lessons)
     all_warnings.extend(warnings)
+
+    if args.against:
+        if not os.path.exists(args.against):
+            print(f'ERROR: --against file not found: {args.against}',
+                  file=sys.stderr)
+            sys.exit(1)
+        warnings = check_cross_file_duplicates(
+            lessons, load_lessons(args.against), args.against)
+        all_warnings.extend(warnings)
 
     # Report
     active = sum(1 for v in lessons.values()

@@ -590,6 +590,8 @@ boucle_health_record() {
   local prompt_chars="${5:-0}" tokens="${6:-}" cost="${7:-}"
   local model="${8:-}" provider="${9:-}"
   local skills="${10:-}" arm="${11:-}" setup_fail="${12:-}"
+  local swarm="${13:-0}"
+  case "$swarm" in '' | *[!0-9]*) swarm=0 ;; esac
   local file="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
   mkdir -p "$(dirname "$file")" 2> /dev/null || true
   local ts skills_json
@@ -605,9 +607,9 @@ boucle_health_record() {
       | paste -sd, - 2> /dev/null || true)]"
     [ "$skills_json" = "[]" ] || [ -n "$skills_json" ] || skills_json="[]"
   fi
-  printf '{"timestamp":"%s","role":"%s","iteration":%s,"exit_code":%s,"prompt_chars":%s,"tokens":"%s","cost_usd":"%s","model":"%s","provider":"%s","skills":%s,"arm":"%s","setup_fail":"%s"}\n' \
+  printf '{"timestamp":"%s","role":"%s","iteration":%s,"exit_code":%s,"prompt_chars":%s,"tokens":"%s","cost_usd":"%s","model":"%s","provider":"%s","skills":%s,"arm":"%s","setup_fail":"%s","swarm_spawns":%s}\n' \
     "$ts" "$role" "$iteration" "$exit_code" "$prompt_chars" "${tokens:-n/a}" "${cost:-n/a}" "$model" "$provider" \
-    "$skills_json" "${arm:-full}" "$setup_fail" \
+    "$skills_json" "${arm:-full}" "$setup_fail" "$swarm" \
     >> "$file" 2> /dev/null || true
 }
 
@@ -834,6 +836,14 @@ boucle_human_touches() {
 
 # boucle_metrics_row <iid> <terminal>
 #
+# prompt_chars_max is the only record of assembled prompt size that outlives
+# the job: health.jsonl lives in .boucle-state/ (gitignored, destroyed with
+# the container) and in BOUCLE_STATE_CACHE (never survives an ephemeral
+# runner). Without it, "how close do consumers run to context rot" is
+# unanswerable — the per-run [boucle:prompt] line is written to a job log
+# nobody aggregates. verdicts carries the reviewer/e2e outcomes for the same
+# reason: they are what distinguishes a first-pass success from a recovery.
+#
 # Print ONE JSON object summarising the whole issue. <terminal> is the state
 # the issue ended in: done | human.
 #
@@ -889,6 +899,11 @@ boucle_metrics_row() {
         human_delivery: $delivery,
         build_fails: ([$outcomes[] | select(.outcome == "build-fail")] | length),
         no_changes: ([$outcomes[] | select(.outcome == "no-changes")] | length),
+        verdicts: ([$outcomes[] | select(.role == "reviewer" or .role == "e2e") | .outcome]),
+        prompt_chars_max: ([.[] | select(has("prompt_chars")) | .prompt_chars
+                            | numbers] | max // 0),
+        swarm_spawns: ([.[] | select(has("swarm_spawns")) | .swarm_spawns
+                        | numbers] | add // 0),
         tokens: ([.[] | select(has("tokens")) | .tokens
                   | tonumber? // 0] | add // 0)
       }' "$health" 2> /dev/null || true
@@ -983,6 +998,11 @@ boucle_escalation_diagnostic() {
   local health_file="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
   local cost_file="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/cost.json"
   local class="unknown" evidence="" action="Inspect the agent transcript (link below) and the health record."
+  # Which side failed. The harness stopping a run is not the model failing the
+  # task, and the two call for different actions: raise a cap or fix the
+  # engine, versus re-spec or split the issue. `unknown` stays unknown —
+  # guessing a side would be worse than not labelling one.
+  local side="unknown"
 
   # Count outcomes by role from health.jsonl
   local worker_runs worker_no_changes worker_build_fails reviewer_fails
@@ -995,26 +1015,32 @@ boucle_escalation_diagnostic() {
   case "$trigger" in
     no-changes)
       class="step-budget-exhaustion"
+      # Harness-side: the cap stopped the run, the task was never failed.
+      side="harness"
       evidence="$worker_no_changes worker iteration(s) produced no code changes."
       action="The agent exhausted its step budget before committing. Check the transcript for where it spent its steps. If the issue is too large for one iteration, consider splitting it (boucle supports parent-child splits). Re-queue with \`boucle:todo\` to retry."
       ;;
     build-fail)
       class="build-failure"
+      side="model"
       evidence="$worker_build_fails worker iteration(s) failed the build."
       action="The worker shipped code that does not build. Check the build error in the $mr_term discussion. If the build command is wrong, verify \`BOUCLE_BUILD_CMD\` in the consumer CI variables."
       ;;
     rebase-conflict)
       class="rebase-conflict"
+      side="harness"
       evidence="Worker could not rebase onto $BOUCLE_DEFAULT_BRANCH (master keeps advancing)."
       action="Master advanced faster than the worker could land the branch. Re-queue with \`boucle:todo\` to retry on a fresh base, or rebase the branch manually."
       ;;
     not-mergeable)
       class="not-mergeable"
+      side="harness"
       evidence="$mr_term is not mergeable after rebase."
       action="Check the $mr_term conflict status. The merger already attempted a rebase. Resolve the conflict manually on the branch, or re-queue with \`boucle:todo\` for a fresh worker run."
       ;;
     exit-4)
       class="provider/quota"
+      side="harness"
       evidence="Worker exited 4 (model/API failure — provider down or quota exhausted)."
       action="Check the model provider status and remaining credits/quota. If the provider is down, set \`BOUCLE_FALLBACK_PROVIDER\` to retry on a secondary. Once available, re-queue with \`boucle:todo\`."
       ;;
@@ -1031,10 +1057,16 @@ boucle_escalation_diagnostic() {
     cost_summary=$(boucle_cost_summary "$iid" 2> /dev/null || echo "")
   fi
 
-  echo "<!-- boucle:diagnostic v=1 iid=$iid class=$class trigger=$trigger -->"
+  echo "<!-- boucle:diagnostic v=1 iid=$iid class=$class side=$side trigger=$trigger -->"
   echo "## 🔍 Diagnostic — issue #$iid"
   echo ""
-  echo "**Failure class:** \`$class\`"
+  echo "**Failure class:** \`$class\` (**$side**-side)"
+  echo ""
+  case "$side" in
+    harness) echo "> The harness stopped this run; the task itself was never failed. Raise the cap, fix the environment, or report the engine defect upstream — do not re-spec the issue." ;;
+    model) echo "> The agent reached the task and did not deliver. The issue or the acceptance criteria are the place to act, not the engine." ;;
+    *) echo "> Side undetermined — the health record does not say whether the harness or the agent stopped this run." ;;
+  esac
   echo ""
   echo "**Evidence:** $evidence"
   echo ""

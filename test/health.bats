@@ -106,3 +106,136 @@ JSONL
   assert_output --partial "last outcome: reviewer:PASS"
   rm -rf "$T"
 }
+
+# ── failure_side (A1) ─────────────────────────────────────────────────
+# The harness stopping a run is not the model failing the task, and the two
+# call for different actions. `step-budget-exhaustion` is harness-side by
+# the same reasoning: a cap that fires terminated the run prematurely, it
+# did not establish that the task was beyond the agent.
+
+@test "health: diagnostic labels a step-budget exhaustion as harness-side" {
+  TMPF=$(mktemp)
+  T=$(mktemp -d)
+  mkdir -p "$T/.boucle-state/7"
+  printf '{"role":"worker","outcome":"no-changes","detail":"iteration 1"}\n' > "$T/.boucle-state/7/health.jsonl"
+  health_funcs "$TMPF"
+  run bash -c "BOUCLE_WORKSPACE='$T'; source '$TMPF'; boucle_escalation_diagnostic 7 no-changes"
+  assert_success
+  assert_output --partial "side=harness"
+  assert_output --partial "(**harness**-side)"
+  assert_output --partial "The harness stopped this run"
+  rm -rf "$TMPF" "$T"
+}
+
+@test "health: diagnostic labels a build failure as model-side" {
+  TMPF=$(mktemp)
+  T=$(mktemp -d)
+  mkdir -p "$T/.boucle-state/7"
+  printf '{"role":"worker","outcome":"build-fail","detail":"iteration 1"}\n' > "$T/.boucle-state/7/health.jsonl"
+  health_funcs "$TMPF"
+  run bash -c "BOUCLE_WORKSPACE='$T'; source '$TMPF'; boucle_escalation_diagnostic 7 build-fail"
+  assert_success
+  assert_output --partial "side=model"
+  assert_output --partial "The agent reached the task and did not deliver"
+  rm -rf "$TMPF" "$T"
+}
+
+@test "health: diagnostic labels provider/quota and merge failures as harness-side" {
+  TMPF=$(mktemp)
+  T=$(mktemp -d)
+  mkdir -p "$T/.boucle-state/7"
+  : > "$T/.boucle-state/7/health.jsonl"
+  health_funcs "$TMPF"
+  for trigger in exit-4 rebase-conflict not-mergeable; do
+    run bash -c "BOUCLE_WORKSPACE='$T'; source '$TMPF'; boucle_escalation_diagnostic 7 $trigger"
+    assert_success
+    assert_output --partial "side=harness"
+  done
+  rm -rf "$TMPF" "$T"
+}
+
+@test "health: an unclassified trigger leaves the side undetermined rather than guessing" {
+  TMPF=$(mktemp)
+  T=$(mktemp -d)
+  mkdir -p "$T/.boucle-state/7"
+  : > "$T/.boucle-state/7/health.jsonl"
+  health_funcs "$TMPF"
+  run bash -c "BOUCLE_WORKSPACE='$T'; source '$TMPF'; boucle_escalation_diagnostic 7 something-new"
+  assert_success
+  assert_output --partial "side=unknown"
+  assert_output --partial "Side undetermined"
+  rm -rf "$TMPF" "$T"
+}
+
+# ── swarm_spawns on the run record (A2) ───────────────────────────────
+
+@test "health: boucle_health_record carries the swarm spawn count" {
+  TMPF=$(mktemp)
+  T=$(mktemp -d)
+  mkdir -p "$T/.boucle-state/7"
+  health_funcs "$TMPF"
+  run bash -c "BOUCLE_WORKSPACE='$T'; source '$TMPF'; boucle_health_record 7 worker 1 0 1500 400 0.01 m p 'astro' full '' 3"
+  assert_success
+  run jq -r 'select(.role=="worker") | .swarm_spawns | tostring' "$T/.boucle-state/7/health.jsonl"
+  assert_output "3"
+  rm -rf "$TMPF" "$T"
+}
+
+@test "health: a missing or non-numeric swarm count records 0, never a broken row" {
+  TMPF=$(mktemp)
+  T=$(mktemp -d)
+  mkdir -p "$T/.boucle-state/7"
+  health_funcs "$TMPF"
+  run bash -c "BOUCLE_WORKSPACE='$T'; source '$TMPF'; boucle_health_record 7 worker 1 0 1500 400 0.01 m p 'astro' full '' 'not-a-number'"
+  assert_success
+  run jq -r '.swarm_spawns | tostring' "$T/.boucle-state/7/health.jsonl"
+  assert_output "0"
+  # Omitted entirely (every existing caller before A2)
+  run bash -c "BOUCLE_WORKSPACE='$T'; source '$TMPF'; boucle_health_record 8 worker 1 0 1500 400 0.01 m p 'astro' full ''"
+  assert_success
+  rm -rf "$TMPF" "$T"
+}
+
+# ── the reviewer and e2e actually write their verdict (A7) ────────────
+# boucle_health_outcome documented itself as taking reviewer/e2e rows and
+# no stage ever wrote one, so boucle_escalation_diagnostic counted 0
+# reviewer FAILs on every escalation. These guard the wiring, not the
+# function: the function was always fine, the calls were missing.
+
+@test "health: reviewer.sh records its verdict before acting on it" {
+  run grep -n 'boucle_health_outcome "\$BOUCLE_ISSUE" "reviewer"' lib/boucle-ci/reviewer.sh
+  assert_success
+  # Must be written BEFORE the routing switch, so a verdict that ends the
+  # loop is recorded too.
+  record_line=$(grep -n 'boucle_health_outcome "\$BOUCLE_ISSUE" "reviewer"' lib/boucle-ci/reviewer.sh | head -1 | cut -d: -f1)
+  switch_line=$(grep -n '^  case "\$VERDICT" in' lib/boucle-ci/reviewer.sh | head -1 | cut -d: -f1)
+  [ "$record_line" -lt "$switch_line" ]
+}
+
+@test "health: e2e.sh records its verdict before acting on it" {
+  run grep -n 'boucle_health_outcome "\$BOUCLE_ISSUE" "e2e"' lib/boucle-ci/e2e.sh
+  assert_success
+  record_line=$(grep -n 'boucle_health_outcome "\$BOUCLE_ISSUE" "e2e"' lib/boucle-ci/e2e.sh | head -1 | cut -d: -f1)
+  switch_line=$(grep -n '^  case "\$VERDICT" in' lib/boucle-ci/e2e.sh | head -1 | cut -d: -f1)
+  [ "$record_line" -lt "$switch_line" ]
+}
+
+@test "health: an absent verdict is recorded as UNCERTAIN, not as silence" {
+  # No verdict is a fact about the run. Recording nothing would make it
+  # indistinguishable from a PASS in the record.
+  run grep -c 'VERDICT:-UNCERTAIN' lib/boucle-ci/reviewer.sh lib/boucle-ci/e2e.sh
+  assert_success
+  assert_line --index 0 --partial "reviewer.sh:1"
+  assert_line --index 1 --partial "e2e.sh:1"
+}
+
+@test "health: the diagnostic's reviewer-FAIL count now has rows to count" {
+  TMPF=$(mktemp)
+  T=$(mktemp -d)
+  mkdir -p "$T/.boucle-state/7"
+  health_funcs "$TMPF"
+  run bash -c "BOUCLE_WORKSPACE='$T'; source '$TMPF'; boucle_health_outcome 7 reviewer FAIL 'iteration 1'; boucle_health_outcome 7 reviewer FAIL 'iteration 2'; boucle_escalation_diagnostic 7 something-new"
+  assert_success
+  assert_output --partial "2 reviewer FAIL(s)"
+  rm -rf "$TMPF" "$T"
+}

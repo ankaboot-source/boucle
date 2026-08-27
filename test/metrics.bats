@@ -375,3 +375,53 @@ stub_forge() {
   run bash -c "'$REPO/bin/skills-stats' --file '$TMP/m.jsonl' --json | jq -r '.[0].iterations_done'"
   assert_output "2"
 }
+
+# ── prompt size and verdicts on the published row (A3, A7) ────────────
+# health.jsonl is gitignored and the state cache never survives an
+# ephemeral runner, so the per-issue row is the ONLY copy of a measurement
+# that outlives the job. Anything absent from it is unmeasurable in
+# practice, however faithfully it was written per run.
+
+@test "row: carries the largest assembled prompt seen on the issue" {
+  lib
+  cat > "$TMP/.boucle-state/7/health.jsonl" <<'EOF'
+{"timestamp":"t","role":"worker","iteration":1,"exit_code":0,"prompt_chars":48213,"tokens":"10","cost_usd":"n/a","model":"m","provider":"p","skills":[],"arm":"full","setup_fail":"","swarm_spawns":0}
+{"timestamp":"t","role":"worker","iteration":2,"exit_code":0,"prompt_chars":61002,"tokens":"20","cost_usd":"n/a","model":"m","provider":"p","skills":[],"arm":"full","setup_fail":"","swarm_spawns":2}
+EOF
+  run bash -c "cd '$REPO' && BOUCLE_WORKSPACE='$TMP' bash -c '. lib/boucle.sh 2>/dev/null; boucle_metrics_row 7 done' | jq -r '.prompt_chars_max | tostring'"
+  assert_success
+  assert_output "61002"
+}
+
+@test "row: sums the swarm spawns across the issue's runs" {
+  lib
+  cat > "$TMP/.boucle-state/7/health.jsonl" <<'EOF'
+{"timestamp":"t","role":"worker","iteration":1,"exit_code":0,"prompt_chars":10,"tokens":"10","cost_usd":"n/a","model":"m","provider":"p","skills":[],"arm":"full","setup_fail":"","swarm_spawns":3}
+{"timestamp":"t","role":"worker","iteration":2,"exit_code":0,"prompt_chars":10,"tokens":"20","cost_usd":"n/a","model":"m","provider":"p","skills":[],"arm":"full","setup_fail":"","swarm_spawns":2}
+EOF
+  run bash -c "cd '$REPO' && BOUCLE_WORKSPACE='$TMP' bash -c '. lib/boucle.sh 2>/dev/null; boucle_metrics_row 7 done' | jq -r '.swarm_spawns | tostring'"
+  assert_success
+  assert_output "5"
+}
+
+@test "row: carries the reviewer and e2e verdicts, which tell a recovery from a first-pass success" {
+  lib
+  cat > "$TMP/.boucle-state/7/health.jsonl" <<'EOF'
+{"timestamp":"t","role":"worker","iteration":1,"exit_code":0,"prompt_chars":10,"tokens":"10","cost_usd":"n/a","model":"m","provider":"p","skills":[],"arm":"full","setup_fail":"","swarm_spawns":0}
+{"timestamp":"t","role":"reviewer","outcome":"FAIL","detail":"iteration 1"}
+{"timestamp":"t","role":"worker","iteration":2,"exit_code":0,"prompt_chars":10,"tokens":"20","cost_usd":"n/a","model":"m","provider":"p","skills":[],"arm":"full","setup_fail":"","swarm_spawns":0}
+{"timestamp":"t","role":"reviewer","outcome":"PASS","detail":"iteration 2"}
+{"timestamp":"t","role":"e2e","outcome":"PASS","detail":""}
+EOF
+  run bash -c "cd '$REPO' && BOUCLE_WORKSPACE='$TMP' bash -c '. lib/boucle.sh 2>/dev/null; boucle_metrics_row 7 done' | jq -c '.verdicts'"
+  assert_success
+  assert_output '["FAIL","PASS","PASS"]'
+}
+
+@test "row: a worker-only issue still produces a row (no verdicts, zero prompt size absent)" {
+  lib
+  health_fixture
+  run bash -c "cd '$REPO' && BOUCLE_WORKSPACE='$TMP' bash -c '. lib/boucle.sh 2>/dev/null; boucle_metrics_row 7 done' | jq -c '{verdicts, prompt_chars_max, swarm_spawns}'"
+  assert_success
+  assert_output '{"verdicts":[],"prompt_chars_max":100,"swarm_spawns":0}'
+}
