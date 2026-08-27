@@ -125,6 +125,36 @@ ALL_FINAL_IDS="$(printf '%s' "$NOTES_JSON" | jq -r "${FILTER} | .id" 2> /dev/nul
 # Filter to matching draft note IDs (superseded by any final from this run).
 DRAFT_IDS="$(printf '%s' "$NOTES_JSON" | jq -r "${DRAFT_FILTER} | select(.id > ${PRE_ID}) | .id" 2> /dev/null | sort -n)"
 
+# ── Orphan placeholder cleanup (lesson #99) ───────────────────────────
+# An agent may post a bare placeholder ("verification check", "probe", or
+# "DRAFT — ...") tagged only with <!-- boucle:agent --> — no
+# boucle:draft/verdict/triage marker. The draft/verdict collapse logic
+# below ignores these (they match no FILTER/DRAFT_FILTER), so they
+# survive as noise on the PR (observed on boucle.dev PR #90 and #94).
+# Delete them unconditionally — an orphan has no boucle:draft marker, so
+# it is NOT a draft the log-scraping fallback would promote. This runs
+# BEFORE the no-final early-exit so orphans are cleaned even when the
+# agent posted no verdict at all.
+TARGET_ID="${TARGET_ID:-}"
+ORPHAN_IDS="$(printf '%s' "$NOTES_JSON" | jq -r '
+  .[] | select(.body | test("<!-- boucle:agent -->"))
+  | select(.body | test("boucle:(draft|verdict|triage|approval-request|state)") | not)
+  | select(.id > '"${PRE_ID}"')
+  | ( .body | gsub("<!--[^>]*-->"; "") | gsub("\\s+"; " ") | length ) as $len
+  | select($len < 50)
+  | .id
+' 2> /dev/null | sort -n)"
+if [[ -n "$ORPHAN_IDS" ]]; then
+  printf '%s\n' "$ORPHAN_IDS" | while IFS= read -r ORPHAN_ID; do
+    [[ -z "$ORPHAN_ID" ]] && continue
+    # Never delete the target (it holds the final body, if a final exists).
+    [[ "$ORPHAN_ID" == "$TARGET_ID" ]] && continue
+    log "collapse-duplicate-notes: DELETE $ENDPOINT/$ORPHAN_ID (orphan placeholder — no valid marker, <50 chars useful body)"
+    forge_note_delete "$KIND" "$NOTE_IID" "$ORPHAN_ID" 2> /dev/null \
+      || log "collapse-duplicate-notes: DELETE failed for orphan $ORPHAN_ID (continuing)"
+  done
+fi
+
 # If no finals exist, exit without touching drafts — the log-scraping
 # fallback may promote a draft to a final, and deleting it here would lose
 # the only output the agent produced.
@@ -210,37 +240,6 @@ if [[ -n "${ALL_FINAL_IDS:-}" ]]; then
     forge_note_delete "$KIND" "$NOTE_IID" "$STALE_ID" 2> /dev/null \
       || log "collapse-duplicate-notes: DELETE failed for note $STALE_ID (continuing)"
   done
-fi
-
-# ── Orphan placeholder cleanup (lesson #99) ───────────────────────────
-# An agent may post a bare placeholder ("verification check" or "DRAFT —
-# ...") tagged only with <!-- boucle:agent --> — no boucle:draft/
-# boucle:verdict/boucle:triage marker. The draft/verdict collapse logic
-# above ignores these (they match no FILTER/DRAFT_FILTER), so they survive
-# as noise on the PR (observed on boucle.dev PR #90: bare "verification
-# check" comment alongside the real verdict). Delete them when a valid
-# final exists for this run (FINAL_IDS non-empty — the same gate that
-# guards the draft cleanup). When no final exists, leave them: the
-# log-scraping fallback or the C4 gate handles the all-noise case.
-if [[ -n "$FINAL_IDS" ]]; then
-  ORPHAN_IDS="$(printf '%s' "$NOTES_JSON" | jq -r '
-    .[] | select(.body | test("<!-- boucle:agent -->"))
-    | select(.body | test("boucle:(draft|verdict|triage|approval-request|state)") | not)
-    | select(.id > '"${PRE_ID}"')
-    | ( .body | gsub("<!--[^>]*-->"; "") | gsub("\\s+"; " ") | length ) as $len
-    | select($len < 50)
-    | .id
-  ' 2> /dev/null | sort -n)"
-  if [[ -n "$ORPHAN_IDS" ]]; then
-    printf '%s\n' "$ORPHAN_IDS" | while IFS= read -r ORPHAN_ID; do
-      [[ -z "$ORPHAN_ID" ]] && continue
-      # Never delete the target (it holds the final body now).
-      [[ "$ORPHAN_ID" == "$TARGET_ID" ]] && continue
-      log "collapse-duplicate-notes: DELETE $ENDPOINT/$ORPHAN_ID (orphan placeholder — no valid marker, <50 chars useful body)"
-      forge_note_delete "$KIND" "$NOTE_IID" "$ORPHAN_ID" 2> /dev/null \
-        || log "collapse-duplicate-notes: DELETE failed for orphan $ORPHAN_ID (continuing)"
-    done
-  fi
 fi
 
 exit 0

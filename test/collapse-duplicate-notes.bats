@@ -306,3 +306,41 @@ setup() {
   ' 2> /dev/null | sort -n)"
   [ -z "$orphan_ids" ]
 }
+
+@test "orphan cleanup runs even when no final verdict exists (issue #90)" {
+  # The agent posted only a bare "probe" placeholder, no verdict at all.
+  # The early-exit (no finals → leave drafts) must NOT skip the orphan
+  # cleanup, because an orphan has no boucle:draft marker and is not a
+  # promotion candidate. It must be deleted.
+  mock_notes='[
+    {"id": 1, "body": "probe\n\n<!-- boucle:agent -->"}
+  ]'
+  orphan_ids="$(printf '%s' "$mock_notes" | jq -r '
+    .[] | select(.body | test("<!-- boucle:agent -->"))
+    | select(.body | test("boucle:(draft|verdict|triage|approval-request|state)") | not)
+    | select(.id > 0)
+    | ( .body | gsub("<!--[^>]*-->"; "") | gsub("\\s+"; " ") | length ) as $len
+    | select($len < 50)
+    | .id
+  ' 2> /dev/null | sort -n)"
+  [ "$orphan_ids" = "1" ]
+}
+
+@test "orphan cleanup preserves drafts when no final exists (no regression)" {
+  # A valid draft (with boucle:draft marker) must NOT be deleted by the
+  # orphan filter — it has a valid marker. The early-exit still protects
+  # it from the draft-collapse logic. This test confirms the orphan filter
+  # does not match drafts even when no final exists.
+  mock_notes='[
+    {"id": 1, "body": "<!-- boucle:draft role=reviewer -->\n\n## Verdict\nUNCERTAIN\n- [ ] pending verification"}
+  ]'
+  orphan_ids="$(printf '%s' "$mock_notes" | jq -r '
+    .[] | select(.body | test("<!-- boucle:agent -->"))
+    | select(.body | test("boucle:(draft|verdict|triage|approval-request|state)") | not)
+    | select(.id > 0)
+    | ( .body | gsub("<!--[^>]*-->"; "") | gsub("\\s+"; " ") | length ) as $len
+    | select($len < 50)
+    | .id
+  ' 2> /dev/null | sort -n)"
+  [ -z "$orphan_ids" ]
+}
