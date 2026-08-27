@@ -257,27 +257,62 @@ an entry that quietly relaxes an engine invariant. Two cheap mitigations,
 both in the injection: the engine block goes **first**, and the assembled
 prompt states that engine lessons take precedence over local ones on
 conflict.
-### P2 — Refine on success too, not only at escalation
+### P2 — Refine on *recovered* runs, not on every success
 
 `bin/jc:1342` emits a lesson candidate only when the loop escalates. Every
 artifact boucle has ever distilled therefore comes from a failed run.
 [docs/skills-audit.md](skills-audit.md) already flags this — "100% of the
 lesson pipeline is `0s5f`" — and reports that failure-only source pools make
 distilled artifacts **worse than no artifact** (0.5161 vs 0.5935,
-Codex/TB2).
+Codex/TB2). Prime Agent's `/refine` "runs a background model call over
+relevant events"; nothing in it is conditioned on failure.
 
-Prime Agent is independent evidence for the same fix. `/refine` "runs a
-background model call over relevant events"; nothing in it is conditioned on
-failure, and the self-improvement path it describes is explicitly about
-*useful* computation: "Useful computations become skills, repeated
-coordination patterns become subagent specifications, and corrected
-assumptions become memories or prompt notes."
+**But "any success" is the wrong trigger.** A first-pass success carries no
+lesson: the agent did the obvious thing and it worked. Distilling from those
+would flood the file with restatements of the charter. The trajectory worth
+distilling is the **recovered** one — the run that failed, was corrected, and
+then passed. That is where the delta between "what did not work" and "what
+did" is visible, and it is exactly what `iterations.md` already records under
+*Approach* and *Tried and rejected*.
 
-Emit a candidate at the terminal `boucle:done` transition as well — the same
-hook that already publishes the metrics row. Route success-derived candidates
-to the consumer's root `LESSONS.yml` (P1) when the class is repo-specific,
-so the engine file stays conservative while the pool that feeds the prompt
-stops being 100% failure-derived.
+**The predicate is mechanical, not a judgment call.** It reads the run
+record, so no model decides whether an issue "was hard":
+
+| Signal | Recorded today? | Where |
+| --- | --- | --- |
+| Worker iterations ≥ 2 | ✅ | one `role=worker` row per run, `lib/boucle.sh:590` |
+| A `build-fail` occurred | ✅ | `boucle_health_outcome`, `lib/boucle-ci/worker.sh:554` |
+| A `no-changes` iteration occurred | ✅ | `lib/boucle-ci/worker.sh:465` |
+| A human amended mid-work | ✅ | `amended-in-flight`, `lib/boucle-ci/worker.sh:1004` |
+| **A reviewer `FAIL` occurred** | ❌ **never written** | see below |
+
+**The gap, and a bug it exposes.** `boucle_health_outcome` documents itself
+as "called by the jobs (worker: …; **reviewer/e2e: PASS/FAIL/UNCERTAIN**;
+merger: …)", and LOOP.md §"Loop-health measurement" repeats it. Measured:
+the function is called from `lib/boucle-ci/worker.sh` (7×) and
+`lib/boucle-ci/merger.sh` (2×) **and nowhere else**. The reviewer and the e2e
+never write a row. Consequence today, independent of P2:
+`boucle_escalation_diagnostic` computes
+`reviewer_fails=$(grep -c '"outcome":"FAIL"' …)` at `lib/boucle.sh:992` and
+therefore **always reports 0 reviewer FAILs** in the `unknown`-class evidence
+line. A doc that describes a system that does not exist is, by boucle's own
+rule, a bug.
+
+So P2 needs one prerequisite (A7 in §7): have the reviewer and e2e write
+their verdict rows, as the function was designed for and the diagnostic
+already assumes. Then the trigger is:
+
+> At `boucle:done`, emit a candidate **only if** the health record shows a
+> recovered trajectory (≥1 reviewer `FAIL`, or ≥1 `build-fail`, or ≥2 worker
+> iterations). Otherwise emit nothing — silence is honest.
+
+**Four filters, not one**, which is what bounds the noise: the recovery
+predicate excludes nominal successes by construction; the four-point
+admission test excludes instances; `--against` dedupe (P1) excludes
+restatements; and the MR gate gives a human the last word. Route the
+candidate to the consumer's root `LESSONS.yml` when the class is
+repo-specific, so the engine file stays conservative while the pool that
+feeds the prompt stops being 100% failure-derived.
 
 ### P3 — Summarise into L1, retain the original in L3
 
@@ -346,22 +381,31 @@ The Factorio trace also tells boucle **what shape** to expect and to support:
 rather than deeper recursion." Wide and shallow, which is exactly boucle's
 one-worker-fans-out model. Do not build recursive delegation.
 
-### P5 — Make the pushed blobs addressable
+### P5 — Stop telling the agent the lessons are exhausted
 
 Boucle pushes rather than pulls, deliberately, on measurement: 0 of 68
 observed runs read `LESSONS.yml` voluntarily. The paper's conclusion
-vindicates that choice rather than undermining it — capabilities models were
-not trained to operate go underused — so **keep the push**.
+vindicates that — capabilities models were not trained to operate go
+underused — so **keep the push**, and do not build a retrieval command
+nothing will call.
 
-The cheap half of the L2 idea still applies, and it is the same principle as
-P3: an excerpt should name what it is an excerpt **of**. The lessons block is
-capped at 80 lines out of 107 entries and the agent is told "do NOT re-read
-the file" — correct for the file, wrong for the remaining knowledge. Append
-one line naming the remainder and the command that widens it
-(`bin/lessons --grep <kw>`, to be added). It costs ~1 line against a
-4,387-char block, and whether it is ever used is measurable on the same
-channel as P4 — which is the honest way to settle push-vs-pull for boucle's
-models instead of arguing it.
+What remains is not a feature, it is a **wrong sentence**. The injected
+block ends with:
+
+> `Relevant lessons (from LESSONS.yml — already extracted, do NOT re-read the file)`
+
+Measured, that instruction is false in the general case. The agent receives
+**at most 18 of 107** lessons — the keyword-matched block is capped at 80
+lines and a lesson averages 9.5 — and when no keyword matches the issue body
+it receives exactly **5** (the default set: #1, #2, #5, #6, #99). The
+sentence tells it the remaining 89 to 102 do not exist. An agent that hits,
+mid-run, a problem unrelated to its issue title has been instructed that the
+lessons are done with.
+
+The fix is one clause: **"do NOT re-read the lessons above"**, not "the
+file". Cost: one string in `bin/jc:1368`. Whether anything ever widens on
+its own is then measurable on the P4 channel — and if it never does, nothing
+was spent finding out.
 
 ### P6 — Termination semantics: cap the budget, name the failing side
 
@@ -450,14 +494,14 @@ upstream (the #54 flywheel), not a hard issue.
 
 ## 7. Priorisation — impact vs cost
 
-§4 ranks by strength of argument. This ranks by what to build first. Eleven
+§4 ranks by strength of argument. This ranks by what to build first. Twelve
 atomic, separately shippable items; **S/M/L is implementation cost**, and the
 touch points are named so every estimate is checkable.
 
 |  | Cost S | Cost M | Cost L |
 | --- | --- | --- | --- |
 | **High impact** | A6 | B2, C1 | — |
-| **Medium impact** | A1, A2, A3, A4 | B1 | — |
+| **Medium impact** | A1, A2, A3, A4, A7 | B1 | — |
 | **Low / conditional** | A5 | D1 (unknown) | C2 (conditional) |
 
 ### Batch 1 — measure and unblock (all S, ship together)
@@ -468,14 +512,15 @@ touch points are named so every estimate is checkable.
 | **A2** | Count `swarm` spawns | Observability | Medium | The worker is told to fan out into parallel sub-agents. Nobody knows whether it ever does | Mirror `extract_skills_used` / `record_skills_used`, `bin/jc:2202–2240` |
 | **A3** | Read the `prompt_chars` already collected | Context budget | Medium | Every run already records how much text the agent received. Nobody has looked. Decides whether C2 is worth building | Nothing to write — the field is on every health row |
 | **A4** | Check the sub-agent bill | Accounting | Medium (High if broken) | Verify `cost.json` counts tokens spent by swarm children, or the per-feature cost is understated where spend is highest | `bin/jc:2141`; the fix depends on what jcode reports |
-| **A5** | Name the remainder under the lessons block | Context budget | Low | The agent gets 80 lines out of 107 lessons and is told not to re-read the file. Tell it what it is missing and how to fetch it | `bin/jc:1368` + a ~40-line `bin/lessons` |
+| **A5** | Fix the "do NOT re-read the file" clause | Context budget | Low | The agent receives at most **18 of 107** lessons — 5 when nothing matches — and is told the file is done with. Say "the lessons above", not "the file". One string, no new script | `bin/jc:1368` |
+| **A7** | Record the reviewer and e2e verdicts | Observability | Medium | `boucle_health_outcome` is documented as taking reviewer/e2e PASS/FAIL/UNCERTAIN rows and **no stage writes them**, so the escalation diagnostic's reviewer-FAIL count is always 0. Fixes a dead evidence line, and is the prerequisite for B2 | `lib/boucle-ci/reviewer.sh`, `lib/boucle-ci/e2e.sh` — one call each, the function exists |
 | **A6** | Merge the two `LESSONS.yml` instead of falling back | Learning / retention | **High** | Today the first file that exists wins: a consumer that writes its own lessons **silently loses all 107 engine ones**. Latent bug on its own, and the prerequisite for C1 | `bin/jc:1368–1382`, plus a `readlink -f` guard for dogfood (`ENGINE_DIR="."`) |
 
 ### Batch 2 — the real work (M)
 
 | # | Item | Problem class | Impact | What it means | Touch points |
 | --- | --- | --- | --- | --- | --- |
-| **B2** | Emit a refinement candidate at `boucle:done` | Learning | **High** | Boucle only learns a lesson when it **fails**. Everything it knows was distilled from failures — measured as worse than distilling nothing. Learn from successful issues too | `bin/jc:1342` — the candidate path exists, the trigger is what is wrong |
+| **B2** | Emit a candidate on **recovered** runs | Learning | **High** | Boucle only learns when it **fails** — everything it knows is distilled from failures, measured as worse than distilling nothing. Learn also from an issue that failed, was corrected, then passed. A first-pass success emits nothing | `bin/jc:1342` — the candidate path exists, the trigger is what is wrong. Needs **A7** |
 | **C1** | A consumer-scoped `LESSONS.yml` | Learning / retention | **Highest** | Boucle remembers nothing about *your* project: every issue re-discovers the same trap. Give the repo its own lesson file, written by the worker, reviewed in the MR, revertible | Drop `LESSONS.yml` from the symlink loops (`bin/jc:707`, `bin/update:331`, `bin/setup:588`); seed + migrate in `bin/setup` / `bin/update`; `--against` dedupe in `bin/check-lessons`; candidate routing; the fifth admission question in `AGENTS.md` |
 | **B1** | Cap the budget | Control / cost | Medium | Boucle counts money but never stops for it — only step and iteration caps exist. Add "past X, stop and call me", as a harness-side stop, never a pass | Stage entry in `lib/boucle-ci/*.sh`; `budget-exhausted` class in `boucle_escalation_diagnostic` |
 
@@ -492,6 +537,7 @@ touch points are named so every estimate is checkable.
 | --- | --- |
 | Batch 1 before everything | Pure measurement and labelling: no agent behaviour changes, no risk, and A3/A4/A2 *decide* three later items. Boucle's own rule — "measure first, cap second" |
 | A6 before C1 | Without the merge, a consumer that starts writing lessons loses the engine's 107 |
+| **A7 before B2** | Without the reviewer's verdict on the health row, "this run recovered from a FAIL" is not computable |
 | B2 before C1 | C1 without B2 persists the same failure-only distillate, per repo this time |
 | B1 after A4 | A budget cap that cannot see sub-agent spend leaks exactly where spend is highest |
 | C2 only if A3 says so | Nobody is running near a ceiling today |
