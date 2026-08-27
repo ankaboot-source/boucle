@@ -1787,6 +1787,51 @@ write_prompt_overlay "$AGENT_FILE"
 AGENT_LOG="$STATE_DIR/agent-output.log"
 : > "$AGENT_LOG"
 
+# ── 4b-bis. The health record fires on EVERY exit path ────────────────
+# The record used to live only at the end of section 7d, after every early
+# `exit 3` (silent failure, empty log, empty placeholder draft) and `exit 4`
+# (provider down, quota exhausted) between here and there — and after any
+# `set -e` abort. So the runs that recorded nothing were exactly the runs
+# worth measuring: the failures. The measurement had survivorship bias built
+# into its own control flow, and the branch it feeds showed only the runs
+# that went well.
+#
+# An EXIT trap fixes the shape rather than the symptom: no future early exit
+# can silently drop a row, because there is no path out of this script that
+# does not pass through here. 7d still calls it explicitly, so the happy path
+# keeps the richer fields (tokens, cost, skills) that only exist once the
+# later sections have run; the flag makes the trap a no-op after that.
+_BOUCLE_HEALTH_WRITTEN=""
+emit_health_record() {
+  local rc=$?
+  [ -z "$_BOUCLE_HEALTH_WRITTEN" ] || return "$rc"
+  _BOUCLE_HEALTH_WRITTEN=1
+  # On an early exit, 7c never ran and SKILLS_USED is empty — read the
+  # transcript directly rather than recording "no skills" for a run that may
+  # well have loaded some before it died.
+  local skills="${SKILLS_USED:-}"
+  if [ -z "$skills" ] && type extract_skills_used > /dev/null 2>&1; then
+    skills=$(extract_skills_used "$AGENT_LOG" 2> /dev/null | paste -sd, - 2> /dev/null || echo "")
+  fi
+  # Same rule for the spawn count: on an early exit 7d never ran, so read the
+  # transcript rather than recording 0 for a run that may have fanned out
+  # before it died. 0 and "we never looked" are different findings.
+  local swarm="${SWARM_SPAWNS:-}"
+  if [ -z "$swarm" ] && type extract_swarm_spawns > /dev/null 2>&1; then
+    swarm=$(extract_swarm_spawns "$AGENT_LOG" 2> /dev/null || echo 0)
+  fi
+  case "$swarm" in '' | *[!0-9]*) swarm=0 ;; esac
+  local setup_fail
+  setup_fail=$(boucle_classify_setup_failure "$AGENT_LOG" 2> /dev/null || echo "")
+  boucle_health_record "$ISSUE" "$ROLE" "$ITERATION" "${AGENT_EXIT:-$rc}" \
+    "${prompt_total_chars:-0}" "${h_pt:-}" "${h_cost:-}" \
+    "${h_model:-}" "${h_provider:-}" \
+    "$skills" "$(boucle_experiment_arm "$ISSUE" 2> /dev/null || echo full)" \
+    "$setup_fail" "$swarm" || true
+  return "$rc"
+}
+trap emit_health_record EXIT
+
 # ── 4c. Pre-flight provider probe (#42) ───────────────────────────────
 # The reactive path (section 5b) discovers an exhausted quota the expensive
 # way: provision the runner, clone the repo, build the prompt, run the
@@ -2442,14 +2487,11 @@ record_skills_used || true
 # 25x larger than the aggregate one and therefore the first place a real
 # effect would become visible on a consumer's issue volume.
 h_setup_fail=$(boucle_classify_setup_failure "$AGENT_LOG" 2> /dev/null || echo "")
-h_arm=$(boucle_experiment_arm "$ISSUE" 2> /dev/null || echo "full")
 if [ -n "$h_setup_fail" ]; then
   echo "[boucle:metrics] role=$ROLE iteration=$ITERATION setup_fail=$h_setup_fail (the environment blocked this run before the task)" >&2
 fi
 record_swarm_spawns || true
-boucle_health_record "$ISSUE" "$ROLE" "$ITERATION" "$AGENT_EXIT" \
-  "${prompt_total_chars:-0}" "${h_pt:-}" "${h_cost:-}" "$h_model" "$h_provider" \
-  "${SKILLS_USED:-}" "$h_arm" "$h_setup_fail" "${SWARM_SPAWNS:-0}" || true
+emit_health_record || true
 
 # ── 7b. Capture jcode session for interactive takeover (#54 item 2) ──
 # jcode persists every run as ~/.jcode/sessions/<id>.json + <id>.journal.jsonl.

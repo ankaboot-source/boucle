@@ -329,10 +329,13 @@ stub_forge() {
 }
 
 @test "jc: the health record carries skills, arm and setup_fail" {
-  run bash -c "grep -A3 'boucle_health_record \"\$ISSUE\"' '$REPO/bin/jc' | tr -d '\n'"
-  assert_output --partial 'SKILLS_USED'
-  assert_output --partial 'h_arm'
-  assert_output --partial 'h_setup_fail'
+  # These three fields are what make health.jsonl a join table between what a
+  # run was given and how it went. Asserted on the call itself, wherever it
+  # lives, so moving it into the EXIT trap cannot quietly drop one.
+  run bash -c "grep -A5 'boucle_health_record \"\$ISSUE\"' '$REPO/bin/jc' | tr -d '\n'"
+  assert_output --partial 'skills'
+  assert_output --partial 'boucle_experiment_arm'
+  assert_output --partial 'setup_fail'
 }
 
 @test "jc: withholding the catalogue is gated on the arm" {
@@ -634,4 +637,72 @@ metrics_remote_config_only() {
   assert_success
   assert_output --partial "[boucle:metrics] WARN"
   assert_output --partial "issue #7"
+}
+
+# ── The health record must survive every exit path ───────────────────────
+#
+# The record used to sit at the very end of bin/jc, after six early `exit 3`
+# / `exit 4` paths (silent failure, empty log, empty placeholder draft,
+# provider down, quota exhausted) and after any `set -e` abort. So the runs
+# that recorded nothing were exactly the runs worth measuring — the failures.
+# The measurement had survivorship bias built into its own control flow.
+
+@test "jc: the health record is emitted from an EXIT trap, not just at the end" {
+  run grep -n 'trap emit_health_record EXIT' "$REPO/bin/jc"
+  assert_success
+}
+
+@test "jc: no early exit can precede the trap" {
+  # Every `exit N` in the file must come AFTER the trap is installed,
+  # otherwise that path still drops the row.
+  # Scoped to exits that can happen once there is a run to record. The
+  # argument-validation exits above AGENT_LOG have no issue, role or
+  # transcript yet — a row there would be an empty one, not a missing one.
+  local trap_line agent_log_line first_exit
+  trap_line=$(grep -n 'trap emit_health_record EXIT' "$REPO/bin/jc" | cut -d: -f1)
+  agent_log_line=$(grep -n '^AGENT_LOG=' "$REPO/bin/jc" | head -1 | cut -d: -f1)
+  assert [ -n "$trap_line" ]
+  assert [ -n "$agent_log_line" ]
+  # The trap is installed as soon as there is a transcript to describe.
+  assert [ "$trap_line" -gt "$agent_log_line" ]
+  first_exit=$(grep -nE '^[[:space:]]*exit [0-9$]' "$REPO/bin/jc" \
+    | awk -F: -v a="$agent_log_line" '$1 > a {print $1; exit}')
+  assert [ -n "$first_exit" ]
+  assert [ "$trap_line" -lt "$first_exit" ]
+}
+
+@test "jc: the recorder is called once, through the trap function" {
+  # A second direct call to boucle_health_record would write a duplicate row
+  # on the happy path and reintroduce the drift the trap exists to prevent.
+  run bash -c "grep -c '^boucle_health_record ' '$REPO/bin/jc' || true"
+  assert_output "0"
+  run grep -c 'boucle_health_record "\$ISSUE"' "$REPO/bin/jc"
+  assert_output "1"
+}
+
+@test "jc: an early exit still reads the skills out of the transcript" {
+  # SKILLS_USED is set in 7c, which an early exit never reaches. Recording
+  # "no skills" for a run that loaded some before it died would be a wrong
+  # answer, not a missing one.
+  run grep -A3 'local skills="\${SKILLS_USED:-}"' "$REPO/bin/jc"
+  assert_success
+  assert_output --partial "extract_skills_used"
+}
+
+@test "jc: an early exit still reads the swarm count out of the transcript" {
+  # Same rule as the skills above: SWARM_SPAWNS is set in 7d, which an early
+  # exit never reaches. Recording 0 for a run that fanned out before it died
+  # is a wrong answer, not a missing one — and 0 is exactly the value the
+  # question "does swarm ever fire?" is trying to establish.
+  run grep -A3 'local swarm="\${SWARM_SPAWNS:-}"' "$REPO/bin/jc"
+  assert_success
+  assert_output --partial "extract_swarm_spawns"
+}
+
+@test "jc: the swarm count reaches the health record through the trap" {
+  # The count is the 13th argument; a row written without it defaults to 0,
+  # which is indistinguishable from a measured zero.
+  run grep -A6 'boucle_health_record "\$ISSUE" "\$ROLE" "\$ITERATION"' "$REPO/bin/jc"
+  assert_success
+  assert_output --partial '"$setup_fail" "$swarm"'
 }
