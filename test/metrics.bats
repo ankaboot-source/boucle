@@ -375,3 +375,134 @@ stub_forge() {
   run bash -c "'$REPO/bin/skills-stats' --file '$TMP/m.jsonl' --json | jq -r '.[0].iterations_done'"
   assert_output "2"
 }
+
+# ── Durability of the raw health log ─────────────────────────────────────
+#
+# The defect these cover: health.jsonl is written into .boucle-state/ inside
+# whichever ephemeral job produced it, but the TERMINAL label is usually
+# applied by a different job with an empty workspace (a doctor sweep, a
+# post-merge e2e). The publish then summarised a table that did not exist and
+# reported "nothing to publish" for an issue that had just finished a full
+# loop. These tests pin the two halves of the fix: the raw log leaves the job
+# as it is written, and the reader finds it again when the local copy is gone.
+
+metrics_remote() {
+  # A bare repo standing in for origin, plus a working clone whose `origin`
+  # points at it — boucle_metrics_git_append reads the remote off `origin`.
+  git init -q --bare "$TMP/origin.git"
+  git init -q "$TMP/work"
+  git -C "$TMP/work" remote add origin "$TMP/origin.git"
+  cd "$TMP/work" || return 1
+}
+
+remote_file() {
+  git -C "$TMP/origin.git" show "$BOUCLE_METRICS_BRANCH:$1" 2> /dev/null
+}
+
+@test "metrics: health lines reach the branch as they are written" {
+  lib
+  metrics_remote
+  health_fixture
+  boucle_metrics_sync_health 7
+  run remote_file "raw/7.jsonl"
+  assert_success
+  assert_output --partial '"role":"worker","iteration":1'
+  assert_output --partial '"outcome":"build-fail"'
+}
+
+@test "metrics: re-syncing the same log does not duplicate lines" {
+  lib
+  metrics_remote
+  health_fixture
+  boucle_metrics_sync_health 7
+  boucle_metrics_sync_health 7
+  run bash -c "git -C '$TMP/origin.git' show '$BOUCLE_METRICS_BRANCH:raw/7.jsonl' | wc -l"
+  assert_output "3"
+}
+
+@test "metrics: a later append adds only the new line" {
+  lib
+  metrics_remote
+  health_fixture
+  boucle_metrics_sync_health 7
+  echo '{"timestamp":"2026-08-24T11:00:00Z","role":"e2e","outcome":"PASS","detail":""}' \
+    >> "$TMP/.boucle-state/7/health.jsonl"
+  boucle_metrics_sync_health 7
+  run bash -c "git -C '$TMP/origin.git' show '$BOUCLE_METRICS_BRANCH:raw/7.jsonl' | wc -l"
+  assert_output "4"
+}
+
+@test "metrics: BOUCLE_METRICS_SYNC=false keeps the local write and skips the push" {
+  lib
+  metrics_remote
+  health_fixture
+  BOUCLE_METRICS_SYNC=false boucle_metrics_sync_health 7
+  run remote_file "raw/7.jsonl"
+  assert_failure
+  assert [ -s "$TMP/.boucle-state/7/health.jsonl" ]
+}
+
+@test "metrics: disabling metrics entirely also disables the raw sync" {
+  lib
+  metrics_remote
+  health_fixture
+  BOUCLE_METRICS_ENABLED=false boucle_metrics_sync_health 7
+  run remote_file "raw/7.jsonl"
+  assert_failure
+}
+
+@test "metrics: hydrate prefers the local health file" {
+  lib
+  metrics_remote
+  health_fixture
+  run boucle_metrics_hydrate_health 7
+  assert_success
+  assert_output "$TMP/.boucle-state/7/health.jsonl"
+}
+
+@test "metrics: hydrate falls back to the branch when the workspace is empty" {
+  lib
+  metrics_remote
+  health_fixture
+  boucle_metrics_sync_health 7
+  rm -f "$TMP/.boucle-state/7/health.jsonl"
+  run boucle_metrics_hydrate_health 7
+  assert_success
+  assert [ -s "$output" ]
+  run bash -c "grep -c 'build-fail' '$(boucle_metrics_hydrate_health 7)'"
+  assert_output "1"
+}
+
+@test "metrics: hydrate prints nothing when the issue never ran an agent" {
+  lib
+  metrics_remote
+  run boucle_metrics_hydrate_health 7
+  assert_success
+  assert_output ""
+}
+
+@test "metrics: a terminal transition in a FRESH job still publishes a row" {
+  # The regression that started this: the doctor recovered a closed issue,
+  # the hook fired, and the row was empty because the doctor's workspace had
+  # never seen health.jsonl. The raw log on the branch is what closes it.
+  lib
+  metrics_remote
+  stub_forge
+  health_fixture
+  boucle_metrics_sync_health 7
+  rm -rf "$TMP/.boucle-state/7"
+  run boucle_metrics_row 7 done
+  assert_success
+  assert_output --partial '"issue":"7"'
+  assert_output --partial '"terminal":"done"'
+  assert_output --partial '"iterations":2'
+}
+
+@test "metrics: git_append reports failure when there is no origin to push to" {
+  lib
+  git init -q "$TMP/noremote"
+  cd "$TMP/noremote" || return 1
+  echo 'x' > "$TMP/line"
+  run boucle_metrics_git_append "metrics.jsonl" "$TMP/line" "msg"
+  assert_failure
+}

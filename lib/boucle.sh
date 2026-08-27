@@ -609,6 +609,7 @@ boucle_health_record() {
     "$ts" "$role" "$iteration" "$exit_code" "$prompt_chars" "${tokens:-n/a}" "${cost:-n/a}" "$model" "$provider" \
     "$skills_json" "${arm:-full}" "$setup_fail" \
     >> "$file" 2> /dev/null || true
+  boucle_metrics_sync_health "$iid" || true
 }
 
 # Append a verdict/outcome line to health.jsonl. Called by the jobs
@@ -623,6 +624,7 @@ boucle_health_outcome() {
   printf '{"timestamp":"%s","role":"%s","outcome":"%s","detail":"%s"}\n' \
     "$ts" "$role" "$outcome" "$detail" \
     >> "$file" 2> /dev/null || true
+  boucle_metrics_sync_health "$iid" || true
 }
 
 # ── Merge-gate approval ───────────────────────────────────────────────
@@ -710,6 +712,18 @@ boucle_mr_is_approved() {
 
 BOUCLE_METRICS_BRANCH="${BOUCLE_METRICS_BRANCH:-boucle/metrics}"
 BOUCLE_METRICS_FILE="${BOUCLE_METRICS_FILE:-metrics.jsonl}"
+# Per-issue RAW health log on the same branch. health.jsonl is written into
+# .boucle-state/ inside whichever job produced it, and every boucle job runs
+# on a fresh ephemeral runner with an empty workspace. The job that applies
+# the TERMINAL label is almost never the job that did the work — a doctor
+# sweep, a post-merge e2e — so at publish time the local health.jsonl is a
+# file that has never existed in that container, and the summary row was
+# computed over an empty table: "no health data for issue #N — nothing to
+# publish", on an issue that had just completed a full loop. That is the same
+# class of defect this measurement exists to catch — an operation that
+# succeeds while its effect is null. The raw log is therefore pushed as it is
+# written, not read back at the end from a file that is not there.
+BOUCLE_METRICS_RAW_DIR="${BOUCLE_METRICS_RAW_DIR:-raw}"
 
 # boucle_metrics_enabled
 #
@@ -868,8 +882,9 @@ boucle_human_touches() {
         2> /dev/null || echo 0)
   fi
 
-  local health="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
-  if [ -s "$health" ]; then
+  local health
+  health=$(boucle_metrics_hydrate_health "$iid")
+  if [ -n "$health" ] && [ -s "$health" ]; then
     amends=$(grep -c '"outcome":"amended-in-flight"' "$health" 2> /dev/null || echo 0)
   fi
 
@@ -898,9 +913,10 @@ boucle_human_touches() {
 # number that is wrong in a direction it cannot detect.
 boucle_metrics_row() {
   local iid="${1:-}" terminal="${2:-unknown}"
-  local health="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
   command -v jq > /dev/null 2>&1 || return 0
-  [ -s "$health" ] || return 0
+  local health
+  health=$(boucle_metrics_hydrate_health "$iid")
+  [ -n "$health" ] && [ -s "$health" ] || return 0
 
   local touches spec delivery
   touches=$(boucle_human_touches "$iid" 2> /dev/null || printf '0\t0')
@@ -979,43 +995,103 @@ boucle_metrics_publish() {
     return 0
   fi
 
-  local branch="$BOUCLE_METRICS_BRANCH" file="$BOUCLE_METRICS_FILE"
-  local tmp
-  tmp=$(mktemp -d 2> /dev/null) || return 0
+  local rowfile
+  rowfile=$(mktemp 2> /dev/null) || return 0
+  printf '%s\n' "$row" > "$rowfile"
+  if boucle_metrics_git_append "$BOUCLE_METRICS_FILE" "$rowfile" \
+    "metrics: issue #$iid ($terminal)"; then
+    echo "[boucle:metrics] published issue #$iid ($terminal) to $BOUCLE_METRICS_BRANCH:$BOUCLE_METRICS_FILE" >&2
+  else
+    echo "[boucle:metrics] WARN: could not publish metrics for issue #$iid — the row is lost, the loop is not" >&2
+  fi
+  rm -f "$rowfile"
+  return 0
+}
 
-  # Read-modify-append against the remote, in a scratch worktree: the branch
-  # is shared by every issue in the project and two issues can finish at the
-  # same time. A push race loses the row, so retry on rejection.
+# boucle_metrics_git_append <relpath> <src-file> <commit-msg>
+#
+# Append the lines of <src-file> to <relpath> on the metrics branch, skipping
+# any line the branch already carries, and push. Returns 0 only when the data
+# is on the branch (including "it was already there"); non-zero means it is
+# not.
+#
+# Read-modify-append against the remote in a scratch worktree, because the
+# branch is shared by every issue in the project and two jobs can finish at
+# the same moment. A push race loses data silently, so retry on rejection.
+boucle_metrics_git_append() {
+  local relpath="${1:-}" src="${2:-}" msg="${3:-metrics}"
+  [ -n "$relpath" ] || return 1
+
+  local tmp payload
+  tmp=$(mktemp -d 2> /dev/null) || return 1
+  payload="$tmp/payload"
+  if ! cat "$src" > "$payload" 2> /dev/null; then
+    rm -rf "$tmp"
+    return 1
+  fi
+  if [ ! -s "$payload" ]; then
+    rm -rf "$tmp"
+    return 0
+  fi
+
+  local origin branch="$BOUCLE_METRICS_BRANCH"
+  origin=$(git remote get-url origin 2> /dev/null || echo "")
+  if [ -z "$origin" ]; then
+    rm -rf "$tmp"
+    return 1
+  fi
+
   local attempt
   for attempt in 1 2 3; do
     rm -rf "${tmp:?}/repo"
     mkdir -p "$tmp/repo" || break
-    if ! git -C "$tmp/repo" init -q 2> /dev/null; then break; fi
-    git -C "$tmp/repo" remote add origin "$(git remote get-url origin 2> /dev/null || echo "")" 2> /dev/null || true
+    git -C "$tmp/repo" init -q 2> /dev/null || break
+    git -C "$tmp/repo" remote add origin "$origin" 2> /dev/null || true
 
     if git -C "$tmp/repo" fetch -q --depth 1 origin "$branch" 2> /dev/null; then
       git -C "$tmp/repo" checkout -q FETCH_HEAD 2> /dev/null || true
       git -C "$tmp/repo" checkout -q -B "$branch" 2> /dev/null || true
     else
-      # First row ever: an ORPHAN branch, so the metrics log shares no
-      # history with the consumer's code.
+      # First write ever: an ORPHAN branch, so the measurement log shares no
+      # history with the consumer's code and can never enter it.
       git -C "$tmp/repo" checkout -q --orphan "$branch" 2> /dev/null || true
       printf '%s\n' \
         "# boucle metrics" "" \
-        "Append-only measurement log, one JSON object per issue." \
-        "Written by \`boucle_metrics_publish\` at the terminal transition." \
+        "Append-only measurement log." "" \
+        "- \`$BOUCLE_METRICS_FILE\` — one JSON object per finished issue." \
+        "- \`$BOUCLE_METRICS_RAW_DIR/<issue>.jsonl\` — the raw per-run health" \
+        "  lines that row was computed from, pushed as they are written so" \
+        "  they outlive the ephemeral job that produced them." "" \
         "Read with \`bin/skills-stats\`. Safe to delete: it is measurement," \
         "never decision state." > "$tmp/repo/README.md" 2> /dev/null || true
     fi
 
-    printf '%s\n' "$row" >> "$tmp/repo/$file" 2> /dev/null || break
-    git -C "$tmp/repo" add "$file" README.md 2> /dev/null || true
+    mkdir -p "$(dirname "$tmp/repo/$relpath")" 2> /dev/null || break
+    touch "$tmp/repo/$relpath" 2> /dev/null || break
+
+    # Only the lines the branch does not already carry. Health lines are
+    # pushed after every append, so each push re-offers everything written so
+    # far; without this the raw log grows quadratically in duplicates.
+    local fresh="$tmp/fresh" grc=0
+    grep -F -x -v -f "$tmp/repo/$relpath" "$payload" > "$fresh" 2> /dev/null || grc=$?
+    # Exit 1 is "no fresh lines", a valid answer. Above 1 is grep itself
+    # failing, and dropping the payload there would be silent data loss —
+    # offer everything and let the next dedupe sort it out.
+    if [ "$grc" -gt 1 ]; then
+      cp "$payload" "$fresh" 2> /dev/null || break
+    fi
+    if [ ! -s "$fresh" ]; then
+      rm -rf "$tmp"
+      return 0
+    fi
+
+    cat "$fresh" >> "$tmp/repo/$relpath" 2> /dev/null || break
+    git -C "$tmp/repo" add -A 2> /dev/null || true
     git -C "$tmp/repo" -c user.email="${BOUCLE_BOT_EMAIL:-boucle@localhost}" \
       -c user.name="${BOUCLE_BOT_NAME:-boucle}" \
-      commit -q -m "metrics: issue #$iid ($terminal)" 2> /dev/null || break
+      commit -q -m "$msg" 2> /dev/null || break
 
     if git -C "$tmp/repo" push -q origin "$branch" 2> /dev/null; then
-      echo "[boucle:metrics] published issue #$iid ($terminal) to $branch:$file" >&2
       rm -rf "$tmp"
       return 0
     fi
@@ -1023,7 +1099,61 @@ boucle_metrics_publish() {
   done
 
   rm -rf "$tmp"
-  echo "[boucle:metrics] WARN: could not publish metrics for issue #$iid — the row is lost, the loop is not" >&2
+  return 1
+}
+
+# boucle_metrics_sync_health <iid>
+#
+# Push the local health.jsonl for <iid> to <metrics branch>:<raw>/<iid>.jsonl.
+# Called after every health append, so the measurement is durable from the
+# moment it exists rather than at a terminal transition that runs in a
+# different container. Silent on the happy path and fail-open throughout:
+# this is instrumentation, it must never be the thing that breaks a loop.
+boucle_metrics_sync_health() {
+  local iid="${1:-}"
+  [ -n "$iid" ] || return 0
+  boucle_metrics_enabled || return 0
+  # Opt out of the per-append push alone, keeping the summary row: a consumer
+  # on a slow forge may not want a network round-trip per agent run.
+  case "$(printf '%s' "${BOUCLE_METRICS_SYNC:-true}" | tr '[:upper:]' '[:lower:]')" in
+    false | 0 | no | off) return 0 ;;
+  esac
+  local health="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
+  [ -s "$health" ] || return 0
+  boucle_metrics_git_append "$BOUCLE_METRICS_RAW_DIR/${iid}.jsonl" "$health" \
+    "metrics: raw health for issue #$iid" > /dev/null 2>&1 || true
+  return 0
+}
+
+# boucle_metrics_hydrate_health <iid>
+#
+# Print the path to a health.jsonl for <iid>, preferring the local file and
+# falling back to the copy on the metrics branch. Prints nothing when neither
+# exists — the callers already treat "no health" as "no row", which is the
+# correct answer for an issue that never ran an agent.
+boucle_metrics_hydrate_health() {
+  local iid="${1:-}"
+  [ -n "$iid" ] || return 0
+  local health="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
+  if [ -s "$health" ]; then
+    printf '%s\n' "$health"
+    return 0
+  fi
+  boucle_metrics_enabled || return 0
+
+  local origin tmp
+  origin=$(git remote get-url origin 2> /dev/null || echo "")
+  [ -n "$origin" ] || return 0
+  tmp=$(mktemp -d 2> /dev/null) || return 0
+  if git -C "$tmp" init -q 2> /dev/null \
+    && git -C "$tmp" remote add origin "$origin" 2> /dev/null \
+    && git -C "$tmp" fetch -q --depth 1 origin "$BOUCLE_METRICS_BRANCH" 2> /dev/null \
+    && git -C "$tmp" checkout -q FETCH_HEAD 2> /dev/null \
+    && [ -s "$tmp/$BOUCLE_METRICS_RAW_DIR/${iid}.jsonl" ]; then
+    printf '%s\n' "$tmp/$BOUCLE_METRICS_RAW_DIR/${iid}.jsonl"
+    return 0
+  fi
+  rm -rf "$tmp"
   return 0
 }
 
