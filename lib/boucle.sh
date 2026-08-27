@@ -1015,46 +1015,78 @@ boucle_metrics_publish() {
 # is on the branch (including "it was already there"); non-zero means it is
 # not.
 #
-# Read-modify-append against the remote in a scratch worktree, because the
-# branch is shared by every issue in the project and two jobs can finish at
-# the same moment. A push race loses data silently, so retry on rejection.
+# Built on plumbing inside the EXISTING repository rather than a scratch
+# clone, for one reason that cost a full loop to find: a `git init` in a temp
+# directory inherits none of the checkout's credentials. On a CI runner the
+# token lives in the working repo's `http.<host>.extraheader`, so a scratch
+# repo's push is unauthenticated and fails — silently, when the caller has
+# redirected stderr. Using the working repo's own remote means the push is
+# authenticated exactly like every other push the job makes.
+#
+# hash-object / update-index / write-tree / commit-tree / push, with a
+# private GIT_INDEX_FILE: HEAD, the index and the working tree are never
+# touched, so this is safe to call from the middle of any role.
+#
+# The branch is shared by every issue in the project and two jobs can finish
+# at the same moment. A push race loses data silently, so retry on rejection.
 boucle_metrics_git_append() {
   local relpath="${1:-}" src="${2:-}" msg="${3:-metrics}"
+  local branch="$BOUCLE_METRICS_BRANCH"
   [ -n "$relpath" ] || return 1
+  git rev-parse --git-dir > /dev/null 2>&1 || return 1
+  git remote get-url origin > /dev/null 2>&1 || return 1
 
-  local tmp payload
+  local tmp
   tmp=$(mktemp -d 2> /dev/null) || return 1
-  payload="$tmp/payload"
-  if ! cat "$src" > "$payload" 2> /dev/null; then
+  if ! cat "$src" > "$tmp/payload" 2> /dev/null; then
     rm -rf "$tmp"
     return 1
   fi
-  if [ ! -s "$payload" ]; then
+  if [ ! -s "$tmp/payload" ]; then
     rm -rf "$tmp"
     return 0
   fi
 
-  local origin branch="$BOUCLE_METRICS_BRANCH"
-  origin=$(git remote get-url origin 2> /dev/null || echo "")
-  if [ -z "$origin" ]; then
-    rm -rf "$tmp"
-    return 1
-  fi
-
-  local attempt
+  local attempt base existing fresh grc blob tree commit idx rc=1
   for attempt in 1 2 3; do
-    rm -rf "${tmp:?}/repo"
-    mkdir -p "$tmp/repo" || break
-    git -C "$tmp/repo" init -q 2> /dev/null || break
-    git -C "$tmp/repo" remote add origin "$origin" 2> /dev/null || true
+    base=""
+    existing="$tmp/existing"
+    : > "$existing"
+    if git fetch -q --depth 1 origin "$branch" 2> /dev/null; then
+      base=$(git rev-parse FETCH_HEAD 2> /dev/null || echo "")
+      git cat-file -p "$base:$relpath" > "$existing" 2> /dev/null || : > "$existing"
+    fi
 
-    if git -C "$tmp/repo" fetch -q --depth 1 origin "$branch" 2> /dev/null; then
-      git -C "$tmp/repo" checkout -q FETCH_HEAD 2> /dev/null || true
-      git -C "$tmp/repo" checkout -q -B "$branch" 2> /dev/null || true
-    else
-      # First write ever: an ORPHAN branch, so the measurement log shares no
-      # history with the consumer's code and can never enter it.
-      git -C "$tmp/repo" checkout -q --orphan "$branch" 2> /dev/null || true
+    # Only the lines the branch does not already carry. Health lines are
+    # pushed after every append, so each push re-offers everything written so
+    # far; without this the raw log grows quadratically.
+    fresh="$tmp/fresh"
+    grc=0
+    grep -F -x -v -f "$existing" "$tmp/payload" > "$fresh" 2> /dev/null || grc=$?
+    # Exit 1 is "no fresh lines", a valid answer. Above 1 is grep itself
+    # failing, and dropping the payload there would be silent data loss —
+    # offer everything and let the next dedupe sort it out.
+    if [ "$grc" -gt 1 ]; then
+      cp "$tmp/payload" "$fresh" 2> /dev/null || break
+    fi
+    if [ ! -s "$fresh" ]; then
+      rm -rf "$tmp"
+      return 0
+    fi
+    cat "$existing" "$fresh" > "$tmp/merged" 2> /dev/null || break
+
+    idx="$tmp/index"
+    rm -f "$idx"
+    if [ -n "$base" ]; then
+      GIT_INDEX_FILE="$idx" git read-tree "$base" 2> /dev/null || rm -f "$idx"
+    fi
+    blob=$(git hash-object -w "$tmp/merged" 2> /dev/null) || break
+    GIT_INDEX_FILE="$idx" git update-index --add \
+      --cacheinfo "100644,$blob,$relpath" 2> /dev/null || break
+
+    # First write ever: an ORPHAN commit, so the measurement log shares no
+    # history with the consumer's code and can never enter it.
+    if [ -z "$base" ]; then
       printf '%s\n' \
         "# boucle metrics" "" \
         "Append-only measurement log." "" \
@@ -1063,43 +1095,34 @@ boucle_metrics_git_append() {
         "  lines that row was computed from, pushed as they are written so" \
         "  they outlive the ephemeral job that produced them." "" \
         "Read with \`bin/skills-stats\`. Safe to delete: it is measurement," \
-        "never decision state." > "$tmp/repo/README.md" 2> /dev/null || true
+        "never decision state." > "$tmp/readme" 2> /dev/null || true
+      blob=$(git hash-object -w "$tmp/readme" 2> /dev/null) || true
+      [ -n "$blob" ] && GIT_INDEX_FILE="$idx" git update-index --add \
+        --cacheinfo "100644,$blob,README.md" 2> /dev/null || true
     fi
 
-    mkdir -p "$(dirname "$tmp/repo/$relpath")" 2> /dev/null || break
-    touch "$tmp/repo/$relpath" 2> /dev/null || break
-
-    # Only the lines the branch does not already carry. Health lines are
-    # pushed after every append, so each push re-offers everything written so
-    # far; without this the raw log grows quadratically in duplicates.
-    local fresh="$tmp/fresh" grc=0
-    grep -F -x -v -f "$tmp/repo/$relpath" "$payload" > "$fresh" 2> /dev/null || grc=$?
-    # Exit 1 is "no fresh lines", a valid answer. Above 1 is grep itself
-    # failing, and dropping the payload there would be silent data loss —
-    # offer everything and let the next dedupe sort it out.
-    if [ "$grc" -gt 1 ]; then
-      cp "$payload" "$fresh" 2> /dev/null || break
+    tree=$(GIT_INDEX_FILE="$idx" git write-tree 2> /dev/null) || break
+    [ -n "$tree" ] || break
+    if [ -n "$base" ]; then
+      commit=$(git -c "user.email=${BOUCLE_BOT_EMAIL:-boucle@localhost}" \
+        -c "user.name=${BOUCLE_BOT_NAME:-boucle}" \
+        commit-tree "$tree" -p "$base" -m "$msg" 2> /dev/null) || break
+    else
+      commit=$(git -c "user.email=${BOUCLE_BOT_EMAIL:-boucle@localhost}" \
+        -c "user.name=${BOUCLE_BOT_NAME:-boucle}" \
+        commit-tree "$tree" -m "$msg" 2> /dev/null) || break
     fi
-    if [ ! -s "$fresh" ]; then
-      rm -rf "$tmp"
-      return 0
-    fi
+    [ -n "$commit" ] || break
 
-    cat "$fresh" >> "$tmp/repo/$relpath" 2> /dev/null || break
-    git -C "$tmp/repo" add -A 2> /dev/null || true
-    git -C "$tmp/repo" -c user.email="${BOUCLE_BOT_EMAIL:-boucle@localhost}" \
-      -c user.name="${BOUCLE_BOT_NAME:-boucle}" \
-      commit -q -m "$msg" 2> /dev/null || break
-
-    if git -C "$tmp/repo" push -q origin "$branch" 2> /dev/null; then
-      rm -rf "$tmp"
-      return 0
+    if git push -q origin "$commit:refs/heads/$branch" 2> /dev/null; then
+      rc=0
+      break
     fi
     echo "[boucle:metrics] push to $branch rejected (attempt $attempt) — refetching" >&2
   done
 
   rm -rf "$tmp"
-  return 1
+  return "$rc"
 }
 
 # boucle_metrics_sync_health <iid>
@@ -1107,8 +1130,14 @@ boucle_metrics_git_append() {
 # Push the local health.jsonl for <iid> to <metrics branch>:<raw>/<iid>.jsonl.
 # Called after every health append, so the measurement is durable from the
 # moment it exists rather than at a terminal transition that runs in a
-# different container. Silent on the happy path and fail-open throughout:
-# this is instrumentation, it must never be the thing that breaks a loop.
+# different container.
+#
+# Fail-open — this is instrumentation, it must never break a loop — but NOT
+# silent. The first version swallowed stderr, and when the push turned out to
+# be unauthenticated there was nothing in any log to say so: the branch was
+# simply never created, and the only symptom was a metric that did not exist.
+# A failure that says nothing is the failure mode this whole measurement was
+# built to catch.
 boucle_metrics_sync_health() {
   local iid="${1:-}"
   [ -n "$iid" ] || return 0
@@ -1120,8 +1149,10 @@ boucle_metrics_sync_health() {
   esac
   local health="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
   [ -s "$health" ] || return 0
-  boucle_metrics_git_append "$BOUCLE_METRICS_RAW_DIR/${iid}.jsonl" "$health" \
-    "metrics: raw health for issue #$iid" > /dev/null 2>&1 || true
+  if ! boucle_metrics_git_append "$BOUCLE_METRICS_RAW_DIR/${iid}.jsonl" "$health" \
+    "metrics: raw health for issue #$iid"; then
+    echo "[boucle:metrics] WARN: could not sync raw health for issue #$iid to $BOUCLE_METRICS_BRANCH — the loop is unaffected, the measurement is not durable for this run" >&2
+  fi
   return 0
 }
 
@@ -1131,6 +1162,10 @@ boucle_metrics_sync_health() {
 # falling back to the copy on the metrics branch. Prints nothing when neither
 # exists — the callers already treat "no health" as "no row", which is the
 # correct answer for an issue that never ran an agent.
+#
+# Reads through the working repo's own remote, for the same credential reason
+# boucle_metrics_git_append does: a scratch clone cannot authenticate against
+# a private repository.
 boucle_metrics_hydrate_health() {
   local iid="${1:-}"
   [ -n "$iid" ] || return 0
@@ -1140,17 +1175,17 @@ boucle_metrics_hydrate_health() {
     return 0
   fi
   boucle_metrics_enabled || return 0
+  git rev-parse --git-dir > /dev/null 2>&1 || return 0
+  git remote get-url origin > /dev/null 2>&1 || return 0
 
-  local origin tmp
-  origin=$(git remote get-url origin 2> /dev/null || echo "")
-  [ -n "$origin" ] || return 0
+  local tmp out
   tmp=$(mktemp -d 2> /dev/null) || return 0
-  if git -C "$tmp" init -q 2> /dev/null \
-    && git -C "$tmp" remote add origin "$origin" 2> /dev/null \
-    && git -C "$tmp" fetch -q --depth 1 origin "$BOUCLE_METRICS_BRANCH" 2> /dev/null \
-    && git -C "$tmp" checkout -q FETCH_HEAD 2> /dev/null \
-    && [ -s "$tmp/$BOUCLE_METRICS_RAW_DIR/${iid}.jsonl" ]; then
-    printf '%s\n' "$tmp/$BOUCLE_METRICS_RAW_DIR/${iid}.jsonl"
+  out="$tmp/health.jsonl"
+  if git fetch -q --depth 1 origin "$BOUCLE_METRICS_BRANCH" 2> /dev/null \
+    && git cat-file -p "FETCH_HEAD:$BOUCLE_METRICS_RAW_DIR/${iid}.jsonl" \
+      > "$out" 2> /dev/null \
+    && [ -s "$out" ]; then
+    printf '%s\n' "$out"
     return 0
   fi
   rm -rf "$tmp"
