@@ -450,57 +450,63 @@ upstream (the #54 flywheel), not a hard issue.
 
 ## 7. Priorisation — impact vs cost
 
-§4 ranks by strength of argument. This ranks by what to build first. Ten
+§4 ranks by strength of argument. This ranks by what to build first. Eleven
 atomic, separately shippable items; **S/M/L is implementation cost**, and the
-touch points are named so the estimate is checkable.
+touch points are named so every estimate is checkable.
 
-| # | Item | Problem class | Impact | Cost | Touch points |
+|  | Cost S | Cost M | Cost L |
+| --- | --- | --- | --- |
+| **High impact** | A6 | B2, C1 | — |
+| **Medium impact** | A1, A2, A3, A4 | B1 | — |
+| **Low / conditional** | A5 | D1 (unknown) | C2 (conditional) |
+
+### Batch 1 — measure and unblock (all S, ship together)
+
+| # | Item | Problem class | Impact | What it means | Touch points |
 | --- | --- | --- | --- | --- | --- |
-| **A1** | `failure_side: harness \| model` on the health row + diagnostic | Observability | **Medium** | **S** | `lib/boucle.sh:608` (one field), `:995` (one variable per `case` branch) |
-| **A2** | Count `swarm` spawns per run | Observability | **Medium** (unblocks D1) | **S** | Mirror `extract_skills_used` / `record_skills_used`, `bin/jc:2202–2240` |
-| **A3** | Read the `prompt_chars` already collected; set a default ceiling | Context budget | **Medium** (decides C2) | **S** | Nothing to write — the field exists on every health row |
-| **A4** | Verify `cost.json` counts swarm children | Accounting | **Medium**, **High** if broken | **S** to check | `bin/jc:2141`; the fix depends on what jcode reports |
-| **A5** | Name the remainder under the lessons block (`bin/lessons --grep`) | Context budget | **Low** | **S** | `bin/jc:1368` + a new ~40-line script |
-| **B1** | `BOUCLE_MAX_ISSUE_COST` / `_TOKENS` + `budget-exhausted` class | Control / termination | **Medium** | **M** | Stage entry in `lib/boucle-ci/*.sh`, `boucle_escalation_diagnostic` |
-| **B2** | Emit a refinement candidate at `boucle:done` | Learning | **High** | **M** | `bin/jc:1342` (the candidate path exists; it is the trigger that is wrong) |
-| **C1** | A consumer-scoped `LESSONS.yml` | Learning / retention | **Highest** | **M** | Merge instead of fallback at `bin/jc:1368`; drop `LESSONS.yml` from the symlink loops at `bin/jc:707`, `bin/update:331`, `bin/setup:588`; `--against` dedupe in `bin/check-lessons`; candidate routing; a fifth admission question |
-| **C2** | `[boucle:digest]` instead of the 120-char rung | Context budget | **Conditional** on A3 | **L** | `bin/jc` trimming ladder + an extra cheap-model call + retrieval pointer |
-| **D1** | Reusable subagent specifications | Coordination | **Unknown** | **M** | Blocked by A2 — do not build before it answers |
+| **A1** | Label the failing side | Observability | Medium | When the loop gives up, say whether the **machine** stopped (quota, git conflict, step cap) or the **model** failed. Different action each time | `lib/boucle.sh:608` (one field), `:995` (one variable per `case` branch) |
+| **A2** | Count `swarm` spawns | Observability | Medium | The worker is told to fan out into parallel sub-agents. Nobody knows whether it ever does | Mirror `extract_skills_used` / `record_skills_used`, `bin/jc:2202–2240` |
+| **A3** | Read the `prompt_chars` already collected | Context budget | Medium | Every run already records how much text the agent received. Nobody has looked. Decides whether C2 is worth building | Nothing to write — the field is on every health row |
+| **A4** | Check the sub-agent bill | Accounting | Medium (High if broken) | Verify `cost.json` counts tokens spent by swarm children, or the per-feature cost is understated where spend is highest | `bin/jc:2141`; the fix depends on what jcode reports |
+| **A5** | Name the remainder under the lessons block | Context budget | Low | The agent gets 80 lines out of 107 lessons and is told not to re-read the file. Tell it what it is missing and how to fetch it | `bin/jc:1368` + a ~40-line `bin/lessons` |
+| **A6** | Merge the two `LESSONS.yml` instead of falling back | Learning / retention | **High** | Today the first file that exists wins: a consumer that writes its own lessons **silently loses all 107 engine ones**. Latent bug on its own, and the prerequisite for C1 | `bin/jc:1368–1382`, plus a `readlink -f` guard for dogfood (`ENGINE_DIR="."`) |
 
-**Read the matrix in four quadrants.**
+### Batch 2 — the real work (M)
 
-- **Do now (high value / S).** A1–A4. All four are measurement or labelling,
-  none changes agent behaviour, and three of them *decide* a later item —
-  which is boucle's own house rule (LOOP.md §Cost accounting: "measure first,
-  cap second"). A5 is nearly free and belongs in the same batch.
-- **Do next (M).** B2 before B1. B2 corrects an **active harm** — the
-  distillation pool is 100% failure-derived, and failure-only pools are
-  measured producing artifacts *worse than no artifact* — whereas B1 adds a
-  guard that protects spend without touching quality.
-- **The one real build (M).** C1. It is the only item that attacks the
-  `setup_fail` class (5.3% → 0.2%, ~25× the aggregate effect) and the only
-  one that **compounds**: every issue after the first in a given repository
-  benefits, so its value grows with consumer age while every other item's is
-  flat. Ship it after A1–A4 and B2, never before — B2 is what keeps its
-  input pool from being failure-only, and C1 without B2 would persist the
-  same biased distillate, per-repo this time.
-- **Condition or defer.** C2 only if A3 shows consumers running near a
-  ceiling — `BOUCLE_MAX_PROMPT_CHARS` defaults to `0`, so the digest fires
-  for nobody until someone opts in. D1 only if A2 shows `swarm` ever fires:
-  "many harness capabilities remain underused because current models were
-  not trained to operate them" is the paper's own conclusion, and boucle has
-  0 measurements either way.
+| # | Item | Problem class | Impact | What it means | Touch points |
+| --- | --- | --- | --- | --- | --- |
+| **B2** | Emit a refinement candidate at `boucle:done` | Learning | **High** | Boucle only learns a lesson when it **fails**. Everything it knows was distilled from failures — measured as worse than distilling nothing. Learn from successful issues too | `bin/jc:1342` — the candidate path exists, the trigger is what is wrong |
+| **C1** | A consumer-scoped `LESSONS.yml` | Learning / retention | **Highest** | Boucle remembers nothing about *your* project: every issue re-discovers the same trap. Give the repo its own lesson file, written by the worker, reviewed in the MR, revertible | Drop `LESSONS.yml` from the symlink loops (`bin/jc:707`, `bin/update:331`, `bin/setup:588`); seed + migrate in `bin/setup` / `bin/update`; `--against` dedupe in `bin/check-lessons`; candidate routing; the fifth admission question in `AGENTS.md` |
+| **B1** | Cap the budget | Control / cost | Medium | Boucle counts money but never stops for it — only step and iteration caps exist. Add "past X, stop and call me", as a harness-side stop, never a pass | Stage entry in `lib/boucle-ci/*.sh`; `budget-exhausted` class in `boucle_escalation_diagnostic` |
 
-**Sequencing constraint.** C1's ordering rule from §3 — engine lessons
-first, local second, engine wins on conflict — and the `--against` dedupe
-MUST land with the first line of C1, not after. They are what keep a local
-entry from quietly relaxing an engine invariant.
+### Batch 3 — conditional, do not start yet
 
-**Why C1 is M, not L.** Reusing the lesson contract — same filename, same
-format, scope carried by location — means the validator, the injection path
-and the candidate pipeline all already exist. The build is a merge instead
-of a fallback, three symlink lists to shorten, and a dedupe flag. Not a new
-subsystem.
+| # | Item | Problem class | Impact | What it means | Gate |
+| --- | --- | --- | --- | --- | --- |
+| **C2** | `[boucle:digest]` instead of the 120-char rung | Context budget | Conditional | When a thread gets long, boucle truncates old bot notes to a headline — information gone, token still paid. Summarise instead, and keep the original addressable | **A3**: `BOUCLE_MAX_PROMPT_CHARS` is `0` by default, so the trimmer fires for nobody until a consumer opts in |
+| **D1** | Reusable subagent specifications | Coordination | Unknown | Reusable briefs for parallel sub-agents instead of one improvised per run | **A2**: 0 measurements either way, and the paper's own conclusion is that untrained-for capabilities go unused |
+
+### Sequencing
+
+| Rule | Why |
+| --- | --- |
+| Batch 1 before everything | Pure measurement and labelling: no agent behaviour changes, no risk, and A3/A4/A2 *decide* three later items. Boucle's own rule — "measure first, cap second" |
+| A6 before C1 | Without the merge, a consumer that starts writing lessons loses the engine's 107 |
+| B2 before C1 | C1 without B2 persists the same failure-only distillate, per repo this time |
+| B1 after A4 | A budget cap that cannot see sub-agent spend leaks exactly where spend is highest |
+| C2 only if A3 says so | Nobody is running near a ceiling today |
+| D1 only if A2 says so | Do not build for a feature that may never fire |
+
+**Why C1 is the one to protect.** It is the only item attacking the
+`setup_fail` class (5.3% → 0.2%, ~25× the aggregate effect), and the only one
+that **compounds**: every issue after the first in a given repository
+benefits, so its value grows with consumer age while every other item's stays
+flat.
+
+**Why C1 is M and not L.** Reusing the lesson contract — same filename, scope
+carried by location — means the format, the validator, the injection path and
+the candidate pipeline all already exist. What is left is a merge instead of
+a fallback, three symlink lists to shorten, and a dedupe flag.
 
 ## 8. Reproducing the boucle-side numbers
 
