@@ -625,6 +625,61 @@ boucle_health_outcome() {
     >> "$file" 2> /dev/null || true
 }
 
+# ── Merge-gate approval ───────────────────────────────────────────────
+#
+# ONE definition of "approved", because there were two and they disagreed.
+#
+# dispatch.sh accepts the magic word: a human replying `approved` on the PR
+# moves the issue to boucle:merging and chains the merger. That contract
+# exists because GitHub emoji reactions have NO webhook (LESSONS.yml #85,
+# #89), and it is NOT gated on mono-user — it fires on the boucle:approval
+# label alone.
+#
+# doctor.sh then re-checked the same question with forge_mr_approvals, which
+# counts only NATIVE reviews (`state == "APPROVED"`). A comment produces
+# none, so every issue that sat at boucle:merging long enough for a doctor
+# sweep was escalated with "no longer approved" — wording that implies an
+# approval was withdrawn when none ever existed on that path.
+#
+# On a mono-user install the two can never agree: the PR author and the
+# approver are the same account, and GitHub refuses to let anyone approve
+# their own pull request. The native check is not merely stricter there, it
+# is unsatisfiable — so the comment path is the only one, and the doctor
+# rejected it.
+#
+# Callers must use this rather than calling forge_mr_approvals directly.
+# The emoji signal stays in doctor.sh (it needs the approval-request note),
+# so a caller that wants it ORs it with this.
+
+# boucle_mr_is_approved <mr_iid>
+#   Exit 0 when the merge gate is satisfied, non-zero otherwise.
+boucle_mr_is_approved() {
+  local mr_iid="${1:-}"
+  [ -n "$mr_iid" ] || return 1
+
+  # 1. Native review approval (multi-user installs, or a second reviewer).
+  [ "$(forge_mr_approvals "$mr_iid" 2> /dev/null)" = "true" ] && return 0
+
+  command -v jq > /dev/null 2>&1 || return 1
+
+  # 2. The magic word, matched exactly as dispatch matches it: the FIRST
+  #    line of the comment, trimmed, case-insensitively equal to "approved".
+  #    Anything else at boucle:approval is feedback, not an approval.
+  #
+  #    Humans are told from the bot by the ABSENCE of the agent marker, not
+  #    by actor identity — SKILL.md invariant I7, and the only rule that
+  #    holds in mono-user mode where the bot posts as the human's account.
+  local marker="${BOUCLE_AGENT_MARKER:-<!-- boucle:agent -->}"
+  forge_mr_notes "$mr_iid" 2> /dev/null | jq -e --arg m "$marker" '
+        [.[]
+          | select((.system // false) | not)
+          | select((.body // "") | contains($m) | not)
+          | ((.body // "") | split("\n")[0] | gsub("^\\s+|\\s+$"; "") | ascii_downcase == "approved")]
+        | any' > /dev/null 2>&1 && return 0
+
+  return 1
+}
+
 # ── Skill-effectiveness measurement (docs/skills-audit.md §03) ────────
 #
 # Boucle ships 62 skills, asks every agent to load them, and until now could
