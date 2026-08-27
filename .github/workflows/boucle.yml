@@ -484,13 +484,16 @@ jobs:
           path: |
             .boucle/**/agent-output.log
             .boucle-state/**/agent-output.log
-            # jcode session files for interactive takeover (#54 item 2).
             .boucle-state/**/session/
-            # Measurement files (docs/skills-audit.md §03). The durable copy
-            # is the metrics branch; these are the per-run detail behind it.
             .boucle-state/**/health.jsonl
             .boucle-state/**/cost.json
             .boucle-state/**/skills-used.json
+          # .boucle-state/ is a DOTTED directory, and upload-artifact v4
+          # defaults include-hidden-files to false — so every path above
+          # matched nothing and no artifact was ever produced, however
+          # correct the patterns looked. The agent transcript this step is
+          # named for has been silently absent all along.
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
 
@@ -621,13 +624,16 @@ jobs:
           path: |
             .boucle/**/agent-output.log
             .boucle-state/**/agent-output.log
-            # jcode session files for interactive takeover (#54 item 2).
             .boucle-state/**/session/
-            # Measurement files (docs/skills-audit.md §03). The durable copy
-            # is the metrics branch; these are the per-run detail behind it.
             .boucle-state/**/health.jsonl
             .boucle-state/**/cost.json
             .boucle-state/**/skills-used.json
+          # .boucle-state/ is a DOTTED directory, and upload-artifact v4
+          # defaults include-hidden-files to false — so every path above
+          # matched nothing and no artifact was ever produced, however
+          # correct the patterns looked. The agent transcript this step is
+          # named for has been silently absent all along.
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
       - name: Save boucle state cache
@@ -734,13 +740,16 @@ jobs:
           path: |
             .boucle/**/agent-output.log
             .boucle-state/**/agent-output.log
-            # jcode session files for interactive takeover (#54 item 2).
             .boucle-state/**/session/
-            # Measurement files (docs/skills-audit.md §03). The durable copy
-            # is the metrics branch; these are the per-run detail behind it.
             .boucle-state/**/health.jsonl
             .boucle-state/**/cost.json
             .boucle-state/**/skills-used.json
+          # .boucle-state/ is a DOTTED directory, and upload-artifact v4
+          # defaults include-hidden-files to false — so every path above
+          # matched nothing and no artifact was ever produced, however
+          # correct the patterns looked. The agent transcript this step is
+          # named for has been silently absent all along.
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
 
@@ -1158,13 +1167,16 @@ jobs:
           path: |
             .boucle/**/agent-output.log
             .boucle-state/**/agent-output.log
-            # jcode session files for interactive takeover (#54 item 2).
             .boucle-state/**/session/
-            # Measurement files (docs/skills-audit.md §03). The durable copy
-            # is the metrics branch; these are the per-run detail behind it.
             .boucle-state/**/health.jsonl
             .boucle-state/**/cost.json
             .boucle-state/**/skills-used.json
+          # .boucle-state/ is a DOTTED directory, and upload-artifact v4
+          # defaults include-hidden-files to false — so every path above
+          # matched nothing and no artifact was ever produced, however
+          # correct the patterns looked. The agent transcript this step is
+          # named for has been silently absent all along.
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
 

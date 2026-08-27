@@ -506,3 +506,82 @@ remote_file() {
   run boucle_metrics_git_append "metrics.jsonl" "$TMP/line" "msg"
   assert_failure
 }
+
+# ── The credential bug, pinned ───────────────────────────────────────────
+#
+# The first implementation did the read-modify-append in a scratch `git init`
+# under /tmp. That inherits none of the checkout's configuration — on a CI
+# runner the token lives in the working repo's `http.<host>.extraheader`, so
+# the scratch repo's push was unauthenticated and failed. The whole suite
+# passed anyway, because a local file:// remote needs no credentials.
+#
+# `insteadOf` reproduces the class faithfully without a network: the remote
+# URL is only resolvable through config that lives in THIS repo. Anything
+# that shells out to a fresh clone cannot reach origin; anything that uses
+# the working repo's own remote can.
+
+metrics_remote_config_only() {
+  git init -q --bare "$TMP/origin.git"
+  git init -q "$TMP/work"
+  git -C "$TMP/work" remote add origin "boucle-test://origin"
+  git -C "$TMP/work" config \
+    "url.$TMP/origin.git.insteadOf" "boucle-test://origin"
+  cd "$TMP/work" || return 1
+}
+
+@test "metrics: the append reaches origin through the working repo's own config" {
+  lib
+  metrics_remote_config_only
+  health_fixture
+  boucle_metrics_sync_health 7
+  run remote_file "raw/7.jsonl"
+  assert_success
+  assert_output --partial '"role":"worker","iteration":1'
+}
+
+@test "metrics: hydrate also reads through the working repo's own config" {
+  lib
+  metrics_remote_config_only
+  health_fixture
+  boucle_metrics_sync_health 7
+  rm -f "$TMP/.boucle-state/7/health.jsonl"
+  run boucle_metrics_hydrate_health 7
+  assert_success
+  assert [ -s "$output" ]
+}
+
+@test "metrics: the append never touches HEAD, the index or the working tree" {
+  lib
+  metrics_remote
+  health_fixture
+  echo 'code' > "$TMP/work/file.txt"
+  git -C "$TMP/work" add file.txt
+  git -C "$TMP/work" -c user.email=t@t -c user.name=t commit -q -m "work"
+  echo 'uncommitted' > "$TMP/work/dirty.txt"
+  local head_before status_before
+  head_before=$(git -C "$TMP/work" rev-parse HEAD)
+  status_before=$(git -C "$TMP/work" status --porcelain)
+
+  boucle_metrics_sync_health 7
+
+  assert_equal "$(git -C "$TMP/work" rev-parse HEAD)" "$head_before"
+  assert_equal "$(git -C "$TMP/work" status --porcelain)" "$status_before"
+  # The metrics branch must not appear as a local branch either.
+  run git -C "$TMP/work" rev-parse --verify --quiet "$BOUCLE_METRICS_BRANCH"
+  assert_failure
+}
+
+@test "metrics: a failed sync SAYS so instead of returning quietly" {
+  # The bug behind the bug: the sync swallowed stderr, so an unauthenticated
+  # push left no trace anywhere. The branch simply never appeared.
+  lib
+  git init -q "$TMP/noremote"
+  cd "$TMP/noremote" || return 1
+  mkdir -p "$TMP/.boucle-state/7"
+  health_fixture
+  # No origin at all — the append cannot succeed.
+  run boucle_metrics_sync_health 7
+  assert_success
+  assert_output --partial "[boucle:metrics] WARN"
+  assert_output --partial "issue #7"
+}

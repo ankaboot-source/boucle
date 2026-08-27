@@ -725,6 +725,16 @@ measurement exists to detect. Each health append is therefore pushed to
 repeated pushes do not grow quadratically), and the summary row hydrates from
 there when the local file is absent.
 
+Both the append and the read go through the **working repository's own
+remote**, using git plumbing (`hash-object` / `update-index` / `write-tree` /
+`commit-tree` / `push`) against a private `GIT_INDEX_FILE`. HEAD, the index
+and the working tree are never touched. The reason is credentials: a
+`git init` in a temp directory inherits none of the checkout's configuration,
+so on a CI runner — where the token lives in the working repo's
+`http.<host>.extraheader` — a scratch clone's push is unauthenticated and
+fails. It failed silently for one full loop before the sync was made to
+report it.
+
 ```bash
 bin/skills-stats                # observed split (confounded, always available)
 bin/skills-stats --experiment   # arm split (causal; needs BOUCLE_EXPERIMENT runs)
