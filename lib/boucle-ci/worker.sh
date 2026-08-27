@@ -314,12 +314,27 @@ EOF
     echo "[boucle] WARN: could not fetch issue #$BOUCLE_ISSUE body — worker will fall back to forge CLI."
   fi
 
+  # Single fetch, consumed twice: the prompt injection (BOUCLE_ISSUE_NOTES)
+  # and the terminal amend-recheck snapshot (BOUCLE_MAX_NOTE_ID). Two calls
+  # would open a window between them where a human comment lands in the
+  # snapshot but not in the prompt (or the reverse).
+  local notes_json
+  notes_json=$(forge_issue_notes "$BOUCLE_ISSUE" 2> /dev/null || echo "[]")
+
   export BOUCLE_ISSUE_NOTES
-  BOUCLE_ISSUE_NOTES=$(forge_issue_notes "$BOUCLE_ISSUE" \
+  BOUCLE_ISSUE_NOTES=$(echo "$notes_json" \
     | jq -r '[.[] | select(.system == false or .system == null) | select((.body // "") | contains("<!-- boucle:state") | not) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | reverse | .[]' 2> /dev/null || echo "")
   if [ -z "$BOUCLE_ISSUE_NOTES" ]; then
     echo "[boucle] INFO: no prior notes for issue #$BOUCLE_ISSUE (first worker run)."
   fi
+
+  # Highest note id at job start — the terminal amend-recheck compares
+  # against this (see the "Direct amend recheck" block near the
+  # boucle:review transition): a NON-boucle note with a higher id at the
+  # end of the run means a human commented mid-flight. 0 = no notes (or
+  # fetch failed), which disables the recheck (fail-open).
+  export BOUCLE_MAX_NOTE_ID
+  BOUCLE_MAX_NOTE_ID=$(echo "$notes_json" | jq -r '[.[].id // 0] | max // 0' 2> /dev/null || echo 0)
 
   # ── Sibling sub-issues (context for the worker) ──────────────────
   export BOUCLE_SIBLINGS
@@ -1030,6 +1045,39 @@ ${screenshot_urls}"
   if echo "$terminal_labels" | tr ',' '\n' | grep -qx "boucle:todo"; then
     echo "[boucle] Amend-in-flight detected: issue #$BOUCLE_ISSUE is at boucle:todo (a human commented during this run). Skipping boucle:review transition — the queued amend-worker will re-run with the comment and transition to review. This run's commits are preserved on branch $BRANCH."
     boucle_health_outcome "$BOUCLE_ISSUE" "worker" "amended-in-flight" "iteration $ITERATION (human comment queued an amend)" || true
+    return 0
+  fi
+
+  # ── Direct amend recheck (defense-in-depth) ────────────────────────
+  # The guard above only fires when the amend-in-flight dispatch (the
+  # boucle:working branch of dispatch.sh) ALREADY ran and set boucle:todo.
+  # That dispatch can lose the race: on GitHub Actions a queued workflow
+  # run is de-duplicated when a newer run enters the same concurrency
+  # group, so the issue_comment dispatch triggered by the human's comment
+  # (still queued — no runner yet) is cancelled by the issues:labeled
+  # webhook of THIS run's own terminal transition. boucle:todo is then
+  # never set, the guard above passes, and the amendment is silently
+  # graded away against the frozen spec (boucle.dev #91: the human said
+  # "wrong SVG, it is card-7", the worker changed card-6, the reviewer
+  # PASSed card-6). Recheck the issue notes directly: if a NON-boucle
+  # note arrived after the job-start snapshot (BOUCLE_MAX_NOTE_ID), treat
+  # it as an amendment — skip the boucle:review transition and
+  # re-trigger the worker, which picks the comment up via
+  # BOUCLE_ISSUE_NOTES. Fail-open: a failed re-fetch proceeds to review —
+  # this is the backup, the dispatch path is the primary mechanism.
+  local new_human_notes=""
+  if [ -n "${BOUCLE_MAX_NOTE_ID:-}" ] && [ "$BOUCLE_MAX_NOTE_ID" != "0" ]; then
+    new_human_notes=$(forge_issue_notes "$BOUCLE_ISSUE" 2> /dev/null \
+      | jq -r --argjson max "$BOUCLE_MAX_NOTE_ID" '[.[] | select(.system == false or .system == null) | select((.id // 0) > $max) | select((.body // "") | contains("<!-- boucle:agent") | not)] | length' 2> /dev/null || echo "")
+  fi
+  case "$new_human_notes" in
+    '' | *[!0-9]*) new_human_notes=0 ;;
+  esac
+  if [ "$new_human_notes" -gt 0 ]; then
+    echo "[boucle] Direct amend recheck: $new_human_notes new human note(s) on issue #$BOUCLE_ISSUE since this run started (snapshot id $BOUCLE_MAX_NOTE_ID). Skipping boucle:review transition and re-triggering the worker as an amend-worker — the queued/comment-triggered dispatch did not get there first. This run's commits are preserved on branch $BRANCH."
+    boucle_health_outcome "$BOUCLE_ISSUE" "worker" "amended-in-flight" "iteration $ITERATION (direct recheck: $new_human_notes new human note(s))" || true
+    set_boucle_label "$BOUCLE_ISSUE" "boucle:todo" "boucle::status::bot"
+    chain_to_role "$BOUCLE_ISSUE" "worker" "BOUCLE_ITERATION=$((ITERATION + 1))"
     return 0
   fi
   set_boucle_label "$BOUCLE_ISSUE" "boucle:review" "boucle::status::bot"
