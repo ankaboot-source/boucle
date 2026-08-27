@@ -80,10 +80,27 @@ The second half is the L3 typology (§2.5), and it is sharper than boucle's:
 > and coordination patterns."
 
 Boucle has **rules** (`LESSONS.yml`, 107 entries) and **programs** (62
-skills). It has **no coordination-pattern store** (P4), and its rules store
-has **only one scope** — the engine's (P1). The *facts* type is deliberately
-declined: boucle routes facts to config and charter instead, and keeps
-class-not-instance for everything it persists. See P1.
+skills). The *facts* type is deliberately declined (P1 routes facts to config
+and charter), and the *coordination-pattern* type is not planned (P4).
+
+But the type inventory is the smaller half. The paper's subject is the verb,
+not the nouns:
+
+> "Self-improvement converts execution evidence into persistent harness state
+> that changes later behavior while model weights remain fixed. **Useful
+> computations become skills**, repeated coordination patterns become
+> subagent specifications, and corrected assumptions become memories or
+> prompt notes." — §2.5
+
+Measured against that sentence, **boucle's loop cannot write to any of its
+own stores.** `LESSONS.yml` is engine-owned and symlinked into the submodule
+(P1); `.jcode/skills/` is engine-owned and symlinked the same way, and no
+agent prompt so much as mentions authoring a skill — all 62 are vendored
+upstream. And the paper's state is CRUD, **delete included**: boucle's
+lessons only ever grow (9 of 107 retired, by hand) while the injection caps
+at ~18 entries. Rules that never retire and procedures that are never
+written are the two halves of continual learning boucle is missing: P7 and
+P8.
 
 ## 2. The mapping
 
@@ -93,6 +110,9 @@ class-not-instance for everything it persists. See P1.
 | Long context stored as a file, searched from the REPL | Note thread trimmed and pushed into the prompt | **Transfers, half** (P3) |
 | `rlm()` async subagents, handle returned immediately | `swarm` in [.jcode/agents/worker.md](../.jcode/agents/worker.md) | **Converged** — but 0 instrumentation (P4) |
 | Subagent **specifications** as typed L3 state | None — swarm prompts improvised per run | **Transfers** (P4) |
+| **"Useful computations become skills"** — the loop authors procedures | 62 skills, **100% vendored**; no agent prompt mentions writing one; `.jcode/skills` is symlinked into the engine submodule | **Transfers** (P7) |
+| Typed state is **CRUD — delete included**; agentic garbage collection | Lessons only grow: 9 of 107 retired, manually; injection caps at ~18 | **Transfers** (P8) |
+| Refinement records **trigger and intended effect** | `git blame` gives who/when, nothing gives *what it was meant to change* | **Transfers** (P8) |
 | Memories = facts, local by default | `LESSONS.yml` is rules, engine-scoped, and unwritable from a consumer | **Scope transfers, type rejected** (P1) |
 | `/refine` over trajectory events, any outcome | Candidate emitted **only at escalation** (`bin/jc:1342`) | **Transfers** (P2) |
 | Versioned refinements, provenance, rollback | `pruned:` / `merged_into:` — manual, no provenance | **Transfers** (P1) |
@@ -447,6 +467,87 @@ makes the whole escalation stream summable the same way, and a consumer
 whose escalations are mostly harness-side has an engine defect to file
 upstream (the #54 flywheel), not a hard issue.
 
+### P7 — Let the loop author a skill
+
+This is the paper's flagship self-improvement move — "**useful computations
+become skills**" — and boucle has **no counterpart at all**. Measured: 62
+skills, 100% vendored from upstream, and the string "skill" appears in the
+four agent prompts only as *load this*, never as *write one*.
+
+**Why a rule cannot do a procedure's job.** `LESSONS.yml` entries are
+one-line `❌` / `✅` pairs — a contract, not a runbook. "Seed the fixture DB,
+then run the e2e suite with `--headed=false`, then reset the volume" is a
+**procedure**; compressing it into a `✅` line either loses the steps or
+turns the lessons file into documentation. [docs/skills-audit.md](skills-audit.md)
+already measured which of the two carries the value:
+`procedural_anchor` **65.7%** against `knowledge_injection` **4.5%**, and the
+one class where skills demonstrably move the number is environment failure
+(`setup_fail` 5.3% → 0.2%). Boucle's learning pipeline currently writes only
+the 4.5% kind.
+
+**The same structural blocker as P1, in a second place.** `.jcode/skills` is
+in the very symlink loop that P1 has to shorten (`bin/jc:707`,
+`bin/update:331`, `bin/setup:588`), so a consumer-authored skill writes into
+the `.boucle/` submodule and evaporates. And `bin/skills-index:52` repeats
+the override bug exactly: `SKILLS_DIR="$BOUCLE_WORKSPACE/.jcode/skills"`,
+falling back to `$BOUCLE_HOME/.jcode/skills` — **first match wins**, so a
+consumer that creates its own skills directory silently loses all 62 engine
+skills from the catalogue. That is A6's twin, and it needs the same fix.
+
+The shape, once the plumbing is merged rather than overridden:
+
+| Aspect | Decision |
+| --- | --- |
+| Where | `.jcode/skills/` at the consumer root as a **real directory**, merged with the engine's in the catalogue, never overriding it |
+| When | The worker proposes a skill when it repeats the same multi-step procedure across issues — the recurrence signal, not a one-off |
+| What | The existing skill format (`SKILL.md` + frontmatter), so `bin/skills-index` and `bin/doctor --audit` validate it unchanged |
+| Gate | Written in the MR like any code; the reviewer reads it; `bin/doctor --audit` already reports a frontmatter/directory name mismatch |
+| Measurement | Free — `skills-used.json` and the `skills` field on the health row already record loads by directory name, so a loop-authored skill is measured exactly like a vendored one |
+
+**Sequence it after P1**, not before: the same symlink and merge work
+unblocks both, and P1's lesson pipeline is the cheaper place to learn whether
+loop-authored state survives review at all.
+
+### P8 — Retire state, not just accumulate it
+
+Prime Agent's supplemental state is CRUD — "entries support create, read,
+update, and **delete**" — and the L2 mechanism has a name, *agentic garbage
+collection*: "the model creates, retains, summarises, or deletes REPL values
+and subagent sessions as the task changes."
+
+Boucle only creates. Measured: 107 lessons, of which **4 `pruned:`** and
+**5 `merged_into:`** — nine retirements, all by hand, over the file's whole
+life. Meanwhile the injection caps the block at 80 lines, which is **~18
+entries**. So 107 entries compete for 18 slots on every run, and the
+selection is a keyword grep against the issue body. Adding P1 and P7 makes
+this worse by construction: more entries, same 18 slots.
+
+**Retirement needs evidence, and the join table already exists.**
+`health.jsonl` carries, on the run record, which skills loaded, which arm the
+issue was assigned and how the run went — that join is exactly what
+[docs/skills-audit.md](skills-audit.md) built it for. What is missing on the
+lessons side is the other half: **which lessons were injected into which
+run**. Today nothing records it, so no lesson can ever be evaluated.
+
+Two steps, and the first is small:
+
+1. **Record what was injected.** Add the matched lesson keys to the health
+   row, next to `skills`. Same field shape, same file, and it turns the
+   lessons block from an unmeasured push into something joinable against the
+   outcome.
+2. **Then retire on evidence.** A lesson injected often and never coinciding
+   with a better outcome is a candidate for `pruned: true` — proposed in an
+   MR, never applied automatically. The existing `pruned:` / `merged_into:`
+   markers are already the delete mechanism; what is missing is the signal
+   that says which entry to point them at.
+
+**Also: record the intended effect.** The paper's refinement "records its
+trigger and intended effect". P1 settles provenance with `git blame`, which
+gives who and when but not *what the entry was supposed to change* — and that
+is precisely the field step 2 needs to judge it against. A `since:` /
+`effect:` key is metadata, outside the `❌`/`✅` contract text, so it does not
+collide with `check-lessons`' ban on incident details inside a lesson.
+
 ## 5. Where boucle is already ahead
 
 - **Reviewed refinement beats local-and-silent.** §3 is the paper's own
@@ -494,16 +595,22 @@ upstream (the #54 flywheel), not a hard issue.
 
 ## 7. The plan — reviewed item by item against the code
 
-§4 ranks by strength of argument. This is the build plan. **Nine items**;
+§4 ranks by strength of argument. This is the build plan. **Twelve items**;
 three of §4's proposals are **not planned** and are listed at the end.
 S/M/L is implementation cost, and every claim below was re-checked against
-the source — two items changed materially in that pass.
+the source.
 
-|  | Cost S | Cost M |
-| --- | --- | --- |
-| **High impact** | A6, A7 | B2, C1 |
-| **Medium impact** | A1, A4 | — |
-| **Low impact** | A2, A3, A5 | — |
+**Three items were added after a review pass** asking why a study of a
+self-improvement harness had produced exactly one learning item. The answer
+was a methodology error: the plan was assembled from boucle's existing seams
+outward, so anything without a seam — a loop that writes a skill, a store
+that retires entries — never got written down. A8, C3 and B3 close that.
+
+|  | Cost S | Cost M | Cost L |
+| --- | --- | --- | --- |
+| **High impact** | A6, A7, A8 | B2, C1, B3 | C3 |
+| **Medium impact** | A1, A4 | — | — |
+| **Low impact** | A2, A3, A5 | — | — |
 
 ### The two that changed on review
 
@@ -533,6 +640,7 @@ answers both directions — and the figure it protects is a public claim
 | --- | --- | --- | --- | --- | --- |
 | **A6** | Merge the two `LESSONS.yml` instead of falling back | Learning / retention | **High** | Today the first file that exists wins, so a consumer writing its own lessons **silently loses all 107 engine ones**. Latent bug, and the prerequisite for C1 | `bin/jc:1368–1382`; add a `readlink -f` guard for dogfood (`ENGINE_DIR="."`, both paths identical) |
 | **A7** | Record the reviewer and e2e verdicts | Observability | **High** | `boucle_health_outcome` documents itself as taking reviewer/e2e `PASS/FAIL/UNCERTAIN` rows; measured, it is called only from `worker.sh` (7×) and `merger.sh` (2×). So `boucle_escalation_diagnostic` reports **0 reviewer FAILs, always** (`lib/boucle.sh:992`). Fixes that, and unblocks B2 | Genuinely one line each: the verdict is already in a shell variable at `reviewer.sh:331–345` and `e2e.sh:187` |
+| **A8** | Merge the skills catalogue instead of overriding it | Learning / retention | **High** | A6's twin. `bin/skills-index:52` takes `$BOUCLE_WORKSPACE/.jcode/skills` and falls back to the engine's — **first match wins**, so a consumer that creates its own skills directory silently loses all 62 engine skills. Same symlink removal, same merge | `bin/skills-index:52–53`; drop `.jcode/skills` from the loops at `bin/jc:707`, `bin/update:331`, `bin/setup:588` |
 | **A1** | Label the failing side | Observability | Medium | When the loop gives up, say whether the **machine** stopped it (quota, git conflict, step cap) or the **model** failed. Different action each time; `step-budget-exhaustion` is harness-side by the paper's definition | `lib/boucle.sh:608` (one field), `:995` (one variable per `case` branch) |
 | **A4** | Check the token sum for double-counting | Accounting | Medium | Verify the summed usage is not counting both per-turn lines and a cumulative total. Protects the cost figure boucle publishes on every MR | `bin/jc:2103`; one run with a swarm spawn, compare against the provider's own reported total |
 | **A5** | Fix the "do NOT re-read the file" clause | Context budget | Low | The agent receives at most **18 of 107** lessons — exactly **5** when nothing matches the issue body — and is told the file is done with. Say "the lessons above", not "the file" | `bin/jc:1368`, one string. No new script: voluntary reads are 0 of 68 |
@@ -545,16 +653,20 @@ answers both directions — and the figure it protects is a public claim
 | --- | --- | --- | --- | --- | --- |
 | **B2** | Emit a candidate on **recovered** runs | Learning | **High** | Boucle only learns when it fails — everything it knows is distilled from failures, measured as worse than distilling nothing. Learn also from an issue that failed, was corrected, then passed. A first-pass success emits nothing | **A7** — without the reviewer verdict on the health row, "recovered from a FAIL" is not computable |
 | **C1** | A consumer-scoped `LESSONS.yml` | Learning / retention | **Highest** | Boucle remembers nothing about *your* project: every issue re-discovers the same trap. The repo gets its own lesson file — same name, same format, scope carried by location — written by the worker, reviewed in the MR, revertible | **A6** (or a consumer loses the engine's 107) and **B2** (or it persists the same failure-only distillate, per repo) |
+| **B3** | Record which lessons were injected | Learning / retention | **High** | Boucle pushes lessons into every prompt and has never recorded *which* — so no lesson can be evaluated, and none has ever been retired on evidence (9 of 107, all by hand). One field next to `skills` on the health row makes the lessons block joinable against the outcome, exactly as skills already are | — (independent; its value grows with C1 and C3) |
+| **C3** | Let the loop author a skill | Learning / retention | **High** | The paper's flagship move — a recurring procedure becomes a reusable skill. Boucle's 62 skills are 100% vendored and no agent prompt mentions writing one. `LESSONS.yml` structurally cannot hold a procedure, and procedures are the 65.7% mode against 4.5% for reference material | **A8**, then **C1** — the same plumbing, and C1 is the cheaper place to learn whether loop-authored state survives review. Cost **L** |
 
 ### Sequence
 
 | Step | Items | Why here |
 | --- | --- | --- |
-| 1 | **A6, A7** | Both fix a live defect and both unblock later work. Nothing depends on them being done together, but neither should wait |
+| 1 | **A6, A7, A8** | All three fix a live defect and unblock later work. A6 and A8 are the same fix in two places — do them together |
 | 2 | A1, A4, A5 | Independent, cheap, no behaviour change |
 | 3 | A2 | Independent; may end in a deletion rather than a build |
 | 4 | **B2** | Needs A7 |
 | 5 | **C1** | Needs A6 and B2 |
+| 6 | **B3** | Independent, but only pays once there is state worth retiring |
+| 7 | **C3** | Needs A8 and the C1 experience |
 | — | A3 | Whenever convenient — no consumer until a context-budget decision comes back |
 
 ### Not planned
