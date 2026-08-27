@@ -1049,3 +1049,11 @@
   - 'DO name the anti-patterns in the prompt with a worked example, not just a rule: the file map (nodes named after the files being edited — the most common wrong diagram), the restated title, and the wrong grammar. #86''s erDiagram and the `flowchart` that should have replaced it sit side by side in `.jcode/agents/triage.md`; BOTH parse, which is the point.'
   - 'DO post the parser''s own message (and the line, counted from the fence) in the re-trigger note — the next triage round and the human both need to see what is broken, not that something is.'
   - 'DO write the grammar traps down where the agent reads them (`templates/diagram-theme.md` § Syntax rules) and verify each one against the parser before documenting it. Gate via `BOUCLE_DIAGRAM_SYNTAX_GATE` (default: true).'
+110:
+  title: A stage that polls for an event a sibling design choice suppresses is dead code
+  ❌:
+  - 'DO NOT let a stage poll for a forge event (push pipeline, webhook) that a sibling design choice ([skip ci] in squash-merged commits) prevents from firing. The poll is dead code — it can never observe the event, so it either loops to timeout or false-positives on a stale run from a previous commit.'
+  - 'DO NOT document a stage''s intent as "builds + deploys" when the implementation only polls. A comment that claims a behavior the code does not implement is worse than no comment — it misleads the next agent into preserving the dead code.'
+  ✅:
+  - 'DO make the stage perform the action it documents. If post-merge "builds + deploys + triggers e2e", post-merge calls the deploy function directly — it does not poll for a separate job that a sibling choice ([skip ci]) prevents from running.'
+  - 'DO verify that a polling loop''s success condition can actually be satisfied given the system''s other design choices. A poll for event X is only valid if some path in the system produces event X.'

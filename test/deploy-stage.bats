@@ -78,10 +78,10 @@ setup() {
 }
 
 @test "the shared deploy stage carries the conditional build, not an unconditional one" {
-  run grep -q 'already populated (build artifact) — skipping build' lib/boucle-ci/deploy.sh
+  run grep -q 'already populated (build artifact) — skipping build' lib/boucle.sh
   assert_success
   # The bare `eval "$BOUCLE_BUILD_CMD"` must be inside the else branch.
-  run awk '/already populated \(build artifact\)/ {seen=1} seen && /eval "\$BOUCLE_BUILD_CMD"/ {print "GUARDED"; exit}' lib/boucle-ci/deploy.sh
+  run awk '/already populated \(build artifact\)/ {seen=1} seen && /eval "\$BOUCLE_BUILD_CMD"/ {print "GUARDED"; exit}' lib/boucle.sh
   assert_output "GUARDED"
 }
 
@@ -128,8 +128,87 @@ setup() {
   # npm run build on a repo with no package.json (the engine repo regression:
   # every push to main failed with ENOENT package.json because the deploy
   # stage ran the default BOUCLE_BUILD_CMD on a shell project).
-  run grep -q 'boucle_is_external_deploy' lib/boucle-ci/deploy.sh
+  run grep -q 'boucle_is_external_deploy' lib/boucle.sh
   assert_success
-  run grep -q 'consumer CI handles deploy, skipping' lib/boucle-ci/deploy.sh
+  run grep -q 'consumer CI handles deploy, skipping' lib/boucle.sh
   assert_success
+}
+
+# ── boucle_do_deploy: the extracted build+deploy core ─────────────────────
+
+@test "boucle_do_deploy returns the URL and does not chain to e2e (cloudflare)" {
+  run bash -c '
+    BOUCLE_DEPLOY_CMD="echo DEPLOYED https://example.com"
+    BOUCLE_DEPLOY_URL_REGEX="https://[a-zA-Z0-9./-]+"
+    BOUCLE_BUILD_CMD="echo BUILD_RAN"
+    BOUCLE_BUILD_OUTPUT=""
+    BOUCLE_DEFAULT_BRANCH=main
+    curl() { echo "200"; }
+    source lib/boucle.sh
+    chain_to_role() { echo "CHAINED:$1:$2"; }
+    out=$(boucle_do_deploy)
+    rc=$?
+    echo "RC=$rc"
+    echo "OUT=$out"
+    [ "$rc" -eq 0 ]
+    [ "$out" = "https://example.com" ]
+  '
+  assert_success
+  assert_output --partial "RC=0"
+  assert_output --partial "OUT=https://example.com"
+  refute_output --partial "CHAINED"
+}
+
+@test "boucle_do_deploy returns empty URL for empty BOUCLE_DEPLOY_CMD (declarative Pages)" {
+  run bash -c '
+    BOUCLE_DEPLOY_CMD=""
+    BOUCLE_BUILD_CMD="echo BUILD_RAN"
+    BOUCLE_BUILD_OUTPUT=""
+    source lib/boucle.sh
+    out=$(boucle_do_deploy)
+    rc=$?
+    echo "RC=$rc"
+    echo "OUT=[$out]"
+    [ "$rc" -eq 0 ]
+    [ -z "$out" ]
+  '
+  assert_success
+  assert_output --partial "RC=0"
+  assert_output --partial "OUT=[]"
+}
+
+@test "boucle_do_deploy returns empty URL in external mode" {
+  run bash -c '
+    BOUCLE_DEPLOY_CMD="echo DEPLOYED https://example.com"
+    BOUCLE_DEPLOY_MODE=external
+    BOUCLE_BUILD_CMD="echo BUILD_RAN"
+    BOUCLE_BUILD_OUTPUT=""
+    source lib/boucle.sh
+    out=$(boucle_do_deploy)
+    rc=$?
+    echo "RC=$rc"
+    echo "OUT=[$out]"
+    [ "$rc" -eq 0 ]
+    [ -z "$out" ]
+  '
+  assert_success
+  assert_output --partial "RC=0"
+  assert_output --partial "OUT=[]"
+}
+
+@test "boucle_do_deploy exits non-zero when deploy fails with no URL" {
+  run bash -c '
+    BOUCLE_DEPLOY_CMD="echo FAILED; exit 1"
+    BOUCLE_DEPLOY_URL_REGEX="https://[a-zA-Z0-9./-]+"
+    BOUCLE_BUILD_CMD="echo BUILD_RAN"
+    BOUCLE_BUILD_OUTPUT=""
+    BOUCLE_DEFAULT_BRANCH=main
+    source lib/boucle.sh
+    boucle_do_deploy
+    rc=$?
+    echo "RC=$rc"
+    [ "$rc" -ne 0 ]
+  '
+  assert_success
+  assert_output --partial "RC=1"
 }
