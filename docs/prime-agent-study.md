@@ -97,7 +97,7 @@ own stores.** `LESSONS.yml` is engine-owned and symlinked into the submodule
 (P1); `.jcode/skills/` is engine-owned and symlinked the same way, and no
 agent prompt so much as mentions authoring a skill — all 62 are vendored
 upstream. And the paper's state is CRUD, **delete included**: boucle's
-lessons only ever grow (9 of 107 retired, by hand) while the injection caps
+lessons only ever grow (7 of 107 retired, by hand) while the injection caps
 at ~18 entries. Rules that never retire and procedures that are never
 written are the two halves of continual learning boucle is missing: P7 and
 P8.
@@ -111,7 +111,7 @@ P8.
 | `rlm()` async subagents, handle returned immediately | `swarm` in [.jcode/agents/worker.md](../.jcode/agents/worker.md) | **Converged** — but 0 instrumentation (P4) |
 | Subagent **specifications** as typed L3 state | None — swarm prompts improvised per run | **Transfers** (P4) |
 | **"Useful computations become skills"** — the loop authors procedures | 62 skills, **100% vendored**; no agent prompt mentions writing one; `.jcode/skills` is symlinked into the engine submodule | **Transfers** (P7) |
-| Typed state is **CRUD — delete included**; agentic garbage collection | Lessons only grow: 9 of 107 retired, manually; injection caps at ~18 | **Transfers** (P8) |
+| Typed state is **CRUD — delete included**; agentic garbage collection | Lessons only grow: 7 of 107 retired, manually; injection caps at ~18 | **Transfers** (P8) |
 | Refinement records **trigger and intended effect** | `git blame` gives who/when, nothing gives *what it was meant to change* | **Transfers** (P8) |
 | Memories = facts, local by default | `LESSONS.yml` is rules, engine-scoped, and unwritable from a consumer | **Scope transfers, type rejected** (P1) |
 | `/refine` over trajectory events, any outcome | Candidate emitted **only at escalation** (`bin/jc:1342`) | **Transfers** (P2) |
@@ -417,8 +417,14 @@ block ends with:
 Measured, that instruction is false in the general case. The agent receives
 **at most 18 of 107** lessons — the keyword-matched block is capped at 80
 lines and a lesson averages 9.5 — and when no keyword matches the issue body
-it receives exactly **5** (the default set: #1, #2, #5, #6, #99). The
-sentence tells it the remaining 89 to 102 do not exist. An agent that hits,
+it receives the default set (#1, #2, #5, #6, #99). The sentence tells it the
+remaining 89 to 102 do not exist.
+
+**And the default path was worse than "five lessons".** Implementing this
+surfaced a defect in it: the awk reset its keep flag on the header line, so
+no body was ever accumulated and the injection was **five bare numbers, 21
+bytes** — no titles, no `❌`/`✅` — under a heading calling them mandatory
+operating principles. Fixed alongside; the same block is now 3,879 bytes. An agent that hits,
 mid-run, a problem unrelated to its issue title has been instructed that the
 lessons are done with.
 
@@ -515,9 +521,9 @@ update, and **delete**" — and the L2 mechanism has a name, *agentic garbage
 collection*: "the model creates, retains, summarises, or deletes REPL values
 and subagent sessions as the task changes."
 
-Boucle only creates. Measured: 107 lessons, of which **4 `pruned:`** and
-**5 `merged_into:`** — nine retirements, all by hand, over the file's whole
-life. Meanwhile the injection caps the block at 80 lines, which is **~18
+Boucle only creates. Measured (`bin/check-lessons LESSONS.yml`): 107 lessons,
+100 active, **3 pruned** and **4 merged** — seven retirements, all by hand,
+over the file's whole life. Meanwhile the injection caps the block at 80 lines, which is **~18
 entries**. So 107 entries compete for 18 slots on every run, and the
 selection is a keyword grep against the issue body. Adding P1 and P7 makes
 this worse by construction: more entries, same 18 slots.
@@ -594,6 +600,24 @@ collide with `check-lessons`' ban on incident details inside a lesson.
   default — §3.
 
 ## 7. The plan — reviewed item by item against the code
+
+> **Status (implemented).** A1, A2, A3, A5, A6, A7, B2 and C1 are built,
+> tested and merged into this branch: the two `LESSONS.yml` are merged rather
+> than overridden, `LESSONS.yml` has left the symlink loops and `bin/update`
+> migrates the old one away, `bin/check-lessons` gained `--against`, the
+> worker is asked for a lesson when recovering, the reviewer and e2e write
+> their verdicts, the diagnostic names the failing side, swarm spawns are
+> counted, and the per-issue metrics row carries the prompt size, the spawn
+> count and the verdicts. 828 → 866 tests.
+>
+> **A4 was not implementable here**: it is an operational check — one run
+> carrying a swarm spawn, compared against the provider's own reported total
+> — and this session has no CI run to observe. It stays open.
+>
+> Two defects surfaced while implementing the above and were fixed with it:
+> the default lesson set injected five bare numbers (see P5), and
+> `extract_swarm_spawns` doubled its own output because `grep -c` prints `0`
+> *and* exits 1 when nothing matches.
 
 §4 ranks by strength of argument. This is the build plan. **Twelve items**;
 three of §4's proposals are **not planned** and are listed at the end.
