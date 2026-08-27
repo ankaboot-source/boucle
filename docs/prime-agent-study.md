@@ -80,8 +80,10 @@ The second half is the L3 typology (§2.5), and it is sharper than boucle's:
 > and coordination patterns."
 
 Boucle has **rules** (`LESSONS.yml`, 107 entries) and **programs** (62
-skills). It has **no facts store** and **no coordination-pattern store**.
-P1 and P4 are those two holes.
+skills). It has **no coordination-pattern store** (P4), and its rules store
+has **only one scope** — the engine's (P1). The *facts* type is deliberately
+declined: boucle routes facts to config and charter instead, and keeps
+class-not-instance for everything it persists. See P1.
 
 ## 2. The mapping
 
@@ -91,7 +93,7 @@ P1 and P4 are those two holes.
 | Long context stored as a file, searched from the REPL | Note thread trimmed and pushed into the prompt | **Transfers, half** (P3) |
 | `rlm()` async subagents, handle returned immediately | `swarm` in [.jcode/agents/worker.md](../.jcode/agents/worker.md) | **Converged** — but 0 instrumentation (P4) |
 | Subagent **specifications** as typed L3 state | None — swarm prompts improvised per run | **Transfers** (P4) |
-| Memories = facts, local by default | Nothing; `LESSONS.yml` is rules, global, human-curated, and unwritable from a consumer | **Transfers, inverted** (P1) |
+| Memories = facts, local by default | `LESSONS.yml` is rules, engine-scoped, and unwritable from a consumer | **Scope transfers, type rejected** (P1) |
 | `/refine` over trajectory events, any outcome | Candidate emitted **only at escalation** (`bin/jc:1342`) | **Transfers** (P2) |
 | Versioned refinements, provenance, rollback | `pruned:` / `merged_into:` — manual, no provenance | **Transfers** (P1) |
 | Compaction: summary into L1, **originals kept in L3** | Tail-elision 750 → 300 → 120 chars, no retention | **Transfers** (P3) |
@@ -124,24 +126,24 @@ boucle already satisfies two:
 | --- | --- |
 | Least-privilege action interfaces | Per-stage CI container, scrubbed credentials, no self-approval path |
 | Auditable rollback of contaminated refinements | A committed file: `git revert`, `git log -p`, MR history |
-| **Independent state validation** | **Partially — see below** |
+| **Independent state validation** | **The MR gate — see below** |
 
-The third is the one to design for, and it produces a hard constraint that
-was not obvious before reading the paper:
+The third is the one to design for. The contamination path the paper
+observed has three steps: the agent finds a shortcut, uses it, and
+**persists it unreviewed**. Boucle cuts the third: a refinement reaches a
+prompt only after the MR that added it was approved, so the entry is
+human-validated before it can influence anything.
 
-**A refinement injected into both the worker and its reviewer defeats the
-validator.** `bin/jc:1368` injects into `triage | worker | reviewer` alike.
-For human-curated rules that is fine — they are the shared charter. For
-agent-written **facts** it is not: a contaminated memory ("the e2e suite is
-flaky here, a red run is expected") would reach the very agent whose job is
-to catch it, and the loop would ratify its own shortcut exactly as the
-Factorio agent did. Therefore:
+What survives the gate is the weaker risk — an entry that quietly relaxes an
+engine invariant, approved by a human who skimmed a one-line YAML in a large
+MR. Two mitigations, both in the injection and both nearly free:
 
-- **NEVER** inject the agent-written memory store into the **reviewer** or
-  **e2e** prompt. Triage and worker only.
-- The reviewer validates the diff — memory entries included, since they land
-  in the same MR — from the charter docs and the acceptance criteria, not
-  from the memory.
+- Engine lessons go **first** in the assembled block, consumer lessons
+  second, each under its own label.
+- The block states that **engine lessons take precedence on conflict**.
+
+`bin/check-lessons --against` (P1) closes the other half by rejecting a
+consumer entry that restates or contradicts an engine one at >0.6 overlap.
 
 Boucle's other structural answer to this trace is already in place: the paper
 observes "the model handled irreversible actions poorly" and reports a
@@ -153,95 +155,84 @@ those gates exist to prevent.
 
 ## 4. What transfers, ranked
 
-### P1 — A facts store, per consumer, gated by the MR
+### P1 — `LESSONS.local.yml`: the consumer's own lessons
 
 Boucle learns in exactly one place: `LESSONS.yml`, 107 entries,
 engine-global and human-curated. Nothing a run discovers about **this
 repository** outlives the issue: `.boucle-state/<issue>/` is per-issue and
 gitignored, and the state note hangs off the issue. Issue N+1 re-discovers
-the build command, the flaky suite, the missing binary.
+the same trap.
 
-**"Is `LESSONS.yml` not already the facts store?"** Partly, by content —
-several of the 107 entries are environment facts written in imperative form
-(#3 is "MCP handshake hangs in CI"). But it cannot serve as one, for three
-reasons, and the third is the blocker:
+**Rejected: Prime Agent's "memories = facts" type.** The paper separates
+rules from facts and stores instances as memories. Boucle keeps
+**class-not-instance** (AGENTS.md §"Lessons learned") for its own store too,
+and it is right to: an instance is not actionable on the next issue, and
+boucle already has better homes for facts. One type, two scopes.
 
-1. **Scope.** It is engine-global. A fact about consumer X's repository
-   ("build with pnpm, not npm") would ship to every other consumer.
-2. **Admission test.** AGENTS.md §"Lessons learned" demands
-   class-not-instance. Repo facts are instances by definition — the test
-   rejects exactly what a facts store is for.
-3. **The write path is closed.** At a consumer root, `LESSONS.yml` is a
-   **symlink into the engine submodule** (`bin/update:331` creates it;
-   `.boucle/` is a git submodule). An agent writing a lesson there writes
-   into a *different git repository*: `git add` from the consumer stages
-   nothing but a dirty submodule pointer, and `bin/check-boucle-sync`
-   rejects `.boucle/` changes that are not `chore(boucle):` bot commits. The
-   entry evaporates. **No agent can record a per-repo fact today**, whatever
-   the typology says.
+| Kind of knowledge | Example | Home | Why |
+| --- | --- | --- | --- |
+| Config value | build command, deploy mode, review mode | CI variable / root CI shim | The documented consumer seam (AGENTS.md §"`.boucle/` ownership") |
+| Project context | stack, constraints, conventions | consumer `AGENTS.md` / `CONTEXT.md` / `DESIGN.md` | Human-authored charter, already read by the worker |
+| Class of mistake, universal | "NEVER `PUT` a label that is already present" | engine `LESSONS.yml`, upstream MR | Every consumer benefits |
+| **Class of mistake, this repo only** | "NEVER run the e2e suite before seeding the fixture DB" | **`LESSONS.local.yml`** ← the gap | Noise upstream, load-bearing here |
+| One-off instance | "issue #42 failed, the token had expired" | Nowhere — git history | Fails the four-point test, by design |
 
-The seam nonetheless exists, and C1 should use it: `bin/update:338` refuses
-to symlink over a **real** root `LESSONS.yml` ("a consumer may have a custom
-LESSONS.yml"), and `bin/jc:1382` reads `$BOUCLE_WORKSPACE/LESSONS.yml`
-*before* falling back to `$BOUCLE_HOME/LESSONS.yml`. **But that seam is an
-override, not a merge**: a consumer who materialises a real root
-`LESSONS.yml` silently loses all 107 engine lessons. So the facts store MUST
-be a **separate file** — never a consumer-owned `LESSONS.yml` — unless the
-injection is first changed to concatenate both.
+**Why not the existing `LESSONS.yml`.** Not for scope — a lesson added in a
+consumer is never propagated anywhere, the sync is one-way (engine →
+consumer) and `SYNC_PATHS` (`bin lib .jcode <ci> LOOP.md`) excludes
+`LESSONS.yml` entirely. The blocker is the **write path**: at a consumer
+root, `LESSONS.yml` is a symlink into the `.boucle/` submodule
+(`bin/update:331`). An agent writing there writes into a *different git
+repository* — `git add` from the consumer stages nothing but a dirty
+submodule pointer, and `bin/check-boucle-sync` rejects `.boucle/` changes
+that are not `chore(boucle):` bot commits. The entry evaporates.
 
-That is the `setup_fail` class — the environment blocking a run before the
-agent reaches the task — which [docs/skills-audit.md](skills-audit.md)
-measures dropping **5.3% → 0.2%**, "an effect ~25× the aggregate one".
-Boucle already knows this is the class worth attacking; it has nowhere to
-write what it learned.
+`bin/update:338` does refuse to symlink over a **real** root `LESSONS.yml`,
+and `bin/jc:1382` prefers `$BOUCLE_WORKSPACE/LESSONS.yml` over
+`$BOUCLE_HOME/LESSONS.yml` — so the seam exists. **But it is an override,
+not a merge**: a consumer materialising a real root `LESSONS.yml` silently
+loses all 107 engine lessons. Hence a separate file.
 
-Prime Agent's memories are that store, and its default is **session-local**,
-with global entries requiring an explicit request. Boucle should take the
-mechanism and invert the default: **consumer-local**, because a fact about
-one repository is noise in every other.
-
-- **Where.** A consumer-root, agent-writable, **committed** file (e.g.
-  `BOUCLE-MEMORY.yml`). **NEVER** under `.boucle/` — that directory is 100%
-  owned by `bin/update`, and `bin/check-boucle-sync` rejects agent commits
-  touching it ([AGENTS.md](../AGENTS.md) §"`.boucle/` ownership").
-- **What.** Facts, not rules. One entry per fact, each carrying what the
-  paper's refinement records carry — its **trigger** and its **intended
-  effect**: issue iid, SHA, the observed error string, what should change.
-  No entry without evidence.
-- **Who.** The worker writes it in the **same MR** as the code. Every memory
-  then passes the reviewer and the human MR gate. Prime Agent's refinements
-  are local and silent; boucle's are reviewed — and §3 is the paper's own
-  argument for why that is the safer default.
-- **Rollback for free.** It is a committed file. `git revert` is the
-  versioned-provenance mechanism Prime Agent had to build.
-- **Injection.** Reuse the `LESSONS.yml` path in `bin/jc:1368` — same
-  keyword extraction, same "already extracted, do NOT re-read" framing —
-  **minus the reviewer and e2e roles** (§3).
+| Aspect | Decision | Rationale |
+| --- | --- | --- |
+| Path | `LESSONS.local.yml`, consumer root | Outside `.boucle/` (no guard trip), distinct from the symlink (no override trap) |
+| Ownership | Consumer repo, committed, agent-writable | Reviewed in the MR, revertible with `git revert` |
+| Format | **Identical** to `LESSONS.yml` (`n: title / ❌ / ✅`) | Reuses the validator, the injection code and the candidate pipeline unchanged |
+| Numbering | From `1`, independent namespace | `check_numbering` requires `1..max` with no unmarked gaps — an offset would fail |
+| Admission | The four-point test **plus a fifth**: *repo-specific* — would this be noise in another consumer? Yes → here. No → upstream MR | Keeps class-not-instance; routes universal lessons to the engine |
+| Provenance | `git blame` | `check-lessons` **forbids** issue numbers, MR numbers, SHAs and line numbers in lesson text: "those live in git history". The commit is the evidence record |
+| Validation | `bin/check-lessons LESSONS.local.yml --against .boucle/LESSONS.yml` | Same format gate, plus cross-file dedupe so a consumer cannot restate engine lesson #3 |
+| Injection | Engine block first, consumer block second, both labelled; engine wins on conflict | Concatenate, never override |
+| `bin/update` | Untouched | Not in `SYNC_PATHS`, not in `CONSUMER_ROOT_DOCS`, not in the symlink list |
+| Write moment | The worker, in the **same MR** as the code | A human approves it before it ever reaches a prompt |
 
 ```mermaid
 flowchart LR
-    subgraph L3G["L3 global — rules, human-curated, bin/update-synced"]
-        L["LESSONS.yml<br/>107 entries<br/>classes of mistake"]
+    subgraph ENG["Engine — .boucle/LESSONS.yml (symlinked to root)"]
+        L["107 universal lessons<br/>upstream MR only"]
     end
-    subgraph L3L["L3 local — facts, agent-written, MR-reviewed"]
-        M["BOUCLE-MEMORY.yml<br/>this repo's facts<br/>trigger + effect + SHA"]
+    subgraph LOC["Consumer — LESSONS.local.yml"]
+        M["this repo's lessons<br/>same format, same test<br/>+ repo-specific"]
     end
-    R["Run on issue N"] -->|"class of mistake"| L
-    R -->|"fact about THIS repo"| M
-    L --> P["L1: assembled prompt (bin/jc)"]
-    M -->|"triage + worker only"| P
-    M -.->|"NEVER injected —<br/>keeps the validator independent"| RV["Reviewer / e2e"]
+    R["Run on issue N"] -->|"universal class"| U["upstream MR"]
+    R -->|"repo-specific class"| M
+    U -.->|"bin/update"| L
+    L --> P["L1: assembled prompt<br/>engine block, then local block"]
+    M --> P
     P --> R2["Run on issue N+1"]
 ```
 
-**The admission test MUST differ.** `LESSONS.yml` demands
-class-not-instance (AGENTS.md §"Lessons learned") because it stores *rules*.
-A facts store is the opposite: instances are the whole point. Reusing the
-four-point test would reject every useful entry; skipping a test entirely
-would fill the file with re-worded lessons. Write a narrow one —
-reproducible, repo-specific, falsifiable, non-duplicate — and enforce it the
-way `bin/check-lessons` already enforces the other.
-
+**Correction to §3's isolation rule.** An earlier draft required never
+injecting the store into the reviewer or e2e prompt, reasoning from the
+Factorio trace that a validator must not read the state it validates. With
+this design that rule is **too strong and should not be implemented**: an
+entry only reaches a prompt *after* a human approved the MR that added it,
+so the contamination path the paper observed — silent, unreviewed
+persistence — is already cut by the gate. What remains is the weaker risk of
+an entry that quietly relaxes an engine invariant. Two cheap mitigations,
+both in the injection: the engine block goes **first**, and the assembled
+prompt states that engine lessons take precedence over local ones on
+conflict.
 ### P2 — Refine on success too, not only at escalation
 
 `bin/jc:1342` emits a lesson candidate only when the loop escalates. Every
@@ -260,9 +251,9 @@ assumptions become memories or prompt notes."
 
 Emit a candidate at the terminal `boucle:done` transition as well — the same
 hook that already publishes the metrics row. Route success-derived candidates
-to the P1 facts store, not to `LESSONS.yml`, so the global rules file stays
-conservative while the pool that feeds the prompt stops being 100%
-failure-derived.
+to `LESSONS.local.yml` (P1) when the class is repo-specific, so the engine
+file stays conservative while the pool that feeds the prompt stops being
+100% failure-derived.
 
 ### P3 — Summarise into L1, retain the original in L3
 
@@ -448,7 +439,7 @@ touch points are named so the estimate is checkable.
 | **A5** | Name the remainder under the lessons block (`bin/lessons --grep`) | Context budget | **Low** | **S** | `bin/jc:1368` + a new ~40-line script |
 | **B1** | `BOUCLE_MAX_ISSUE_COST` / `_TOKENS` + `budget-exhausted` class | Control / termination | **Medium** | **M** | Stage entry in `lib/boucle-ci/*.sh`, `boucle_escalation_diagnostic` |
 | **B2** | Emit a refinement candidate at `boucle:done` | Learning | **High** | **M** | `bin/jc:1342` (the candidate path exists; it is the trigger that is wrong) |
-| **C1** | `BOUCLE-MEMORY.yml` — the facts store | Learning / retention | **Highest** | **L** | New file + admission test + `bin/check-memory` + injection scoped to triage/worker + CI guard + size cap |
+| **C1** | `LESSONS.local.yml` — the consumer's own lessons | Learning / retention | **Highest** | **M** | Second injection source in `bin/jc:1368`; `--against` cross-file dedupe in `bin/check-lessons`; candidate routing; a fifth admission question; `bin/setup` seed |
 | **C2** | `[boucle:digest]` instead of the 120-char rung | Context budget | **Conditional** on A3 | **L** | `bin/jc` trimming ladder + an extra cheap-model call + retrieval pointer |
 | **D1** | Reusable subagent specifications | Coordination | **Unknown** | **M** | Blocked by A2 — do not build before it answers |
 
@@ -462,7 +453,7 @@ touch points are named so the estimate is checkable.
   distillation pool is 100% failure-derived, and failure-only pools are
   measured producing artifacts *worse than no artifact* — whereas B1 adds a
   guard that protects spend without touching quality.
-- **The one big build (L).** C1. It is the only item that attacks the
+- **The one real build (M).** C1. It is the only item that attacks the
   `setup_fail` class (5.3% → 0.2%, ~25× the aggregate effect) and the only
   one that **compounds**: every issue after the first in a given repository
   benefits, so its value grows with consumer age while every other item's is
@@ -476,10 +467,15 @@ touch points are named so the estimate is checkable.
   not trained to operate them" is the paper's own conclusion, and boucle has
   0 measurements either way.
 
-**Sequencing constraint.** C1 carries the safety requirement from §3 —
-never inject the facts store into the reviewer or e2e prompt — and that
-constraint MUST land with the first line of C1, not after. A memory store
-shipped without it is the Factorio trace with a `git log`.
+**Sequencing constraint.** C1's ordering rule from §3 — engine lessons
+first, local second, engine wins on conflict — and the `--against` dedupe
+MUST land with the first line of C1, not after. They are what keep a local
+entry from quietly relaxing an engine invariant.
+
+**Why C1 is M, not L.** Reusing the lesson contract instead of inventing a
+separate store means the format, the validator, the injection path and the
+candidate pipeline all already exist. The build is a second source and a
+dedupe flag, not a new subsystem.
 
 ## 8. Reproducing the boucle-side numbers
 
