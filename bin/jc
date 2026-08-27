@@ -2173,18 +2173,32 @@ case "$ROLE" in
         exit 3
       fi
       # C4 HARD GATE: reject empty placeholder drafts (lesson #99). The
-      # agent posted SOMETHING (passed agent_posted_note above), but if the
-      # only thing it posted is a bare "verification check" or "DRAFT —..."
-      # with no body, it's noise the human cannot act on (observed on
-      # boucle.dev: 5/30 verdict-role runs posted empty placeholders).
-      # Extract the posted/drafted note body from the log and check its
-      # length. A meaningful draft has at least 50 chars of content (the
-      # marker line itself is ~40 chars, so 50 excludes pure markers).
-      POSTED_BODY=$(grep -oE '(boucle:(triage|verdict|draft)[^"]*|<!-- boucle:(triage|verdict|draft)[^>]*-->.*$)' "$AGENT_LOG" 2> /dev/null | tail -1 || true)
-      if [ -n "$POSTED_BODY" ]; then
-        POSTED_LEN=${#POSTED_BODY}
-        if [ "$POSTED_LEN" -lt 50 ]; then
-          echo "[boucle] ERROR: agent posted an empty placeholder draft (${POSTED_LEN} chars: \"${POSTED_BODY}\") — lesson #99 violation. The draft MUST contain at least the acceptance criteria and a lean verdict. Silent failure (exit 3)." >&2
+      # agent posted SOMETHING (passed agent_posted_note above), but if
+      # NONE of the posted/drafted bodies are long enough, it's noise the
+      # human cannot act on (observed on boucle.dev: 5/30 verdict-role
+      # runs posted empty placeholders; PR #90 posted a bare "verification
+      # check" alongside the verdict). Extract ALL posted/drafted note
+      # bodies from the log and check whether ANY is long enough (≥50
+      # chars). A meaningful draft has at least the acceptance criteria
+      # and a lean verdict (the marker line itself is ~40 chars, so 50
+      # excludes pure markers). If none qualify, the agent produced only
+      # noise — silent failure. (Orphan placeholders posted alongside a
+      # valid verdict are cleaned up by collapse-duplicate-notes; the
+      # gate only escalates when there is no valid output at all.)
+      POSTED_BODIES=$(grep -oE '(boucle:(triage|verdict|draft)[^"]*|<!-- boucle:(triage|verdict|draft)[^>]*-->.*$)' "$AGENT_LOG" 2> /dev/null || true)
+      if [[ -n "$POSTED_BODIES" ]]; then
+        # Check whether ANY posted body is long enough (≥50 chars).
+        VALID_BODY_FOUND=false
+        while IFS= read -r BODY_LINE; do
+          [[ -z "$BODY_LINE" ]] && continue
+          if [[ ${#BODY_LINE} -ge 50 ]]; then
+            VALID_BODY_FOUND=true
+            break
+          fi
+        done <<< "$POSTED_BODIES"
+        if [[ "$VALID_BODY_FOUND" != true ]]; then
+          SHORTEST=$(printf '%s\n' "$POSTED_BODIES" | awk '{ if (min=="" || length($0)<min) min=length($0) } END { print min+0 }')
+          echo "[boucle] ERROR: agent posted only empty placeholder draft(s) (shortest ${SHORTEST} chars) — lesson #99 violation. The draft MUST contain at least the acceptance criteria and a lean verdict. Silent failure (exit 3)." >&2
           echo "[boucle] CI should escalate to human — the agent produced noise, not a draft." >&2
           exit 3
         fi

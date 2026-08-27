@@ -218,3 +218,91 @@ setup() {
   draft_ids="$(printf '%s' "$mock_notes" | jq -r '.[] | select(.body | test("<!-- boucle:draft role=e2e")) | select(.id > 0) | .id' | sort -n)"
   [ -z "$draft_ids" ]
 }
+
+# ── Orphan placeholder cleanup (lesson #99, issue #87) ────────────────
+# A bare "verification check" or "DRAFT —..." tagged only with
+# <!-- boucle:agent --> (no boucle:draft/verdict/triage marker) is an
+# orphan. When a final exists, collapse-duplicate-notes deletes it.
+
+@test "orphan filter selects <!-- boucle:agent --> notes with no valid marker and <50 chars useful body" {
+  mock_notes='[
+    {"id": 1, "body": "verification check\n\n<!-- boucle:agent -->"},
+    {"id": 2, "body": "<!-- boucle:verdict v=1 role=reviewer sha=abc123 -->\n\n## Verdict\nPASS"}
+  ]'
+  orphan_ids="$(printf '%s' "$mock_notes" | jq -r '
+    .[] | select(.body | test("<!-- boucle:agent -->"))
+    | select(.body | test("boucle:(draft|verdict|triage|approval-request|state)") | not)
+    | select(.id > 0)
+    | ( .body | gsub("<!--[^>]*-->"; "") | gsub("\\s+"; " ") | length ) as $len
+    | select($len < 50)
+    | .id
+  ' 2> /dev/null | sort -n)"
+  [ "$orphan_ids" = "1" ]
+}
+
+@test "orphan filter does NOT select notes with a valid marker (verdict)" {
+  mock_notes='[
+    {"id": 1, "body": "<!-- boucle:verdict v=1 role=reviewer sha=abc123 -->\n\n## Verdict\nPASS\n\n<!-- boucle:agent -->"}
+  ]'
+  orphan_ids="$(printf '%s' "$mock_notes" | jq -r '
+    .[] | select(.body | test("<!-- boucle:agent -->"))
+    | select(.body | test("boucle:(draft|verdict|triage|approval-request|state)") | not)
+    | select(.id > 0)
+    | ( .body | gsub("<!--[^>]*-->"; "") | gsub("\\s+"; " ") | length ) as $len
+    | select($len < 50)
+    | .id
+  ' 2> /dev/null | sort -n)"
+  [ -z "$orphan_ids" ]
+}
+
+@test "orphan filter does NOT select long agent notes (e.g. a real comment without markers)" {
+  # A real agent comment that happens to lack markers but is long (>50 chars)
+  # should NOT be deleted — it may be a meaningful human-facing message.
+  mock_notes='[
+    {"id": 1, "body": "This is a longer agent comment that explains something meaningful to the human reader and exceeds fifty characters.\n\n<!-- boucle:agent -->"}
+  ]'
+  orphan_ids="$(printf '%s' "$mock_notes" | jq -r '
+    .[] | select(.body | test("<!-- boucle:agent -->"))
+    | select(.body | test("boucle:(draft|verdict|triage|approval-request|state)") | not)
+    | select(.id > 0)
+    | ( .body | gsub("<!--[^>]*-->"; "") | gsub("\\s+"; " ") | length ) as $len
+    | select($len < 50)
+    | .id
+  ' 2> /dev/null | sort -n)"
+  [ -z "$orphan_ids" ]
+}
+
+@test "orphan filter respects pre_id boundary" {
+  mock_notes='[
+    {"id": 5, "body": "verification check\n\n<!-- boucle:agent -->"},
+    {"id": 15, "body": "verification check\n\n<!-- boucle:agent -->"},
+    {"id": 25, "body": "<!-- boucle:verdict v=1 role=reviewer sha=abc123 -->\n\n## Verdict\nPASS"}
+  ]'
+  # pre_id=10 → only orphan id 15 should match (5 is below boundary)
+  orphan_ids="$(printf '%s' "$mock_notes" | jq -r '
+    .[] | select(.body | test("<!-- boucle:agent -->"))
+    | select(.body | test("boucle:(draft|verdict|triage|approval-request|state)") | not)
+    | select(.id > 10)
+    | ( .body | gsub("<!--[^>]*-->"; "") | gsub("\\s+"; " ") | length ) as $len
+    | select($len < 50)
+    | .id
+  ' 2> /dev/null | sort -n)"
+  [ "$orphan_ids" = "15" ]
+}
+
+@test "orphan filter does NOT select notes without <!-- boucle:agent --> marker" {
+  # A human comment that is short and lacks markers should never be deleted.
+  mock_notes='[
+    {"id": 1, "body": "approved"},
+    {"id": 2, "body": "<!-- boucle:verdict v=1 role=reviewer sha=abc123 -->\n\n## Verdict\nPASS"}
+  ]'
+  orphan_ids="$(printf '%s' "$mock_notes" | jq -r '
+    .[] | select(.body | test("<!-- boucle:agent -->"))
+    | select(.body | test("boucle:(draft|verdict|triage|approval-request|state)") | not)
+    | select(.id > 0)
+    | ( .body | gsub("<!--[^>]*-->"; "") | gsub("\\s+"; " ") | length ) as $len
+    | select($len < 50)
+    | .id
+  ' 2> /dev/null | sort -n)"
+  [ -z "$orphan_ids" ]
+}
