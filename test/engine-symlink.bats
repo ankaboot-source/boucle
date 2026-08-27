@@ -1,9 +1,11 @@
 #!/usr/bin/env bats
 # Engine symlink targets (bin/lib/engine-symlink.sh).
 #
-# LESSONS.yml, .jcode/skills/ and bin/ live in the engine dir but are
-# referenced at the consumer root, so setup/update symlink them up. Both
-# callers passed "<engine>/<path>" as the target — right when read from the
+# .jcode/skills/ and bin/ live in the engine dir but are referenced at the
+# consumer root, so setup/update symlink them up. (LESSONS.yml was in that
+# list until the consumer took ownership of that filename; the helper is
+# still exercised with it below, since it must keep working for any path.)
+# Both callers passed "<engine>/<path>" as the target — right when read from the
 # repo root, wrong for any link that is not AT the root. `.jcode/skills`
 # resolved to `.jcode/.boucle/.jcode/skills` and never existed.
 #

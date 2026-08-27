@@ -379,6 +379,56 @@ stub_forge() {
   assert_output "2"
 }
 
+# ── prompt size and verdicts on the published row (A3, A7) ────────────
+# The raw log now reaches the branch as it is written, so these fields are
+# durable per run either way. The summary row is what a dashboard reads
+# without parsing every line, and a field missing from it is a field nobody
+# will aggregate.
+
+@test "row: carries the largest assembled prompt seen on the issue" {
+  lib
+  cat > "$TMP/.boucle-state/7/health.jsonl" <<'EOF'
+{"timestamp":"t","role":"worker","iteration":1,"exit_code":0,"prompt_chars":48213,"tokens":"10","cost_usd":"n/a","model":"m","provider":"p","skills":[],"arm":"full","setup_fail":"","swarm_spawns":0}
+{"timestamp":"t","role":"worker","iteration":2,"exit_code":0,"prompt_chars":61002,"tokens":"20","cost_usd":"n/a","model":"m","provider":"p","skills":[],"arm":"full","setup_fail":"","swarm_spawns":2}
+EOF
+  run bash -c "cd '$REPO' && BOUCLE_WORKSPACE='$TMP' bash -c '. lib/boucle.sh 2>/dev/null; boucle_metrics_row 7 done' | jq -r '.prompt_chars_max | tostring'"
+  assert_success
+  assert_output "61002"
+}
+
+@test "row: sums the swarm spawns across the issue's runs" {
+  lib
+  cat > "$TMP/.boucle-state/7/health.jsonl" <<'EOF'
+{"timestamp":"t","role":"worker","iteration":1,"exit_code":0,"prompt_chars":10,"tokens":"10","cost_usd":"n/a","model":"m","provider":"p","skills":[],"arm":"full","setup_fail":"","swarm_spawns":3}
+{"timestamp":"t","role":"worker","iteration":2,"exit_code":0,"prompt_chars":10,"tokens":"20","cost_usd":"n/a","model":"m","provider":"p","skills":[],"arm":"full","setup_fail":"","swarm_spawns":2}
+EOF
+  run bash -c "cd '$REPO' && BOUCLE_WORKSPACE='$TMP' bash -c '. lib/boucle.sh 2>/dev/null; boucle_metrics_row 7 done' | jq -r '.swarm_spawns | tostring'"
+  assert_success
+  assert_output "5"
+}
+
+@test "row: carries the reviewer and e2e verdicts, which tell a recovery from a first-pass success" {
+  lib
+  cat > "$TMP/.boucle-state/7/health.jsonl" <<'EOF'
+{"timestamp":"t","role":"worker","iteration":1,"exit_code":0,"prompt_chars":10,"tokens":"10","cost_usd":"n/a","model":"m","provider":"p","skills":[],"arm":"full","setup_fail":"","swarm_spawns":0}
+{"timestamp":"t","role":"reviewer","outcome":"FAIL","detail":"iteration 1"}
+{"timestamp":"t","role":"worker","iteration":2,"exit_code":0,"prompt_chars":10,"tokens":"20","cost_usd":"n/a","model":"m","provider":"p","skills":[],"arm":"full","setup_fail":"","swarm_spawns":0}
+{"timestamp":"t","role":"reviewer","outcome":"PASS","detail":"iteration 2"}
+{"timestamp":"t","role":"e2e","outcome":"PASS","detail":""}
+EOF
+  run bash -c "cd '$REPO' && BOUCLE_WORKSPACE='$TMP' bash -c '. lib/boucle.sh 2>/dev/null; boucle_metrics_row 7 done' | jq -c '.verdicts'"
+  assert_success
+  assert_output '["FAIL","PASS","PASS"]'
+}
+
+@test "row: a worker-only issue still produces a row (no verdicts, zero prompt size absent)" {
+  lib
+  health_fixture
+  run bash -c "cd '$REPO' && BOUCLE_WORKSPACE='$TMP' bash -c '. lib/boucle.sh 2>/dev/null; boucle_metrics_row 7 done' | jq -c '{verdicts, prompt_chars_max, swarm_spawns}'"
+  assert_success
+  assert_output '{"verdicts":[],"prompt_chars_max":100,"swarm_spawns":0}'
+}
+
 # ── Durability of the raw health log ─────────────────────────────────────
 #
 # The defect these cover: health.jsonl is written into .boucle-state/ inside
@@ -637,4 +687,22 @@ metrics_remote_config_only() {
   run grep -A3 'local skills="\${SKILLS_USED:-}"' "$REPO/bin/jc"
   assert_success
   assert_output --partial "extract_skills_used"
+}
+
+@test "jc: an early exit still reads the swarm count out of the transcript" {
+  # Same rule as the skills above: SWARM_SPAWNS is set in 7d, which an early
+  # exit never reaches. Recording 0 for a run that fanned out before it died
+  # is a wrong answer, not a missing one — and 0 is exactly the value the
+  # question "does swarm ever fire?" is trying to establish.
+  run grep -A3 'local swarm="\${SWARM_SPAWNS:-}"' "$REPO/bin/jc"
+  assert_success
+  assert_output --partial "extract_swarm_spawns"
+}
+
+@test "jc: the swarm count reaches the health record through the trap" {
+  # The count is the 13th argument; a row written without it defaults to 0,
+  # which is indistinguishable from a measured zero.
+  run grep -A6 'boucle_health_record "\$ISSUE" "\$ROLE" "\$ITERATION"' "$REPO/bin/jc"
+  assert_success
+  assert_output --partial '"$setup_fail" "$swarm"'
 }

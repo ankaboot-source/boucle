@@ -248,6 +248,11 @@ $evidence"
     "$BOUCLE_HOME"/bin/collapse-duplicate-notes e2e "$BOUCLE_PROJECT_ID" "$BOUCLE_ISSUE" "$PRE_RUN_VERDICT_ID" "$BOUCLE_FORGE_HOST"
   fi
 
+  # Record the verdict on the health record (see reviewer.sh for why this
+  # exists). Written after every fallback has resolved, so the row carries the
+  # verdict the loop acted on.
+  boucle_health_outcome "$BOUCLE_ISSUE" "e2e" "${VERDICT:-UNCERTAIN}" "" || true
+
   # ── Shared verdict routing (command-mode and agent-mode) ────────────
   case "$VERDICT" in
     PASS)

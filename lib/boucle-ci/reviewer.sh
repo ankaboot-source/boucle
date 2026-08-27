@@ -572,6 +572,15 @@ boucle_ci_reviewer() {
     fi
   }
 
+  # Record the verdict on the health record. boucle_health_outcome documents
+  # itself as taking reviewer/e2e PASS/FAIL/UNCERTAIN rows, but no stage ever
+  # wrote one: boucle_escalation_diagnostic therefore counted 0 reviewer FAILs
+  # on every escalation. Written here — after every fallback has resolved — so
+  # the row carries the verdict the loop actually acted on, not a draft.
+  # An empty VERDICT is recorded as UNCERTAIN: no verdict is a fact about the
+  # run, and silence would be indistinguishable from a PASS in the record.
+  boucle_health_outcome "$BOUCLE_ISSUE" "reviewer" "${VERDICT:-UNCERTAIN}" "iteration ${BOUCLE_ITERATION:-1}" || true
+
   case "$VERDICT" in
     PASS)
       # Assign the MR to the original issue author so they're notified

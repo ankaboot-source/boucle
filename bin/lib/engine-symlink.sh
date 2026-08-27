@@ -5,9 +5,12 @@
 #
 # THE BUG THIS EXISTS TO PREVENT
 #
-# LESSONS.yml, .jcode/skills/ and bin/ live under the engine dir (.boucle/)
-# but agent prompts reference them at the consumer root, so bin/setup and
-# bin/update symlink them up. Both computed the target as
+# .jcode/skills/ and bin/ live under the engine dir (.boucle/) but agent
+# prompts reference them at the consumer root, so bin/setup and bin/update
+# symlink them up. (LESSONS.yml used to be in that list; at a consumer root
+# that name is now the CONSUMER's own lessons file — see LOOP.md § "Lessons —
+# two files, one name". The helper still handles it, nothing calls it for
+# it.) Both computed the target as
 # "<engine>/<path>" — correct when read from the repo root, and wrong the
 # moment the link itself is not AT the repo root:
 #
@@ -15,8 +18,8 @@
 #
 # `ln -s` resolves a relative target from the directory containing the LINK,
 # not from the repo root. That link points at `.jcode/.boucle/.jcode/skills`,
-# which does not exist. Two of the three links (LESSONS.yml, bin) sit at the
-# root and worked; the skills one sits inside .jcode/ and never did.
+# which does not exist. The links that sit at the root worked; the skills
+# one sits inside .jcode/ and never did.
 #
 # The failure is SILENT in the worst way: `ln -s` succeeds, `ls` shows the
 # link, `git` records it, and only the skill load fails — the agent reports

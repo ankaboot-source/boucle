@@ -163,3 +163,83 @@ with open('$tmp','w') as f: yaml.dump(d, f, allow_unicode=True, sort_keys=True)
   [ "$status" -eq 0 ]
   rm -f "$tmp"
 }
+
+# ── --against: cross-file duplicate detection (a consumer's own lessons) ──
+# A consumer keeps its lessons in LESSONS.yml at the repo root while the
+# engine's live under .boucle/, and bin/jc injects BOTH. An entry that
+# restates an engine lesson is therefore paid for twice in every prompt.
+
+# A near-copy of engine lesson #3 ("No MCP in CI").
+write_restatement() {
+  cat > "$1" <<'YAML'
+1:
+  title: MCP is stripped in our CI too
+  ✅: 'DO: strip MCP in CI; use native `glob`/`grep`/`read` and the `codebase-memory-mcp cli` fallback. Every prompt citing graph tools MUST document both interfaces.'
+  ❌: DO NOT rely on `codebase-memory-mcp` tools in CI (the handshake hangs).
+YAML
+}
+
+# A lesson that could only come from one repository.
+write_repo_specific() {
+  cat > "$1" <<'YAML'
+1:
+  title: Seed the fixture volume first
+  ✅: 'DO: run the seed task before invoking any browser suite.'
+  ❌: DO NOT invoke the browser suite against an unseeded fixture volume.
+YAML
+}
+
+@test "check-lessons --against flags a lesson that restates one in the other file" {
+  tmp=$(mktemp)
+  write_restatement "$tmp"
+  run "$CHECK" "$tmp" --against "$LESSONS"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"restates #3"* ]]
+  rm -f "$tmp"
+}
+
+@test "check-lessons --against --strict fails on a restatement" {
+  tmp=$(mktemp)
+  write_restatement "$tmp"
+  run "$CHECK" "$tmp" --against "$LESSONS" --strict
+  [ "$status" -ne 0 ]
+  rm -f "$tmp"
+}
+
+@test "check-lessons --against passes a lesson specific to the repository" {
+  tmp=$(mktemp)
+  write_repo_specific "$tmp"
+  run "$CHECK" "$tmp" --against "$LESSONS" --strict
+  [ "$status" -eq 0 ]
+  rm -f "$tmp"
+}
+
+@test "check-lessons --against errors when the other file does not exist" {
+  tmp=$(mktemp)
+  write_repo_specific "$tmp"
+  run "$CHECK" "$tmp" --against /nonexistent/LESSONS.yml
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--against file not found"* ]]
+  rm -f "$tmp"
+}
+
+@test "check-lessons --against skips the AGENTS.md check (engine-only guard)" {
+  # A consumer file must not be judged against AGENTS.md: the consumer does
+  # not own that document. Run from a directory whose AGENTS.md WOULD trip
+  # the guard and assert the consumer file still passes.
+  tmp=$(mktemp -d)
+  write_repo_specific "$tmp/LESSONS.yml"
+  printf '## Lessons learned\n\n99. **A lesson in AGENTS.md** - would trip the guard.\n' > "$tmp/AGENTS.md"
+  run bash -c "cd '$tmp' && python3 '$CHECK' LESSONS.yml --against '$LESSONS'"
+  [ "$status" -eq 0 ]
+  rm -rf "$tmp"
+}
+
+@test "check-lessons without --against still runs the AGENTS.md check" {
+  tmp=$(mktemp -d)
+  write_repo_specific "$tmp/LESSONS.yml"
+  printf '## Lessons learned\n\n99. **A lesson in AGENTS.md** - would trip the guard.\n' > "$tmp/AGENTS.md"
+  run bash -c "cd '$tmp' && python3 '$CHECK' LESSONS.yml"
+  [ "$status" -ne 0 ]
+  rm -rf "$tmp"
+}

@@ -575,19 +575,27 @@ done
 echo ""
 
 # ── 0a-ter. Engine symlinks at the consumer root ──────────────────────
-# LESSONS.yml, .jcode/skills/, and bin/ live under .boucle/ (the engine dir)
+# .jcode/skills/ and bin/ live under .boucle/ (the engine dir)
 # but agent prompts reference them at the repo root. jcode's `skill` tool
-# resolves `.jcode/skills/` relative to cwd (repo root), `Read LESSONS.yml`
-# assumes repo root, and `bin/forge-note` is called as `bin/forge-note`
+# resolves `.jcode/skills/` relative to cwd (repo root) and `bin/forge-note`
+# is called as `bin/forge-note`
 # (relative to cwd). Without these symlinks, 0/68 agent runs could load
-# skills, read LESSONS.yml, or reliably call forge-note (observed on
-# boucle.dev). Symlinks (not copies) so they stay in sync with .boucle/
-# on every bin/update without a re-copy step.
+# skills or reliably call forge-note (observed on boucle.dev). Symlinks
+# (not copies) so they stay in sync with .boucle/ on every bin/update
+# without a re-copy step.
 # Idempotent: replace stale/broken symlinks, never touch a real file.
+#
+# LESSONS.yml is deliberately NOT in this list. At a consumer root that name
+# belongs to the CONSUMER's own lessons — a real, committed, agent-writable
+# file. Symlinking it into the engine made the root file the engine's, which
+# is why no agent could ever record one: the write landed in the .boucle/
+# submodule, `git add` staged nothing but a dirty pointer, and
+# bin/check-boucle-sync rejected it. The engine's lessons still reach every
+# prompt — bin/jc injects both files and MERGES them.
 echo "=== Engine symlinks ==="
 # shellcheck source=bin/lib/engine-symlink.sh
 . "$ENGINE_ROOT/bin/lib/engine-symlink.sh"
-for lt in "LESSONS.yml" ".jcode/skills" "bin"; do
+for lt in ".jcode/skills" "bin"; do
   engine_src="$ENGINE_ROOT/$lt"
   if [ ! -e "$engine_src" ]; then
     log_skip "$lt not in engine — skipping symlink"

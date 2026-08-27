@@ -317,20 +317,47 @@ propagate_consumer_root_files() {
     fi
   done
 
+  # ── Migrate the LESSONS.yml symlink away (one-time) ──────────────
+  # Consumers installed before the split carry a root LESSONS.yml symlinked
+  # into .boucle/. That symlink is what makes the root name the engine's, so
+  # it must go before the consumer can own that path. Removing it loses
+  # nothing: the target is the engine file, still present under .boucle/ and
+  # still injected into every prompt. A REAL file at the root is a consumer
+  # lessons file — never touch it. No empty file is seeded in its place: an
+  # absent file is the honest state until the loop records a first lesson,
+  # and bin/check-lessons would reject an empty one.
+  if [ "$ENGINE_DIR" != "." ] && [ -L "LESSONS.yml" ]; then
+    local lessons_target
+    lessons_target=$(readlink -f "LESSONS.yml" 2> /dev/null || echo "")
+    if [ -z "$lessons_target" ] \
+      || [ "$lessons_target" = "$(readlink -f "$ENGINE_DIR/LESSONS.yml" 2> /dev/null)" ]; then
+      rm -f "LESSONS.yml"
+      propagated="$propagated LESSONS.yml"
+      echo "[boucle] migrated: removed the root LESSONS.yml symlink into $ENGINE_DIR — that path is now the consumer's own lessons file" >&2
+    fi
+  fi
+
   # ── Symlink engine assets that agents must find at the repo root ──
-  # LESSONS.yml, .jcode/skills/, and bin/ live under .boucle/ (the engine
+  # .jcode/skills/ and bin/ live under .boucle/ (the engine
   # dir) but agent prompts reference them at the repo root. jcode's
-  # `skill` tool resolves `.jcode/skills/` relative to cwd (repo root),
-  # `Read LESSONS.yml` assumes repo root, and `bin/forge-note` is called
-  # as `bin/forge-note` (relative to cwd). Without these symlinks, 0/68
-  # agent runs could load skills, read LESSONS.yml, or reliably call
-  # forge-note (observed on boucle.dev — the files exist under .boucle/
-  # but are invisible at the root). Symlinks (not copies) so they stay
-  # in sync with .boucle/ on every bin/update without a re-copy step.
+  # `skill` tool resolves `.jcode/skills/` relative to cwd (repo root) and
+  # `bin/forge-note` is called as `bin/forge-note` (relative to cwd).
+  # Without these symlinks, 0/68 agent runs could load skills or reliably
+  # call forge-note (observed on boucle.dev — the files exist under
+  # .boucle/ but are invisible at the root). Symlinks (not copies) so they
+  # stay in sync with .boucle/ on every bin/update without a re-copy step.
   # Idempotent: replace stale/broken symlinks, never touch a real file.
+  #
+  # LESSONS.yml is deliberately NOT in this list. At a consumer root that name
+  # belongs to the CONSUMER's own lessons — a real, committed, agent-writable
+  # file. Symlinking it into the engine made the root file the engine's, which
+  # is why no agent could ever record one: the write landed in the .boucle/
+  # submodule, `git add` staged nothing but a dirty pointer, and
+  # bin/check-boucle-sync rejected it. The engine's lessons still reach every
+  # prompt — bin/jc injects both files and MERGES them.
   # shellcheck source=bin/lib/engine-symlink.sh
   . "$ENGINE_DIR/bin/lib/engine-symlink.sh"
-  for lt in "LESSONS.yml" ".jcode/skills" "bin"; do
+  for lt in ".jcode/skills" "bin"; do
     local engine_src="$ENGINE_DIR/$lt"
     [ -e "$engine_src" ] || continue
     # If the root path is already a symlink pointing at the engine, skip.

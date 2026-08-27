@@ -247,6 +247,41 @@ If an entry fails any test, fix the code and move on — do not add a
 lesson. The worker MUST justify a new entry against this test (state the
 justification on stdout); the reviewer MUST reject entries that fail it.
 
+### Which file (a fifth question, only in a consumer repo)
+
+Lessons live in **two** files and both are injected into every prompt
+(see [LOOP.md](LOOP.md) § "Lessons — two files, one name"):
+
+5. **Repo-specific or universal?** Would this entry be *noise* in another
+   repository — does it name this project's stack, test harness or deploy?
+   - **Yes, noise elsewhere** → `LESSONS.yml` at the repo root. That file is
+     the consumer's own. Validate with
+     `bin/check-lessons LESSONS.yml --against .boucle/LESSONS.yml`, which
+     rejects an entry that merely restates an engine lesson.
+   - **No, it would hold anywhere** → it belongs to the engine. **NEVER**
+     commit it to `.boucle/LESSONS.yml` — that directory is engine-owned and
+     the write is discarded. State the entry on stdout for upstreaming per
+     [.jcode/UPSTREAM-FIX-WORKFLOW.md](.jcode/UPSTREAM-FIX-WORKFLOW.md).
+
+   In the engine repo itself there is one file and this question does not
+   arise.
+
+### When a lesson is proposed
+
+Two triggers, and **silence is the expected outcome of both**:
+
+- **At escalation** — the reviewer emits a candidate on the final iteration;
+  the worker validates and commits it.
+- **On recovery** — the worker is asked for one when it is fixing a failed
+  iteration (iteration ≥ 2), where the delta between what failed and what
+  worked is visible in `iterations.md` and `state.md`'s *Tried and rejected*.
+
+A **first-pass success proposes nothing**. Distilling from a run that simply
+worked fills the file with restatements of the charter, and distilling only
+from runs that *failed* — which is all boucle used to do — produces artifacts
+measured as worse than no artifact at all
+([docs/skills-audit.md](docs/skills-audit.md) § 1).
+
 > Each lesson that states a *current protocol invariant* cross-references
 > [SKILL.md](SKILL.md) §I<N> for the normative text. The lesson keeps the
 > incident context (the ❌/✅ pair and the explanation) but defers the rule

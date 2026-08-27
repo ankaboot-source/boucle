@@ -693,18 +693,26 @@ fi
 mkdir -p "$STATE_DIR"
 
 # ── 3a-bis. Ensure engine symlinks exist at the repo root ──────────────
-# LESSONS.yml, .jcode/skills/, and bin/ live under $BOUCLE_HOME (the engine
+# .jcode/skills/ and bin/ live under $BOUCLE_HOME (the engine
 # dir, usually .boucle/) but agent prompts reference them at the repo root.
 # jcode's `skill` tool resolves `.jcode/skills/` relative to cwd (repo
-# root), `Read LESSONS.yml` assumes repo root, and `bin/forge-note` is
-# called as `bin/forge-note` (relative to cwd). bin/setup and bin/update
+# root) and `bin/forge-note` is called as `bin/forge-note` (relative to
+# cwd). bin/setup and bin/update
 # create these symlinks, but this is a runtime fallback for the first CI
 # run after a submodule add (before bin/update has run) or if the symlinks
 # were lost (e.g. a git clean that removes symlinks). Idempotent: only
 # creates the symlink if the root path doesn't exist and the engine path
 # does. Never overwrites a real file/dir (consumer-owned).
+#
+# LESSONS.yml is deliberately NOT in this list. At a consumer root that name
+# belongs to the CONSUMER's own lessons — a real, committed, agent-writable
+# file. Symlinking it into the engine made the root file the engine's, which
+# is why no agent could ever record one: the write landed in the .boucle/
+# submodule, `git add` staged nothing but a dirty pointer, and
+# bin/check-boucle-sync rejected it. The engine's lessons still reach every
+# prompt — bin/jc injects both files and MERGES them.
 if [ -n "${BOUCLE_HOME:-}" ] && [ "$BOUCLE_HOME" != "$BOUCLE_WORKSPACE" ]; then
-  for lt in "LESSONS.yml" ".jcode/skills" "bin"; do
+  for lt in ".jcode/skills" "bin"; do
     engine_src="$BOUCLE_HOME/$lt"
     root_path="$BOUCLE_WORKSPACE/$lt"
     [ -e "$engine_src" ] || continue
@@ -995,6 +1003,52 @@ trim_notes() {
 # Role instructions live in .jcode/agents/<role>.md (system prompt,
 # loaded via .jcode/prompt-overlay.md).
 # The user prompt below only adds issue-specific context to avoid duplication.
+# select_lessons <file> <keywords> — pull the lessons matching the issue.
+#
+# Returns the matching lesson blocks (number + title + ❌ + ✅), capped so one
+# source cannot crowd out the other. Empty when the file is absent or nothing
+# matches; the caller decides whether to fall back to a default set.
+select_lessons() {
+  local file="$1" keywords="$2" cap="${3:-80}"
+  [ -f "$file" ] || return 0
+  [ -n "$keywords" ] || return 0
+  grep -iqE "$keywords" "$file" 2> /dev/null || return 0
+  awk -v kw="$keywords" '
+    BEGIN { IGNORECASE=1 }
+    /^[0-9]+:/ {
+      if (buf && buf ~ kw) print buf;
+      buf = $0 "\n"; next
+    }
+    { buf = buf $0 "\n" }
+    END { if (buf && buf ~ kw) print buf }
+  ' "$file" 2> /dev/null | head -"$cap" || true
+}
+
+# select_default_lessons <file> — the critical set, when nothing matched.
+#
+# Engine-only by construction: #1/#2/#5/#6/#99 name specific engine lessons,
+# and the same numbers in a consumer file are unrelated entries.
+select_default_lessons() {
+  local file="$1"
+  [ -f "$file" ] || return 0
+  # The previous form reset the keep flag on the header line itself, so the
+  # body was never accumulated: this injected five bare numbers (21 bytes,
+  # no titles, no ❌/✅) under a heading calling them mandatory operating
+  # principles. Keep the whole entry, header through last body line.
+  awk '
+    BEGIN { split("1 2 5 6 99", w, " "); for (i in w) want[w[i]] = 1 }
+    /^[0-9]+:/ {
+      if (keep && buf) printf "%s", buf
+      num = $0; sub(/:.*/, "", num)
+      keep = (num in want)
+      buf = keep ? $0 "\n" : ""
+      next
+    }
+    { if (keep) buf = buf $0 "\n" }
+    END { if (keep && buf) printf "%s", buf }
+  ' "$file" 2> /dev/null | head -40 || true
+}
+
 build_prompt() {
   local role="$1"
   local prompt=""
@@ -1165,6 +1219,53 @@ ${LESSON_CANDIDATE_CONTENT}
 ---
 "
         fi
+      fi
+
+      # ── Refinement on a RECOVERED run (not only at escalation) ────────
+      # Until now boucle distilled a lesson only when the loop gave up, so
+      # 100% of what it has ever learned came from runs that failed. A pool
+      # built only from failures produces artifacts measured as worse than no
+      # artifact at all (docs/skills-audit.md §1).
+      #
+      # The trajectory worth distilling is the RECOVERED one: failed,
+      # corrected, then passed. That is exactly where this worker is standing
+      # on iteration >= 2 — the previous iteration did not land, its trace is
+      # in iterations.md and state.md, and the fix is the delta between them.
+      #
+      # A first-pass success emits nothing: it did the obvious thing and it
+      # worked, so there is no lesson, and asking for one would fill the file
+      # with restatements of the charter.
+      #
+      # Premature-lesson risk is carried by the MR gate, not by the prompt: if
+      # this iteration fails too, its code never merges and neither does the
+      # lesson. The reviewer already validates entries against the admission
+      # test and may require removal.
+      if [ "${BOUCLE_ITERATION:-1}" -gt 1 ]; then
+        # Which file may this worker write? At a consumer root LESSONS.yml is
+        # the consumer's own; in the engine repo both paths are one file.
+        local lessons_scope="repo"
+        if [ "$(readlink -f "$BOUCLE_WORKSPACE/LESSONS.yml" 2> /dev/null)" \
+          = "$(readlink -f "$BOUCLE_HOME/LESSONS.yml" 2> /dev/null)" ]; then
+          lessons_scope="engine"
+        fi
+        prompt="${prompt}
+**Refinement (you are recovering a failed iteration).** This is iteration ${BOUCLE_ITERATION}: a previous attempt on this issue did not land. Once your fix is in place, ask whether what went wrong was a CLASS of mistake that would recur without a lesson — the failure trace is in iterations.md and in state.md's \`Tried and rejected\`.
+
+- If it was a one-off now fixed in code: emit NOTHING. The code fix prevents recurrence; silence is honest and is the expected outcome most of the time.
+- If it passes the four-point admission test from AGENTS.md (class-not-instance, recurrence-without-the-doc, stable, not-already-covered), record it as described below, in THIS MR, and say on stdout which tests it passes."
+        if [ "$lessons_scope" = "repo" ]; then
+          prompt="${prompt}
+
+Where it goes:
+- **Specific to this repository** (its stack, its test harness, its deploy) → add it to \`LESSONS.yml\` at the repo root. That file is this repository's own; it is committed here and reviewed in this MR. Validate with \`bin/check-lessons LESSONS.yml --against ${BOUCLE_HOME}/LESSONS.yml\` — the \`--against\` flag rejects an entry that merely restates an engine lesson (both files are injected into every prompt, so a restatement is paid for twice).
+- **Universal** (it would hold in any repository) → do NOT commit it here. \`${BOUCLE_HOME}/LESSONS.yml\` is engine-owned and a write there is discarded. State the entry on stdout for upstreaming per \`.jcode/UPSTREAM-FIX-WORKFLOW.md\`."
+        else
+          prompt="${prompt}
+
+Add it to \`LESSONS.yml\` and validate with \`bin/check-lessons LESSONS.yml\` before committing. Use the next available number, or reuse a pruned/merged gap if the class is identical."
+        fi
+        prompt="${prompt}
+"
       fi
       ;;
     reviewer)
@@ -1376,61 +1477,73 @@ Apply the four-point admission test from AGENTS.md. If no candidate passes, emit
   case "$role" in
     triage | worker | reviewer)
       [ "$arm" = "none" ] && echo "[boucle:metrics] arm=none — lessons withheld from the $role prompt (BOUCLE_EXPERIMENT)" >&2
-      local lessons_block=""
-      local lessons_file="$BOUCLE_WORKSPACE/LESSONS.yml"
-      [ "$arm" = "none" ] && lessons_file="/nonexistent"
-      [ -f "$lessons_file" ] || lessons_file="$BOUCLE_HOME/LESSONS.yml"
-      if [ -f "$lessons_file" ]; then
-        # Extract keywords from the issue body (lowercase, alphanumeric,
-        # deduplicated, max 20). These are used to grep LESSONS.yml for
-        # matching lessons.
-        local keywords=""
-        if [ -n "${BOUCLE_ISSUE_BODY:-}" ]; then
-          keywords=$(printf '%s' "$BOUCLE_ISSUE_BODY" \
-            | tr '[:upper:]' '[:lower:]' \
-            | grep -oE '[a-z]{4,}' \
-            | sort -u \
-            | head -20 \
-            | paste -sd'|' - 2> /dev/null || echo "")
-        fi
-        # Grep LESSONS.yml for lessons matching any keyword in the title,
-        # ❌, or ✅ fields. Extract the full lesson block (number + title +
-        # ❌ + ✅). Limit to 10 matches to keep the prompt within budget.
-        local matched=""
-        if [ -n "$keywords" ]; then
-          matched=$(grep -iE "$keywords" "$lessons_file" 2> /dev/null | head -1 || true)
-        fi
-        if [ -n "$matched" ]; then
-          # Keyword match: extract the matching lesson blocks.
-          # Each lesson starts with "^N:" and ends before the next "^N:".
-          lessons_block=$(awk -v kw="$keywords" '
-            BEGIN { IGNORECASE=1 }
-            /^[0-9]+:/ {
-              if (buf && buf ~ kw) print buf;
-              buf = $0 "\n"; next
-            }
-            { buf = buf $0 "\n" }
-            END { if (buf && buf ~ kw) print buf }
-          ' "$lessons_file" 2> /dev/null | head -80 || true)
-        fi
-        # If no keyword match, inject the default critical lessons.
-        if [ -z "$lessons_block" ]; then
-          lessons_block=$(awk '
-            /^1:/ {p=1} /^2:/ {p=1} /^5:/ {p=1} /^6:/ {p=1} /^99:/ {p=1}
-            p && /^[0-9]+:/ { if (buf) print buf; buf=$0"\n"; p=0; next }
-            p { buf=buf$0"\n" }
-            END { if (buf) print buf }
-          ' "$lessons_file" 2> /dev/null | head -40 || true)
-        fi
-        if [ -n "$lessons_block" ]; then
+      # Two sources, one filename, scope carried by location:
+      #   $BOUCLE_HOME/LESSONS.yml      — the engine's universal lessons
+      #   $BOUCLE_WORKSPACE/LESSONS.yml — this repository's own
+      #
+      # They are MERGED, never overridden. The previous first-match-wins
+      # fallback meant a consumer that wrote its own lessons silently lost
+      # every engine lesson — the file exists, so the engine's was never read.
+      #
+      # Same-file guard: in the engine repo (and wherever the root file is
+      # still a symlink into .boucle/), both paths resolve to one inode and
+      # the block would otherwise be injected twice.
+      local engine_lessons="$BOUCLE_HOME/LESSONS.yml"
+      local local_lessons="$BOUCLE_WORKSPACE/LESSONS.yml"
+      if [ "$arm" = "none" ]; then
+        engine_lessons="/nonexistent"
+        local_lessons="/nonexistent"
+      fi
+      if [ -e "$engine_lessons" ] && [ -e "$local_lessons" ] \
+        && [ "$(readlink -f "$engine_lessons" 2> /dev/null)" = "$(readlink -f "$local_lessons" 2> /dev/null)" ]; then
+        local_lessons="/nonexistent"
+      fi
+
+      # Extract keywords from the issue body (lowercase, alphanumeric,
+      # deduplicated, max 20) and match both sources against them.
+      local keywords=""
+      if [ -n "${BOUCLE_ISSUE_BODY:-}" ]; then
+        keywords=$(printf '%s' "$BOUCLE_ISSUE_BODY" \
+          | tr '[:upper:]' '[:lower:]' \
+          | grep -oE '[a-z]{4,}' \
+          | sort -u \
+          | head -20 \
+          | paste -sd'|' - 2> /dev/null || echo "")
+      fi
+
+      local engine_block local_block
+      engine_block=$(select_lessons "$engine_lessons" "$keywords" 80)
+      local_block=$(select_lessons "$local_lessons" "$keywords" 40)
+      # Nothing matched anywhere: fall back to the engine's critical set, so a
+      # run is never left with no operating principles at all.
+      if [ -z "$engine_block" ] && [ -z "$local_block" ]; then
+        engine_block=$(select_default_lessons "$engine_lessons")
+      fi
+
+      if [ -n "$engine_block" ] || [ -n "$local_block" ]; then
+        prompt="${prompt}
+
+Relevant lessons (extracted for you — do NOT re-read the lessons above; the files hold more that did not match this issue)."
+        if [ -n "$engine_block" ]; then
           prompt="${prompt}
 
-Relevant lessons (from LESSONS.yml — already extracted, do NOT re-read the file):
+Engine lessons — universal, they apply in every repository:
 ---
-${lessons_block}
----
-These lessons are mandatory operating principles. Violating any ❌ pattern is a FAIL criterion."
+${engine_block}
+---"
         fi
+        if [ -n "$local_block" ]; then
+          prompt="${prompt}
+
+This repository's own lessons:
+---
+${local_block}
+---
+Where a repository lesson conflicts with an engine lesson, the ENGINE lesson wins."
+        fi
+        prompt="${prompt}
+
+These lessons are mandatory operating principles. Violating any ❌ pattern is a FAIL criterion."
       fi
       ;;
   esac
@@ -1700,13 +1813,21 @@ emit_health_record() {
   if [ -z "$skills" ] && type extract_skills_used > /dev/null 2>&1; then
     skills=$(extract_skills_used "$AGENT_LOG" 2> /dev/null | paste -sd, - 2> /dev/null || echo "")
   fi
+  # Same rule for the spawn count: on an early exit 7d never ran, so read the
+  # transcript rather than recording 0 for a run that may have fanned out
+  # before it died. 0 and "we never looked" are different findings.
+  local swarm="${SWARM_SPAWNS:-}"
+  if [ -z "$swarm" ] && type extract_swarm_spawns > /dev/null 2>&1; then
+    swarm=$(extract_swarm_spawns "$AGENT_LOG" 2> /dev/null || echo 0)
+  fi
+  case "$swarm" in '' | *[!0-9]*) swarm=0 ;; esac
   local setup_fail
   setup_fail=$(boucle_classify_setup_failure "$AGENT_LOG" 2> /dev/null || echo "")
   boucle_health_record "$ISSUE" "$ROLE" "$ITERATION" "${AGENT_EXIT:-$rc}" \
     "${prompt_total_chars:-0}" "${h_pt:-}" "${h_cost:-}" \
     "${h_model:-}" "${h_provider:-}" \
     "$skills" "$(boucle_experiment_arm "$ISSUE" 2> /dev/null || echo full)" \
-    "$setup_fail" || true
+    "$setup_fail" "$swarm" || true
   return "$rc"
 }
 trap emit_health_record EXIT
@@ -2258,6 +2379,47 @@ extract_skills_used() {
   return 0
 }
 
+# extract_swarm_spawns <log> — count sub-agent spawns in the transcript.
+#
+# worker.md tells the worker to fan out into parallel sub-agents with the
+# `swarm` tool and forbids one-liner prompts, and nothing has ever recorded
+# whether a single run does it. Measurement only — nothing gates on this.
+#
+# The pattern is deliberately STRICT, and that is the difference between this
+# and extract_skills_used: a skill name is validated against
+# .jcode/skills/<name> on disk, so a loose match costs nothing. `swarm` has no
+# such backstop, so a loose match would count the prompt's own instructions
+# and every prose mention ("I could use swarm here") as spawns, and the number
+# would be worse than none. Match only call shapes — `swarm(`, a tool-call
+# name field, an explicit invocation line — never the bare word.
+extract_swarm_spawns() {
+  local log="$1" n
+  [ -f "$log" ] || return 0
+  # Counts LINES carrying a call shape, not occurrences: a line with two
+  # spawns counts once. An undercount is the safe direction for a first
+  # measurement — the question this answers is "does this ever fire at all".
+  # `grep -c` prints 0 AND exits 1 when nothing matches, so the status is
+  # swallowed and the value normalised rather than defaulted twice.
+  n=$(grep -cE '(\bswarm\(|"name"[[:space:]]*:[[:space:]]*"swarm"|'"'"'name'"'"'[[:space:]]*:[[:space:]]*'"'"'swarm'"'"'|^[[:space:]]*swarm[[:space:]]+(spawn|run)\b|tool[_-]?call[^\n]{0,40}\bswarm\b)' "$log" 2> /dev/null || true)
+  case "$n" in '' | *[!0-9]*) n=0 ;; esac
+  printf '%s\n' "$n"
+}
+
+# Sets SWARM_SPAWNS (global) so the health record in 7d can carry it, on the
+# same channel and with the same observability rule as skills.
+record_swarm_spawns() {
+  local n observable="yes"
+  n=$(extract_swarm_spawns "$AGENT_LOG")
+  case "$n" in '' | *[!0-9]*) n=0 ;; esac
+  # A transcript we cannot read is NOT a finding of "no spawns".
+  if [ ! -s "$AGENT_LOG" ]; then
+    observable="no"
+    n=0
+  fi
+  SWARM_SPAWNS="$n"
+  echo "[boucle:metrics] role=$ROLE iteration=$ITERATION swarm_spawns=$n observable=$observable" >&2
+}
+
 # Sets SKILLS_USED (global) so the health record in 7d can carry the same
 # list. skills-used.json stays as a projection for anything already reading
 # it; health.jsonl is the file the analysis joins on.
@@ -2328,6 +2490,7 @@ h_setup_fail=$(boucle_classify_setup_failure "$AGENT_LOG" 2> /dev/null || echo "
 if [ -n "$h_setup_fail" ]; then
   echo "[boucle:metrics] role=$ROLE iteration=$ITERATION setup_fail=$h_setup_fail (the environment blocked this run before the task)" >&2
 fi
+record_swarm_spawns || true
 emit_health_record || true
 
 # ── 7b. Capture jcode session for interactive takeover (#54 item 2) ──
