@@ -190,14 +190,27 @@ permissions:
 # Serial merge: only one merger job at a time (lesson #8, #10).
 # Per-issue serialization: worker/reviewer/e2e for the same issue don't overlap.
 #
-# Two separate groups, mirroring the GitLab resource_group architecture
+# Three separate lanes, mirroring the GitLab resource_group architecture
 # (dispatch: boucle-dispatch, worker/reviewer/e2e: boucle-issue-$BOUCLE_ISSUE):
 #
 #   - workflow_dispatch (chain_to_role) → boucle-issue-<BOUCLE_ISSUE>
 #     Serializes role-specific runs (worker/reviewer/e2e) per issue, so two
 #     worker runs or two reviewer runs for the same issue queue, not overlap.
 #
-#   - webhook events (issues, issue_comment, pull_request, schedule) → boucle-dispatch-<issue|run_id>
+#   - issue_comment / pull_request_review_comment → boucle-dispatch-note-<issue|PR|run_id>
+#     Comment dispatches get their OWN lane because they carry the
+#     amend-in-flight path (dispatch.sh boucle:working branch): a human
+#     comment during a worker run must re-trigger the worker. GitHub
+#     Actions de-duplicates QUEUED runs inside one concurrency group even
+#     with cancel-in-progress: false, so a comment dispatch still waiting
+#     for a runner is cancelled by any newer run in the same group —
+#     notably the issues:labeled webhook of the worker's OWN terminal
+#     transition (observed on boucle.dev #91: the amend dispatch was
+#     cancelled 34s after the comment, the worker transitioned to
+#     boucle:review, the amendment never reached a worker, and the
+#     reviewer graded the wrong file against the frozen spec).
+#
+#   - other webhook events (issues, pull_request, schedule) → boucle-dispatch-<issue|run_id>
 #     The dispatch job is a fast router; it must NOT compete with a
 #     chain_to_role workflow_dispatch for the same concurrency slot.
 #     Previously both shared one group, so the issues webhook fired by
@@ -206,8 +219,12 @@ permissions:
 #     boucle:review and no-op'd, leaving the reviewer untriggered and the
 #     issue stuck at boucle:review until the doctor's stuck-issue recovery
 #     fired — producing the "FAIL loops" pattern (consumer 2026-08).
+#
+# Dispatch runs in different lanes may overlap in time; that is safe —
+# dispatch is a fast, idempotent router, and the role jobs it chains are
+# serialized per issue by their own job-level concurrency groups.
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && format('boucle-issue-{0}', github.event.inputs.BOUCLE_ISSUE) || format('boucle-dispatch-{0}', github.event.issue.number || github.event.pull_request.number || github.run_id) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && format('boucle-issue-{0}', github.event.inputs.BOUCLE_ISSUE) || (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') && format('boucle-dispatch-note-{0}', github.event.issue.number || github.event.pull_request.number || github.run_id) || format('boucle-dispatch-{0}', github.event.issue.number || github.event.pull_request.number || github.run_id) }}
   cancel-in-progress: false
 
 # ── Jobs ────────────────────────────────────────────────────────────────────────
