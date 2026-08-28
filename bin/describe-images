@@ -95,8 +95,24 @@ if ! command -v file > /dev/null 2>&1; then
 fi
 
 # ── Scan attachment dirs for images ───────────────────────────────────
+# Three sources, all under $STATE_DIR:
+#   attachments/      — issue comment uploads (flat, from fetch-issue-attachments)
+#   mr-attachments/   — MR comment uploads (flat, from fetch-mr-attachments)
+#   repo-images/      — raster images ADDED/MODIFIED by the PR itself,
+#                       extracted from the MR head by boucle_collect_mr_images
+#                       (lib/boucle-ci/reviewer.sh) with subdirs preserved
+#                       (e.g. public/og-image.png). Without this source the
+#                       vision pipeline never saw PR-changed images and the
+#                       text-only reviewer model 400'd on a Read (boucle.dev
+#                       PR #94, 2026-08-27).
+# repo-images nests subdirs, so the find is recursive (no -maxdepth 1);
+# the attachment dirs are flat, so recursion is a no-op there.
+# IMAGE_RELS carries the path relative to the scanned dir (the section
+# heading): bare filename for the flat attachment dirs, repo-relative
+# path for repo-images.
 IMAGE_FILES=()
-for dir in "$STATE_DIR/attachments" "$STATE_DIR/mr-attachments"; do
+IMAGE_RELS=()
+for dir in "$STATE_DIR/attachments" "$STATE_DIR/mr-attachments" "$STATE_DIR/repo-images"; do
   [ -d "$dir" ] || continue
   while IFS= read -r -d '' f; do
     mime=$(file --mime-type -b "$f" 2> /dev/null || echo "")
@@ -107,9 +123,12 @@ for dir in "$STATE_DIR/attachments" "$STATE_DIR/mr-attachments"; do
       # triage preview used placeholder icons instead of the shared SVGs).
       # Keep SVGs out of the vision pipeline — agents read them as text.
       image/svg+xml) continue ;;
-      image/*) IMAGE_FILES+=("$f") ;;
+      image/*)
+        IMAGE_FILES+=("$f")
+        IMAGE_RELS+=("${f#${dir}/}")
+        ;;
     esac
-  done < <(find "$dir" -maxdepth 1 -type f -print0 2> /dev/null || true)
+  done < <(find "$dir" -type f -print0 2> /dev/null || true)
 done
 
 IMAGE_COUNT=${#IMAGE_FILES[@]}
@@ -178,12 +197,19 @@ echo "" >> "$DESC_FILE"
 SUCCESS_COUNT=0
 FAIL_COUNT=0
 
-for img in "${IMAGE_FILES[@]}"; do
+for i in "${!IMAGE_FILES[@]}"; do
+  img="${IMAGE_FILES[$i]}"
+  # Heading is the path RELATIVE to the scanned dir: attachments and
+  # mr-attachments are flat, so this is the bare filename (unchanged
+  # behavior); repo-images preserves subdirs, so a PR-changed asset reads
+  # as `public/og-image.png` — the agent needs the repo path to reason
+  # about the file, a bare `og-image.png` would be ambiguous.
+  rel="${IMAGE_RELS[$i]}"
   filename=$(basename "$img")
   # Get dimensions/metadata via `file`
   meta=$(file "$img" 2> /dev/null || echo "unknown")
 
-  echo "## ${filename}" >> "$DESC_FILE"
+  echo "## ${rel}" >> "$DESC_FILE"
   echo "" >> "$DESC_FILE"
   echo "- File: \`$img\`" >> "$DESC_FILE"
   echo "- Metadata: ${meta}" >> "$DESC_FILE"
