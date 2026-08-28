@@ -1300,6 +1300,9 @@ HELPER
   helper_script=$(mktemp)
   cat > "$helper_script" << 'HELPER'
 #!/usr/bin/env bash
+# Pin the mode: a runner that exports BOUCLE_DEPLOY_MODE=external (a
+# consumer variable) would otherwise send this down the external path.
+BOUCLE_DEPLOY_MODE=self
 BOUCLE_ISSUE=42
 BOUCLE_DEPLOY_CMD="echo DEPLOYED https://example.com"
 BOUCLE_DEPLOY_URL_REGEX="https://[a-zA-Z0-9./-]+"
@@ -1331,6 +1334,9 @@ HELPER
   helper_script=$(mktemp)
   cat > "$helper_script" << 'HELPER'
 #!/usr/bin/env bash
+# Pin the mode: a runner that exports BOUCLE_DEPLOY_MODE=external (a
+# consumer variable) would otherwise send this down the external path.
+BOUCLE_DEPLOY_MODE=self
 BOUCLE_ISSUE=42
 BOUCLE_DEPLOY_CMD="echo FAILED; exit 1"
 BOUCLE_DEPLOY_URL_REGEX="https://[a-zA-Z0-9./-]+"
