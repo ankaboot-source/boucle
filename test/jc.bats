@@ -78,6 +78,17 @@ extract_prompt_funcs() {
   printf 'boucle_review_mode() { echo "${BOUCLE_REVIEW_MODE:-preview}"; }\n' >> "$1"
 }
 
+# Extract the resolution block with a test-controlled ENGINE_DIR (the
+# real one is derived from $0, which points at bash inside `run`).
+extract_agent_resolution() { # $1 = outfile, $2 = engine dir, $3 = end regex
+  awk -v stop="${3:-^# Extract model}" '
+    /^ENGINE_DIR=/ { p = 1 }
+    p { print }
+    p && $0 ~ stop { exit }
+  ' bin/jc \
+    | sed "s|^ENGINE_DIR=.*|ENGINE_DIR='$2'|" > "$1"
+}
+
 # ── Syntax ────────────────────────────────────────────────────────────
 
 @test "bin/jc parses without syntax error" {
@@ -931,11 +942,7 @@ temperature: 0.3
 triage agent body
 EOF
   TMPF=$(mktemp)
-  awk '
-    /^AGENT_FILE=""/ { p = 1 }
-    p { print }
-    p && /^# Extract temperature/ { exit }
-  ' bin/jc > "$TMPF"
+  extract_agent_resolution "$TMPF" "$(dirname "$(dirname "$AGENT_DIR")")" "^# Extract temperature"
   # shellcheck disable=SC1090
   run bash -c "
     CI_PROJECT_DIR='$(dirname "$(dirname "$AGENT_DIR")")'
@@ -962,11 +969,7 @@ temperature: 0.3
 triage agent body
 EOF
   TMPF=$(mktemp)
-  awk '
-    /^AGENT_FILE=""/ { p = 1 }
-    p { print }
-    p && /^# Extract temperature/ { exit }
-  ' bin/jc > "$TMPF"
+  extract_agent_resolution "$TMPF" "$(dirname "$(dirname "$AGENT_DIR")")" "^# Extract temperature"
   # shellcheck disable=SC1090
   run bash -c "
     CI_PROJECT_DIR='$(dirname "$(dirname "$AGENT_DIR")")'
@@ -994,11 +997,7 @@ model: ollama-cloud/deepseek-v4-flash
 worker agent body
 EOF
   TMPF=$(mktemp)
-  awk '
-    /^AGENT_FILE=""/ { p = 1 }
-    p { print }
-    p && /^# Extract temperature/ { exit }
-  ' bin/jc > "$TMPF"
+  extract_agent_resolution "$TMPF" "$(dirname "$(dirname "$AGENT_DIR")")" "^# Extract temperature"
   # shellcheck disable=SC1090
   run bash -c "
     CI_PROJECT_DIR='$(dirname "$(dirname "$AGENT_DIR")")'
@@ -1031,11 +1030,7 @@ reasoning_effort: max
 worker agent body
 EOF
   TMPF=$(mktemp)
-  awk '
-    /^AGENT_FILE=""/ { p = 1 }
-    p { print }
-    p && /^# ── Provider fallback config/ { exit }
-  ' bin/jc > "$TMPF"
+  extract_agent_resolution "$TMPF" "$(dirname "$(dirname "$AGENT_DIR")")" "^# ── Provider fallback config"
   # shellcheck disable=SC1090
   run bash -c "
     CI_PROJECT_DIR='$(dirname "$(dirname "$AGENT_DIR")")'
@@ -1062,11 +1057,7 @@ temperature: 0.5
 triage agent body
 EOF
   TMPF=$(mktemp)
-  awk '
-    /^AGENT_FILE=""/ { p = 1 }
-    p { print }
-    p && /^# ── Provider fallback config/ { exit }
-  ' bin/jc > "$TMPF"
+  extract_agent_resolution "$TMPF" "$(dirname "$(dirname "$AGENT_DIR")")" "^# ── Provider fallback config"
   # shellcheck disable=SC1090
   run bash -c "
     CI_PROJECT_DIR='$(dirname "$(dirname "$AGENT_DIR")")'
@@ -1094,11 +1085,7 @@ worker agent body
 EOF
   TMPF=$(mktemp)
   # Slice through the export block (ends before Do-Not-Disturb).
-  awk '
-    /^AGENT_FILE=""/ { p = 1 }
-    p { print }
-    p && /^# ── Do-Not-Disturb/ { exit }
-  ' bin/jc > "$TMPF"
+  extract_agent_resolution "$TMPF" "$(dirname "$(dirname "$AGENT_DIR")")" "^# ── Do-Not-Disturb"
   JCODE_HOME=$(mktemp -d)
   # shellcheck disable=SC1090
   run bash -c "
@@ -1860,4 +1847,92 @@ YAML
   refute_output --partial "Engine rule about labels"
   refute_output --partial "Repo rule about labels"
   rm -rf "$TMPF" "$W" "$H"
+}
+
+# ── Agent-prompt resolution: the engine's copy wins ───────────────────
+# `.jcode/` is engine-owned (bin/update syncs it as a whole). A copy in
+# the consumer's workspace is a mirror, and on a submodule install that
+# mirror never moves again — bin/update can only bump the submodule
+# pointer. A workspace-first lookup froze such a consumer on a months-old
+# triage prompt while the engine's parser moved on, so every spec it
+# produced was missing the sections the engine expects.
+
+# Build a .jcode/agents/<role>.md tree; echoes the root.
+make_agent_tree() { # $1 = body marker
+  local root
+  root=$(mktemp -d)
+  mkdir -p "$root/.jcode/agents"
+  printf -- '---\nmodel: ollama-cloud/glm-5.2\ntemperature: 0.3\n---\n%s\n' "$1" \
+    > "$root/.jcode/agents/triage.md"
+  echo "$root"
+}
+
+@test "agent prompt: the engine's copy wins over a stale workspace copy" {
+  ENGINE=$(make_agent_tree "current engine prompt")
+  WS=$(make_agent_tree "stale consumer prompt")
+  TMPF=$(mktemp)
+  extract_agent_resolution "$TMPF" "$ENGINE"
+  run bash -c "AGENT='triage'; BOUCLE_WORKSPACE='$WS'; BOUCLE_HOME=''; source '$TMPF'; echo \"PICKED=\$AGENT_FILE\"; grep -c 'current engine prompt' \"\$AGENT_FILE\""
+  assert_success
+  assert_output --partial "PICKED=$ENGINE/.jcode/agents/triage.md"
+  refute_output --partial "$WS/.jcode/agents/triage.md
+PICKED"
+  rm -rf "$TMPF" "$ENGINE" "$WS"
+}
+
+@test "agent prompt: a divergent workspace copy is reported, not silently ignored" {
+  ENGINE=$(make_agent_tree "current engine prompt")
+  WS=$(make_agent_tree "stale consumer prompt")
+  TMPF=$(mktemp)
+  extract_agent_resolution "$TMPF" "$ENGINE"
+  run bash -c "AGENT='triage'; BOUCLE_WORKSPACE='$WS'; BOUCLE_HOME=''; source '$TMPF' 2>&1"
+  assert_success
+  assert_output --partial "differs from the engine's"
+  assert_output --partial ".jcode/ is engine-owned"
+  rm -rf "$TMPF" "$ENGINE" "$WS"
+}
+
+@test "agent prompt: an in-sync workspace copy warns about nothing" {
+  # A tarball install: the workspace copy IS the engine's copy.
+  ENGINE=$(make_agent_tree "current engine prompt")
+  WS=$(make_agent_tree "current engine prompt")
+  TMPF=$(mktemp)
+  extract_agent_resolution "$TMPF" "$ENGINE"
+  run bash -c "AGENT='triage'; BOUCLE_WORKSPACE='$WS'; BOUCLE_HOME=''; source '$TMPF' 2>&1"
+  assert_success
+  refute_output --partial "WARN"
+  rm -rf "$TMPF" "$ENGINE" "$WS"
+}
+
+@test "agent prompt: the workspace copy is still used when the engine has none" {
+  # A consumer carrying a role the engine does not ship must keep working.
+  ENGINE=$(mktemp -d)
+  WS=$(make_agent_tree "consumer-only prompt")
+  TMPF=$(mktemp)
+  extract_agent_resolution "$TMPF" "$ENGINE"
+  run bash -c "AGENT='triage'; BOUCLE_WORKSPACE='$WS'; BOUCLE_HOME=''; source '$TMPF' 2>&1; echo \"PICKED=\$AGENT_FILE\""
+  assert_success
+  assert_output --partial "PICKED=$WS/.jcode/agents/triage.md"
+  refute_output --partial "WARN"
+  rm -rf "$TMPF" "$ENGINE" "$WS"
+}
+
+@test "agent prompt: BOUCLE_HOME is consulted before the workspace" {
+  # bin/jc invoked from outside the engine tree: BOUCLE_HOME names it.
+  HOME_DIR=$(make_agent_tree "engine via BOUCLE_HOME")
+  WS=$(make_agent_tree "stale consumer prompt")
+  TMPF=$(mktemp)
+  extract_agent_resolution "$TMPF" "$(mktemp -d)"
+  run bash -c "AGENT='triage'; BOUCLE_WORKSPACE='$WS'; BOUCLE_HOME='$HOME_DIR'; source '$TMPF' 2>&1; echo \"PICKED=\$AGENT_FILE\""
+  assert_success
+  assert_output --partial "PICKED=$HOME_DIR/.jcode/agents/triage.md"
+  rm -rf "$TMPF" "$HOME_DIR" "$WS"
+}
+
+@test "agent prompt: the candidate order puts the engine ahead of the workspace" {
+  # Regression guard on the order itself, independent of the behaviour
+  # tests above: engine dir, then BOUCLE_HOME, then the workspace mirror.
+  run bash -c "awk '/^AGENT_FILE=\"\"/,/^done/' bin/jc | grep -n 'agents/' | cut -d: -f1,2 | paste -sd' ' -"
+  assert_success
+  [[ "$output" =~ ENGINE_DIR.*BOUCLE_HOME.*BOUCLE_WORKSPACE ]]
 }

@@ -1066,3 +1066,12 @@
   - 'DO classify mechanically at injection time: tag every injected note `[<author> — boucle]` when its body carries `<!-- boucle:agent -->` (stamped by every forge note path), `[<author> — human]` otherwise. The tag is the only authorship signal the agents receive.'
   - 'DO keep the jc parsers (filter_mr_discussion, trim_notes) marker-derived: bot detection via the `— boucle` tag, with BOUCLE_BOT_USERNAME equality only as a legacy fallback.'
   - 'DO treat every `— human` note as a binding amendment candidate even when posted under the bot''s account and even when it contradicts the frozen spec (lesson #53) — recognize by marker, never by actor (lesson #100).'
+112:
+  title: Engine-owned files MUST be read from the engine, never from the consumer's copy of them
+  ❌:
+  - 'DO NOT resolve an engine-owned file (agent prompts, skills — anything `bin/update` syncs wholesale) from the consumer''s workspace before the engine''s own copy. The consumer''s copy is a mirror, and on a submodule install it is a FROZEN mirror: `bin/update` can then only move the submodule pointer, so nothing rewrites the parent repo''s files again. A workspace-first lookup pinned a consumer to the agent prompt it last received by tarball while the engine advanced underneath it — the loop ran the current parser against an agent that had never been told to emit the current spec sections.'
+  - 'DO NOT let that divergence stay silent. The symptom (sections missing from the agent''s output) accuses the agent, and the agent is doing exactly what its prompt says; nothing in the run names the stale file, so the search starts in the wrong place.'
+  ✅:
+  - 'DO resolve engine-owned files engine-first: the directory of the running script, then `$BOUCLE_HOME`, then the consumer''s workspace as a fallback for a role the engine does not ship. On a tarball install this changes nothing — the workspace copy IS the engine''s copy.'
+  - 'DO warn, on every run, when a workspace copy exists and differs from the engine''s: name both paths, say which one is being used, and say how to re-sync.'
+  - 'DO make version skew visible rather than survivable in silence: a consumer whose mirrored files predate its engine pin is a bug, even when the parser''s legacy fallbacks keep the loop running.'
