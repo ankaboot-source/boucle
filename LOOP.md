@@ -810,6 +810,22 @@ measurement log never enters the consumer's history or triggers their CI, and
 fail-open throughout: a metrics write must never be what stops an issue
 reaching done.
 
+**An empty skills list is not a finding on its own.** Each run also records
+`skills_evidence`, which says what the empty list is evidence *of*:
+`parsed` (names read), `not-invoked` (the transcript shows no `skill_manage`
+activity — a real zero), `unparsed` (it *does* show activity and the extractor
+read nothing — the sensor is broken, and every skill figure from that run is
+wrong rather than empty), or `no-transcript`. The per-issue row carries
+`runs_skills_unparsed`; an all-zero skills column with a non-zero count there
+is a broken extractor, not a fact about agents. `unparsed` also raises a
+`[boucle] WARN` in the job log, because that state must never pass quietly.
+
+**An empty verdict is recorded as `no-verdict`, never as `UNCERTAIN`.** A
+posted `VERDICT: UNCERTAIN` is a judgement and escalates to a human at once;
+an empty verdict is a run that produced nothing and re-triggers the reviewer
+up to `BOUCLE_MAX_ITERATIONS`. Recording both under one name sends the
+diagnosis after the wrong bug.
+
 **The raw log is pushed as it is written, not read back at the end.** Every
 boucle job runs on a fresh ephemeral runner, and the job that applies the
 terminal label is almost never the job that did the work — a doctor sweep

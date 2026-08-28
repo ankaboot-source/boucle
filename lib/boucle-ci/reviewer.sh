@@ -593,9 +593,17 @@ boucle_ci_reviewer() {
   # wrote one: boucle_escalation_diagnostic therefore counted 0 reviewer FAILs
   # on every escalation. Written here — after every fallback has resolved — so
   # the row carries the verdict the loop actually acted on, not a draft.
-  # An empty VERDICT is recorded as UNCERTAIN: no verdict is a fact about the
-  # run, and silence would be indistinguishable from a PASS in the record.
-  boucle_health_outcome "$BOUCLE_ISSUE" "reviewer" "${VERDICT:-UNCERTAIN}" "iteration ${BOUCLE_ITERATION:-1}" || true
+  # An empty VERDICT is recorded as `no-verdict`, NOT as UNCERTAIN. The two
+  # are different facts and the loop treats them differently: a posted
+  # `VERDICT: UNCERTAIN` escalates to a human immediately (the case block
+  # below), while an empty verdict re-triggers the reviewer up to
+  # BOUCLE_MAX_ITERATIONS (the assertion at the end of this function).
+  # Recording both as "UNCERTAIN" made those indistinguishable in the health
+  # log — observed on boucle.dev #92, which shows ten UNCERTAIN rows that were
+  # in fact ten runs where the agent posted nothing at all, five of them on a
+  # byte-identical prompt. Reading that row as "the reviewer was unsure" is
+  # the wrong diagnosis and points at the wrong fix.
+  boucle_health_outcome "$BOUCLE_ISSUE" "reviewer" "${VERDICT:-no-verdict}" "iteration ${BOUCLE_ITERATION:-1}" || true
 
   case "$VERDICT" in
     PASS)

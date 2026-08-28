@@ -1832,13 +1832,18 @@ emit_health_record() {
     swarm=$(extract_swarm_spawns "$AGENT_LOG" 2> /dev/null || echo 0)
   fi
   case "$swarm" in '' | *[!0-9]*) swarm=0 ;; esac
-  local setup_fail
+  local setup_fail evidence
   setup_fail=$(boucle_classify_setup_failure "$AGENT_LOG" 2> /dev/null || echo "")
+  # On an early exit 7c never ran, so classify here from the transcript.
+  evidence="${SKILLS_EVIDENCE:-}"
+  if [ -z "$evidence" ] && type skills_evidence > /dev/null 2>&1; then
+    evidence=$(skills_evidence "$AGENT_LOG" "$skills" 2> /dev/null || echo "")
+  fi
   boucle_health_record "$ISSUE" "$ROLE" "$ITERATION" "${AGENT_EXIT:-$rc}" \
     "${prompt_total_chars:-0}" "${h_pt:-}" "${h_cost:-}" \
     "${h_model:-}" "${h_provider:-}" \
     "$skills" "$(boucle_experiment_arm "$ISSUE" 2> /dev/null || echo full)" \
-    "$setup_fail" "$swarm" || true
+    "$setup_fail" "$swarm" "$evidence" || true
   return "$rc"
 }
 trap emit_health_record EXIT
@@ -2445,10 +2450,44 @@ record_swarm_spawns() {
   echo "[boucle:metrics] role=$ROLE iteration=$ITERATION swarm_spawns=$n observable=$observable" >&2
 }
 
+# skills_evidence <log> <extracted-names>
+#
+# Why a name list alone is not enough: "no skills used" and "the extractor
+# does not match this transcript format" produce the SAME empty list, and the
+# second is a broken sensor reporting a finding. Observed on boucle.dev #91
+# and #92 — 60+ runs, `skills: []` on every one, with no way to tell which.
+#
+# The tool jcode exposes is `skill_manage`. Its presence in the transcript is
+# independent of whatever shape extract_skills_used greps for, so it tells the
+# two apart:
+#
+#   no-transcript  the log is missing or empty — nothing can be said
+#   parsed         names were extracted
+#   not-invoked    the log mentions no skill_manage at all — a real zero
+#   unparsed       the log DOES show skill_manage and we extracted nothing
+#                  → the extractor is wrong, and this is the row that says so
+skills_evidence() {
+  local log="${1:-}" used="${2:-}"
+  if [ -z "$log" ] || [ ! -s "$log" ]; then
+    echo "no-transcript"
+    return 0
+  fi
+  if [ -n "$used" ]; then
+    echo "parsed"
+    return 0
+  fi
+  if grep -qi 'skill_manage' "$log" 2> /dev/null; then
+    echo "unparsed"
+  else
+    echo "not-invoked"
+  fi
+}
+
 # Sets SKILLS_USED (global) so the health record in 7d can carry the same
 # list. skills-used.json stays as a projection for anything already reading
 # it; health.jsonl is the file the analysis joins on.
 SKILLS_USED=""
+SKILLS_EVIDENCE=""
 record_skills_used() {
   local used observable="yes"
   used=$(extract_skills_used "$AGENT_LOG" | paste -sd, - 2> /dev/null || echo "")
@@ -2461,7 +2500,17 @@ record_skills_used() {
     used=""
   fi
 
-  echo "[boucle:metrics] role=$ROLE iteration=$ITERATION skills_used=${used:-none} observable=$observable" >&2
+  SKILLS_EVIDENCE=$(skills_evidence "$AGENT_LOG" "$used")
+
+  echo "[boucle:metrics] role=$ROLE iteration=$ITERATION skills_used=${used:-none} observable=$observable evidence=$SKILLS_EVIDENCE" >&2
+
+  # The one state that must never pass quietly: the agent DID call the skill
+  # tool and the extractor returned nothing. That is not a measurement, it is
+  # the measurement failing — and without this line it looks exactly like an
+  # agent that chose to load no skills.
+  if [ "$SKILLS_EVIDENCE" = "unparsed" ]; then
+    echo "[boucle] WARN: the transcript shows skill_manage activity but extract_skills_used matched no skill name (role=$ROLE, iteration=$ITERATION). The extractor does not match this transcript format — every skills figure derived from this run is WRONG, not merely empty. Fix the patterns in extract_skills_used against a real transcript before trusting any skill statistic." >&2
+  fi
 
   # Skills soft gate: warn (not fail) when the agent loaded 0 skills despite
   # the prompt injecting a skill catalogue and recommending skill usage. The

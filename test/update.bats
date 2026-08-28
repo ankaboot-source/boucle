@@ -444,6 +444,12 @@ setup() {
   cd "$tmp" || exit 1
   printf 'node_modules/\n' > .gitignore
   git init -q
+  # A CI runner has no global git identity, so a bare `git commit` here fails
+  # with "empty ident name" — the same shape as every other temp repo in this
+  # suite, which all configure one. This test passed on any developer machine
+  # and failed on the runner, which is why it landed.
+  git config user.email "test@example.com"
+  git config user.name "test"
   mkdir -p .jcode
   touch .jcode/prompt-overlay.md
   git add .jcode/prompt-overlay.md
