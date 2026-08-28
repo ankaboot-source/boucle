@@ -105,10 +105,26 @@ curl_with_auth() {
 # variable: the push then went out under the workflow's own token instead of
 # the configured PAT, and nothing said so. CI_PROJECT_PATH stays as a fallback
 # for a GitLab job that runs bin/update without sourcing lib/boucle-ci.sh.
+#
+# Extraheader removal (issue #107): on GitHub, actions/checkout persists an
+# `http.<origin-url>.extraheader` config entry (Authorization: Bearer
+# <GITHUB_TOKEN>) in the local git config. libcurl sends that header INSTEAD
+# of credentials embedded in the remote URL, so even with the PAT correctly
+# set in the URL the push went out under the workflow token — which GitHub
+# rejects for workflow-file changes ("refusing to allow a GitHub App to
+# create or update workflow ... without workflows permission"). Observed on
+# boucle.dev: every self-update bump rejected, forever, with the PAT in place.
+# Removing the persisted header lets the URL credentials (the PAT) win. Only
+# done when a PAT is configured — without one, the header is the only auth
+# and removing it would break pushes that currently work.
 configure_git_push() {
   local project_path="${BOUCLE_PROJECT_PATH:-${CI_PROJECT_PATH:-}}"
   if [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ] && [ -n "$project_path" ]; then
     git remote set-url origin "https://${BOUCLE_BOT_USERNAME:-up-bot}:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${project_path}.git" 2> /dev/null
+    # The checkout action persists an Authorization extraheader for the origin
+    # URL; libcurl prefers it over the URL-embedded credentials. Drop it so
+    # the PAT is actually used.
+    git config --unset-all "http.${BOUCLE_FORGE_HOST}.extraheader" 2> /dev/null || true
   fi
 }
 
@@ -126,6 +142,9 @@ configure_git_push() {
 #
 # A protected default branch is called out separately: it is the one failure
 # here that retrying can never clear, so promising a retry would be false.
+# Same for a workflow-permission rejection: the sync always touches
+# .github/workflows/boucle.yml on GitHub, and a push token without the
+# workflows permission is rejected on every run (issue #107).
 #
 # Returns 0 if the push succeeded, 1 otherwise.
 push_update() {
@@ -141,6 +160,19 @@ push_update() {
       echo "[boucle]   NOT clear by retrying: allow the boucle bot to bypass the rule, or" >&2
       echo "[boucle]   turn self-update off (BOUCLE_UPDATE_DISABLE=true) and bump the" >&2
       echo "[boucle]   engine by hand." >&2
+      ;;
+    *"create or update workflow"*)
+      # Issue #107 — the push touched a workflow file and the credential that
+      # actually reached GitHub (a GitHub App token when the PAT was silently
+      # ignored, or a PAT missing the workflow scope) is not allowed to write
+      # .github/workflows/. Retrying cannot clear it: the sync always touches
+      # the workflow file, so this failure repeats on every run until the
+      # token used for pushing carries the workflows permission.
+      echo "[boucle] ERROR: push rejected — the token used cannot create or update workflow files." >&2
+      echo "[boucle]   GitHub only allows tokens with the 'workflows' permission (PAT scope:" >&2
+      echo "[boucle]   'workflow') to push changes to .github/workflows/. This will" >&2
+      echo "[boucle]   NOT clear by retrying: regenerate the bot PAT with 'repo' +" >&2
+      echo "[boucle]   'workflow' scopes and set BOUCLE_TOKEN, or bump the engine by hand." >&2
       ;;
     *)
       echo "[boucle] WARN: push failed, will retry next pipeline" >&2

@@ -433,6 +433,37 @@ setup() {
   unset -f git
 }
 
+@test "configure_git_push drops the persisted extraheader when a PAT is set" {
+  # Issue #107: actions/checkout persists an Authorization extraheader for the
+  # origin URL; libcurl prefers it over the URL-embedded credentials, so the
+  # push went out under the workflow token even with the PAT configured — and
+  # GitHub rejected every workflow-file sync ("refusing to allow a GitHub App
+  # to create or update workflow ... without workflows permission").
+  BOUCLE_TOKEN="pat-secret"
+  BOUCLE_FORGE_HOST="github.com"
+  BOUCLE_PROJECT_PATH="acme/site"
+  git() { echo "git $*"; }
+  export -f git
+  run configure_git_push
+  assert_success
+  assert_output --partial "config --unset-all http.github.com.extraheader"
+  unset -f git
+}
+
+@test "configure_git_push leaves the extraheader alone without a PAT" {
+  # Without a PAT the persisted header is the only auth — removing it would
+  # break the pushes that currently work.
+  unset BOUCLE_TOKEN
+  BOUCLE_FORGE_HOST="github.com"
+  BOUCLE_PROJECT_PATH="acme/site"
+  git() { echo "git $*"; }
+  export -f git
+  run configure_git_push
+  assert_success
+  refute_output --partial "extraheader"
+  unset -f git
+}
+
 # ── push_update ───────────────────────────────────────────────────────
 
 @test "push_update succeeds quietly when the push lands" {
@@ -490,6 +521,27 @@ setup() {
   run push_update
   assert_failure
   assert_output --partial "main looks protected"
+  refute_output --partial "will retry next pipeline"
+  unset -f git
+}
+
+@test "push_update names the workflows permission for a workflow-file rejection" {
+  # Issue #107: the self-update sync always touches .github/workflows/boucle.yml
+  # on GitHub, and a push token without the workflows permission is rejected on
+  # EVERY run. Promising "will retry next pipeline" was false — boucle.dev
+  # froze on an old engine while the log kept promising a retry that could
+  # never succeed.
+  BOUCLE_DEFAULT_BRANCH="main"
+  git() {
+    echo "! [remote rejected] main -> main (refusing to allow a GitHub App to create or update workflow \`.github/workflows/boucle.yml\` without \`workflows\` permission)" >&2
+    return 1
+  }
+  export -f git
+  run push_update
+  assert_failure
+  assert_output --partial "workflows"
+  assert_output --partial "NOT clear by retrying"
+  assert_output --partial "scopes and set BOUCLE_TOKEN"
   refute_output --partial "will retry next pipeline"
   unset -f git
 }
