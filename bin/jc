@@ -3,7 +3,7 @@
 # Wraps jcode: scrubs secrets, enforces caps, runs agent, asserts side effects.
 # Swapping to another coding agent = editing this one file.
 #
-# Role mapping (boucle role → project-local agent in .jcode/agents/):
+# Role mapping (boucle role → engine-owned agent in .jcode/agents/):
 #   triage   → triage    (glm-5.2, analyzes issue)
 #   worker   → worker    (deepseek-v4-flash, implements)
 #   reviewer → reviewer  (glm-5.2, adversarial review)
@@ -68,7 +68,7 @@ DRY_RUN="${BOUCLE_DRY_RUN:-false}"
 # The only bound is wall-clock timeout (set per-job in .gitlab-ci.yml) + iteration cap.
 # JCODE_RUN_AUTO_POKE=0 prevents the auto-poke loop from extending the run.
 
-# ── Map boucle roles to project-local agents (.jcode/agents/*.md) ──
+# ── Map boucle roles to engine-owned agents (.jcode/agents/*.md) ──
 # jcode has no --variant flag. Reasoning effort IS controllable since jcode
 # v0.73.0 via JCODE_OPENAI_REASONING_EFFORT / config openai_reasoning_effort
 # (values none|minimal|low|medium|high|xhigh|max — deepseek ladder includes
@@ -192,11 +192,26 @@ TOML
 # the agent files (e.g. BOUCLE_MODEL_TRIAGE=glm-5.2-flash for a cheaper
 # triage, BOUCLE_MODEL_WORKER=deepseek-v4-flash for a faster worker).
 # The agent file default is the "good default" — override only when needed.
+#
+# Prompt resolution: the ENGINE's copy wins over the consumer's.
+# `.jcode/` is engine-owned — bin/update syncs it as a whole ("the engine
+# owns it entirely: agents/, skills/, ...") — so a copy sitting in the
+# consumer's workspace is a mirror, never a source. On a submodule
+# install that mirror is FROZEN: bin/update can then only move the
+# submodule pointer, and nothing rewrites the parent repo's files again.
+# A workspace-first lookup pinned such a consumer to the prompt it last
+# received by tarball while the engine advanced underneath it — the loop
+# ran the current parser against an agent that had never been told to
+# emit the current spec sections, so the machine-readable block was
+# simply absent from every spec. Engine-first is also a no-op for a
+# tarball install, where the workspace copy IS the engine's copy.
+ENGINE_DIR=$(cd "$(dirname "$0")/.." 2> /dev/null && pwd || echo "")
 AGENT_FILE=""
 for candidate in \
-  "$BOUCLE_WORKSPACE/.jcode/agents/${AGENT}.md" \
-  "$(pwd)/.jcode/agents/${AGENT}.md" \
-  "$(dirname "$0")/../.jcode/agents/${AGENT}.md"; do
+  "${ENGINE_DIR:-.}/.jcode/agents/${AGENT}.md" \
+  "${BOUCLE_HOME:-}/.jcode/agents/${AGENT}.md" \
+  "${BOUCLE_WORKSPACE:-}/.jcode/agents/${AGENT}.md" \
+  "$(pwd)/.jcode/agents/${AGENT}.md"; do
   if [ -f "$candidate" ]; then
     AGENT_FILE="$candidate"
     break
@@ -205,6 +220,16 @@ done
 if [ -z "$AGENT_FILE" ]; then
   echo "[boucle] ERROR: agent file not found for role $AGENT" >&2
   exit 1
+fi
+# A workspace mirror that differs from the engine's copy is stale (or a
+# local edit that belongs upstream). Say so, loudly and every run: silent
+# divergence is how a consumer ends up running last month's prompt
+# against this month's parser, and the symptom — sections missing from
+# the agent's output — points at the agent, not at the sync.
+WORKSPACE_AGENT="${BOUCLE_WORKSPACE:-}/.jcode/agents/${AGENT}.md"
+if [ -f "$WORKSPACE_AGENT" ] && [ "$WORKSPACE_AGENT" != "$AGENT_FILE" ] \
+  && ! cmp -s "$WORKSPACE_AGENT" "$AGENT_FILE"; then
+  echo "[boucle] WARN: $WORKSPACE_AGENT differs from the engine's $AGENT_FILE — using the engine's (.jcode/ is engine-owned). Re-sync the consumer with bin/update, or send the change upstream." >&2
 fi
 
 # Extract model from YAML frontmatter (strip provider prefix if present)

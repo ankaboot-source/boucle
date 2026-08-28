@@ -239,7 +239,12 @@ jcode --provider-profile "$BOUCLE_PROVIDER_PROFILE" --model "$MODEL" --tools '*'
 **Role prompts** (`.jcode/agents/*.md`) carry YAML frontmatter (model,
 reasoning_effort, steps). `bin/jc` extracts the model from the frontmatter and
 builds the user prompt from the issue body, notes, reviewer feedback, and
-attachments (with token-cost trimming).
+attachments (with token-cost trimming). The prompts are **engine-owned**:
+`bin/jc` reads the engine's copy (its own directory, then `$BOUCLE_HOME`)
+before any copy in the consumer's workspace, and warns when the two differ.
+On a submodule install the workspace copy is frozen — `bin/update` can only
+move the submodule pointer — so a workspace-first lookup would run last
+month's prompt against this month's parser.
 
 ## 6. State machine implementation
 
