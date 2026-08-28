@@ -444,6 +444,10 @@ setup() {
   cd "$tmp" || exit 1
   printf 'node_modules/\n' > .gitignore
   git init -q
+  # The CI runner has no git identity, and `git commit` refuses to guess
+  # one — configure the throwaway repo, the way the other suites do.
+  git config user.email "test@example.com"
+  git config user.name "Test"
   mkdir -p .jcode
   touch .jcode/prompt-overlay.md
   git add .jcode/prompt-overlay.md
