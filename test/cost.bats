@@ -164,3 +164,56 @@ JSON
   run grep -q 'cost_block=$(boucle_cost_summary "$BOUCLE_ISSUE"' lib/boucle-ci/worker.sh
   assert_success
 }
+
+@test "cost: jcode's [Tokens] upload/download format is parsed (issue #119)" {
+  # ollama-cloud transcripts carry usage as "[Tokens] upload: N download: M",
+  # not JSON — the JSON-only extractor recorded n/a on every boucle.dev run
+  # while the transcript held 15 usage lines.
+  TMPF=$(mktemp); LOG=$(mktemp)
+  extract_cost_funcs "$TMPF"
+  printf '[Tokens] upload: 21628 download: 327\n[Tokens] upload: 38450 download: 149\n' > "$LOG"
+  run bash -c "source '$TMPF'; extract_token_usage '$LOG' prompt_tokens"
+  assert_output "60078"
+  run bash -c "source '$TMPF'; extract_token_usage '$LOG' completion_tokens"
+  assert_output "476"
+  rm -f "$TMPF" "$LOG"
+}
+
+@test "cost: download never trails the bracket — the lone token matches (issue #119)" {
+  # 'download' sits AFTER 'upload: N' on the same line, so a bracket-anchored
+  # download grep ([Tokens]\s+download:) matches nothing. The download side
+  # must grep the word alone.
+  TMPF=$(mktemp); LOG=$(mktemp)
+  extract_cost_funcs "$TMPF"
+  printf '[Tokens] upload: 37649 download: 155\n' > "$LOG"
+  run bash -c "source '$TMPF'; extract_token_usage '$LOG' output_tokens"
+  assert_output "155"
+  rm -f "$TMPF" "$LOG"
+}
+
+@test "cost: JSON and jcode formats on one log are BOTH summed" {
+  TMPF=$(mktemp); LOG=$(mktemp)
+  extract_cost_funcs "$TMPF"
+  printf '{"usage":{"prompt_tokens": 5, "completion_tokens": 2}}\n[Tokens] upload: 3 download: 1\n' > "$LOG"
+  run bash -c "source '$TMPF'; extract_token_usage '$LOG' prompt_tokens"
+  assert_output "8"
+  run bash -c "source '$TMPF'; extract_token_usage '$LOG' completion_tokens"
+  assert_output "3"
+  rm -f "$TMPF" "$LOG"
+}
+
+@test "metrics summary: all-n/a tokens publish null, not a fake zero (issue #119)" {
+  # The summary's `tonumber? // 0` coerced "n/a" runs into tokens:0 —
+  # indistinguishable from "these runs consumed nothing".
+  TMPF=$(mktemp); T=$(mktemp -d)
+  awk '/^boucle_metrics_hydrate_health\(\) \{/,/^\}/' lib/boucle.sh > "$TMPF"
+  awk '/^boucle_metrics_row\(\) \{/,/^\}/' lib/boucle.sh >> "$TMPF"
+  mkdir -p "$T/.boucle-state/9"
+  printf '{"timestamp":"t","role":"e2e","iteration":1,"exit_code":0,"prompt_chars":10,"tokens":"n/a","cost_usd":"n/a","model":"m","provider":"p","skills":[],"skills_evidence":"not-invoked","arm":"full","setup_fail":"","swarm_spawns":0}\n' \
+    > "$T/.boucle-state/9/health.jsonl"
+  run bash -c "BOUCLE_WORKSPACE='$T'; BOUCLE_PROJECT_ID=acme/site; BOUCLE_METRICS_ENABLED=false; source '$TMPF'; boucle_metrics_row 9 done"
+  assert_success
+  assert_output --partial '"tokens":null'
+  refute_output --partial '"tokens":0'
+  rm -rf "$TMPF" "$T"
+}

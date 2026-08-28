@@ -987,8 +987,15 @@ boucle_metrics_row() {
                             | numbers] | max // 0),
         swarm_spawns: ([.[] | select(has("swarm_spawns")) | .swarm_spawns
                         | numbers] | add // 0),
+        # A run whose usage was not captured records "n/a", not 0 (the health
+        # printf). Summing with `tonumber? // 0` (the pre-#119 form) coerced
+        # that n/a into a FAKE 0 at the issue level — indistinguishable from
+        # "these runs consumed nothing" (observed: every boucle.dev issue
+        # published tokens:0 while transcripts held the real figures). Keep
+        # the absence honest: sum only numeric values; if NO run carried a
+        # number, publish null ("not measured") instead of a fake zero.
         tokens: ([.[] | select(has("tokens")) | .tokens
-                  | tonumber? // 0] | add // 0)
+                  | select(type == "number")] | add)
       }' "$health" 2> /dev/null || true
 }
 

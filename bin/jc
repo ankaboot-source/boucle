@@ -2487,12 +2487,43 @@ EOF
 # Best-effort by design. Providers report usage inconsistently and some not
 # at all; a missing count records "n/a" and the run continues. Fabricating a
 # number would be worse than reporting none.
+# extract_token_usage <log> <field>
+#
+# Sum every occurrence of `field` in the agent transcript. Providers report
+# usage inconsistently — pattern coverage per provider, observed in the wild:
+#
+#   JSON-ish  "prompt_tokens": 5213 / completion_tokens=1502   (OpenAI-style)
+#   jcode     [Tokens] upload: 21628 download: 327             (ollama-cloud)
+#
+# `field` is one of prompt_tokens|completion_tokens|input_tokens|
+# output_tokens; the jcode line is matched as upload↔prompt and
+# download↔completion (what jcode reports is context sent vs tokens
+# generated, i.e. the same two quantities under provider-agnostic names).
+# Missing anywhere → empty result → caller records "n/a": fabricating a
+# number would be worse than reporting none (issue #119 — every boucle.dev
+# run carried n/a while the transcript held 15 usage lines, because only
+# the JSON formats were covered).
 extract_token_usage() {
   local log="$1" field="$2"
   [ -f "$log" ] || return 0
-  grep -oE "\"?${field}\"?[[:space:]]*[:=][[:space:]]*[0-9]+" "$log" 2> /dev/null \
-    | grep -oE '[0-9]+$' \
-    | awk '{ s += $1 } END { if (NR > 0) print s }'
+  local js jcode
+  js=$(grep -oE "\"?${field}\"?[[:space:]]*[:=][[:space:]]*[0-9]+" "$log" 2> /dev/null \
+    | grep -oE '[0-9]+$')
+  case "$field" in
+    prompt_tokens | input_tokens)
+      # '[Tokens] upload: N download: M' — upload sits right after the
+      # bracket; download NEVER does (it trails 'upload: N' on the same
+      # line), so the download side must grep the word alone, not the
+      # bracket-anchored form.
+      js="$js
+$(grep -oE '\[Tokens\][[:space:]]+upload:[[:space:]]*[0-9]+' "$log" 2> /dev/null | grep -oE '[0-9]+$')"
+      ;;
+    completion_tokens | output_tokens)
+      js="$js
+$(grep -oE '\bdownload:[[:space:]]*[0-9]+' "$log" 2> /dev/null | grep -oE '[0-9]+$')"
+      ;;
+  esac
+  printf '%s\n' "$js" | awk '$1 ~ /^[0-9]+$/ { s += $1 } END { if (NR > 0) print s }'
 }
 
 # Append one entry per agent invocation. The accumulator survives across
