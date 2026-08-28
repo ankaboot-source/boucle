@@ -43,26 +43,22 @@ boucle_ci_e2e() {
   # Use deployment URL passed from deploy job (production domain may not have
   # DNS yet). BOTH env vars can legitimately be absent — doctor re-runs e2e
   # via workflow_dispatch (recovery path), which carries none of the deploy
-  # job's env. Under set -u, expanding an unset default (line 44's
+  # job's env. Under set -u, expanding an unset default (the old
   # "$BOUCLE_PRODUCTION_URL") crashed the whole job ("unbound variable",
-  # observed on boucle.dev #116) BEFORE any message could be printed, so the
-  # recovery pass burned a full runner per retry. Resolution ladder: deploy
-  # URL → production URL → Pages URL (the consumer's canonical pages URL,
-  # the same thing the worker's deploy step resolves) → empty (skip loudly).
+  # observed on boucle.dev #116) BEFORE any message could be printed.
+  # Resolution ladder: BOUCLE_LIVE_URL → BOUCLE_PRODUCTION_URL →
+  # boucle_resolve_live_url (consumer site URL — same chain post-merge uses).
   LIVE_URL="${BOUCLE_LIVE_URL:-${BOUCLE_PRODUCTION_URL:-}}"
-  if [ -z "$LIVE_URL" ] && [ "${BOUCLE_FORGE:-}" = "gitlab" ] && [ -n "${CI_PAGES_URL:-}" ]; then
-    LIVE_URL="${CI_PAGES_URL%/}/"
-  fi
-  if [ -z "$LIVE_URL" ] && command -v boucle_github_pages_url > /dev/null 2>&1; then
-    LIVE_URL=$(boucle_github_pages_url 2> /dev/null || true)
-  fi
   if [ -z "$LIVE_URL" ]; then
-    echo "[boucle] E2E: no live URL available (BOUCLE_LIVE_URL / BOUCLE_PRODUCTION_URL unset, Pages URL unresolvable) — skipping e2e for issue ${BOUCLE_ISSUE:-?}." >&2
+    LIVE_URL="$(boucle_resolve_live_url "")"
+  fi
+  export BOUCLE_LIVE_URL="$LIVE_URL"
+  if [ -z "$LIVE_URL" ] && [ -z "${BOUCLE_E2E_COMMAND:-}" ]; then
+    echo "[boucle] e2e skip: no live URL configured (BOUCLE_LIVE_URL / BOUCLE_PRODUCTION_URL unset; boucle_resolve_live_url returned empty). Skipping agent-mode e2e for issue ${BOUCLE_ISSUE:-?}." >&2
     echo "[boucle] This happens on e2e re-runs that bypass the deploy job. Re-run post-merge instead to re-deploy first." >&2
     exit 0
   fi
-  export BOUCLE_LIVE_URL="$LIVE_URL"
-  echo "E2E testing URL: $LIVE_URL"
+  echo "E2E testing URL: ${LIVE_URL:-<command-mode, no URL>}"
 
   # ── Define MR_HEAD (the deployed commit SHA) ─────────────────────────
   # e2e.sh runs independently from the reviewer (after deploy), so it does

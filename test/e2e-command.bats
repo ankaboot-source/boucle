@@ -234,3 +234,61 @@ setup() {
   assert_failure
   assert_output "GUARD_FAIL"
 }
+
+# ── Regression: #116 set -u crash when both URL env vars absent ──────
+
+@test "e2e under set -u: both URL vars unset does not crash in command-mode" {
+  run bash -c '
+    timeout() { shift 3; "$@"; }
+    export -f timeout
+    set -u
+    export BOUCLE_HOME="$PWD" BOUCLE_FORGE=gitlab BOUCLE_FORGE_HOST=h BOUCLE_PROJECT_ID=1
+    export BOUCLE_WORKSPACE="$BATS_TEST_TMPDIR"
+    source bin/forge/common.sh
+    source lib/boucle.sh
+    source lib/boucle-ci/e2e.sh
+    unset BOUCLE_LIVE_URL BOUCLE_PRODUCTION_URL
+    BOUCLE_E2E_COMMAND=":"
+    boucle_ci_e2e
+  '
+  assert_success
+  refute_output --partial "unbound variable"
+  assert_output --partial "Command-mode e2e"
+}
+
+@test "e2e under set -u: both URL vars unset skips agent-mode cleanly" {
+  run bash -c '
+    set -u
+    export BOUCLE_HOME="$PWD" BOUCLE_FORGE=gitlab BOUCLE_FORGE_HOST=h BOUCLE_PROJECT_ID=1
+    export BOUCLE_WORKSPACE="$BATS_TEST_TMPDIR"
+    export BOUCLE_ISSUE=116
+    BOUCLE_DEPLOY_MODE=external
+    source bin/forge/common.sh
+    source lib/boucle.sh
+    source lib/boucle-ci/e2e.sh
+    unset BOUCLE_LIVE_URL BOUCLE_PRODUCTION_URL
+    boucle_ci_e2e
+  '
+  assert_success
+  assert_output --partial "e2e skip"
+  refute_output --partial "unbound variable"
+}
+
+@test "e2e under set -u: BOUCLE_LIVE_URL explicit preserves unchanged behavior" {
+  run bash -c '
+    timeout() { shift 3; "$@"; }
+    export -f timeout
+    set -u
+    export BOUCLE_HOME="$PWD" BOUCLE_FORGE=gitlab BOUCLE_FORGE_HOST=h BOUCLE_PROJECT_ID=1
+    export BOUCLE_WORKSPACE="$BATS_TEST_TMPDIR"
+    source bin/forge/common.sh
+    source lib/boucle.sh
+    source lib/boucle-ci/e2e.sh
+    BOUCLE_LIVE_URL="https://live.example.com"
+    unset BOUCLE_PRODUCTION_URL
+    BOUCLE_E2E_COMMAND=":"
+    boucle_ci_e2e
+  '
+  assert_success
+  assert_output --partial "E2E testing URL: https://live.example.com"
+}
