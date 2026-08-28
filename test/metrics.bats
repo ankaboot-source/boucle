@@ -17,6 +17,13 @@ setup() {
 }
 
 teardown() {
+  # Leave the directory before deleting it. Several tests here cd into $TMP
+  # to exercise git behaviour against a scratch remote, and teardown runs in
+  # the same shell as the test — so without this, rm -rf removes the shell's
+  # own working directory. Locally that is survivable and the suite exits 0;
+  # on the CI runner the same TAP output exited 1 with no failing test named,
+  # which is what a deleted CWD looks like from the outside.
+  cd "$BATS_TEST_DIRNAME" 2> /dev/null || cd / || true
   rm -rf "$TMP"
 }
 
@@ -713,8 +720,6 @@ metrics_remote_config_only() {
 # That is what an agent loading no skills looks like, and it is also exactly
 # what an extractor that does not match the transcript format looks like.
 # The name list alone cannot separate them; skills_evidence can.
-
-evidence() { bash -c ". '$REPO/bin/jc' 2>/dev/null; skills_evidence \"\$@\"" _ "$@"; }
 
 @test "skills: an absent transcript is 'no-transcript', never a zero" {
   run bash -c "grep -A6 '^skills_evidence() {' '$REPO/bin/jc'"
