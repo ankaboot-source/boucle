@@ -45,10 +45,15 @@
 # Output: the extracted repo-relative paths on stdout, one per line.
 boucle_collect_mr_images() {
   local base="${MR_BASE:-}" head="${MR_HEAD:-}"
-  # Same workspace normalization as lib/boucle-ci.sh: GitHub Actions sets
-  # BOUCLE_WORKSPACE (CI_PROJECT_DIR is GitLab-only); the state dir formula
-  # MUST stay in sync with bin/describe-images.
-  local project_dir="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-${GITHUB_WORKSPACE:-$(pwd)}}}"
+  # Same workspace normalization as lib/boucle-ci.sh: CI_PROJECT_DIR is the
+  # cross-forge source of truth (GitHub Actions sets it; GitLab sets it too).
+  # The state-dir formula MUST stay in sync with bin/describe-images — a
+  # divergent path silently yields "images=0", the reviewer then reads the
+  # PNGs and the text-only model 400s on image input (consumer 2026-08).
+  # Do NOT prefer GITHUB_WORKSPACE here: a test that sets CI_PROJECT_DIR
+  # would be shadowed by the runner-set GITHUB_WORKSPACE in CI (the engine
+  # repo path), routing git diff at the wrong repo → empty → false skip.
+  local project_dir="${CI_PROJECT_DIR:-$(pwd)}"
   local state_dir="$project_dir/.boucle-state/${BOUCLE_ISSUE:-}"
   local repo_dir="$state_dir/repo-images"
   local max_images=8 max_bytes=8388608
