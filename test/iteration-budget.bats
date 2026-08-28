@@ -91,3 +91,88 @@ setup() {
   assert_success
   assert_output "ESCALATES"
 }
+
+# ── Iteration derivation from verdicts (#97) ──────────────────────────
+# The label-event re-trigger path does not forward BOUCLE_ITERATION, so the
+# counter can be stuck at 1 while the loop iterates — the MAX_ITERATIONS
+# escalation never fires. Both stage scripts derive the true iteration from
+# the verdicts already fetched (zero extra API calls) and raise, never
+# lower, the inherited value.
+
+@test "worker and reviewer both derive BOUCLE_ITERATION from reviewer verdicts" {
+  run grep -c 'derived_iteration' lib/boucle-ci/worker.sh
+  assert_success
+  [ "$output" -ge 1 ]
+  run grep -c 'derived_iteration' lib/boucle-ci/reviewer.sh
+  assert_success
+  [ "$output" -ge 1 ]
+  # The derivation runs right after the MR feedback fetch, before the agent.
+  run grep -q 'BOUCLE_REVIEWER_FEEDBACK=\$(forge_mr_notes' lib/boucle-ci/worker.sh
+  assert_success
+  run grep -q 'BOUCLE_REVIEWER_FEEDBACK=\$(forge_mr_notes' lib/boucle-ci/reviewer.sh
+  assert_success
+}
+
+@test "iteration derivation: verdicts + 1 raises a stuck BOUCLE_ITERATION" {
+  # 3 verdicts on the MR, inherited iteration stuck at 1 (label-event
+  # re-trigger path) → the counter must rise to 4 so the MAX_ITERATIONS
+  # escalation can fire.
+  run bash -c '
+    set -e
+    BOUCLE_REVIEWER_FEEDBACK="[x — boucle] <!-- boucle:verdict v=1 role=reviewer sha=abc --> VERDICT: FAIL
+[x — boucle] <!-- boucle:verdict v=1 role=reviewer sha=abc --> VERDICT: FAIL
+[x — boucle] <!-- boucle:verdict v=1 role=reviewer sha=abc --> VERDICT: FAIL"
+    BOUCLE_ITERATION=1
+    verdict_count=$(printf "%s\n" "$BOUCLE_REVIEWER_FEEDBACK" | grep -c "boucle:verdict" 2> /dev/null || true)
+    verdict_count="${verdict_count:-0}"
+    if [ "$verdict_count" -gt 0 ]; then
+      derived_iteration=$((verdict_count + 1))
+      if [ "${BOUCLE_ITERATION:-1}" -lt "$derived_iteration" ]; then
+        export BOUCLE_ITERATION="$derived_iteration"
+      fi
+    fi
+    echo "ITERATION=$BOUCLE_ITERATION"
+  '
+  assert_success
+  assert_output "ITERATION=4"
+}
+
+@test "iteration derivation: never lowers an inherited iteration" {
+  # A single verdict on the MR, but the job inherited BOUCLE_ITERATION=3
+  # (forwarded via chain_to_role): the derived value (2) must NOT lower it.
+  run bash -c '
+    set -e
+    BOUCLE_REVIEWER_FEEDBACK="[x — boucle] <!-- boucle:verdict v=1 role=reviewer sha=abc --> VERDICT: FAIL"
+    BOUCLE_ITERATION=3
+    verdict_count=$(printf "%s\n" "$BOUCLE_REVIEWER_FEEDBACK" | grep -c "boucle:verdict" 2> /dev/null || true)
+    verdict_count="${verdict_count:-0}"
+    if [ "$verdict_count" -gt 0 ]; then
+      derived_iteration=$((verdict_count + 1))
+      if [ "${BOUCLE_ITERATION:-1}" -lt "$derived_iteration" ]; then
+        export BOUCLE_ITERATION="$derived_iteration"
+      fi
+    fi
+    echo "ITERATION=$BOUCLE_ITERATION"
+  '
+  assert_success
+  assert_output "ITERATION=3"
+}
+
+@test "iteration derivation: empty feedback leaves the iteration untouched" {
+  run bash -c '
+    set -e
+    BOUCLE_REVIEWER_FEEDBACK=""
+    BOUCLE_ITERATION=2
+    verdict_count=$(printf "%s\n" "$BOUCLE_REVIEWER_FEEDBACK" | grep -c "boucle:verdict" 2> /dev/null || true)
+    verdict_count="${verdict_count:-0}"
+    if [ "$verdict_count" -gt 0 ]; then
+      derived_iteration=$((verdict_count + 1))
+      if [ "${BOUCLE_ITERATION:-1}" -lt "$derived_iteration" ]; then
+        export BOUCLE_ITERATION="$derived_iteration"
+      fi
+    fi
+    echo "ITERATION=$BOUCLE_ITERATION"
+  '
+  assert_success
+  assert_output "ITERATION=2"
+}

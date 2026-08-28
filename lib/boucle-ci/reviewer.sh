@@ -145,7 +145,23 @@ boucle_ci_reviewer() {
   # human amendments over the frozen criteria.
   export BOUCLE_REVIEWER_FEEDBACK
   BOUCLE_REVIEWER_FEEDBACK=$(forge_mr_notes "$MR_IID" \
-    | jq -r '[.[] | select(.system == false or .system == null) | select((.body // "") | contains("<!-- boucle:state") | not) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | .[]' 2> /dev/null || echo "")
+    | jq -r '[.[] | select(.system == false or .system == null) | select((.body // "") | contains("<!-- boucle:state") | not) | "[\(.author.username // .author.name // "unknown") — \(if ((.body // "") | contains("<!-- boucle:agent -->")) then "boucle" else "human" end)] \(.body)"] | .[]' 2> /dev/null || echo "")
+
+  # Iteration derivation (issue #97): the label-event re-trigger path does
+  # not forward BOUCLE_ITERATION, so the counter can be stuck at 1 while the
+  # loop iterates — the MAX_ITERATIONS escalation never fires. Derive the
+  # true iteration from the verdicts already fetched above (zero extra API
+  # calls) and raise, never lower, the inherited value.
+  local verdict_count derived_iteration
+  verdict_count=$(printf '%s\n' "$BOUCLE_REVIEWER_FEEDBACK" | grep -c 'boucle:verdict' 2> /dev/null || true)
+  verdict_count="${verdict_count:-0}"
+  if [ "$verdict_count" -gt 0 ]; then
+    derived_iteration=$((verdict_count + 1))
+    if [ "${BOUCLE_ITERATION:-1}" -lt "$derived_iteration" ]; then
+      echo "[boucle] BOUCLE_ITERATION raised ${BOUCLE_ITERATION:-1} → $derived_iteration ($verdict_count reviewer verdict(s) on the MR)"
+      export BOUCLE_ITERATION="$derived_iteration"
+    fi
+  fi
 
   # Detect empty MR (worker shipped zero commits — base_sha == head_sha).
   # Re-trigger the worker instead of running the reviewer uselessly.
@@ -300,7 +316,7 @@ boucle_ci_reviewer() {
   # the issue note — only the MR notes and issue body).
   export BOUCLE_ISSUE_NOTES
   BOUCLE_ISSUE_NOTES=$(forge_issue_notes "$BOUCLE_ISSUE" \
-    | jq -r '[.[] | select(.system == false or .system == null) | select((.body // "") | contains("<!-- boucle:state") | not) | "[\(.author.username // .author.name // "unknown")] \(.body)"] | reverse | .[]' 2> /dev/null || echo "")
+    | jq -r '[.[] | select(.system == false or .system == null) | select((.body // "") | contains("<!-- boucle:state") | not) | "[\(.author.username // .author.name // "unknown") — \(if ((.body // "") | contains("<!-- boucle:agent -->")) then "boucle" else "human" end)] \(.body)"] | reverse | .[]' 2> /dev/null || echo "")
   if [ -z "$BOUCLE_ISSUE_NOTES" ]; then
     echo "[boucle] INFO: no prior notes for issue #$BOUCLE_ISSUE."
   fi

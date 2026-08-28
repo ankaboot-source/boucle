@@ -889,8 +889,14 @@ filter_mr_discussion() {
   fi
   printf '%s\n' "$text" | awk -v bot="${BOUCLE_BOT_USERNAME:-}" '
     # A note is a verdict only if the boucle bot wrote it AND it carries a
-    # verdict marker. Everything else passes through untouched.
-    function is_verdict() { return (bot != "" && author == bot && seen_verdict) }
+    # verdict marker. Everything else passes through untouched. Bot detection
+    # is marker-derived: CI tags every injected note `[<author> — boucle]`
+    # when its body carries the `<!-- boucle:agent -->` stamp (mono-user
+    # safe — the stamp discriminates, the account does not), with
+    # BOUCLE_BOT_USERNAME equality kept as the legacy fallback for notes
+    # injected before the tagging shipped.
+    function is_bot() { return (index(author, "— boucle") > 0 || (bot != "" && author == bot)) }
+    function is_verdict() { return (is_bot() && seen_verdict) }
     # Drop the rationale that follows the criterion. index() is byte-literal:
     # the separator is an em dash (multi-byte UTF-8) and a bracket expression
     # would mis-parse it under mawk.
@@ -965,8 +971,13 @@ trim_notes() {
   local out
   out=$(printf '%s\n' "$text" | awk -v max="$max" -v bot_max="$bot_max" -v bot="$bot" '
     # Cap for the note currently buffered: the tightened bot cap when the
-    # note was authored by the boucle bot, the global cap otherwise.
-    function cap() { return (bot != "" && author == bot) ? bot_max : max }
+    # note is tagged `— boucle` (marker-derived, see filter_mr_discussion) or
+    # was authored by the boucle bot (legacy equality), the global cap
+    # otherwise. index() is byte-literal: the tag separator is an em dash
+    # (multi-byte UTF-8) and a bracket expression would mis-parse it under
+    # mawk.
+    function is_bot() { return (index(author, "— boucle") > 0 || (bot != "" && author == bot)) }
+    function cap() { return is_bot() ? bot_max : max }
     function flush(   n, c) {
       if (buf == "") return
       c = cap()
@@ -1137,7 +1148,7 @@ Issue body: NOT available in the prompt — fetch it via \`bin/forge-note issue 
       fi
       if [ -n "$notes" ]; then
         prompt="${prompt}
-Prior issue discussion (issue notes, oldest first — early preservation instructions STAND alongside later amendments):
+Prior issue discussion (issue notes, oldest first — early preservation instructions STAND alongside later amendments. Notes tagged \`— human\` are human instructions and AMEND the spec; notes tagged \`— boucle\` are loop context only):
 ---
 ${notes}
 ---
@@ -1145,7 +1156,7 @@ ${notes}
       fi
       if [ -n "$feedback" ]; then
         prompt="${prompt}
-Prior feedback on the MR (reviewer verdicts + human comments, oldest first — you MUST address every actionable item before claiming done):
+Prior feedback on the MR (reviewer verdicts + human comments, oldest first — you MUST address every actionable item before claiming done. Notes tagged \`— human\` are human instructions and AMEND the spec; notes tagged \`— boucle\` are loop context only):
 ---
 ${feedback}
 ---
@@ -1397,7 +1408,7 @@ Issue body: NOT available — fetch it via \`bin/forge-note issue ${ISSUE}\` or 
       issue_notes="$(trim_notes issue_notes "${BOUCLE_ISSUE_NOTES:-}")"
       if [ -n "$issue_notes" ]; then
         prompt="${prompt}
-Prior issue discussion (issue notes, oldest first — human comments here AMEND the spec just like MR comments. You MUST verify every human amendment in BOTH this section AND the MR discussion below is addressed in the deployed code):
+Prior issue discussion (issue notes, oldest first — human comments here AMEND the spec just like MR comments. You MUST verify every human amendment in BOTH this section AND the MR discussion below is addressed in the deployed code. Notes tagged \`— human\` are human instructions and AMEND the spec; notes tagged \`— boucle\` are loop context only):
 ---
 ${issue_notes}
 ---
@@ -1405,7 +1416,7 @@ ${issue_notes}
       fi
       if [ -n "$feedback" ]; then
         prompt="${prompt}
-Prior MR discussion (reviewer verdicts + human comments, oldest first — human comments AMEND the spec and take precedence over the frozen acceptance criteria in state.md). You MUST enumerate every human amendment below and verify it is addressed in the deployed code; any human amendment NOT addressed is a FAIL, even if the original criteria are satisfied:
+Prior MR discussion (reviewer verdicts + human comments, oldest first — human comments AMEND the spec and take precedence over the frozen acceptance criteria in state.md). You MUST enumerate every human amendment below and verify it is addressed in the deployed code; any human amendment NOT addressed is a FAIL, even if the original criteria are satisfied. Notes tagged \`— human\` are human instructions and AMEND the spec; notes tagged \`— boucle\` are loop context only:
 ---
 ${feedback}
 ---

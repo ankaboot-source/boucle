@@ -91,6 +91,14 @@ without the stamp is treated as a human reply and routed. This is mono-user-safe
 not). Every comment a harness posts MUST carry the stamp, or dispatch will treat
 it as a human reply and re-route. (LESSONS.yml lesson #55.)
 
+The same marker discriminates note authorship in prompts: CI MUST tag every
+note injected into an agent prompt `[<author> — boucle]` when its body carries
+the stamp, `[<author> — human]` otherwise, and agents MUST classify authorship
+by that tag — NEVER by the posting account (in mono-user mode the account is
+shared, so identity discriminates nothing; a human amendment posted under the
+bot's account is still a binding amendment, lesson #111). (LESSONS.yml lesson
+#111.)
+
 ### I8 — Doc-as-code
 
 A doc that describes a system that no longer exists is a bug. Charter docs are

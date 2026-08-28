@@ -415,6 +415,14 @@ it posts, so it recognises its own writes without asking who acted.
 `bin/doctor` fails loudly if you land in the broken configuration by
 accident.
 
+**Note injection is tagged by the same marker.** Every note injected into an
+agent prompt (issue notes and MR feedback) MUST be tagged
+`[<author> — human]` or `[<author> — boucle]` by CI, computed from the
+`<!-- boucle:agent -->` stamp — never from the posting account, which in
+mono-user mode is shared (lesson #111). Agents classify note authorship by
+the tag: `— human` notes AMEND the spec and win over the frozen criteria,
+`— boucle` notes are loop context only.
+
 **The MR-approval gate: emoji reaction.** In mono-user mode
 the PR author IS the bot account, so forge-native self-approval is unreliable
 (GitHub blocks author self-review; GitLab is inconsistent). The MR gate

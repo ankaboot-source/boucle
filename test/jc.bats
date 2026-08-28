@@ -542,6 +542,24 @@ extract_budget_funcs() {
   rm -f "$TMPF"
 }
 
+@test "prompt budget: the — boucle tag tightens the cap even in mono-user mode" {
+  # In mono-user mode BOUCLE_BOT_USERNAME matches nobody — every note is
+  # posted under the human's account. The tightened bot cap must still apply
+  # to notes tagged `— boucle` (marker-derived at injection), while a
+  # `— human` note on the same account keeps the global cap.
+  TMPF=$(mktemp)
+  extract_func_body trim_notes "$TMPF"
+  BIG=$(printf 'h%.0s' $(seq 1 600))
+  run bash -c "source '$TMPF'; BOUCLE_BOT_USERNAME=up-bot; BOUCLE_MAX_NOTE_CHARS=1000; BOUCLE_BOT_NOTE_CHARS=50 trim_notes t '[x — human] $BIG
+[x — boucle] $BIG'" 2> /dev/null
+  assert_success
+  # The human-tagged note is under the 1000 global cap → untouched.
+  assert_output --partial "$BIG"
+  # The boucle-tagged note is over the 50-char bot cap → elided.
+  assert_output --partial "elided by boucle (cap=50)"
+  rm -f "$TMPF"
+}
+
 @test "report_prompt_size: emits a total line with size and estimated tokens" {
   TMPF=$(mktemp)
   extract_budget_funcs "$TMPF"
@@ -1330,6 +1348,33 @@ VERDICT: FAIL
   run bash -c "BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$(cat)\"" <<< "$(anchor_fixture)"
   assert_success
   assert_output --partial "Master advanced since this branch was created."
+  rm -f "$TMPF"
+}
+
+@test "anchoring: mono-user verdicts are detected by the — boucle tag, not the account" {
+  # In mono-user mode EVERY note is posted under the human's own account
+  # (BOUCLE_BOT_USERNAME=up-bot matches nobody). The bot verdict must still
+  # be reduced to its unmet criteria — detected via the `— boucle` tag that
+  # CI derives from the <!-- boucle:agent --> marker at injection time —
+  # while the human amendment on the SAME account passes through intact.
+  TMPF=$(mktemp)
+  extract_anchor "$TMPF"
+  run bash -c "BOUCLE_BOT_USERNAME=up-bot; source '$TMPF'; filter_mr_discussion \"\$(cat)\"" <<'EOF'
+[baderdean — boucle] <!-- boucle:verdict v=1 role=reviewer sha=abc -->
+VERDICT: FAIL
+- [x] Header renders — verified via curl
+- [ ] Footer link present — RATIONALE-ANCHOR relative path 404s
+[baderdean — human] AMENDMENT-KEEP-ME use card-7.svg — do not substitute
+EOF
+  assert_success
+  assert_output --partial "VERDICT: FAIL"
+  assert_output --partial "- [ ] Footer link present"
+  # The rationale is the anchor — it must not survive.
+  refute_output --partial "RATIONALE-ANCHOR"
+  # Met criteria are not re-listed either.
+  refute_output --partial "- [x] Header renders"
+  # The human amendment on the SAME account is never filtered.
+  assert_output --partial "[baderdean — human] AMENDMENT-KEEP-ME use card-7.svg — do not substitute"
   rm -f "$TMPF"
 }
 
