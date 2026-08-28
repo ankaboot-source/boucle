@@ -172,7 +172,7 @@ for entry in $(printf '%s' "${BOUCLE_PREVIEW_VIEWPORTS:-$DEFAULT_VIEWPORTS}" | t
       ;;
   esac
 
-  # Wait for the page to be capture-ready before screenshotting. Two phases:
+  # Wait for the page to be capture-ready before screenshotting. Three phases:
   #
   #   1. networkidle — fonts, images, async chunks, and XHR have settled.
   #      Catches the common "screenshot fired mid-load" failure where a
@@ -187,8 +187,43 @@ for entry in $(printf '%s' "${BOUCLE_PREVIEW_VIEWPORTS:-$DEFAULT_VIEWPORTS}" | t
   #      that hasn't revealed yet). The delay lets those animations complete.
   #      Configurable via BOUCLE_PREVIEW_SETTLE_MS; default 1200 ms covers
   #      typical 300–800 ms entrance animations with headroom.
+  #
+  #   3. full-page scroll sweep — a full-page capture extends the viewport to
+  #      the document height AT CAPTURE TIME, but IntersectionObserver
+  #      callbacks fire only for content that intersected the viewport during
+  #      the page's life at the ORIGINAL viewport size. Below-the-fold
+  #      sections gated on scroll reveal (observers, scroll listeners) never
+  #      fired, and the capture ships them invisible (opacity 0). Scrolling
+  #      through the document step by step before capturing walks every
+  #      section through the viewport, so every observer fires and every
+  #      reveal animation has time to complete before the screenshot. This
+  #      is the IntersectionObserver counterpart of the settle delay — the
+  #      settle waits for time-driven animation, the sweep drives
+  #      scroll-driven animation. Best-effort: eval failures never fail the
+  #      viewport (a page may disable programmatic scroll or have no
+  #      observers at all); the screenshot still proceeds. The step is one
+  #      viewport height and each position is held for the settle delay so
+  #      threshold-based observers (e.g. threshold: 0.5) get a full
+  #      intersection sample rather than a blur past.
   "$AB" --session "$SESSION" wait --load networkidle > /dev/null 2>&1 || true
   SETTLE_MS="${BOUCLE_PREVIEW_SETTLE_MS:-1200}"
+  "$AB" --session "$SESSION" wait "$SETTLE_MS" > /dev/null 2>&1 || true
+
+  # Scroll sweep (phase 3): walk the document top-to-bottom, then return to
+  # the top so the capture starts from the natural scroll position. Steps:
+  # ceil(docHeight / viewportHeight) + 1 — the +1 covers a document whose
+  # height is not an exact multiple of the viewport.
+  "$AB" --session "$SESSION" eval 'window.__boucleSweep=(()=>{const h=document.documentElement;return Math.max(1,Math.ceil(Math.max(h.scrollHeight,document.body?document.body.scrollHeight:0)/(window.innerHeight||800))+1)})()' > /dev/null 2>&1 || true
+  sweep_steps="$("$AB" --session "$SESSION" eval 'window.__boucleSweep' 2> /dev/null | tr -dc '0-9' || true)"
+  case "$sweep_steps" in '' | *[!0-9]*) sweep_steps=6 ;; esac
+  [ "$sweep_steps" -gt 30 ] && sweep_steps=30
+  _i=1
+  while [ "$_i" -le "$sweep_steps" ]; do
+    "$AB" --session "$SESSION" eval "window.scrollTo(0, Math.min(document.documentElement.scrollHeight, window.innerHeight * $_i))" > /dev/null 2>&1 || true
+    "$AB" --session "$SESSION" wait "$SETTLE_MS" > /dev/null 2>&1 || true
+    _i=$((_i + 1))
+  done
+  "$AB" --session "$SESSION" eval 'window.scrollTo(0, 0)' > /dev/null 2>&1 || true
   "$AB" --session "$SESSION" wait "$SETTLE_MS" > /dev/null 2>&1 || true
 
   if ! "$AB" --session "$SESSION" screenshot --full "$TARGET" > /dev/null 2>&1; then
