@@ -106,25 +106,36 @@ curl_with_auth() {
 # the configured PAT, and nothing said so. CI_PROJECT_PATH stays as a fallback
 # for a GitLab job that runs bin/update without sourcing lib/boucle-ci.sh.
 #
-# Extraheader removal (issue #107): on GitHub, actions/checkout persists an
-# `http.<origin-url>.extraheader` config entry (Authorization: Bearer
-# <GITHUB_TOKEN>) in the local git config. libcurl sends that header INSTEAD
-# of credentials embedded in the remote URL, so even with the PAT correctly
-# set in the URL the push went out under the workflow token — which GitHub
-# rejects for workflow-file changes ("refusing to allow a GitHub App to
-# create or update workflow ... without workflows permission"). Observed on
-# boucle.dev: every self-update bump rejected, forever, with the PAT in place.
-# Removing the persisted header lets the URL credentials (the PAT) win. Only
-# done when a PAT is configured — without one, the header is the only auth
-# and removing it would break pushes that currently work.
+# Extraheader removal (issue #107, corrected on boucle.dev): on GitHub,
+# actions/checkout persists an `http.<origin-url>.extraheader` config entry
+# (Authorization: Bearer <GITHUB_TOKEN>) in the local git config. The key is
+# keyed on the FULL origin URL with scheme and trailing slash — e.g.
+# `http.https://github.com/owner/repo.git/.extraheader` — not on the bare
+# host. libcurl sends that header INSTEAD of credentials embedded in the
+# remote URL, so even with the PAT correctly set in the URL the push went
+# out under the workflow token — which GitHub rejects for workflow-file
+# changes ("refusing to allow a GitHub App to create or update workflow ...
+# without workflows permission"). Observed on boucle.dev: every self-update
+# bump rejected, forever, with the PAT in place — and AGAIN after the first
+# fix, because it unset a key that never existed (host-keyed) and matched
+# nothing. Removing the persisted header lets the URL credentials (the PAT)
+# win. Only done when a PAT is configured — without one, the header is the
+# only auth and removing it would break pushes that currently work.
 configure_git_push() {
   local project_path="${BOUCLE_PROJECT_PATH:-${CI_PROJECT_PATH:-}}"
   if [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "${BOUCLE_FORGE_HOST:-}" ] && [ -n "$project_path" ]; then
     git remote set-url origin "https://${BOUCLE_BOT_USERNAME:-up-bot}:${BOUCLE_TOKEN}@${BOUCLE_FORGE_HOST}/${project_path}.git" 2> /dev/null
-    # The checkout action persists an Authorization extraheader for the origin
-    # URL; libcurl prefers it over the URL-embedded credentials. Drop it so
-    # the PAT is actually used.
-    git config --unset-all "http.${BOUCLE_FORGE_HOST}.extraheader" 2> /dev/null || true
+    # The checkout action persists an Authorization extraheader keyed on the
+    # full origin URL; libcurl prefers it over the URL-embedded credentials.
+    # Drop every extraheader config entry (git config --get-regexp over the
+    # local config only) so the PAT is actually used regardless of which URL
+    # spelling checkout keyed it under. --local keeps the purge scoped to
+    # this clone's config.
+    local key
+    while IFS= read -r key; do
+      [ -n "$key" ] || continue
+      git config --local --unset-all "$key" 2> /dev/null || true
+    done < <(git config --local --get-regexp '^http\..*\.extraheader$' 2> /dev/null | awk '{print $1}')
   fi
 }
 
@@ -553,8 +564,22 @@ main() {
         echo "[boucle] healing consumer root state (files drifted from the engine) — committing"
         git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
         git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+        # Filter out ignored paths before the add: untrack_prompt_overlay
+        # gitignores .jcode/prompt-overlay.md AND git-rm --cacheds it, and
+        # `git add <ignored-path>` exits 1 while staging NOTHING of that
+        # invocation — the heal commit would silently lose every other file
+        # listed alongside it (verified: git 2.55). `git add` refuses only
+        # explicitly-ignored paths; staged deletions (the overlay's rm
+        # --cached) are already in the index and need no re-add.
+        local heal_addable=""
+        for heal_path in $heal_out; do
+          if [ -e "$heal_path" ] && git check-ignore -q "$heal_path" 2> /dev/null; then
+            continue
+          fi
+          heal_addable="$heal_addable $heal_path"
+        done
         # shellcheck disable=SC2086
-        git add $heal_out 2> /dev/null || true
+        git add $heal_addable 2> /dev/null || true
         git commit -m "chore(boucle): re-sync consumer root files to engine $current [skip ci]" > /dev/null 2>&1 || true
         if push_update; then
           echo "[boucle] consumer root state healed"

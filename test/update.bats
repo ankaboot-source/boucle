@@ -434,19 +434,31 @@ setup() {
 }
 
 @test "configure_git_push drops the persisted extraheader when a PAT is set" {
-  # Issue #107: actions/checkout persists an Authorization extraheader for the
-  # origin URL; libcurl prefers it over the URL-embedded credentials, so the
-  # push went out under the workflow token even with the PAT configured — and
-  # GitHub rejected every workflow-file sync ("refusing to allow a GitHub App
-  # to create or update workflow ... without workflows permission").
+  # Issue #107 (corrected): actions/checkout persists an Authorization
+  # extraheader keyed on the FULL origin URL; libcurl prefers it over the
+  # URL-embedded credentials, so the push went out under the workflow token
+  # even with the PAT configured — and GitHub rejected every workflow-file
+  # sync. The first fix unset a host-keyed key that never existed and
+  # matched nothing (observed again on boucle.dev), so the purge now lists
+  # every http.*.extraheader entry via get-regexp and unsets each one.
   BOUCLE_TOKEN="pat-secret"
   BOUCLE_FORGE_HOST="github.com"
   BOUCLE_PROJECT_PATH="acme/site"
-  git() { echo "git $*"; }
+  # Stub git: answer the get-regexp probe with two persisted keys, echo
+  # every other invocation (set-url, the per-key unset).
+  git() {
+    case "$*" in
+      *"get-regexp"*"extraheader"*)
+        printf 'http.https://github.com/acme/site.git/.extraheader x-access-token:stub\nhttp.https://github.com/.extraheader bearer:stub\n'
+        ;;
+      *) echo "git $*" ;;
+    esac
+  }
   export -f git
   run configure_git_push
   assert_success
-  assert_output --partial "config --unset-all http.github.com.extraheader"
+  assert_output --partial "config --local --unset-all http.https://github.com/acme/site.git/.extraheader"
+  assert_output --partial "config --local --unset-all http.https://github.com/.extraheader"
   unset -f git
 }
 
