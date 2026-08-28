@@ -123,11 +123,13 @@ while [[ $# -gt 0 ]]; do
       echo "  --bot-id <id>            Bot user ID (for adding as project member)."
       echo "                           When provided, mono-user is disabled (dedicated bot)."
       echo "  --bot-username <name>    Bot username (default: up-bot; used to seed BOUCLE_BOT_USERNAME CI variable)"
-      echo "  --bot-token <pat>        Bot PAT (used as BOUCLE_TOKEN CI variable)"
-      echo "                           GitHub scopes: 'repo' + 'workflow' (optionally 'admin:org'"
-      echo "                           for branch-protection checks). Create one at"
-      echo "                           https://github.com/settings/tokens/new — see"
+      echo "  --bot-token <pat>        Bot PAT (used as BOUCLE_TOKEN CI variable)."
+      echo "                           REQUIRED on GitHub: 'repo' + 'workflow' scopes"
+      echo "                           (optionally 'admin:org' for branch-protection checks)."
+      echo "                           Create one at https://github.com/settings/tokens/new — see"
       echo "                           https://docs.github.com/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps"
+      echo "                           If omitted, setup adopts the authenticated gh CLI token"
+      echo "                           (run 'gh auth refresh -s workflow' to add the workflow scope)."
       echo "                           An invalid/expired PAT fails setup with instructions."
       echo "  --mono-user              Force mono-user mode (default when no --bot-id is given)."
       echo "                           Mono-user = one account owns both the issues and the loop."
@@ -933,13 +935,57 @@ if [ "$FORGE" = "gitlab" ]; then
   fi
 else
   # ── GitHub: repo secrets via gh secret set ──────────────────────────
-  # BOUCLE_TOKEN (from --bot-token)
+  # BOUCLE_TOKEN (from --bot-token) — REQUIRED on GitHub.
+  # The loop pushes workflow-file changes from CI (self-update syncs
+  # .github/workflows/boucle.yml to the repo root), and the workflow token
+  # (a GitHub App token) is never allowed to create or update workflow files
+  # — only a token carrying the 'workflow' scope/permission can. GitHub offers
+  # no API to mint a PAT, so we resolve the auth token in three tiers:
+  #   1. --bot-token (explicit, the documented path for a dedicated bot)
+  #   2. the authenticated gh CLI token, IF it already carries the 'workflow'
+  #      scope (the common mono-user case — gh auth refresh -s workflow adds it)
+  #   3. neither → fail loudly with the one command that fixes it.
+  # Skipping the token silently (the old log_skip) produced installs that
+  # "worked" but whose self-update push was rejected on every run (boucle.dev,
+  # issue #107). The PAT is the auth token in BOTH modes (mono-user default and
+  # dedicated bot) — see bin/setup §"Mono-user auto-detection".
   if [ -n "$BOT_TOKEN" ]; then
-    run "echo \"$BOT_TOKEN\" | GH_TOKEN=\"$BOT_TOKEN\" gh secret set BOUCLE_TOKEN --repo \"$PROJECT_ID\" 2>/dev/null"
-    log_pass "BOUCLE_TOKEN set (secrets)"
+    : # explicit — use it
+  elif command -v gh > /dev/null 2>&1 && _gh_tok="$(gh auth token 2> /dev/null)" && [ -n "$_gh_tok" ]; then
+    # Adopt the gh CLI identity. Verify the 'workflow' scope is present: gh
+    # auth login defaults to repo, read:org, gist — workflow is NOT default,
+    # so check before adopting or the self-update push will be rejected for
+    # the same reason as the workflow token. X-OAuth-Scopes is the response
+    # header that lists classic-PAT/OAuth scopes; fine-grained tokens don't
+    # emit it (they carry permissions, not scopes) and are handled by the
+    # fallback error below.
+    _gh_scopes="$(gh api -i user 2> /dev/null | tr -d '\r' | sed -n 's/^x-oauth-scopes: *//Ip' | head -1)"
+    case ",${_gh_scopes}," in
+      *,workflow,*)
+        BOT_TOKEN="$_gh_tok"
+        log_pass "Adopted the authenticated gh CLI token as BOUCLE_TOKEN (scopes: ${_gh_scopes})"
+        ;;
+      *)
+        echo "Error: the authenticated gh CLI token lacks the 'workflow' scope." >&2
+        echo "  gh auth login grants repo, read:org, gist by default — NOT workflow." >&2
+        echo "  Run:  gh auth refresh -s workflow" >&2
+        echo "  then re-run setup. The loop's self-update pushes" >&2
+        echo "  .github/workflows/boucle.yml, and GitHub rejects any token" >&2
+        echo "  without the workflow scope. See README.md §The bot user." >&2
+        exit 1
+        ;;
+    esac
   else
-    log_skip "BOUCLE_TOKEN (no --bot-token provided)"
+    echo "Error: no auth token for GitHub. Either pass --bot-token <PAT with" >&2
+    echo "  'repo' + 'workflow' scopes>, or authenticate the gh CLI first" >&2
+    echo "  (gh auth login && gh auth refresh -s workflow). GitHub offers no" >&2
+    echo "  API to mint a PAT, so one of these is required: the loop's" >&2
+    echo "  self-update pushes .github/workflows/boucle.yml, which the workflow" >&2
+    echo "  token (a GitHub App token) can never do. See README.md §The bot user." >&2
+    exit 1
   fi
+  run "echo \"$BOT_TOKEN\" | GH_TOKEN=\"$BOT_TOKEN\" gh secret set BOUCLE_TOKEN --repo \"$PROJECT_ID\" 2>/dev/null"
+  log_pass "BOUCLE_TOKEN set (secrets)"
 
   # CLOUDFLARE_API_TOKEN (from --cf-token)
   if [ -n "$CF_TOKEN" ]; then

@@ -359,6 +359,12 @@ part of the install**: it is not a separate step.
   [Scopes for OAuth apps](https://docs.github.com/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps).
   An **invalid or expired PAT fails setup** with an explicit message pointing
   here; renew it and re-run `bin/setup` (idempotent).
+  **The PAT is required on GitHub, in every mode** — setup refuses to run
+  without it. The loop's self-update pushes `.github/workflows/boucle.yml`
+  (the workflow must live at the repo root on GitHub Actions), and GitHub
+  never lets a workflow token (a GitHub App token) create or update workflow
+  files — only a PAT with the `workflow` scope can. An install without the
+  PAT silently freezes on the engine version it shipped with.
 
 If the GitLab service-account API is unavailable on your instance (feature
 flag off, or the endpoint 403s), setup falls back to the manual flow: create
@@ -382,6 +388,16 @@ the loop reassigns issues to it automatically.
 Mono-user is the **default** when no `--bot-id` is given — one account
 carries the issues, the MRs, the approvals and boucle's own actions. This is
 the common case on GitHub, where nothing provisions a bot account for you.
+
+**Mono-user still needs a token carrying the `workflow` scope on GitHub**
+(`--bot-token`, scopes `repo` + `workflow`). Mono-user changes *who* owns the
+issues and approvals, not how the loop authenticates its pushes — the token is
+the auth credential in both modes. If you omit `--bot-token`, setup adopts the
+authenticated `gh` CLI token, provided it already carries the `workflow` scope
+(`gh auth login` does **not** grant it by default — run
+`gh auth refresh -s workflow` to add it). Without it, self-update cannot push
+the workflow file it syncs and the install freezes on its initial engine
+version (see [The bot user](#the-bot-user)).
 
 **The cost: notifications degrade.** The forge signals "it's your turn" by
 changing an issue's assignee — but the issue is already yours, so nothing is
