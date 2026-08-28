@@ -914,8 +914,14 @@ filter_mr_discussion() {
   fi
   printf '%s\n' "$text" | awk -v bot="${BOUCLE_BOT_USERNAME:-}" '
     # A note is a verdict only if the boucle bot wrote it AND it carries a
-    # verdict marker. Everything else passes through untouched.
-    function is_verdict() { return (bot != "" && author == bot && seen_verdict) }
+    # verdict marker. Everything else passes through untouched. Bot detection
+    # is marker-derived: CI tags every injected note `[<author> — boucle]`
+    # when its body carries the `<!-- boucle:agent -->` stamp (mono-user
+    # safe — the stamp discriminates, the account does not), with
+    # BOUCLE_BOT_USERNAME equality kept as the legacy fallback for notes
+    # injected before the tagging shipped.
+    function is_bot() { return (index(author, "— boucle") > 0 || (bot != "" && author == bot)) }
+    function is_verdict() { return (is_bot() && seen_verdict) }
     # Drop the rationale that follows the criterion. index() is byte-literal:
     # the separator is an em dash (multi-byte UTF-8) and a bracket expression
     # would mis-parse it under mawk.
@@ -990,8 +996,13 @@ trim_notes() {
   local out
   out=$(printf '%s\n' "$text" | awk -v max="$max" -v bot_max="$bot_max" -v bot="$bot" '
     # Cap for the note currently buffered: the tightened bot cap when the
-    # note was authored by the boucle bot, the global cap otherwise.
-    function cap() { return (bot != "" && author == bot) ? bot_max : max }
+    # note is tagged `— boucle` (marker-derived, see filter_mr_discussion) or
+    # was authored by the boucle bot (legacy equality), the global cap
+    # otherwise. index() is byte-literal: the tag separator is an em dash
+    # (multi-byte UTF-8) and a bracket expression would mis-parse it under
+    # mawk.
+    function is_bot() { return (index(author, "— boucle") > 0 || (bot != "" && author == bot)) }
+    function cap() { return is_bot() ? bot_max : max }
     function flush(   n, c) {
       if (buf == "") return
       c = cap()
@@ -1142,7 +1153,7 @@ Post your analysis as a comment with the boucle:triage marker. Use: bin/forge-no
       # the agent assume there is no feedback.
       if [ -z "${BOUCLE_REVIEWER_FEEDBACK:-}" ] && [ "${BOUCLE_ITERATION:-1}" -gt 1 ]; then
         echo "[boucle:jc] WARNING: worker re-run (iteration ${BOUCLE_ITERATION}) with EMPTY MR feedback — the feedback channel may be broken. The worker will be told to fetch the MR discussion itself." >&2
-        feedback="[boucle:guard] No MR feedback was injected on this re-run, but prior runs exist (iteration ${BOUCLE_ITERATION}). Do NOT assume there is no feedback: fetch the MR notes for source branch boucle/${ISSUE} yourself (glab mr note list -R \${CI_PROJECT_PATH} -n 100 or bin/forge-note) and address every actionable human comment and reviewer verdict before claiming done."
+        feedback="[boucle:guard] No MR feedback was injected on this re-run, but prior runs exist (iteration ${BOUCLE_ITERATION}). Do NOT assume there is no feedback: fetch the MR notes for the MR whose source branch STARTS WITH boucle/${ISSUE} yourself (the full name carries a title slug, boucle/${ISSUE}-<slug>; glab mr note list -R \${CI_PROJECT_PATH} -n 100 or bin/forge-note) and address every actionable human comment and reviewer verdict before claiming done."
       fi
       prompt="Implement issue #${ISSUE}. Read state.md first. Commit your changes.
 
@@ -1162,7 +1173,7 @@ Issue body: NOT available in the prompt — fetch it via \`bin/forge-note issue 
       fi
       if [ -n "$notes" ]; then
         prompt="${prompt}
-Prior issue discussion (issue notes, oldest first — early preservation instructions STAND alongside later amendments):
+Prior issue discussion (issue notes, oldest first — early preservation instructions STAND alongside later amendments. Notes tagged \`— human\` are human instructions and AMEND the spec; notes tagged \`— boucle\` are loop context only):
 ---
 ${notes}
 ---
@@ -1170,7 +1181,7 @@ ${notes}
       fi
       if [ -n "$feedback" ]; then
         prompt="${prompt}
-Prior feedback on the MR (reviewer verdicts + human comments, oldest first — you MUST address every actionable item before claiming done):
+Prior feedback on the MR (reviewer verdicts + human comments, oldest first — you MUST address every actionable item before claiming done. Notes tagged \`— human\` are human instructions and AMEND the spec; notes tagged \`— boucle\` are loop context only):
 ---
 ${feedback}
 ---
@@ -1321,11 +1332,12 @@ Add it to \`LESSONS.yml\` and validate with \`bin/check-lessons LESSONS.yml\` be
       # slip a PASS).
       if [ -z "${BOUCLE_REVIEWER_FEEDBACK:-}" ] && [ "${BOUCLE_ITERATION:-1}" -gt 1 ]; then
         echo "[boucle:jc] WARNING: reviewer re-run (iteration ${BOUCLE_ITERATION}) with EMPTY MR feedback — the feedback channel may be broken. The reviewer will be told to fetch the MR discussion itself." >&2
-        feedback="[boucle:guard] No MR feedback was injected on this re-run, but prior runs exist (iteration ${BOUCLE_ITERATION}). Do NOT assume there is no feedback: fetch the MR notes for source branch boucle/${ISSUE} yourself (glab mr note list -R \${CI_PROJECT_PATH} -n 100 or bin/forge-note) and verify EVERY human amendment is addressed before PASS."
+        feedback="[boucle:guard] No MR feedback was injected on this re-run, but prior runs exist (iteration ${BOUCLE_ITERATION}). Do NOT assume there is no feedback: fetch the MR notes for the MR whose source branch STARTS WITH boucle/${ISSUE} yourself (the full name carries a title slug, boucle/${ISSUE}-<slug>; glab mr note list -R \${CI_PROJECT_PATH} -n 100 or bin/forge-note) and verify EVERY human amendment is addressed before PASS."
       fi
       # The reviewer MUST post its verdict on the MR/PR, NOT the issue.
       # BOUCLE_MR_IID is exported by reviewer.sh (the MR/PR number for the
-      # branch boucle/$ISSUE). Without it in the prompt, the agent only
+      # worker branch, which starts with boucle/$ISSUE). Without it in the
+      # prompt, the agent only
       # knows the issue number and posts the verdict there — the CI parser
       # reads forge_mr_notes (PR comments), so a verdict on the issue is
       # invisible to the loop and the issue escalates to human (boucle.dev
@@ -1351,6 +1363,8 @@ Add it to \`LESSONS.yml\` and validate with \`bin/check-lessons LESSONS.yml\` be
       prompt="Review the MR for issue #${ISSUE}.${mr_iid_ref} Test the deployed preview at \$BOUCLE_PREVIEW_URL. Post your verdict with the boucle:verdict marker.
 
 Verify content fidelity: the issue body below is the original spec. Check that the MR preserves the instructed content (URLs, citations, texts) verbatim — no placeholders, no rewrites, no substitutions. A MR that degrades instructed content is a FAIL even if it satisfies the latest amendments.
+
+HARD RULE — NEVER use the Read tool on raster image files (.png .jpg .jpeg .gif .webp .avif .bmp). Your model is text-only: image input kills the session (boucle.dev PR #94: a reviewer Read public/og-image.png and the run 400'd, 5/5 iterations failed). Raster images changed by the PR are described as text in the image descriptions section below; if an image you need is NOT covered there, use non-visual analysis (e.g. python3 pixel statistics: dimensions, color histogram, dominant colors) and note the limitation in your verdict. SVG files are text/XML — you MAY Read those.
 "
       # C3: Inject the correct MR head SHA so the agent posts the verdict
       # marker with the right SHA. Without this, the agent guesses (or copies
@@ -1422,7 +1436,7 @@ Issue body: NOT available — fetch it via \`bin/forge-note issue ${ISSUE}\` or 
       issue_notes="$(trim_notes issue_notes "${BOUCLE_ISSUE_NOTES:-}")"
       if [ -n "$issue_notes" ]; then
         prompt="${prompt}
-Prior issue discussion (issue notes, oldest first — human comments here AMEND the spec just like MR comments. You MUST verify every human amendment in BOTH this section AND the MR discussion below is addressed in the deployed code):
+Prior issue discussion (issue notes, oldest first — human comments here AMEND the spec just like MR comments. You MUST verify every human amendment in BOTH this section AND the MR discussion below is addressed in the deployed code. Notes tagged \`— human\` are human instructions and AMEND the spec; notes tagged \`— boucle\` are loop context only):
 ---
 ${issue_notes}
 ---
@@ -1430,7 +1444,7 @@ ${issue_notes}
       fi
       if [ -n "$feedback" ]; then
         prompt="${prompt}
-Prior MR discussion (reviewer verdicts + human comments, oldest first — human comments AMEND the spec and take precedence over the frozen acceptance criteria in state.md). You MUST enumerate every human amendment below and verify it is addressed in the deployed code; any human amendment NOT addressed is a FAIL, even if the original criteria are satisfied:
+Prior MR discussion (reviewer verdicts + human comments, oldest first — human comments AMEND the spec and take precedence over the frozen acceptance criteria in state.md). You MUST enumerate every human amendment below and verify it is addressed in the deployed code; any human amendment NOT addressed is a FAIL, even if the original criteria are satisfied. Notes tagged \`— human\` are human instructions and AMEND the spec; notes tagged \`— boucle\` are loop context only:
 ---
 ${feedback}
 ---
@@ -1442,6 +1456,8 @@ Image descriptions (generated by the vision model from attachments — use these
 ---
 ${BOUCLE_IMAGE_DESCRIPTIONS}
 ---
+
+The descriptions above may also cover raster images ADDED OR MODIFIED BY THE PR ITSELF (e.g. public/og-image.png — extracted from the MR head into the vision pipeline by the reviewer stage, not comment attachments). Treat those sections like any other description: they are the ONLY visual information you get about those files — never Read them (see the HARD RULE above).
 "
       fi
       # Lesson candidate emission at escalation (reviewer-only):
@@ -1846,13 +1862,18 @@ emit_health_record() {
     swarm=$(extract_swarm_spawns "$AGENT_LOG" 2> /dev/null || echo 0)
   fi
   case "$swarm" in '' | *[!0-9]*) swarm=0 ;; esac
-  local setup_fail
+  local setup_fail evidence
   setup_fail=$(boucle_classify_setup_failure "$AGENT_LOG" 2> /dev/null || echo "")
+  # On an early exit 7c never ran, so classify here from the transcript.
+  evidence="${SKILLS_EVIDENCE:-}"
+  if [ -z "$evidence" ] && type skills_evidence > /dev/null 2>&1; then
+    evidence=$(skills_evidence "$AGENT_LOG" "$skills" 2> /dev/null || echo "")
+  fi
   boucle_health_record "$ISSUE" "$ROLE" "$ITERATION" "${AGENT_EXIT:-$rc}" \
     "${prompt_total_chars:-0}" "${h_pt:-}" "${h_cost:-}" \
     "${h_model:-}" "${h_provider:-}" \
     "$skills" "$(boucle_experiment_arm "$ISSUE" 2> /dev/null || echo full)" \
-    "$setup_fail" "$swarm" || true
+    "$setup_fail" "$swarm" "$evidence" || true
   return "$rc"
 }
 trap emit_health_record EXIT
@@ -2459,10 +2480,44 @@ record_swarm_spawns() {
   echo "[boucle:metrics] role=$ROLE iteration=$ITERATION swarm_spawns=$n observable=$observable" >&2
 }
 
+# skills_evidence <log> <extracted-names>
+#
+# Why a name list alone is not enough: "no skills used" and "the extractor
+# does not match this transcript format" produce the SAME empty list, and the
+# second is a broken sensor reporting a finding. Observed on boucle.dev #91
+# and #92 — 60+ runs, `skills: []` on every one, with no way to tell which.
+#
+# The tool jcode exposes is `skill_manage`. Its presence in the transcript is
+# independent of whatever shape extract_skills_used greps for, so it tells the
+# two apart:
+#
+#   no-transcript  the log is missing or empty — nothing can be said
+#   parsed         names were extracted
+#   not-invoked    the log mentions no skill_manage at all — a real zero
+#   unparsed       the log DOES show skill_manage and we extracted nothing
+#                  → the extractor is wrong, and this is the row that says so
+skills_evidence() {
+  local log="${1:-}" used="${2:-}"
+  if [ -z "$log" ] || [ ! -s "$log" ]; then
+    echo "no-transcript"
+    return 0
+  fi
+  if [ -n "$used" ]; then
+    echo "parsed"
+    return 0
+  fi
+  if grep -qi 'skill_manage' "$log" 2> /dev/null; then
+    echo "unparsed"
+  else
+    echo "not-invoked"
+  fi
+}
+
 # Sets SKILLS_USED (global) so the health record in 7d can carry the same
 # list. skills-used.json stays as a projection for anything already reading
 # it; health.jsonl is the file the analysis joins on.
 SKILLS_USED=""
+SKILLS_EVIDENCE=""
 record_skills_used() {
   local used observable="yes"
   used=$(extract_skills_used "$AGENT_LOG" | paste -sd, - 2> /dev/null || echo "")
@@ -2475,7 +2530,17 @@ record_skills_used() {
     used=""
   fi
 
-  echo "[boucle:metrics] role=$ROLE iteration=$ITERATION skills_used=${used:-none} observable=$observable" >&2
+  SKILLS_EVIDENCE=$(skills_evidence "$AGENT_LOG" "$used")
+
+  echo "[boucle:metrics] role=$ROLE iteration=$ITERATION skills_used=${used:-none} observable=$observable evidence=$SKILLS_EVIDENCE" >&2
+
+  # The one state that must never pass quietly: the agent DID call the skill
+  # tool and the extractor returned nothing. That is not a measurement, it is
+  # the measurement failing — and without this line it looks exactly like an
+  # agent that chose to load no skills.
+  if [ "$SKILLS_EVIDENCE" = "unparsed" ]; then
+    echo "[boucle] WARN: the transcript shows skill_manage activity but extract_skills_used matched no skill name (role=$ROLE, iteration=$ITERATION). The extractor does not match this transcript format — every skills figure derived from this run is WRONG, not merely empty. Fix the patterns in extract_skills_used against a real transcript before trusting any skill statistic." >&2
+  fi
 
   # Skills soft gate: warn (not fail) when the agent loaded 0 skills despite
   # the prompt injecting a skill catalogue and recommending skill usage. The

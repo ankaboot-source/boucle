@@ -146,8 +146,15 @@ boucle_ci_doctor() {
       return
     }
     awards=$(forge_note_reactions mr "$mr_iid" "$approval_note_id" 2> /dev/null || echo "[]")
-    if echo "$awards" | jq -e --arg emojis "$BOUCLE_SPEC_APPROVAL_EMOJIS" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
-              [.[] | select(.user.username != $bname) | .name]
+    # Issue #100: classify by agent marker, not account identity — in
+    # mono-user mode BOUCLE_BOT_USERNAME falls back to "up-bot" (nobody),
+    # so an identity filter would let boucle's own notes/reactions count
+    # as human. Exclude reactors who authored an agent-marker note.
+    agent_users=$(echo "$notes" | jq -c '[.[] | select((.body // "") | contains("<!-- boucle:agent -->")) | (.author.username // .author.name // "")] | unique' 2> /dev/null || echo "[]")
+    if echo "$awards" | jq -e --arg emojis "$BOUCLE_SPEC_APPROVAL_EMOJIS" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" --argjson au "$agent_users" '
+              [.[] | select(.user.username != $bname)
+                  | select(.user.username as $u | ($au | index($u)) | not)
+                  | .name]
               | map(select(. as $n | ($emojis | split("|")) | index($n)))
               | length > 0
           ' > /dev/null 2>&1; then
@@ -166,8 +173,8 @@ boucle_ci_doctor() {
   doctor_mr_approval_magic_word() {
     local mr_iid="$1" notes
     notes=$(forge_mr_notes "$mr_iid" 2> /dev/null || echo "[]")
-    if echo "$notes" | jq -e --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
-              [.[] | select(.author.username != $bname)
+    if echo "$notes" | jq -e '
+              [.[] | select((.body // "") | contains("<!-- boucle:agent -->") | not)
                 | (.body | split("\n")[0] | gsub("^\\s+|\\s+$"; "") | ascii_downcase == "approved")]
               | any
           ' > /dev/null 2>&1; then
@@ -228,8 +235,11 @@ boucle_ci_doctor() {
     LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
 
     # Find the last human (non-bot) note after the triage comment.
-    HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
-          [.[] | select(.author.username != $bname) | select(.id > ($tid | tonumber))]
+    # Issue #100: marker-based classification — a note is boucle's iff its
+    # body carries <!-- boucle:agent --> (stamped by every forge_*_note
+    # path); everything else is human, regardless of author account.
+    HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" '
+          [.[] | select((.body // "") | contains("<!-- boucle:agent -->") | not) | select(.id > ($tid | tonumber))]
           | length
         ')
 
@@ -273,9 +283,10 @@ boucle_ci_doctor() {
     NOTES=$(forge_issue_notes "$IID")
     # Find the last triage comment (same as needs-info recovery above).
     LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
-    # Detect any non-bot note after the last triage comment.
-    HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
-          [.[] | select(.author.username != $bname) | select(.id > ($tid | tonumber))]
+    # Detect any human note after the last triage comment (issue #100:
+    # marker-based, not identity-based — see needs-info recovery above).
+    HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" '
+          [.[] | select((.body // "") | contains("<!-- boucle:agent -->") | not) | select(.id > ($tid | tonumber))]
           | length
         ')
     # Check for an approval emoji on the triage comment AND any standalone
@@ -297,14 +308,18 @@ boucle_ci_doctor() {
     [ -n "$SPEC_AUTHOR" ] \
       || echo "  → WARN: could not resolve the author of #$IID — accepting a reaction from any non-bot user (previous behaviour)"
     EMOJI_APPROVAL_FOUND=false
+    # Issue #100: also exclude reactors who authored an agent-marker note
+    # (mono-user mode: boucle reacts under the human's own account).
+    AGENT_USERS=$(echo "$NOTES" | jq -c '[.[] | select((.body // "") | contains("<!-- boucle:agent -->")) | (.author.username // .author.name // "")] | unique' 2> /dev/null || echo "[]")
     for NOTE_ID in $LAST_TRIAGE_NOTE_ID $SPEC_INVITE_NOTE_ID; do
       [ "$NOTE_ID" = "0" ] || [ -z "$NOTE_ID" ] && continue
       # forge_note_reactions normalizes both backends to
       # {name, user.username} — the jq filter below works unchanged.
       AWARDS=$(forge_note_reactions issue "$IID" "$NOTE_ID")
-      if echo "$AWARDS" | jq -e --arg emojis "$BOUCLE_SPEC_APPROVAL_EMOJIS" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" --arg author "$SPEC_AUTHOR" '
+      if echo "$AWARDS" | jq -e --arg emojis "$BOUCLE_SPEC_APPROVAL_EMOJIS" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" --arg author "$SPEC_AUTHOR" --argjson au "$AGENT_USERS" '
                 [.[]
                   | select(.user.username != $bname)
+                  | select(.user.username as $u | ($au | index($u)) | not)
                   | select($author == "" or .user.username == $author)
                   | .name]
                 | map(select(. as $n | ($emojis | split("|")) | index($n)))
@@ -328,8 +343,8 @@ boucle_ci_doctor() {
     # when neither the emoji webhook nor the label webhook fired.
     MAGIC_WORD_APPROVAL_FOUND=false
     if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ] && [ "$LAST_TRIAGE_NOTE_ID" != "0" ]; then
-      MAGIC_WORD_APPROVAL_FOUND=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" --arg author "$SPEC_AUTHOR" '
-            [.[] | select(.author.username != $bname)
+      MAGIC_WORD_APPROVAL_FOUND=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" --arg author "$SPEC_AUTHOR" '
+            [.[] | select((.body // "") | contains("<!-- boucle:agent -->") | not)
               | select($author == "" or .author.username == $author)
               | select(.id > ($tid | tonumber))]
             | map(.body | split("\n")[0] | gsub("^\\s+|\\s+$"; "") | ascii_downcase == "approved")
@@ -483,9 +498,11 @@ boucle_ci_doctor() {
       continue
     fi
 
-    # Is there a human reply after the last triage comment?
-    HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" --arg bname "${BOUCLE_BOT_USERNAME:-up-bot}" '
-          [.[] | select(.author.username != $bname) | select(.id > ($tid | tonumber))]
+    # Is there a human reply after the last triage comment? (issue #100:
+    # marker-based classification — agent-marker notes are never "human",
+    # even when posted from the human's own account in mono-user mode.)
+    HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" '
+          [.[] | select((.body // "") | contains("<!-- boucle:agent -->") | not) | select(.id > ($tid | tonumber))]
           | length
         ')
     if [ "$HUMAN_REPLY_AFTER_TRIAGE" -eq 0 ]; then

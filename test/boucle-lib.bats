@@ -1300,10 +1300,11 @@ HELPER
   helper_script=$(mktemp)
   cat > "$helper_script" << 'HELPER'
 #!/usr/bin/env bash
-# Pin the mode: a runner that exports BOUCLE_DEPLOY_MODE=external (a
-# consumer variable) would otherwise send this down the external path.
-BOUCLE_DEPLOY_MODE=self
 BOUCLE_ISSUE=42
+# Explicit: the CI job inherits BOUCLE_DEPLOY_MODE from the workflow env, and
+# this test asserts the SELF path (it is in the name). Relying on the code
+# default made it pass locally and fail on the runner.
+BOUCLE_DEPLOY_MODE=self
 BOUCLE_DEPLOY_CMD="echo DEPLOYED https://example.com"
 BOUCLE_DEPLOY_URL_REGEX="https://[a-zA-Z0-9./-]+"
 BOUCLE_BUILD_CMD="echo BUILD_RAN"
@@ -1334,10 +1335,11 @@ HELPER
   helper_script=$(mktemp)
   cat > "$helper_script" << 'HELPER'
 #!/usr/bin/env bash
-# Pin the mode: a runner that exports BOUCLE_DEPLOY_MODE=external (a
-# consumer variable) would otherwise send this down the external path.
-BOUCLE_DEPLOY_MODE=self
 BOUCLE_ISSUE=42
+# Explicit: the CI job inherits BOUCLE_DEPLOY_MODE from the workflow env, and
+# this test asserts the SELF path (it is in the name). Relying on the code
+# default made it pass locally and fail on the runner.
+BOUCLE_DEPLOY_MODE=self
 BOUCLE_DEPLOY_CMD="echo FAILED; exit 1"
 BOUCLE_DEPLOY_URL_REGEX="https://[a-zA-Z0-9./-]+"
 BOUCLE_BUILD_CMD="echo BUILD_RAN"
@@ -2152,4 +2154,46 @@ print('OK' if any('boucle' in c for c in allow) else 'MISSING: %s' % allow)
   assert_success
   run grep -q 'why is it not the agent' LESSONS.yml
   assert_success
+}
+
+# ── Note tagging: authorship by marker, never by identity (#97) ───────
+# CI tags every injected note `[<author> — boucle]` when its body carries
+# the `<!-- boucle:agent -->` stamp, `[<author> — human]` otherwise — so
+# agents classify by the tag, which discriminates even in mono-user mode
+# (where the account is shared and identity discriminates nothing).
+
+@test "note tagging: all four injection sites use the same marker-derived jq expression" {
+  # Anti-drift: the worker (MR feedback + issue notes) and the reviewer (MR
+  # feedback + issue notes) must keep the identical tagging expression.
+  # grep -A1 captures the two continuation lines of each jq pipeline.
+  run bash -c "grep -A1 'contains(\"<!-- boucle:state\") | not) | \"\[\\\\(.author.username' lib/boucle-ci/worker.sh lib/boucle-ci/reviewer.sh | grep -c 'unknown\") — \\\\(if ((.body // \"\") | contains(\"<!-- boucle:agent -->\"))'"
+  assert_output "4"
+}
+
+@test "note tagging: the tag derives from the marker, not the account" {
+  # Same author, two bodies — only the stamped one is tagged boucle.
+  run jq -r '[.[] | select(.system == false or .system == null) | select((.body // "") | contains("<!-- boucle:state") | not) | "[\(.author.username // .author.name // "unknown") — \(if ((.body // "") | contains("<!-- boucle:agent -->")) then "boucle" else "human" end)] \(.body)"] | .[]' <<'EOF'
+[
+  {"author":{"username":"baderdean"},"system":false,"body":"<!-- boucle:agent -->\nverdict body"},
+  {"author":{"username":"baderdean"},"system":false,"body":"c'est card-7.svg, pas card-6.svg"},
+  {"author":{"username":"baderdean"},"system":true,"body":"system note"}
+]
+EOF
+  assert_success
+  assert_output --partial "[baderdean — boucle] <!-- boucle:agent -->"
+  assert_output --partial "[baderdean — human] c'est card-7.svg, pas card-6.svg"
+  # System notes are filtered out entirely.
+  refute_output --partial "system note"
+}
+
+@test "note tagging: a boucle:state note is never injected" {
+  run jq -r '[.[] | select(.system == false or .system == null) | select((.body // "") | contains("<!-- boucle:state") | not) | "[\(.author.username // .author.name // "unknown") — \(if ((.body // "") | contains("<!-- boucle:agent -->")) then "boucle" else "human" end)] \(.body)"] | .[]' <<'EOF'
+[
+  {"author":{"username":"baderdean"},"system":false,"body":"<!-- boucle:state v=1 -->\nstate note"},
+  {"author":{"username":"baderdean"},"system":false,"body":"real human note"}
+]
+EOF
+  assert_success
+  refute_output --partial "state note"
+  assert_output --partial "[baderdean — human] real human note"
 }

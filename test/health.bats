@@ -220,10 +220,18 @@ JSONL
   [ "$record_line" -lt "$switch_line" ]
 }
 
-@test "health: an absent verdict is recorded as UNCERTAIN, not as silence" {
+@test "health: an absent verdict is recorded as no-verdict, not as silence" {
   # No verdict is a fact about the run. Recording nothing would make it
   # indistinguishable from a PASS in the record.
-  run grep -c 'VERDICT:-UNCERTAIN' lib/boucle-ci/reviewer.sh lib/boucle-ci/e2e.sh
+  #
+  # It is recorded under its OWN name rather than folded into UNCERTAIN. The
+  # two states take different paths through reviewer.sh — a posted
+  # `VERDICT: UNCERTAIN` escalates to a human immediately, an empty one
+  # re-triggers the reviewer up to BOUCLE_MAX_ITERATIONS — so one name for
+  # both makes the health log point at the wrong bug. boucle.dev #92
+  # escalated twice showing ten UNCERTAIN rows that were, every one of them,
+  # a run where the agent posted nothing at all.
+  run grep -c 'VERDICT:-no-verdict' lib/boucle-ci/reviewer.sh lib/boucle-ci/e2e.sh
   assert_success
   assert_line --index 0 --partial "reviewer.sh:1"
   assert_line --index 1 --partial "e2e.sh:1"

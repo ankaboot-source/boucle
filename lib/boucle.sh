@@ -592,6 +592,11 @@ boucle_health_record() {
   local skills="${10:-}" arm="${11:-}" setup_fail="${12:-}"
   local swarm="${13:-0}"
   case "$swarm" in '' | *[!0-9]*) swarm=0 ;; esac
+  # What the SKILLS FIELD IS EVIDENCE OF, which the field itself cannot say:
+  # an empty list means "no skills used" and "the extractor does not match
+  # this transcript" identically, and the second is a broken sensor reporting
+  # a finding. See skills_evidence() in bin/jc.
+  local skills_evidence="${14:-}"
   local file="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
   mkdir -p "$(dirname "$file")" 2> /dev/null || true
   local ts skills_json
@@ -607,9 +612,9 @@ boucle_health_record() {
       | paste -sd, - 2> /dev/null || true)]"
     [ "$skills_json" = "[]" ] || [ -n "$skills_json" ] || skills_json="[]"
   fi
-  printf '{"timestamp":"%s","role":"%s","iteration":%s,"exit_code":%s,"prompt_chars":%s,"tokens":"%s","cost_usd":"%s","model":"%s","provider":"%s","skills":%s,"arm":"%s","setup_fail":"%s","swarm_spawns":%s}\n' \
+  printf '{"timestamp":"%s","role":"%s","iteration":%s,"exit_code":%s,"prompt_chars":%s,"tokens":"%s","cost_usd":"%s","model":"%s","provider":"%s","skills":%s,"skills_evidence":"%s","arm":"%s","setup_fail":"%s","swarm_spawns":%s}\n' \
     "$ts" "$role" "$iteration" "$exit_code" "$prompt_chars" "${tokens:-n/a}" "${cost:-n/a}" "$model" "$provider" \
-    "$skills_json" "${arm:-full}" "$setup_fail" "$swarm" \
+    "$skills_json" "$skills_evidence" "${arm:-full}" "$setup_fail" "$swarm" \
     >> "$file" 2> /dev/null || true
   boucle_metrics_sync_health "$iid" || true
 }
@@ -964,6 +969,13 @@ boucle_metrics_row() {
         runs: ([.[] | select(has("iteration"))] | length),
         skills: $skills,
         skills_n: ($skills | length),
+        # How much to trust skills / skills_n above. runs_skills_unparsed > 0
+        # means the extractor saw skill_manage activity it could not read, so
+        # the skill figures for this issue are wrong rather than empty — and
+        # an all-zero skills column across a project with a non-zero count
+        # here is a broken sensor, not a finding about agent behaviour.
+        runs_skills_unparsed: ([.[] | select(.skills_evidence == "unparsed")] | length),
+        runs_skills_not_invoked: ([.[] | select(.skills_evidence == "not-invoked")] | length),
         setup_failures: ($setup | length),
         setup_failure_families: ($setup | unique),
         human_spec: $spec,
@@ -2406,6 +2418,16 @@ boucle_escalate_merge_conflict() {
   conflicts=$(boucle_parse_merge_conflicts "$rebase_out")
   [ -z "$conflicts" ] && conflicts="- (unclassified — see rebase output in the pipeline log)"
 
+  # Resolve the ACTUAL worker branch name for the human-facing git commands
+  # below: since lesson #70 it is boucle/<iid>-<slug>, not the bare protocol
+  # key — `git checkout boucle/<iid>` would point at a branch that does not
+  # exist. forge_mr_get may fail (or be absent in unit tests); fall back to
+  # boucle_branch_name, which recomputes the same deterministic name the
+  # worker used (and itself falls back to the bare name without a title).
+  local branch
+  branch=$(forge_mr_get "$mr_iid" 2> /dev/null | jq -r '.source_branch // .head.ref // empty' 2> /dev/null || echo "")
+  [ -z "$branch" ] && branch=$(boucle_branch_name "$issue")
+
   # ── Conflict-retry budget ──────────────────────────────────────────
   # Count prior conflict-retries on this issue via the marker comment
   # `<!-- boucle:conflict-retry N -->` posted on each re-trigger. Bounded
@@ -2452,7 +2474,7 @@ The worker is being re-triggered to rebase onto the fresh \`$default_branch\` an
   local body
   body="⚠️ **Merge conflict — human intervention required**
 
-Issue #$issue ($(forge_mr_ref "$mr_iid"), branch \`boucle/$issue\`) cannot be merged automatically: the rebase onto \`$default_branch\` hit a **semantic conflict** that ${max_retries} worker conflict-retries could not resolve. The loop is **paused** on this issue and it is assigned to you.
+Issue #$issue ($(forge_mr_ref "$mr_iid"), branch \`$branch\`) cannot be merged automatically: the rebase onto \`$default_branch\` hit a **semantic conflict** that ${max_retries} worker conflict-retries could not resolve. The loop is **paused** on this issue and it is assigned to you.
 
 **Classification** : detected from the rebase output (modify/delete = this branch deletes a file the default branch has modified, or vice versa).
 
@@ -2463,9 +2485,9 @@ $conflicts
 
 **Manual options** :
 1. **Resolve on the branch, then re-run the merger** :
-   \`git checkout boucle/$issue && git fetch origin $default_branch && git rebase origin/$default_branch\`
+   \`git checkout $branch && git fetch origin $default_branch && git rebase origin/$default_branch\`
    — take this branch's version of each conflicted file, or the default branch's (\`git checkout origin/$default_branch -- <file>\`), then
-   \`git add -A && git rebase --continue && git push --force-with-lease origin boucle/$issue\`
+   \`git add -A && git rebase --continue && git push --force-with-lease origin $branch\`
    and restore \`boucle:approval\` (the merger will pick it up).
 2. **Let the worker re-plan against fresh $default_branch** (if the issue's goal still stands): set \`boucle:todo\` + \`boucle::status::bot\` — the worker re-baselines and implements the goal on top of the current $default_branch.
 3. **Close the issue** if obsolete or contradictory with changes already on $default_branch ($(forge_mr_ref "$mr_iid") closes with it).

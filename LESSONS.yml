@@ -1057,7 +1057,16 @@
   ✅:
   - 'DO make the stage perform the action it documents. If post-merge "builds + deploys + triggers e2e", post-merge calls the deploy function directly — it does not poll for a separate job that a sibling choice ([skip ci]) prevents from running.'
   - 'DO verify that a polling loop''s success condition can actually be satisfied given the system''s other design choices. A poll for event X is only valid if some path in the system produces event X.'
-109:
+111:
+  title: Comment authorship is classified by the boucle:agent marker, never by account identity
+  ❌:
+  - 'DO NOT classify an injected note as human- or bot-authored from the account that posted it. In mono-user mode boucle posts under the human''s own account, so identity discriminates nothing — an agent grading "is this comment the bot''s?" by account will call the human''s own amendment a bot comment and discard it.'
+  - 'DO NOT let an agent dismiss a human amendment as confused, stale, or bot-generated because it contradicts the issue body or state.md — a human amending their own spec is the amendment channel working as designed; the newest human instruction wins.'
+  ✅:
+  - 'DO classify mechanically at injection time: tag every injected note `[<author> — boucle]` when its body carries `<!-- boucle:agent -->` (stamped by every forge note path), `[<author> — human]` otherwise. The tag is the only authorship signal the agents receive.'
+  - 'DO keep the jc parsers (filter_mr_discussion, trim_notes) marker-derived: bot detection via the `— boucle` tag, with BOUCLE_BOT_USERNAME equality only as a legacy fallback.'
+  - 'DO treat every `— human` note as a binding amendment candidate even when posted under the bot''s account and even when it contradicts the frozen spec (lesson #53) — recognize by marker, never by actor (lesson #100).'
+112:
   title: Engine-owned files MUST be read from the engine, never from the consumer's copy of them
   ❌:
   - 'DO NOT resolve an engine-owned file (agent prompts, skills — anything `bin/update` syncs wholesale) from the consumer''s workspace before the engine''s own copy. The consumer''s copy is a mirror, and on a submodule install it is a FROZEN mirror: `bin/update` can then only move the submodule pointer, so nothing rewrites the parent repo''s files again. A workspace-first lookup pinned a consumer to the agent prompt it last received by tarball while the engine advanced underneath it — the loop ran the current parser against an agent that had never been told to emit the current spec sections.'

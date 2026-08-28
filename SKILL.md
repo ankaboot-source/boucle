@@ -91,6 +91,14 @@ without the stamp is treated as a human reply and routed. This is mono-user-safe
 not). Every comment a harness posts MUST carry the stamp, or dispatch will treat
 it as a human reply and re-route. (LESSONS.yml lesson #55.)
 
+The same marker discriminates note authorship in prompts: CI MUST tag every
+note injected into an agent prompt `[<author> — boucle]` when its body carries
+the stamp, `[<author> — human]` otherwise, and agents MUST classify authorship
+by that tag — NEVER by the posting account (in mono-user mode the account is
+shared, so identity discriminates nothing; a human amendment posted under the
+bot's account is still a binding amendment, lesson #111). (LESSONS.yml lesson
+#111.)
+
 ### I8 — Doc-as-code
 
 A doc that describes a system that no longer exists is a bug. Charter docs are
@@ -184,7 +192,7 @@ stateDiagram-v2
     review --> todo: reviewer FAIL (retry, iter < max)
     review --> human: reviewer FAIL (iter cap) / UNCERTAIN / no verdict
     approval --> merging: human approved MR (native Approve button)
-    approval --> review: MR updated (push to boucle/<iid>)
+    approval --> review: MR updated (push to boucle/<iid>-<slug>)
     approval --> human: MR closed without merge
     merging --> done: merge succeeded + e2e PASS
     merging --> human: merge conflict / not mergeable
@@ -355,9 +363,9 @@ webhook is silently dropped (dispatch requires `boucle:approval`/`human`). The
 reviewer's PASS branch checks `forge_mr_approvals` and triggers the merger
 directly to recover.
 
-### 4.4 Push to `boucle/<iid>` — re-review
+### 4.4 Push to `boucle/<iid>-<slug>` — re-review
 
-A push to the worker branch (`boucle/<iid>`) fires `merge_request update`
+A push to the worker branch (`boucle/<iid>-<slug>`) fires `merge_request update`
 (dispatch.sh:187-205). If the issue was at `boucle:approval`, it reverts to
 `boucle:review` and re-runs the reviewer (the approval is invalidated by the
 push). Otherwise it re-runs the reviewer on the updated MR.
@@ -426,7 +434,7 @@ re-trigger a closed issue by any other means. (LESSONS.yml lesson #44.)
 | boucle's own 👀 ack | emoji event, `awardable_type == Issue`, name canonicalizes to `eyes` | skip |
 | bot-originated event | `ACTOR == BOUCLE_BOT_USERNAME` and action ≠ `merge` | skip |
 | system note | `object_attributes.system == true` | skip (AGENTS.md #34) |
-| non-boucle branch | source_branch not `boucle/<iid>` | skip |
+| non-boucle branch | source_branch does not start with `boucle/<iid>` | skip |
 
 The 👀 filter is not redundant with the bot-identity filter: in mono-user
 mode there is no bot account, so `ACTOR` is the human on *every* event —
@@ -481,18 +489,31 @@ as a human reply (I7).
 
 ## 6. Branch contract
 
-The worker branch is `boucle/<iid>` (e.g. `boucle/42`). The lifecycle:
-- **Worker** creates the branch from `master`/`main`, implements, pushes, opens
-  an MR targeting `master`/`main`.
+The worker branch is `boucle/<iid>-<slug>` (e.g. `boucle/42-fix-nav-link`).
+`boucle_branch_name` (lib/boucle.sh) derives the slug deterministically from
+the issue title: lowercase, kebab-case, max 40 chars, truncated at a word
+boundary when possible. The name MUST stay deterministic — same issue → same
+branch across iterations. When the title is empty or the fetch fails, the
+name falls back to the legacy bare `boucle/<iid>`.
+
+`boucle/<iid>` remains the **protocol key**: every MR lookup
+(`forge_mr_lookup_by_branch`) prefix-matches on it, so an issue-title edit
+that changes the slug can never break a lookup (LESSONS.yml #70, #71).
+
+The lifecycle:
+- **Worker** (CI, `lib/boucle-ci/worker.sh`) creates the branch from
+  `master`/`main`, runs the agent, pushes, opens an MR targeting
+  `master`/`main`. The agent does NOT create the branch.
 - **Reviewer** reviews the MR diff / deployed preview.
 - **Merger** rebases the MR onto `master`/`main` (serially, via
   `resource_group: boucle-merge`) and merges.
 - **Catchup** closes the issue after merge.
 
 A local harness taking over an issue at `boucle:human` SHOULD work on the
-existing `boucle/<iid>` branch (not a new branch) to preserve the worker's
-commits. If the branch is stale, rebase onto `master`/`main` before pushing.
-If the branch is absent, create `boucle/<iid>` from `master`/`main`.
+existing worker branch — `bin/boucle pause` prints its exact name — (not a
+new branch) to preserve the worker's commits. If the branch is stale, rebase
+onto `master`/`main` before pushing. If the branch is absent, create it from
+`master`/`main` under the name `bin/boucle pause` prints.
 
 **Never push to `master`/`main` directly** — the merger owns that transition.
 A harness that pushes to `master`/`main` bypasses the serial-merge guard (I10)
@@ -575,7 +596,7 @@ vars are absent — see §Forge auth below.
 | `bin/boucle check <iid>` | Pre-work gate check: file-gate (overlap with in-flight issues), dependency gate, sibling gate. Consultation only — informs, does not block. |
 | `bin/boucle log <iid>` | Prints `.boucle-state/<iid>/agent-output.log` (last run trace: tool calls, file reads, git operations). |
 | `bin/boucle pause <iid>` | Human takes over. Sets `boucle:human`, saves previous state, posts a comment. |
-| `bin/boucle resume <iid>` | Loop resumes. If branch `boucle/<iid>` has commits ahead → `boucle:review` (reviewer + merger). Otherwise restores the previous label. |
+| `bin/boucle resume <iid>` | Loop resumes. If the worker branch (`boucle/<iid>-<slug>`) has commits ahead → `boucle:review` (reviewer + merger). Otherwise restores the previous label. |
 | `bin/boucle restart <iid>` | Loop takes the issue from scratch (`boucle:todo`). Does not restore previous state. |
 
 ### Posting comments
@@ -657,7 +678,7 @@ boucle status <iid>
 boucle pause <iid>
 boucle check <iid>
 
-# 3. Work in the agent CLI on boucle/<iid>
+# 3. Work in the agent CLI on the worker branch boucle/<iid>-<slug>
 #    (read state.md, fill templates/, commit, push)
 
 # 4. If new spec/conception was done:
@@ -670,7 +691,8 @@ boucle restart <iid>  # if starting from scratch
 
 ### Critical rules
 
-1. **Work on `boucle/<iid>`**, never push to `master`/`main` — the merger
+1. **Work on the worker branch `boucle/<iid>-<slug>`** (the name
+   `boucle pause` prints), never push to `master`/`main` — the merger
    owns that transition (I10).
 2. **Always use `bin/forge-note`** for comments — the `<!-- boucle:agent -->`
    stamp prevents dispatch from treating your comment as a human reply (I7).

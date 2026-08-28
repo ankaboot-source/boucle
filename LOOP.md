@@ -181,7 +181,7 @@ branch (Settings → Pages → Source: Deploy from a branch → `gh-pages` / roo
 | Mode | Behavior |
 |------|----------|
 | `preview` (default) | Worker deploys preview, reviewer tests against `BOUCLE_PREVIEW_URL` extracted from MR description via `BOUCLE_DEPLOY_URL_REGEX`. SHA-anchored freshness assertion. **Auto-fallback:** when the deploy provider has no per-branch preview (`github-pages`, `gitlab-pages`), screenshot mode is auto-activated — the worker captures screenshots locally (no production clobber) and the reviewer grades from those screenshots. A screenshot failure degrades to diff review. |
-| `diff` | Worker skips preview deploy. Reviewer runs code-review mode: fetches PR diff via `forge_mr_diff`, waits for PR check suites via `forge_mr_check_suites` (bounded by `BOUCLE_REVIEW_CHECKS_WAIT`, default 900s), plus instructed-content fidelity checks. Verdict stays SHA-anchored. |
+| `diff` | Worker skips preview deploy. Reviewer runs code-review mode: fetches PR diff via `forge_mr_diff`, waits for PR check suites via `forge_mr_check_suites` (bounded by `BOUCLE_REVIEW_CHECKS_WAIT`, default 900s), plus instructed-content fidelity checks. Verdict stays SHA-anchored. Raster images **added or modified by the PR itself** (`.png .jpg .jpeg .gif .webp .avif .bmp`, SVG excluded — text/XML) are extracted from the MR head (`git show "$MR_HEAD:<path>"`) into `.boucle-state/$ISSUE/repo-images/` and described by the vision model like any attachment, so the text-only reviewer never needs to Read a binary image (boucle.dev PR #94: a reviewer Read `public/og-image.png` and the run 400'd). Caps: 8 images, 8 MB each; skips are logged. Fail-open: any git error yields an empty set — the review proceeds. |
 | `screenshot` | Worker builds the site, serves it locally (`python3 -m http.server` — zero dependencies), captures screenshots of impacted pages via a browser (reusing `bin/render-preview` with HTTP URL support), uploads them as MR attachments. Reviewer receives the screenshots as text descriptions via `bin/describe-images --criteria` — the vision model answers each acceptance criterion (MET/NOT MET/UNCLEAR) from `state.md`, and the reviewer grades against those text descriptions. No deploy command, no token, no CDN propagation wait. Ideal for GitLab CE (no per-branch Pages) or any token-less setup where visual review still matters. Fail-open: a screenshot failure degrades to diff review, never blocks the loop. |
 
 ### Per-provider URL regex defaults
@@ -415,6 +415,14 @@ it posts, so it recognises its own writes without asking who acted.
 `bin/doctor` fails loudly if you land in the broken configuration by
 accident.
 
+**Note injection is tagged by the same marker.** Every note injected into an
+agent prompt (issue notes and MR feedback) MUST be tagged
+`[<author> — human]` or `[<author> — boucle]` by CI, computed from the
+`<!-- boucle:agent -->` stamp — never from the posting account, which in
+mono-user mode is shared (lesson #111). Agents classify note authorship by
+the tag: `— human` notes AMEND the spec and win over the frozen criteria,
+`— boucle` notes are loop context only.
+
 **The MR-approval gate: emoji reaction.** In mono-user mode
 the PR author IS the bot account, so forge-native self-approval is unreliable
 (GitHub blocks author self-review; GitLab is inconsistent). The MR gate
@@ -633,7 +641,8 @@ landed in the submodule, `git add` staged nothing but a dirty pointer, and
 `bin/check-boucle-sync` rejected it. `bin/update` removes that symlink on the
 next run. Nothing is seeded in its place — an absent file is the honest state
 until a first lesson is recorded, and `bin/check-lessons` rejects an empty
-one. `.jcode/skills/` and `bin/` stay symlinked; they are engine-owned.
+one. `.jcode/agents/`, `.jcode/skills/` and `bin/` stay symlinked; they are
+engine-owned.
 
 **What belongs where.** Boucle keeps class-not-instance for everything it
 persists, in both files:
@@ -801,6 +810,22 @@ branch when the issue reaches `boucle:done` or `boucle:human`. Orphan so the
 measurement log never enters the consumer's history or triggers their CI, and
 fail-open throughout: a metrics write must never be what stops an issue
 reaching done.
+
+**An empty skills list is not a finding on its own.** Each run also records
+`skills_evidence`, which says what the empty list is evidence *of*:
+`parsed` (names read), `not-invoked` (the transcript shows no `skill_manage`
+activity — a real zero), `unparsed` (it *does* show activity and the extractor
+read nothing — the sensor is broken, and every skill figure from that run is
+wrong rather than empty), or `no-transcript`. The per-issue row carries
+`runs_skills_unparsed`; an all-zero skills column with a non-zero count there
+is a broken extractor, not a fact about agents. `unparsed` also raises a
+`[boucle] WARN` in the job log, because that state must never pass quietly.
+
+**An empty verdict is recorded as `no-verdict`, never as `UNCERTAIN`.** A
+posted `VERDICT: UNCERTAIN` is a judgement and escalates to a human at once;
+an empty verdict is a run that produced nothing and re-triggers the reviewer
+up to `BOUCLE_MAX_ITERATIONS`. Recording both under one name sends the
+diagnosis after the wrong bug.
 
 **The raw log is pushed as it is written, not read back at the end.** Every
 boucle job runs on a fresh ephemeral runner, and the job that applies the
@@ -1130,7 +1155,7 @@ FAIL, so it needs the why. Only the reviewer's own view is reduced.
 ## File-impact gate
 
 Parallel workers (`BOUCLE_MAX_PARALLEL_ISSUES` > 1) on separate branches
-`boucle/<iid>` can edit the same files and conflict at rebase/merge time. The
+(`boucle/<iid>-<slug>`) can edit the same files and conflict at rebase/merge time. The
 file-impact gate defers a worker before it starts when its issue claims files
 already claimed by an in-flight issue.
 

@@ -324,3 +324,94 @@ extract_spec_review_recovery() {
   run grep -q 'merged MR' lib/boucle-ci/doctor.sh
   assert_success
 }
+
+# ── Mono-user mode: marker-based human-reply classification (#100) ──────
+# In mono-user mode BOUCLE_BOT_USERNAME falls back to "up-bot" (nobody),
+# so identity filters classify EVERY note — including boucle's own — as
+# human. The doctor must classify by the <!-- boucle:agent --> marker
+# instead, independent of the author account.
+
+@test "doctor no longer classifies human replies by author identity" {
+  # The identity filter (select(.author.username != $bname)) must be gone
+  # from every reply/approval classification in doctor.sh.
+  run grep -q 'select(.author.username != \$bname)' lib/boucle-ci/doctor.sh
+  assert_failure
+  # ...and the marker predicate must be present.
+  run grep -q 'contains("<!-- boucle:agent -->")' lib/boucle-ci/doctor.sh
+  assert_success
+}
+
+extract_first_reply_counter() {
+  # Extract the first HUMAN_REPLY_AFTER_TRIAGE assignment (needs-info path).
+  local q="'"
+  awk -v q="$q" '/HUMAN_REPLY_AFTER_TRIAGE=\$\(echo "\$NOTES"/{p=1} p{print} p && $0 ~ q"\\)"{exit}' lib/boucle-ci/doctor.sh
+}
+
+@test "doctor counts human replies by marker, not identity (mono-user)" {
+  # Mono-user: ALL notes are authored by "alice" (boucle posts under her
+  # account). Only the marker-less note is a human reply.
+  NOTES='[
+    {"id": 1, "body": "<!-- boucle:triage v=1 --> needs info", "author": {"username": "alice"}},
+    {"id": 2, "body": "<!-- boucle:agent --> pinging for status", "author": {"username": "alice"}},
+    {"id": 3, "body": "here are the answers", "author": {"username": "alice"}}
+  ]'
+  LAST_TRIAGE_NOTE_ID="1"
+  eval "$(extract_first_reply_counter)"
+  [ "$HUMAN_REPLY_AFTER_TRIAGE" = "1" ]
+}
+
+@test "doctor treats legacy bot-identity notes without marker as human (back-compat)" {
+  # A note from the legacy bot account without a marker (historical note)
+  # is conservatively counted as human — the marker is the source of truth.
+  NOTES='[
+    {"id": 1, "body": "<!-- boucle:triage v=1 --> needs info", "author": {"username": "alice"}},
+    {"id": 2, "body": "old-style bot note without marker", "author": {"username": "up-bot"}}
+  ]'
+  LAST_TRIAGE_NOTE_ID="1"
+  eval "$(extract_first_reply_counter)"
+  [ "$HUMAN_REPLY_AFTER_TRIAGE" = "1" ]
+}
+
+@test "doctor_mr_approval_magic_word ignores boucle's own notes in mono-user" {
+  extract="$(awk '/^  doctor_mr_approval_magic_word\(\) \{/{p=1} p{print} p && /^  \}/{exit}' lib/boucle-ci/doctor.sh)"
+  # boucle posts "approved"?? no — boucle's own magic-word-shaped note is
+  # marker-stamped, so it must NOT count as a human approval.
+  forge_mr_notes() {
+    printf '[{"id": 5, "body": "<!-- boucle:agent --> status: approved \\n(see notes)", "author": {"username": "alice"}}]'
+  }
+  eval "$extract"
+  run doctor_mr_approval_magic_word 42
+  assert_output "0"
+
+  # A real human note (no marker) with standalone `approved` approves.
+  forge_mr_notes() {
+    printf '[{"id": 5, "body": "<!-- boucle:agent --> status update", "author": {"username": "alice"}}, {"id": 6, "body": "Approved", "author": {"username": "alice"}}]'
+  }
+  eval "$extract"
+  run doctor_mr_approval_magic_word 42
+  assert_output "1"
+}
+
+@test "doctor_mr_approval_emoji ignores reactions from agent-marker authors" {
+  extract="$(awk '/^  doctor_mr_approval_emoji\(\) \{/{p=1} p{print} p && /^  \}/{exit}' lib/boucle-ci/doctor.sh)"
+  BOUCLE_SPEC_APPROVAL_EMOJIS="👍"
+  # Mono-user: boucle (acting as alice) reacted 👍 on its own approval
+  # request. Without the marker-author exclusion this would self-approve.
+  forge_mr_notes() {
+    printf '[{"id": 7, "body": "<!-- boucle:approval-request v=1 --> react with 👍", "author": {"username": "alice"}}, {"id": 8, "body": "<!-- boucle:agent --> working", "author": {"username": "alice"}}]'
+  }
+  forge_note_reactions() {
+    printf '[{"name": "👍", "user": {"username": "alice"}}]'
+  }
+  eval "$extract"
+  run doctor_mr_approval_emoji 42
+  assert_output "0"
+
+  # A 👍 from a genuinely human reactor (no marker-authored notes) counts.
+  forge_note_reactions() {
+    printf '[{"name": "👍", "user": {"username": "bob"}}]'
+  }
+  eval "$extract"
+  run doctor_mr_approval_emoji 42
+  assert_output "1"
+}

@@ -22,7 +22,7 @@ and [CONTEXT.md](CONTEXT.md).
 | Agent   | Model                       | Steps | Temp | Role                                                                                                                |
 | ------- | ---------------------------- | ----- | ---- | ------------------------------------------------------------------------------------------------------------------- |
 | triage  | ollama-cloud/glm-5.2        | 200   | 0.3  | Analyzes issue, posts structured comment (TL;DR + Diagram + Analysis + one `## Criteria` section: acceptance, must-haves, non-goals + Questions + one collapsed `## Metadata` section: impacts, impacted files, size S/M/L, validation, disposition) |
-| worker  | ollama-cloud/deepseek-v4-flash:0731 | 100   | —    | Implements on branch `boucle/<iid>`, reads `state.md`, uses codebase-memory-mcp, conventional commit                 |
+| worker  | ollama-cloud/deepseek-v4-flash:0731 | 100   | —    | Implements on branch `boucle/<iid>-<slug>`, reads `state.md`, uses codebase-memory-mcp, conventional commit          |
 | reviewer| ollama-cloud/deepseek-v4-flash:0731 | 35    | 0.2  | Adversarial review against preview URL, SHA-anchored verdict                                                       |
 | e2e     | ollama-cloud/glm-5.2         | 30    | —    | Verifies on production URL, SHA-anchored verdict                                                                    |
 
@@ -104,8 +104,9 @@ boucle workflow adapted for interactive execution:
    only in the chat session.
 2. **Implementation** — the harness may implement directly (it is the
    worker) or delegate to a specialist subagent. Either way, it commits
-   on a branch `boucle/<iid>` (or a feature branch) with conventional
-   commits referencing the issue (`(#<iid>)`).
+   on the worker branch `boucle/<iid>-<slug>` (the name `bin/boucle pause`
+   prints; or a feature branch) with conventional commits referencing the
+   issue (`(#<iid>)`).
 3. **Lessons** — if the harness discovers a new class of mistake, it adds
    a `LESSONS.yml` entry (running the four-point admission test, stating
    the justification on stdout/inline).
@@ -381,12 +382,17 @@ The graph is built once (by CI or locally) and auto-syncs on changes. If
 retry. In CI, `bin/jc` auto-indexes the repo before the agent starts (triage,
 worker, reviewer roles) if the `.codebase-memory/` index doesn't exist.
 
-> **Consumer repos:** `LESSONS.yml`, `.jcode/skills/`, and `bin/` live under
-> `.boucle/` (the engine dir) but are symlinked to the repo root by
-> `bin/setup`, `bin/update`, and `bin/jc` (runtime fallback). If
-> `Read LESSONS.yml` or `skill(...)` fails, check that the symlinks exist:
-> `ls -la LESSONS.yml .jcode/skills bin` — they should point to
-> `.boucle/LESSONS.yml`, `.boucle/.jcode/skills`, `.boucle/bin` respectively.
+> **Consumer repos:** `LESSONS.yml`, `.jcode/agents/`, `.jcode/skills/`, and
+> `bin/` live under `.boucle/` (the engine dir) but are symlinked to the repo
+> root by `bin/setup`, `bin/update`, and `bin/jc` (runtime fallback). If
+> `Read LESSONS.yml`, `skill(...)`, or an agent prompt fails, check that the
+> symlinks exist:
+> `ls -la LESSONS.yml .jcode/agents .jcode/skills bin` — they should point to
+> `.boucle/LESSONS.yml`, `.boucle/.jcode/agents`, `.boucle/.jcode/skills`,
+> `.boucle/bin` respectively. A real dir at the root for an engine-owned path
+> is an orphan from the old copy-based install: `bin/setup`/`bin/update`
+> migrate it to a symlink (a stale `.jcode/agents` means a stale triage
+> prompt).
 
 ### Priority order
 

@@ -338,15 +338,22 @@ propagate_consumer_root_files() {
   fi
 
   # ── Symlink engine assets that agents must find at the repo root ──
-  # .jcode/skills/ and bin/ live under .boucle/ (the engine
-  # dir) but agent prompts reference them at the repo root. jcode's
-  # `skill` tool resolves `.jcode/skills/` relative to cwd (repo root) and
-  # `bin/forge-note` is called as `bin/forge-note` (relative to cwd).
-  # Without these symlinks, 0/68 agent runs could load skills or reliably
-  # call forge-note (observed on boucle.dev — the files exist under
+  # .jcode/agents/, .jcode/skills/ and bin/ live under .boucle/ (the engine
+  # dir) but agent prompts reference them at the repo root. jcode resolves
+  # `.jcode/agents/<role>.md` and `.jcode/skills/` relative to cwd (repo
+  # root) and `bin/forge-note` is called as `bin/forge-note` (relative to
+  # cwd). Without these symlinks, 0/68 agent runs could load skills or
+  # reliably call forge-note (observed on boucle.dev — the files exist under
   # .boucle/ but are invisible at the root). Symlinks (not copies) so they
   # stay in sync with .boucle/ on every bin/update without a re-copy step.
-  # Idempotent: replace stale/broken symlinks, never touch a real file.
+  # Idempotent: replace stale/broken symlinks, migrate orphan real dirs.
+  #
+  # A REAL dir/file at the root for one of the paths above is an ORPHAN from
+  # the old copy-based install (pre-submodule): it is frozen at the version
+  # of the first bin/setup and NEVER refreshed, so consumers run a stale
+  # triage prompt and stale skills. .jcode/ is 100% engine-owned (except
+  # prompt-overlay.md, runtime/gitignored) and the consumer never customizes
+  # these paths — so a real dir here is migrated to a symlink, not skipped.
   #
   # LESSONS.yml is deliberately NOT in this list. At a consumer root that name
   # belongs to the CONSUMER's own lessons — a real, committed, agent-writable
@@ -354,23 +361,22 @@ propagate_consumer_root_files() {
   # is why no agent could ever record one: the write landed in the .boucle/
   # submodule, `git add` staged nothing but a dirty pointer, and
   # bin/check-boucle-sync rejected it. The engine's lessons still reach every
-  # prompt — bin/jc injects both files and MERGES them.
+  # prompt — bin/jc injects both files and MERGES them. Being absent from this
+  # list is what protects it: the migration below only ever applies to
+  # engine-owned paths.
   # shellcheck source=bin/lib/engine-symlink.sh
   . "$ENGINE_DIR/bin/lib/engine-symlink.sh"
-  for lt in ".jcode/skills" "bin"; do
+  for lt in ".jcode/agents" ".jcode/skills" "bin"; do
     local engine_src="$ENGINE_DIR/$lt"
     [ -e "$engine_src" ] || continue
     # If the root path is already a symlink pointing at the engine, skip.
     if [ -L "$lt" ] && [ "$(readlink -f "$lt")" = "$(readlink -f "$engine_src")" ]; then
       continue
     fi
-    # If the root path is a real file/dir (not a symlink), never overwrite
-    # it — a consumer may have a custom LESSONS.yml, skills, or bin. Only
-    # create the symlink when the root path does not exist.
-    if [ -e "$lt" ] && [ ! -L "$lt" ]; then
-      echo "[boucle] WARN: $lt exists at repo root (not a symlink) — skipping symlink creation (consumer-owned)" >&2
-      continue
-    fi
+    # A real dir/file at the root for an ENGINE-OWNED path is an orphan from
+    # the old copy-based install — migrate it to a symlink (see comment
+    # above). The consumer-owned carve-out (LESSONS.yml) works by never
+    # being listed here, so no path-specific guard is needed.
     # The TARGET is not "$engine_src": ln -s resolves a relative target from
     # the directory containing the LINK, not from the repo root, and
     # $ENGINE_DIR is absolute ($(cd .. && pwd)). Passing $engine_src wrote
@@ -379,8 +385,12 @@ propagate_consumer_root_files() {
     # bin/lib/engine-symlink.sh.
     local link_target
     link_target=$(engine_symlink_target "$ENGINE_DIR" "$lt" "$PWD") || continue
-    # Remove a stale/broken symlink if present.
-    [ -L "$lt" ] && rm -f "$lt"
+    local was_real=false
+    [ -e "$lt" ] && [ ! -L "$lt" ] && was_real=true
+    # Remove whatever is there (real orphan dir/file OR stale/broken
+    # symlink). `rm -rf` on a real dir removes the orphan; `git add <path>`
+    # later stages the deletion + the new symlink in one shot.
+    rm -rf "$lt"
     mkdir -p "$(dirname "$lt")"
     ln -s "$link_target" "$lt"
     # `ln -s` succeeds on a dangling target, so a wrong target is invisible
@@ -389,6 +399,9 @@ propagate_consumer_root_files() {
       echo "[boucle] WARN: $lt → $link_target does not resolve — removing the broken symlink" >&2
       rm -f "$lt"
       continue
+    fi
+    if [ "$was_real" = "true" ]; then
+      echo "[boucle] migrated: $lt was a real dir/file (orphan from copy-based install) → symlink to engine" >&2
     fi
     propagated="$propagated $lt"
   done

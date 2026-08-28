@@ -435,6 +435,46 @@ extract_spec_review_block() {
   refute_output --partial 'toJSON'
 }
 
+@test "the GitHub workflow runs comment dispatches in their own concurrency lane" {
+  # Amend-in-flight (issue #2, boucle.dev #91): a human comment during a
+  # worker run fires an issue_comment dispatch that must re-trigger the
+  # worker. GitHub Actions de-duplicates QUEUED runs inside one
+  # concurrency group even with cancel-in-progress: false — so if the
+  # comment dispatch shares a group with the issues:labeled webhook of
+  # the worker's OWN terminal transition, the still-queued comment
+  # dispatch is cancelled and the amendment never reaches a worker.
+  run grep 'boucle-dispatch-note-' .github/workflows/boucle.yml
+  assert_success
+  # The note lane is keyed on the comment events...
+  assert_output --partial "github.event_name == 'issue_comment'"
+  assert_output --partial "github.event_name == 'pull_request_review_comment'"
+  # ...and sits on the same workflow-level group line as the other two
+  # lanes (workflow_dispatch → boucle-issue-, other webhooks →
+  # boucle-dispatch-), i.e. it is a third branch, not a rename.
+  assert_output --partial "github.event_name == 'workflow_dispatch'"
+  assert_output --partial 'boucle-issue-{0}'
+  assert_output --partial 'boucle-dispatch-{0}'
+}
+
+@test "the GitHub workflow: the note lane is checked BEFORE the generic dispatch lane" {
+  # GitHub expressions short-circuit: if the generic boucle-dispatch-{0}
+  # branch came first, issue_comment events would never reach the note
+  # lane and the race would return.
+  run awk '
+    /boucle-dispatch-note-\{0\}/ {
+      note = index($0, "boucle-dispatch-note-{0}")
+      # \047 = single quote: match the generic lane as a quoted format
+      # argument so it cannot match inside boucle-dispatch-note-{0}.
+      generic = index($0, "\047boucle-dispatch-{0}\047")
+      ok = (note > 0 && generic > note)
+      found = 1
+    }
+    END { exit !(found && ok) }
+  ' .github/workflows/boucle.yml
+  assert_success
+}
+
+
 # ── Escalation note contract (lesson #59) ────────────────────────────────
 # A terminal transition (boucle:human / boucle:done) without its explanation
 # note is a silent failure: the human sees a state, no message. The note
@@ -900,6 +940,99 @@ extract_working_amend_block() {
   echo "$guard_block" | grep -q 'boucle_health_outcome'
   echo "$guard_block" | grep -q 'amended-in-flight'
 }
+
+# ── Direct amend recheck (boucle.dev #91): the worker's own safety net ──
+# The label guard above only fires when the amend-in-flight dispatch
+# ALREADY ran and set boucle:todo. On GitHub Actions that dispatch can be
+# cancelled before it runs: queued workflow runs are de-duplicated inside
+# one concurrency group, and the issues:labeled webhook of the worker's
+# own terminal transition enters the same group. Defense-in-depth: the
+# worker snapshots the highest note id at job start (BOUCLE_MAX_NOTE_ID)
+# and rechecks the issue notes before transitioning — if a NON-boucle
+# note arrived during the run, skip boucle:review and re-trigger itself
+# as an amend-worker.
+
+extract_recheck_block() {
+  awk '
+    /Direct amend recheck \(defense-in-depth\)/ { p = 1 }
+    p == 1 && /set_boucle_label "\$BOUCLE_ISSUE" "boucle:review"/ { exit }
+    p == 1 { print }
+  ' lib/boucle-ci/worker.sh
+}
+
+@test "worker: the note snapshot and the prompt injection share ONE fetch" {
+  # Two separate forge_issue_notes calls would open a window where a
+  # human comment lands in one snapshot but not the other.
+  run awk '
+    /notes_json=\$\(forge_issue_notes "\$BOUCLE_ISSUE"/ { fetch++ }
+    /BOUCLE_ISSUE_NOTES=\$\(echo "\$notes_json"/ { notes = 1 }
+    /BOUCLE_MAX_NOTE_ID=\$\(echo "\$notes_json"/ { max = 1 }
+    END { exit !(fetch == 1 && notes == 1 && max == 1) }
+  ' lib/boucle-ci/worker.sh
+  assert_success
+  run grep -q 'export BOUCLE_MAX_NOTE_ID' lib/boucle-ci/worker.sh
+  assert_success
+}
+
+@test "worker: the recheck filters on note id > snapshot AND the boucle:agent marker" {
+  block=$(extract_recheck_block)
+  [ -n "$block" ] || { echo "recheck block not found"; false; }
+  echo "$block" | grep -q 'BOUCLE_MAX_NOTE_ID'
+  echo "$block" | grep -q '> \$max'
+  # boucle's own notes (state, verdicts — all carry the agent marker)
+  # must NOT count as amendments, or every run would amend itself.
+  echo "$block" | grep -q 'boucle:agent'
+  echo "$block" | grep -q '| not'
+}
+
+@test "worker: the recheck jq filter counts only new human notes (functional)" {
+  # Extract the jq program straight from worker.sh and run it on a
+  # fixture: one old human note, one NEW boucle note (agent marker), one
+  # NEW human note, one system note. Only the new human note counts.
+  filter=$(grep -- '--argjson max' lib/boucle-ci/worker.sh \
+    | sed "s/.*BOUCLE_MAX_NOTE_ID\" '//; s/' 2>.*//")
+  [ -n "$filter" ] || { echo "recheck jq program not found"; false; }
+  fixture='[
+    {"id":4,"system":false,"body":"new human amend: wrong SVG, use card-7"},
+    {"id":3,"system":false,"body":"boucle state note <!-- boucle:agent -->"},
+    {"id":2,"system":false,"body":"old human note"},
+    {"id":5,"system":true,"body":"system event"}
+  ]'
+  run bash -c "printf '%s' '$fixture' | jq -r --argjson max 2 '$filter'"
+  assert_success
+  assert_output "1"
+}
+
+@test "worker: the recheck skips boucle:review and re-triggers the worker as amend" {
+  block=$(extract_recheck_block)
+  [ -n "$block" ] || { echo "recheck block not found"; false; }
+  echo "$block" | grep -q 'set_boucle_label "$BOUCLE_ISSUE" "boucle:todo"'
+  echo "$block" | grep -q 'chain_to_role "$BOUCLE_ISSUE" "worker"'
+  echo "$block" | grep -q 'BOUCLE_ITERATION=\$((ITERATION + 1))'
+  echo "$block" | grep -q 'return 0'
+  echo "$block" | grep -q 'boucle_health_outcome'
+  echo "$block" | grep -q 'amended-in-flight'
+  # The recheck itself must NOT perform the review transition.
+  ! echo "$block" | grep -q 'set_boucle_label.*boucle:review'
+}
+
+@test "worker: the recheck fails open on a fetch or jq failure" {
+  block=$(extract_recheck_block)
+  [ -n "$block" ] || { echo "recheck block not found"; false; }
+  # A failed refetch yields an empty string; the case-normalization maps
+  # anything non-numeric to 0, so the worker proceeds to review instead
+  # of looping forever (the dispatch path stays the primary mechanism).
+  echo "$block" | grep -q '\*\[!0-9\]\*) new_human_notes=0'
+}
+
+@test "worker: the recheck sits AFTER the boucle:todo label guard" {
+  # The dispatch path takes precedence when it got there first.
+  todo_guard_line=$(grep -n 'Amend-in-flight guard' lib/boucle-ci/worker.sh | head -1 | cut -d: -f1)
+  recheck_line=$(grep -n 'Direct amend recheck (defense-in-depth)' lib/boucle-ci/worker.sh | head -1 | cut -d: -f1)
+  [ -n "$todo_guard_line" ] && [ -n "$recheck_line" ] && [ "$todo_guard_line" -lt "$recheck_line" ] \
+    || { echo "boucle:todo guard ($todo_guard_line) must precede the recheck ($recheck_line)"; false; }
+}
+
 
 # ── Closed-issue guard: merge exemption (GitHub auto-close race, #79) ──
 

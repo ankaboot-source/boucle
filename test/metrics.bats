@@ -17,6 +17,13 @@ setup() {
 }
 
 teardown() {
+  # Leave the directory before deleting it. Several tests here cd into $TMP
+  # to exercise git behaviour against a scratch remote, and teardown runs in
+  # the same shell as the test — so without this, rm -rf removes the shell's
+  # own working directory. Locally that is survivable and the suite exits 0;
+  # on the CI runner the same TAP output exited 1 with no failing test named,
+  # which is what a deleted CWD looks like from the outside.
+  cd "$BATS_TEST_DIRNAME" 2> /dev/null || cd / || true
   rm -rf "$TMP"
 }
 
@@ -705,4 +712,90 @@ metrics_remote_config_only() {
   run grep -A6 'boucle_health_record "\$ISSUE" "\$ROLE" "\$ITERATION"' "$REPO/bin/jc"
   assert_success
   assert_output --partial '"$setup_fail" "$swarm"'
+}
+
+# ── Telling a broken sensor from a real zero ─────────────────────────────
+#
+# boucle.dev #91 and #92 produced 60+ runs with `skills: []` on every one.
+# That is what an agent loading no skills looks like, and it is also exactly
+# what an extractor that does not match the transcript format looks like.
+# The name list alone cannot separate them; skills_evidence can.
+
+@test "skills: an absent transcript is 'no-transcript', never a zero" {
+  run bash -c "grep -A6 '^skills_evidence() {' '$REPO/bin/jc'"
+  assert_success
+  assert_output --partial "no-transcript"
+}
+
+@test "skills: extracted names classify as 'parsed'" {
+  run bash -c "sed -n '/^skills_evidence() {/,/^}/p' '$REPO/bin/jc' > '$TMP/f.sh'; . '$TMP/f.sh'; echo 'x' > '$TMP/log'; skills_evidence '$TMP/log' 'astro,simplify'"
+  assert_output "parsed"
+}
+
+@test "skills: a transcript with no skill_manage at all is a REAL zero" {
+  run bash -c "sed -n '/^skills_evidence() {/,/^}/p' '$REPO/bin/jc' > '$TMP/f.sh'; . '$TMP/f.sh'; printf 'the agent read some files\n' > '$TMP/log'; skills_evidence '$TMP/log' ''"
+  assert_output "not-invoked"
+}
+
+@test "skills: skill_manage in the log with nothing extracted is 'unparsed'" {
+  # The whole point: the tool WAS called and we read nothing out of it.
+  run bash -c "sed -n '/^skills_evidence() {/,/^}/p' '$REPO/bin/jc' > '$TMP/f.sh'; . '$TMP/f.sh'; printf 'calling skill_manage action=load name=astro\n' > '$TMP/log'; skills_evidence '$TMP/log' ''"
+  assert_output "unparsed"
+}
+
+@test "skills: an empty transcript is not mistaken for 'not-invoked'" {
+  run bash -c "sed -n '/^skills_evidence() {/,/^}/p' '$REPO/bin/jc' > '$TMP/f.sh'; . '$TMP/f.sh'; : > '$TMP/log'; skills_evidence '$TMP/log' ''"
+  assert_output "no-transcript"
+}
+
+@test "jc: the unparsed state raises a WARN instead of passing quietly" {
+  run bash -c "grep -A3 'SKILLS_EVIDENCE\" = \"unparsed\"' '$REPO/bin/jc'"
+  assert_success
+  assert_output --partial "WARN"
+  assert_output --partial "does not match this transcript format"
+}
+
+@test "metrics: the row carries how many runs the sensor could not read" {
+  lib
+  metrics_remote
+  mkdir -p "$TMP/.boucle-state/7"
+  cat > "$TMP/.boucle-state/7/health.jsonl" <<'EOF'
+{"timestamp":"2026-08-27T10:00:00Z","role":"worker","iteration":1,"exit_code":0,"prompt_chars":100,"tokens":"1","cost_usd":"n/a","model":"m","provider":"p","skills":[],"skills_evidence":"unparsed","arm":"full","setup_fail":"","swarm_spawns":0}
+{"timestamp":"2026-08-27T10:05:00Z","role":"reviewer","iteration":1,"exit_code":0,"prompt_chars":100,"tokens":"1","cost_usd":"n/a","model":"m","provider":"p","skills":[],"skills_evidence":"not-invoked","arm":"full","setup_fail":"","swarm_spawns":0}
+EOF
+  stub_forge
+  run boucle_metrics_row 7 done
+  assert_success
+  assert_output --partial '"runs_skills_unparsed":1'
+  assert_output --partial '"runs_skills_not_invoked":1'
+}
+
+# ── An empty verdict is not an UNCERTAIN verdict ─────────────────────────
+#
+# boucle.dev #92 escalated to boucle:human twice showing ten UNCERTAIN rows.
+# All ten were runs where the agent posted NOTHING — five of them on a
+# byte-identical prompt. The two states take different paths through
+# reviewer.sh (immediate escalation vs re-trigger), so recording them under
+# one name points the diagnosis at the wrong bug.
+
+@test "reviewer: an empty verdict records no-verdict, not UNCERTAIN" {
+  run grep -n 'boucle_health_outcome "$BOUCLE_ISSUE" "reviewer"' "$REPO/lib/boucle-ci/reviewer.sh"
+  assert_success
+  assert_output --partial 'no-verdict'
+  refute_output --partial 'VERDICT:-UNCERTAIN'
+}
+
+@test "e2e: an empty verdict records no-verdict, not UNCERTAIN" {
+  run grep -n 'boucle_health_outcome "$BOUCLE_ISSUE" "e2e"' "$REPO/lib/boucle-ci/e2e.sh"
+  assert_success
+  assert_output --partial 'no-verdict'
+  refute_output --partial 'VERDICT:-UNCERTAIN'
+}
+
+@test "reviewer: a genuinely posted UNCERTAIN still escalates to human" {
+  # The fix must not touch the real UNCERTAIN path — that one is a judgement
+  # by the agent and still needs a human.
+  run bash -c "sed -n '/^    UNCERTAIN)/,/^      ;;/p' '$REPO/lib/boucle-ci/reviewer.sh'"
+  assert_success
+  assert_output --partial "boucle:human"
 }

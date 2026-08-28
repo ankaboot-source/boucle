@@ -138,10 +138,11 @@ setup() {
 
 @test "boucle_do_deploy returns the URL and does not chain to e2e (cloudflare)" {
   run bash -c '
-    # Pin the mode: a runner that exports BOUCLE_DEPLOY_MODE=external
-    # (a consumer variable) would otherwise make this skip the deploy.
-    BOUCLE_DEPLOY_MODE=self
     BOUCLE_DEPLOY_CMD="echo DEPLOYED https://example.com"
+    # Explicit: the CI job inherits BOUCLE_DEPLOY_MODE from the workflow
+    # env, and this test asserts the SELF path. Relying on the code
+    # default made it pass locally and fail on the runner.
+    BOUCLE_DEPLOY_MODE=self
     BOUCLE_DEPLOY_URL_REGEX="https://[a-zA-Z0-9./-]+"
     BOUCLE_BUILD_CMD="echo BUILD_RAN"
     BOUCLE_BUILD_OUTPUT=""
@@ -201,8 +202,11 @@ setup() {
 
 @test "boucle_do_deploy exits non-zero when deploy fails with no URL" {
   run bash -c '
-    BOUCLE_DEPLOY_MODE=self
     BOUCLE_DEPLOY_CMD="echo FAILED; exit 1"
+    # Explicit: the CI job inherits BOUCLE_DEPLOY_MODE from the workflow
+    # env, and this test asserts the SELF path. Relying on the code
+    # default made it pass locally and fail on the runner.
+    BOUCLE_DEPLOY_MODE=self
     BOUCLE_DEPLOY_URL_REGEX="https://[a-zA-Z0-9./-]+"
     BOUCLE_BUILD_CMD="echo BUILD_RAN"
     BOUCLE_BUILD_OUTPUT=""

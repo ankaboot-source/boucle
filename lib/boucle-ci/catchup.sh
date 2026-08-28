@@ -4,7 +4,7 @@
 # lib/boucle-ci/catchup.sh — catchup stage: post-merge verification after a
 # direct (human) merge.
 #
-# Triggered by dispatch when a human merges a boucle/<iid> MR directly
+# Triggered by dispatch when a human merges a boucle/<iid>-<slug> MR directly
 # (merge_request webhook, action=merge), bypassing the approval circuit.
 # Inspects the issue state, posts an audit comment, sets boucle:merging as a
 # transitional label, deletes the worker branch, and chains to post-merge

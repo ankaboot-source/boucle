@@ -372,7 +372,7 @@ boucle_ci_dispatch() {
     # branch" — the whole PR path was inert.
     SOURCE_BRANCH=$(jq -r '.object_attributes.source_branch // .pull_request.head.ref // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
     MR_IID=$(jq -r '.object_attributes.iid // .pull_request.number // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
-    # Extract issue IID from branch name boucle/<iid>
+    # Extract issue IID from branch name boucle/<iid>-<slug> (prefix match on boucle/<iid>)
     MR_ISSUE_IID=$(printf '%s' "$SOURCE_BRANCH" | sed -n 's/^boucle\/\([0-9]\+\).*/\1/p')
     if [ -z "$MR_ISSUE_IID" ]; then
       echo "MR !${MR_IID} ($MR_ACTION) but source_branch '$SOURCE_BRANCH' is not a boucle branch, skipping"
