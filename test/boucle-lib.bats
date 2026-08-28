@@ -1301,6 +1301,10 @@ HELPER
   cat > "$helper_script" << 'HELPER'
 #!/usr/bin/env bash
 BOUCLE_ISSUE=42
+# Explicit: the CI job inherits BOUCLE_DEPLOY_MODE from the workflow env, and
+# this test asserts the SELF path (it is in the name). Relying on the code
+# default made it pass locally and fail on the runner.
+BOUCLE_DEPLOY_MODE=self
 BOUCLE_DEPLOY_CMD="echo DEPLOYED https://example.com"
 BOUCLE_DEPLOY_URL_REGEX="https://[a-zA-Z0-9./-]+"
 BOUCLE_BUILD_CMD="echo BUILD_RAN"
@@ -1332,6 +1336,10 @@ HELPER
   cat > "$helper_script" << 'HELPER'
 #!/usr/bin/env bash
 BOUCLE_ISSUE=42
+# Explicit: the CI job inherits BOUCLE_DEPLOY_MODE from the workflow env, and
+# this test asserts the SELF path (it is in the name). Relying on the code
+# default made it pass locally and fail on the runner.
+BOUCLE_DEPLOY_MODE=self
 BOUCLE_DEPLOY_CMD="echo FAILED; exit 1"
 BOUCLE_DEPLOY_URL_REGEX="https://[a-zA-Z0-9./-]+"
 BOUCLE_BUILD_CMD="echo BUILD_RAN"
