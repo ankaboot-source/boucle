@@ -173,7 +173,7 @@ flowchart LR
 | `check` | push / MR to default branch | — | shellcheck, shfmt, bats, doc-sync lint | `lib/boucle-ci/check.sh` |
 | `dispatch` | webhook (no `BOUCLE_ROLE`) | `boucle-dispatch` | webhook router: parse payload, route to role | `lib/boucle-ci/dispatch.sh` |
 | `triage` | webhook (no `BOUCLE_ROLE`) | — (no `BOUCLE_ISSUE` at eval) | analyse issue, draft spec | `lib/boucle-ci/triage.sh` |
-| `worker` | trigger `BOUCLE_ROLE=worker` | `boucle-issue-$BOUCLE_ISSUE` | implement on `boucle/<iid>`, deploy preview | `lib/boucle-ci/worker.sh` |
+| `worker` | trigger `BOUCLE_ROLE=worker` | `boucle-issue-$BOUCLE_ISSUE` | implement on `boucle/<iid>-<slug>`, deploy preview | `lib/boucle-ci/worker.sh` |
 | `reviewer` | trigger `BOUCLE_ROLE=reviewer` | `boucle-issue-$BOUCLE_ISSUE` | adversarial review of MR diff / preview | `lib/boucle-ci/reviewer.sh` |
 | `merger` | trigger `BOUCLE_ROLE=merger` | `boucle-merge` (serial) | rebase + merge after approval | `lib/boucle-ci/merger.sh` |
 | `post-merge` | trigger `BOUCLE_ROLE=post-merge` (from merger, catchup, or doctor) | — | deploy-wait + e2e trigger | `lib/boucle-ci/post-merge.sh` |
@@ -320,7 +320,7 @@ sweep (every 10 min). It:
   `bin/update` 401s on a private repo and fixes propagate manually).
 - **Default-branch gate** — the self-update runs ONLY on the default branch
   (`CI_COMMIT_BRANCH == CI_DEFAULT_BRANCH`). On a worker branch
-  (`boucle/<iid>`) the self-update is skipped — otherwise its
+  (`boucle/<iid>-<slug>`) the self-update is skipped — otherwise its
   `chore(boucle):` commits pollute the worker's MR with engine-sync work
   that is not the issue's work (lesson #67). The existing
   `BOUCLE_PIPELINE_SOURCE != "push"` guard prevents the feedback loop
@@ -388,10 +388,12 @@ The worker's branch handling is governed by `BOUCLE_RETRY_STRATEGY`
 | `reset` | always reset to `origin/$BOUCLE_DEFAULT_BRANCH` |
 | `adaptive` (default) | reset only if the previous iteration shipped no changes |
 
-- **Worktree handling.** The worker checks out `boucle/<iid>`. If the branch
-  has prior worker commits, it rebases onto the default branch to preserve
-  work (lesson #22, #51). On rebase conflict it aborts and preserves the
-  branch — never a destructive reset that orphans pushed commits.
+- **Worktree handling.** The worker checks out `boucle/<iid>-<slug>` (the
+  name `boucle_branch_name` computes — legacy bare `boucle/<iid>` when the
+  issue title is unavailable). If the branch has prior worker commits, it
+  rebases onto the default branch to preserve work (lesson #22, #51). On
+  rebase conflict it aborts and preserves the branch — never a destructive
+  reset that orphans pushed commits.
 - **Discarded-head tagging.** When a reset is warranted (adaptive + previous
   no-changes), the discarded head is never lost silently: it is tagged
   `boucle/<iid>/discarded-<timestamp>` and named in an issue comment.

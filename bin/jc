@@ -1128,7 +1128,7 @@ Post your analysis as a comment with the boucle:triage marker. Use: bin/forge-no
       # the agent assume there is no feedback.
       if [ -z "${BOUCLE_REVIEWER_FEEDBACK:-}" ] && [ "${BOUCLE_ITERATION:-1}" -gt 1 ]; then
         echo "[boucle:jc] WARNING: worker re-run (iteration ${BOUCLE_ITERATION}) with EMPTY MR feedback — the feedback channel may be broken. The worker will be told to fetch the MR discussion itself." >&2
-        feedback="[boucle:guard] No MR feedback was injected on this re-run, but prior runs exist (iteration ${BOUCLE_ITERATION}). Do NOT assume there is no feedback: fetch the MR notes for source branch boucle/${ISSUE} yourself (glab mr note list -R \${CI_PROJECT_PATH} -n 100 or bin/forge-note) and address every actionable human comment and reviewer verdict before claiming done."
+        feedback="[boucle:guard] No MR feedback was injected on this re-run, but prior runs exist (iteration ${BOUCLE_ITERATION}). Do NOT assume there is no feedback: fetch the MR notes for the MR whose source branch STARTS WITH boucle/${ISSUE} yourself (the full name carries a title slug, boucle/${ISSUE}-<slug>; glab mr note list -R \${CI_PROJECT_PATH} -n 100 or bin/forge-note) and address every actionable human comment and reviewer verdict before claiming done."
       fi
       prompt="Implement issue #${ISSUE}. Read state.md first. Commit your changes.
 
@@ -1307,11 +1307,12 @@ Add it to \`LESSONS.yml\` and validate with \`bin/check-lessons LESSONS.yml\` be
       # slip a PASS).
       if [ -z "${BOUCLE_REVIEWER_FEEDBACK:-}" ] && [ "${BOUCLE_ITERATION:-1}" -gt 1 ]; then
         echo "[boucle:jc] WARNING: reviewer re-run (iteration ${BOUCLE_ITERATION}) with EMPTY MR feedback — the feedback channel may be broken. The reviewer will be told to fetch the MR discussion itself." >&2
-        feedback="[boucle:guard] No MR feedback was injected on this re-run, but prior runs exist (iteration ${BOUCLE_ITERATION}). Do NOT assume there is no feedback: fetch the MR notes for source branch boucle/${ISSUE} yourself (glab mr note list -R \${CI_PROJECT_PATH} -n 100 or bin/forge-note) and verify EVERY human amendment is addressed before PASS."
+        feedback="[boucle:guard] No MR feedback was injected on this re-run, but prior runs exist (iteration ${BOUCLE_ITERATION}). Do NOT assume there is no feedback: fetch the MR notes for the MR whose source branch STARTS WITH boucle/${ISSUE} yourself (the full name carries a title slug, boucle/${ISSUE}-<slug>; glab mr note list -R \${CI_PROJECT_PATH} -n 100 or bin/forge-note) and verify EVERY human amendment is addressed before PASS."
       fi
       # The reviewer MUST post its verdict on the MR/PR, NOT the issue.
       # BOUCLE_MR_IID is exported by reviewer.sh (the MR/PR number for the
-      # branch boucle/$ISSUE). Without it in the prompt, the agent only
+      # worker branch, which starts with boucle/$ISSUE). Without it in the
+      # prompt, the agent only
       # knows the issue number and posts the verdict there — the CI parser
       # reads forge_mr_notes (PR comments), so a verdict on the issue is
       # invisible to the loop and the issue escalates to human (boucle.dev

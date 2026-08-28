@@ -514,7 +514,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # ── worker: implement on branch boucle/<iid> ─────────────────────────────────
+  # ── worker: implement on branch boucle/<iid>-<slug> ──────────────────────────
   worker:
     runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
     continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
@@ -929,7 +929,7 @@ jobs:
   # ── catchup: direct merge recovery → chain to post-merge ────────────────
   # Runs on a direct PR merge (pull_request closed+merged) OR via
   # workflow_dispatch from dispatch (which extracts the IID from the branch).
-  # Extracts BOUCLE_ISSUE from the branch name (boucle/<iid>), posts an audit
+  # Extracts BOUCLE_ISSUE from the branch name (boucle/<iid>-<slug>), posts an audit
   # note, sets boucle:merging, and chains to post-merge for deploy + e2e.
   catchup:
     runs-on: ubuntu-latest
@@ -1003,8 +1003,8 @@ jobs:
         env:
           # On workflow_dispatch the IID is in the inputs; on a direct
           # pull_request event it must be extracted from the branch name
-          # (boucle/<iid>), which dispatch normally does but the direct
-          # catchup path bypasses.
+          # (boucle/<iid>-<slug> — prefix match on boucle/<iid>), which dispatch
+          # normally does but the direct catchup path bypasses.
           BOUCLE_ISSUE: ${{ github.event.inputs.BOUCLE_ISSUE || '' }}
         run: |
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
