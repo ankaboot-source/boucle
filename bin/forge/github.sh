@@ -324,10 +324,10 @@ forge_mr_lookup_by_branch() {
     # escalations to boucle:human (issue #113).
     if [ "$merged_filter" -eq 1 ]; then
       _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?state=$state&per_page=100" 2> /dev/null \
-        | jq -r --arg prefix "$branch" '[.[] | select((.head.ref | startswith($prefix)) and (.merged_at != null))] | first | .number // empty' 2> /dev/null || true
+        | jq -r --arg prefix "$branch" '[.[] | select(((.head.ref == $prefix) or (.head.ref | startswith($prefix + "-"))) and (.merged_at != null))] | first | .number // empty' 2> /dev/null || true
     else
       _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?state=$state&per_page=100" 2> /dev/null \
-        | jq -r --arg prefix "$branch" '[.[] | select(.head.ref | startswith($prefix))] | first | .number // empty' 2> /dev/null || true
+        | jq -r --arg prefix "$branch" '[.[] | select((.head.ref == $prefix) or (.head.ref | startswith($prefix + "-")))] | first | .number // empty' 2> /dev/null || true
     fi
     return 0
   fi

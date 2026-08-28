@@ -233,7 +233,7 @@ forge_mr_lookup_by_branch() {
     # No exact match — list MRs in the requested state and filter by prefix.
     glab api --hostname "$BOUCLE_FORGE_HOST" --paginate \
       "/projects/$BOUCLE_PROJECT_ID/merge_requests?state=$state&per_page=100" 2> /dev/null \
-      | jq -r --arg prefix "$branch" '[.[] | select(.source_branch | startswith($prefix))] | first | .iid // empty' 2> /dev/null || true
+      | jq -r --arg prefix "$branch" '[.[] | select((.source_branch == $prefix) or (.source_branch | startswith($prefix + "-")))] | first | .iid // empty' 2> /dev/null || true
     return 0
   fi
   glab api --hostname "$BOUCLE_FORGE_HOST" \

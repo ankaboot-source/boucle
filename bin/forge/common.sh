@@ -465,9 +465,11 @@ forge_reaction_canonical() {
 #   When <source_branch> is a bare protocol key matching "boucle/<digits>"
 #   (no slug), the lookup PREFIX-matches: it first tries an exact match
 #   (backward compat with legacy branches) and, if that is empty, lists MRs
-#   in the requested state and returns the first whose source branch starts
-#   with "boucle/<digits>". This keeps lookups stable even when the readable
-#   worker branch slug changes because the issue title was edited.
+#   in the requested state and returns the first whose source branch is exactly
+#   "boucle/<digits>" or "boucle/<digits>-<slug>" (hyphen boundary — lookup
+#   for boucle/10 must not match boucle/101-<slug>). This keeps lookups stable
+#   even when the readable worker branch slug changes because the issue title
+#   was edited.
 #
 # forge_branch_delete <branch>
 #   Delete a branch from the remote. Best-effort: returns 0 on success,

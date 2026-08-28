@@ -357,3 +357,64 @@ setup() {
   assert_failure
   assert_output --partial "merge conflicts"
 }
+
+@test "github forge_mr_lookup_by_branch finds merged PR on boucle/<iid>-<slug> branch" {
+  # Regression (issue #113): doctor escalated boucle:merging to human because
+  # the merged PR lived on boucle/101-<slug> while lookup used boucle/101.
+  run bash -c '
+    BOUCLE_PROJECT_ID="test/repo"
+    gh() {
+      [ "$1" = "api" ] || return 0
+      shift
+      case "$*" in
+        *"head=test:boucle%2F101"*)
+          printf "[]"
+          ;;
+        *"/pulls?state=closed&per_page=100"*)
+          printf '"'"'[{"number":102,"head":{"ref":"boucle/101-fix-ui-quick-start"},"merged_at":"2026-08-28T20:00:00Z"}]'"'"'
+          ;;
+        *) printf "[]" ;;
+      esac
+    }
+    _gh_api() { GH_TOKEN=x gh api "$@" 2> /dev/null; }
+    source bin/forge/github.sh
+    forge_mr_lookup_by_branch "boucle/101" merged
+  '
+  assert_success
+  assert_output "102"
+}
+
+@test "github forge_mr_lookup_by_branch does not cross-match sibling issue IIDs" {
+  # boucle/10 must not match boucle/101-<slug> (digit-prefix ambiguity).
+  run bash -c '
+    BOUCLE_PROJECT_ID="test/repo"
+    gh() {
+      [ "$1" = "api" ] || return 0
+      shift
+      case "$*" in
+        *"head=test:boucle%2F10"*) printf "[]" ;;
+        *"/pulls?state=open&per_page=100"*)
+          printf '"'"'[{"number":101,"head":{"ref":"boucle/101-fix-ui-quick-start"},"merged_at":null}]'"'"'
+          ;;
+        *) printf "[]" ;;
+      esac
+    }
+    _gh_api() { GH_TOKEN=x gh api "$@" 2> /dev/null; }
+    source bin/forge/github.sh
+    forge_mr_lookup_by_branch "boucle/10" opened
+  '
+  assert_success
+  assert_output ""
+}
+
+@test "github forge_mr_lookup_by_branch returns empty when no PR exists" {
+  run bash -c '
+    BOUCLE_PROJECT_ID="test/repo"
+    gh() { [ "$1" = "api" ] && printf "[]"; }
+    _gh_api() { GH_TOKEN=x gh api "$@" 2> /dev/null; }
+    source bin/forge/github.sh
+    forge_mr_lookup_by_branch "boucle/999" opened
+  '
+  assert_success
+  assert_output ""
+}
