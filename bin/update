@@ -581,6 +581,11 @@ main() {
         # shellcheck disable=SC2086
         git add $heal_addable 2> /dev/null || true
         git commit -m "chore(boucle): re-sync consumer root files to engine $current [skip ci]" > /dev/null 2>&1 || true
+        # configure_git_push is MANDATORY here: without it the push goes out
+        # under the workflow's token and is rejected for the workflow-file
+        # sync (observed on boucle.dev — the heal commit was created but the
+        # push hit the #107 rejection). Same contract as the bump path.
+        configure_git_push
         if push_update; then
           echo "[boucle] consumer root state healed"
         else
