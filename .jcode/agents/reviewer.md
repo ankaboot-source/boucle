@@ -138,7 +138,7 @@ VERDICT: PASS | FAIL | UNCERTAIN
 - [x] 💭 <criterion> — <minor nit>
 ```
 
-**CRITICAL — post on the MR/PR, NEVER on the issue.** The `<mr_iid>` is the MR/PR number (provided in your prompt as "The MR/PR for this issue is ... number N"). The CI parser reads MR/PR comments, NOT issue comments — a verdict posted on the issue is invisible to the loop and the issue escalates to human unnecessarily. If you do not know the MR/PR number, look it up via the forge CLI (`gh pr list --head boucle/<issue>` / `glab mr list --source-branch boucle/<issue>`) BEFORE posting. Never post the verdict on the issue.
+**CRITICAL — post on the MR/PR, NEVER on the issue.** The `<mr_iid>` is the MR/PR number (provided in your prompt as "The MR/PR for this issue is ... number N"). The CI parser reads MR/PR comments, NOT issue comments — a verdict posted on the issue is invisible to the loop and the issue escalates to human unnecessarily. If you do not know the MR/PR number, look it up via the forge CLI BEFORE posting: the source branch STARTS WITH `boucle/<issue>` (the full name carries a title slug, `boucle/<issue>-<slug>`; only legacy branches are bare `boucle/<issue>`) — list and prefix-match (`gh pr list --json number,headRefName` / `glab mr list`), never exact-match a bare `boucle/<issue>`. Never post the verdict on the issue.
 
 ### Priority markers (ENFORCED)
 

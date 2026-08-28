@@ -62,7 +62,7 @@ variables:
   BOUCLE_BUILD_CMD: "npm ci && npm run build"
   BOUCLE_BUILD_OUTPUT: "public"
   # Deploy: swap to any deploy command. Use $$BRANCH (escaped so eval expands it at runtime with
-  # the job-local BRANCH var: "$CI_DEFAULT_BRANCH" for deploy, "boucle/$BOUCLE_ISSUE" for worker preview).
+  # the job-local BRANCH var: "$CI_DEFAULT_BRANCH" for deploy, "boucle/$BOUCLE_ISSUE-<slug>" for worker preview).
   # Examples:
   #   CF Pages:  "npx wrangler pages deploy $BOUCLE_BUILD_OUTPUT --project-name $BOUCLE_DEPLOY_PROJECT --branch $$BRANCH"
   #   Netlify:   "npx netlify deploy --dir $BOUCLE_BUILD_OUTPUT --alias $$BRANCH"
@@ -298,8 +298,8 @@ default:
       # - push pipelines (BOUCLE_PIPELINE_SOURCE=push) to avoid a feedback
       #   loop (push → pipeline → bin/update → push → pipeline → ...)
       # - when BOUCLE_UPDATE_DISABLE=true (opt-out for pinned installs)
-      # Self-update MUST only run on the default branch — on a worker
-      # branch (boucle/<iid>) the self-update commit pollutes the MR
+       # Self-update MUST only run on the default branch — on a worker
+       # branch (boucle/<iid>-<slug>) the self-update commit pollutes the MR
       # with chore(boucle): commits that are the bot's engine-sync work,
       # not the issue's work (observed on MR !105: 6 chore(boucle):
       # commits landed on boucle/79, attributed to the human because
@@ -469,7 +469,7 @@ check:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     # Worker branches (issue #51). Worker commits no longer carry [skip ci],
     # so their code must meet the same bar as anything a human pushes — the
-    # loop writes almost all of it. Without this rule a push to boucle/<iid>
+    # loop writes almost all of it. Without this rule a push to boucle/<iid>-<slug>
     # matches NO job at all (every loop job requires a trigger pipeline), so
     # this is also what stops GitLab creating an empty pipeline.
     - if: $CI_COMMIT_BRANCH =~ /^boucle\//
@@ -712,7 +712,7 @@ post-merge:
   timeout: 30m
 
 # ── Catchup (direct merge recovery) ────────────────────────────────────
-# Triggered by dispatch when a human merges a boucle/<iid> MR directly
+# Triggered by dispatch when a human merges a boucle/<iid>-<slug> MR directly
 # (merge_request webhook, action=merge), bypassing the approval circuit.
 # The push to $CI_DEFAULT_BRANCH already triggered deploy → smoke e2e (no issue
 # context). This job catches up: inspects the issue state, posts an audit

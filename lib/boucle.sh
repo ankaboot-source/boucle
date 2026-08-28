@@ -2418,6 +2418,16 @@ boucle_escalate_merge_conflict() {
   conflicts=$(boucle_parse_merge_conflicts "$rebase_out")
   [ -z "$conflicts" ] && conflicts="- (unclassified — see rebase output in the pipeline log)"
 
+  # Resolve the ACTUAL worker branch name for the human-facing git commands
+  # below: since lesson #70 it is boucle/<iid>-<slug>, not the bare protocol
+  # key — `git checkout boucle/<iid>` would point at a branch that does not
+  # exist. forge_mr_get may fail (or be absent in unit tests); fall back to
+  # boucle_branch_name, which recomputes the same deterministic name the
+  # worker used (and itself falls back to the bare name without a title).
+  local branch
+  branch=$(forge_mr_get "$mr_iid" 2> /dev/null | jq -r '.source_branch // .head.ref // empty' 2> /dev/null || echo "")
+  [ -z "$branch" ] && branch=$(boucle_branch_name "$issue")
+
   # ── Conflict-retry budget ──────────────────────────────────────────
   # Count prior conflict-retries on this issue via the marker comment
   # `<!-- boucle:conflict-retry N -->` posted on each re-trigger. Bounded
@@ -2464,7 +2474,7 @@ The worker is being re-triggered to rebase onto the fresh \`$default_branch\` an
   local body
   body="⚠️ **Merge conflict — human intervention required**
 
-Issue #$issue ($(forge_mr_ref "$mr_iid"), branch \`boucle/$issue\`) cannot be merged automatically: the rebase onto \`$default_branch\` hit a **semantic conflict** that ${max_retries} worker conflict-retries could not resolve. The loop is **paused** on this issue and it is assigned to you.
+Issue #$issue ($(forge_mr_ref "$mr_iid"), branch \`$branch\`) cannot be merged automatically: the rebase onto \`$default_branch\` hit a **semantic conflict** that ${max_retries} worker conflict-retries could not resolve. The loop is **paused** on this issue and it is assigned to you.
 
 **Classification** : detected from the rebase output (modify/delete = this branch deletes a file the default branch has modified, or vice versa).
 
@@ -2475,9 +2485,9 @@ $conflicts
 
 **Manual options** :
 1. **Resolve on the branch, then re-run the merger** :
-   \`git checkout boucle/$issue && git fetch origin $default_branch && git rebase origin/$default_branch\`
+   \`git checkout $branch && git fetch origin $default_branch && git rebase origin/$default_branch\`
    — take this branch's version of each conflicted file, or the default branch's (\`git checkout origin/$default_branch -- <file>\`), then
-   \`git add -A && git rebase --continue && git push --force-with-lease origin boucle/$issue\`
+   \`git add -A && git rebase --continue && git push --force-with-lease origin $branch\`
    and restore \`boucle:approval\` (the merger will pick it up).
 2. **Let the worker re-plan against fresh $default_branch** (if the issue's goal still stands): set \`boucle:todo\` + \`boucle::status::bot\` — the worker re-baselines and implements the goal on top of the current $default_branch.
 3. **Close the issue** if obsolete or contradictory with changes already on $default_branch ($(forge_mr_ref "$mr_iid") closes with it).

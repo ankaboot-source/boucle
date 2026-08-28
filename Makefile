@@ -61,9 +61,17 @@ fix:
 	echo "Formatted $$files"
 
 # Run bats unit tests.
+# Hermeticity guard: unit tests MUST run against boucle's defaults, never
+# against whatever runtime BOUCLE_* config happens to be in the environment.
+# In CI the workflow/job `env:` block exports the repo's live config (e.g.
+# BOUCLE_DEPLOY_MODE=external) into EVERY job — including check — and a bats
+# helper that does not override a variable inherits it: the post-merge
+# self-mode test flips into external mode and fails. Scrub all BOUCLE_* vars
+# before the suite so results never depend on the host (fixes both the GitHub
+# workflow and the GitLab check job, which share this target).
 test:
 	@command -v $(BATS) >/dev/null 2>&1 || { echo "ERROR: bats not installed (brew install bats-core)"; exit 1; }
-	@$(BATS) --formatter tap test/
+	@for _v in $$(env | grep -oE '^BOUCLE_[A-Z0-9_]+'); do unset $$_v; done; $(BATS) --formatter tap test/
 
 # Install pre-commit hooks (prek preferred, falls back to pre-commit).
 install-hooks:

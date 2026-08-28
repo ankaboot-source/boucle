@@ -1154,7 +1154,7 @@ FAIL, so it needs the why. Only the reviewer's own view is reduced.
 ## File-impact gate
 
 Parallel workers (`BOUCLE_MAX_PARALLEL_ISSUES` > 1) on separate branches
-`boucle/<iid>` can edit the same files and conflict at rebase/merge time. The
+(`boucle/<iid>-<slug>`) can edit the same files and conflict at rebase/merge time. The
 file-impact gate defers a worker before it starts when its issue claims files
 already claimed by an in-flight issue.
 
