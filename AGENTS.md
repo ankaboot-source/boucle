@@ -382,12 +382,17 @@ The graph is built once (by CI or locally) and auto-syncs on changes. If
 retry. In CI, `bin/jc` auto-indexes the repo before the agent starts (triage,
 worker, reviewer roles) if the `.codebase-memory/` index doesn't exist.
 
-> **Consumer repos:** `LESSONS.yml`, `.jcode/skills/`, and `bin/` live under
-> `.boucle/` (the engine dir) but are symlinked to the repo root by
-> `bin/setup`, `bin/update`, and `bin/jc` (runtime fallback). If
-> `Read LESSONS.yml` or `skill(...)` fails, check that the symlinks exist:
-> `ls -la LESSONS.yml .jcode/skills bin` — they should point to
-> `.boucle/LESSONS.yml`, `.boucle/.jcode/skills`, `.boucle/bin` respectively.
+> **Consumer repos:** `LESSONS.yml`, `.jcode/agents/`, `.jcode/skills/`, and
+> `bin/` live under `.boucle/` (the engine dir) but are symlinked to the repo
+> root by `bin/setup`, `bin/update`, and `bin/jc` (runtime fallback). If
+> `Read LESSONS.yml`, `skill(...)`, or an agent prompt fails, check that the
+> symlinks exist:
+> `ls -la LESSONS.yml .jcode/agents .jcode/skills bin` — they should point to
+> `.boucle/LESSONS.yml`, `.boucle/.jcode/agents`, `.boucle/.jcode/skills`,
+> `.boucle/bin` respectively. A real dir at the root for an engine-owned path
+> is an orphan from the old copy-based install: `bin/setup`/`bin/update`
+> migrate it to a symlink (a stale `.jcode/agents` means a stale triage
+> prompt).
 
 ### Priority order
 

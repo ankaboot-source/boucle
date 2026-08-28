@@ -281,6 +281,115 @@ setup() {
   assert_output "# consumer README"
 }
 
+# ── Engine-owned symlink migration (issue #105) ───────────────────────
+# A REAL .jcode/agents or .jcode/skills dir at the consumer root is an
+# orphan from the old copy-based install (pre-submodule): frozen at the
+# version of the first bin/setup, never refreshed by bin/update. .jcode/ is
+# 100% engine-owned (except prompt-overlay.md, runtime/gitignored), so the
+# migration below replaces the orphan with a symlink to the engine. The
+# consumer-owned carve-out (LESSONS.yml) works by never being listed.
+
+@test "propagate_consumer_root_files migrates a real .jcode/agents dir to a symlink" {
+  # shellcheck disable=SC2154
+  local tmpdir="$BATS_TEST_TMPDIR"
+  # The engine fixture needs bin/lib/engine-symlink.sh: the function sources
+  # it unconditionally before the symlink loop.
+  mkdir -p "$tmpdir/.boucle/.jcode/agents" "$tmpdir/.boucle/bin/lib" "$tmpdir/.jcode/agents"
+  # shellcheck disable=SC2154 # BATS_TEST_DIRNAME is set by bats at runtime
+  cp "$BATS_TEST_DIRNAME/../bin/lib/engine-symlink.sh" "$tmpdir/.boucle/bin/lib/"
+  # The orphan: stale prompt from the first copy-based install.
+  echo "# OLD stale triage prompt" > "$tmpdir/.jcode/agents/triage.md"
+  # The engine's current prompt.
+  echo "# NEW engine triage prompt" > "$tmpdir/.boucle/.jcode/agents/triage.md"
+  cd "$tmpdir" || return
+  ENGINE_DIR=".boucle" BOUCLE_FORGE=github run propagate_consumer_root_files
+  assert_success
+  assert_output --partial ".jcode/agents"
+  [ -L "$tmpdir/.jcode/agents" ] || fail "expected .jcode/agents to be a symlink"
+  run cat "$tmpdir/.jcode/agents/triage.md"
+  assert_output "# NEW engine triage prompt"
+}
+
+@test "propagate_consumer_root_files is idempotent: existing valid .jcode/agents symlink is a no-op" {
+  # shellcheck disable=SC2154
+  local tmpdir="$BATS_TEST_TMPDIR"
+  mkdir -p "$tmpdir/.boucle/.jcode/agents" "$tmpdir/.boucle/bin/lib" "$tmpdir/.jcode"
+  # shellcheck disable=SC2154 # BATS_TEST_DIRNAME is set by bats at runtime
+  cp "$BATS_TEST_DIRNAME/../bin/lib/engine-symlink.sh" "$tmpdir/.boucle/bin/lib/"
+  echo "# engine triage prompt" > "$tmpdir/.boucle/.jcode/agents/triage.md"
+  cd "$tmpdir" || return
+  # The correct target form (as engine_symlink_target computes it): the
+  # relative target resolves from the LINK's directory, so a root-level link
+  # inside .jcode/ needs the "../".
+  ln -s "../.boucle/.jcode/agents" ".jcode/agents"
+  [ -e "$tmpdir/.jcode/agents" ] || fail "precondition: the symlink must resolve"
+  ENGINE_DIR=".boucle" BOUCLE_FORGE=github run propagate_consumer_root_files
+  assert_success
+  refute_output --partial ".jcode/agents"
+  [ -L "$tmpdir/.jcode/agents" ] || fail "expected .jcode/agents to remain a symlink"
+  [ "$(readlink "$tmpdir/.jcode/agents")" = "../.boucle/.jcode/agents" ] || fail "symlink target changed"
+}
+
+@test "propagate_consumer_root_files migrates .jcode/skills real dir too (regression: guard used to skip it)" {
+  # Regression for issue #105: the old "never overwrite a real dir" guard
+  # skipped the migration for engine-owned paths, so a real .jcode/skills
+  # dir from the copy-based install was never converted on consumers.
+  # shellcheck disable=SC2154
+  local tmpdir="$BATS_TEST_TMPDIR"
+  mkdir -p "$tmpdir/.boucle/.jcode/skills/demo" "$tmpdir/.boucle/bin/lib" "$tmpdir/.jcode/skills/demo"
+  # shellcheck disable=SC2154 # BATS_TEST_DIRNAME is set by bats at runtime
+  cp "$BATS_TEST_DIRNAME/../bin/lib/engine-symlink.sh" "$tmpdir/.boucle/bin/lib/"
+  echo "# OLD stale skill" > "$tmpdir/.jcode/skills/demo/SKILL.md"
+  echo "# NEW engine skill" > "$tmpdir/.boucle/.jcode/skills/demo/SKILL.md"
+  cd "$tmpdir" || return
+  ENGINE_DIR=".boucle" BOUCLE_FORGE=github run propagate_consumer_root_files
+  assert_success
+  assert_output --partial ".jcode/skills"
+  [ -L "$tmpdir/.jcode/skills" ] || fail "expected .jcode/skills to be a symlink"
+  run cat "$tmpdir/.jcode/skills/demo/SKILL.md"
+  assert_output "# NEW engine skill"
+}
+
+@test "propagate_consumer_root_files does NOT touch a real consumer-owned LESSONS.yml" {
+  # The consumer-owned carve-out: LESSONS.yml is NOT in the symlink list, so
+  # the migration must never apply to it. A real file stays untouched.
+  # shellcheck disable=SC2154
+  local tmpdir="$BATS_TEST_TMPDIR"
+  mkdir -p "$tmpdir/.boucle" "$tmpdir/.boucle/bin/lib"
+  # shellcheck disable=SC2154 # BATS_TEST_DIRNAME is set by bats at runtime
+  cp "$BATS_TEST_DIRNAME/../bin/lib/engine-symlink.sh" "$tmpdir/.boucle/bin/lib/"
+  echo "# consumer lessons" > "$tmpdir/LESSONS.yml"
+  echo "# engine lessons" > "$tmpdir/.boucle/LESSONS.yml"
+  cd "$tmpdir" || return
+  ENGINE_DIR=".boucle" BOUCLE_FORGE=github run propagate_consumer_root_files
+  assert_success
+  refute_output --partial "LESSONS.yml"
+  [ ! -L "$tmpdir/LESSONS.yml" ] || fail "expected LESSONS.yml to remain a real file"
+  run cat "$tmpdir/LESSONS.yml"
+  assert_output "# consumer lessons"
+}
+
+@test "propagate_consumer_root_files replaces a broken .jcode/agents symlink with a working one" {
+  # A stale/broken symlink is replaced, not skipped: rm -rf removes the
+  # dangling link, ln -s writes a fresh one, and the "does not resolve"
+  # branch only fires when the freshly computed target itself dangles.
+  # shellcheck disable=SC2154
+  local tmpdir="$BATS_TEST_TMPDIR"
+  mkdir -p "$tmpdir/.boucle/.jcode/agents" "$tmpdir/.boucle/bin/lib" "$tmpdir/.jcode"
+  # shellcheck disable=SC2154 # BATS_TEST_DIRNAME is set by bats at runtime
+  cp "$BATS_TEST_DIRNAME/../bin/lib/engine-symlink.sh" "$tmpdir/.boucle/bin/lib/"
+  echo "# engine triage prompt" > "$tmpdir/.boucle/.jcode/agents/triage.md"
+  cd "$tmpdir" || return
+  ln -s ".boucle/.jcode/agents-does-not-exist" ".jcode/agents"
+  [ ! -e "$tmpdir/.jcode/agents" ] || fail "precondition: the symlink must dangle"
+  ENGINE_DIR=".boucle" BOUCLE_FORGE=github run propagate_consumer_root_files
+  assert_success
+  assert_output --partial ".jcode/agents"
+  [ -L "$tmpdir/.jcode/agents" ] || fail "expected .jcode/agents to be a symlink"
+  run cat "$tmpdir/.jcode/agents/triage.md"
+  assert_output "# engine triage prompt"
+}
+
 # ── configure_git_push ────────────────────────────────────────────────
 
 @test "configure_git_push uses BOUCLE_PROJECT_PATH (the forge-agnostic alias)" {

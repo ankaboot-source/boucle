@@ -1,10 +1,11 @@
 #!/usr/bin/env bats
 # Engine symlink targets (bin/lib/engine-symlink.sh).
 #
-# .jcode/skills/ and bin/ live in the engine dir but are referenced at the
-# consumer root, so setup/update symlink them up. (LESSONS.yml was in that
-# list until the consumer took ownership of that filename; the helper is
-# still exercised with it below, since it must keep working for any path.)
+# .jcode/agents/, .jcode/skills/ and bin/ live in the engine dir but are
+# referenced at the consumer root, so setup/update symlink them up.
+# (LESSONS.yml was in that list until the consumer took ownership of that
+# filename; the helper is still exercised with it below, since it must keep
+# working for any path.)
 # Both callers passed "<engine>/<path>" as the target — right when read from the
 # repo root, wrong for any link that is not AT the root. `.jcode/skills`
 # resolved to `.jcode/.boucle/.jcode/skills` and never existed.
@@ -12,10 +13,16 @@
 # The failure is silent: ln -s succeeds on a dangling target, so the only
 # symptom is skill loads failing later, which reads as a model problem
 # rather than a filesystem one.
+#
+# Regression guard (issue #105): `.jcode/agents` used to be missing from the
+# symlink list in both bin/setup and bin/update, so consumers ran a stale
+# triage prompt (old spec format) frozen at the version of the first
+# bin/setup. The "callers" tests below pin the list to all three paths.
 
 setup() {
   load 'test_helper/bats-support/load'
   load 'test_helper/bats-assert/load'
+  # shellcheck disable=SC2154 # BATS_TEST_DIRNAME is set by bats at runtime
   REPO="$BATS_TEST_DIRNAME/.."
   # shellcheck source=/dev/null
   . "$REPO/bin/lib/engine-symlink.sh"
@@ -74,18 +81,24 @@ teardown() {
 # ── the links actually resolve ────────────────────────────────────────
 
 @test "resolve: every engine symlink resolves on a real tree" {
-  mkdir -p "$TMP/repo/.boucle/.jcode/skills/demo" "$TMP/repo/.boucle/bin"
+  mkdir -p "$TMP/repo/.boucle/.jcode/skills/demo" "$TMP/repo/.boucle/bin" "$TMP/repo/.boucle/.jcode/agents"
   echo x > "$TMP/repo/.boucle/LESSONS.yml"
   echo '---' > "$TMP/repo/.boucle/.jcode/skills/demo/SKILL.md"
+  # .jcode/agents was forgotten in the symlink list (issue #105): without a
+  # sample file here the loop below would skip it and the test would pass
+  # without pinning the list. The file makes the absence of a link fail.
+  echo '# triage' > "$TMP/repo/.boucle/.jcode/agents/triage.md"
 
   run bash -c "cd '$TMP/repo' && . '$REPO/bin/lib/engine-symlink.sh' &&
-    for lt in LESSONS.yml .jcode/skills bin; do
+    for lt in LESSONS.yml .jcode/agents .jcode/skills bin; do
       t=\$(engine_symlink_target \"\$PWD/.boucle\" \"\$lt\" \"\$PWD\") || continue
       mkdir -p \"\$(dirname \"\$lt\")\"; ln -s \"\$t\" \"\$lt\"
       [ -e \"\$lt\" ] || { echo \"BROKEN \$lt -> \$t\"; exit 1; }
     done
     # The path jcode itself uses to load a skill.
     cat .jcode/skills/demo/SKILL.md > /dev/null || { echo 'SKILL UNREADABLE'; exit 1; }
+    # The path jcode itself uses to load the triage prompt.
+    cat .jcode/agents/triage.md > /dev/null || { echo 'AGENT PROMPT UNREADABLE'; exit 1; }
     echo OK"
   assert_success
   assert_output "OK"
@@ -114,5 +127,18 @@ teardown() {
   run grep -q 'does not resolve' "$REPO/bin/setup"
   assert_success
   run grep -q 'does not resolve' "$REPO/bin/update"
+  assert_success
+}
+
+@test "callers: setup and update symlink .jcode/agents (not just skills and bin)" {
+  # Regression guard for issue #105: .jcode/agents was missing from the
+  # symlink list in both callers, so consumers kept running the stale triage
+  # prompt from the first copy-based bin/setup — the engine's new spec
+  # format never reached them. Both callers MUST list all three engine-owned
+  # paths in the same order (agents first — it is the prompt, the highest
+  # stakes).
+  run grep -q 'for lt in ".jcode/agents" ".jcode/skills" "bin"' "$REPO/bin/setup"
+  assert_success
+  run grep -q 'for lt in ".jcode/agents" ".jcode/skills" "bin"' "$REPO/bin/update"
   assert_success
 }

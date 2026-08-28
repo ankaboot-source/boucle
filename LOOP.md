@@ -641,7 +641,8 @@ landed in the submodule, `git add` staged nothing but a dirty pointer, and
 `bin/check-boucle-sync` rejected it. `bin/update` removes that symlink on the
 next run. Nothing is seeded in its place — an absent file is the honest state
 until a first lesson is recorded, and `bin/check-lessons` rejects an empty
-one. `.jcode/skills/` and `bin/` stay symlinked; they are engine-owned.
+one. `.jcode/agents/`, `.jcode/skills/` and `bin/` stay symlinked; they are
+engine-owned.
 
 **What belongs where.** Boucle keeps class-not-instance for everything it
 persists, in both files:

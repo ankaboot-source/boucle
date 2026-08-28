@@ -5,12 +5,14 @@
 #
 # THE BUG THIS EXISTS TO PREVENT
 #
-# .jcode/skills/ and bin/ live under the engine dir (.boucle/) but agent
-# prompts reference them at the consumer root, so bin/setup and bin/update
-# symlink them up. (LESSONS.yml used to be in that list; at a consumer root
-# that name is now the CONSUMER's own lessons file — see LOOP.md § "Lessons —
-# two files, one name". The helper still handles it, nothing calls it for
-# it.) Both computed the target as
+# .jcode/agents/, .jcode/skills/ and bin/ live under the engine dir
+# (.boucle/) but agent prompts reference them at the consumer root, so
+# bin/setup and bin/update symlink them up. (.jcode/agents was forgotten in
+# the list until issue #105 — consumers ran a stale triage prompt frozen at
+# the first copy-based install.) (LESSONS.yml used to be in that list; at a
+# consumer root that name is now the CONSUMER's own lessons file — see
+# LOOP.md § "Lessons — two files, one name". The helper still handles it,
+# nothing calls it for it.) Both computed the target as
 # "<engine>/<path>" — correct when read from the repo root, and wrong the
 # moment the link itself is not AT the repo root:
 #
