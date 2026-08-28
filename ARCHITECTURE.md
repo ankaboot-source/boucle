@@ -71,7 +71,7 @@ self-healing sweep) runs automatically — there is nothing to run by hand.
 │   │   └── github.sh         # gh CLI wrapper
 │   ├── lib/depends-on.sh     # sub-issue dependency gate
 │   ├── collapse-duplicate-notes  # dedupe repeated bot notes
-│   ├── describe-images       # vision-model image descriptions (text for agents)
+│   ├── describe-images       # vision-model image descriptions (text for agents; covers attachments + PR-changed repo images)
 │   ├── fetch-issue-attachments   # mine /uploads/ from issue + parent notes
 │   ├── fetch-mr-attachments      # mine /uploads/ from MR notes
 │   ├── forge-note            # marker-stamped note helper

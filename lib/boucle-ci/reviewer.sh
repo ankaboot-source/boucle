@@ -23,6 +23,87 @@
 # CI parses it SHA-anchored, then falls back to SHA-unanchored + log-scraping
 # (AGENTS.md lessons #27, #41, #43, #47).
 
+# ── PR-changed raster image collection (repo-images) ─────────────────
+# Raster images added/modified by the PR itself (e.g. public/og-image.png)
+# are NOT comment attachments, so bin/describe-images never saw them — the
+# reviewer then improvised, Read the PNG, and the text-only model 400'd on
+# image input, killing the run (boucle.dev PR #94, 2026-08-27: 5/5 identical
+# failed iterations, escalated to boucle:human). This function extracts those
+# images from the MR head into .boucle-state/$ISSUE/repo-images/ so
+# describe-images can describe them as text like any attachment.
+#
+# The reviewer workspace is checked out on the DEFAULT branch
+# (workflow_dispatch + actions/checkout), so PR-changed files MUST be
+# extracted via `git show "$MR_HEAD:<path>"` — never read from the worktree.
+#
+# Fail-open by contract: any git error (empty MR_BASE/MR_HEAD, unknown SHA)
+# yields a warning + an empty list — the review proceeds, never blocks.
+# Caps: 8 images, 8 MB each (git cat-file -s); skips are logged to stderr.
+# SVG is excluded (text/XML — agents read it as text, same policy as
+# strip_image_paths in bin/jc).
+#
+# Output: the extracted repo-relative paths on stdout, one per line.
+boucle_collect_mr_images() {
+  local base="${MR_BASE:-}" head="${MR_HEAD:-}"
+  # Same workspace normalization as lib/boucle-ci.sh: GitHub Actions sets
+  # BOUCLE_WORKSPACE (CI_PROJECT_DIR is GitLab-only); the state dir formula
+  # MUST stay in sync with bin/describe-images.
+  local project_dir="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-${GITHUB_WORKSPACE:-$(pwd)}}}"
+  local state_dir="$project_dir/.boucle-state/${BOUCLE_ISSUE:-}"
+  local repo_dir="$state_dir/repo-images"
+  local max_images=8 max_bytes=8388608
+  local changed p lower count=0
+
+  if [ -z "$base" ] || [ -z "$head" ]; then
+    echo "[boucle] WARN: MR_BASE/MR_HEAD empty — skipping PR-changed image collection" >&2
+    return 0
+  fi
+  if [ -z "${BOUCLE_ISSUE:-}" ]; then
+    echo "[boucle] WARN: BOUCLE_ISSUE empty — skipping PR-changed image collection" >&2
+    return 0
+  fi
+
+  # Fresh state: a re-run must never describe images from a previous MR head.
+  rm -rf "$repo_dir"
+
+  changed=$(git -C "$project_dir" diff --diff-filter=AM --name-only "$base" "$head" 2> /dev/null) || {
+    echo "[boucle] WARN: git diff $base..$head failed — skipping PR-changed image collection" >&2
+    return 0
+  }
+  [ -n "$changed" ] || return 0
+
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    lower=$(printf '%s' "${p##*.}" | tr '[:upper:]' '[:lower:]')
+    case "$lower" in
+      svg) continue ;; # text/XML — agents read it as text
+      png | jpg | jpeg | gif | webp | avif | bmp) : ;;
+      *) continue ;;
+    esac
+    if [ "$count" -ge "$max_images" ]; then
+      echo "[boucle] SKIP: $p — image cap of $max_images reached" >&2
+      continue
+    fi
+    local size
+    size=$(git -C "$project_dir" cat-file -s "$head:$p" 2> /dev/null || echo 0)
+    if [ "${size:-0}" -gt "$max_bytes" ] 2> /dev/null; then
+      echo "[boucle] SKIP: $p — ${size} bytes exceeds ${max_bytes}-byte cap" >&2
+      continue
+    fi
+    if ! mkdir -p "$repo_dir/$(dirname "$p")" 2> /dev/null; then
+      echo "[boucle] WARN: cannot create $repo_dir/$(dirname "$p") — skipping $p" >&2
+      continue
+    fi
+    if ! git -C "$project_dir" show "$head:$p" > "$repo_dir/$p" 2> /dev/null; then
+      echo "[boucle] WARN: git show $head:$p failed — skipping" >&2
+      continue
+    fi
+    count=$((count + 1))
+    echo "$p"
+  done <<< "$changed"
+  return 0
+}
+
 boucle_ci_reviewer() {
   # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script
   # under set -eo pipefail. Without pipefail, the var is just empty (which
@@ -203,6 +284,19 @@ boucle_ci_reviewer() {
   export BOUCLE_MR_IID="$MR_IID"
   "$BOUCLE_HOME"/bin/fetch-mr-attachments || echo "[boucle] WARN: MR attachment fetch failed — continuing without MR attachments"
 
+  # Collect raster images ADDED/MODIFIED by the PR itself (repo-images).
+  # They are not comment attachments, so without this the vision pipeline
+  # never sees them and the text-only reviewer model 400s if it Reads one
+  # (boucle.dev PR #94: reviewer Read public/og-image.png, 5/5 iterations
+  # crashed). Extracted from the MR head into
+  # .boucle-state/$ISSUE/repo-images/ for describe-images below. Fail-open:
+  # any git error yields an empty list, never a blocked review.
+  export BOUCLE_REPO_IMAGES
+  BOUCLE_REPO_IMAGES=$(boucle_collect_mr_images)
+  if [ -n "$BOUCLE_REPO_IMAGES" ]; then
+    echo "[boucle] Collected $(printf '%s\n' "$BOUCLE_REPO_IMAGES" | wc -l | tr -d ' ') PR-changed image(s) for vision description"
+  fi
+
   # Describe image attachments using a vision model so the reviewer gets
   # visual context as text without swapping its model.
   # Forge controls: BOUCLE_VISION_ROUTING, BOUCLE_VISION_MODEL, BOUCLE_VISION_ROLES.
@@ -321,11 +415,17 @@ boucle_ci_reviewer() {
     echo "[boucle] INFO: no prior notes for issue #$BOUCLE_ISSUE."
   fi
 
-  # Describe image attachments (issue + MR comments) using a vision model,
-  # then inject the text descriptions into the reviewer prompt. This replaces
-  # the old detect-vision-need approach which swapped the reviewer's model
-  # to minimax-m3 (worse at code review, prone to WASM OOM crashes).
-  "$BOUCLE_HOME/bin/describe-images reviewer" || echo "[boucle] WARN: image description failed — continuing without descriptions"
+  # Describe image attachments (issue + MR comments + PR-changed repo
+  # images) using a vision model, then inject the text descriptions into
+  # the reviewer prompt. This replaces the old detect-vision-need approach
+  # which swapped the reviewer's model to minimax-m3 (worse at code review,
+  # prone to WASM OOM crashes).
+  # NOTE: this is the ONLY describe-images call — the earlier call above
+  # (with --criteria in screenshot mode) already covers attachments AND
+  # repo-images. A second generic call here would clobber the criteria-mode
+  # descriptions: describe-images truncates .image-descriptions.md when it
+  # finds >= 1 image (leftover of the detect-vision-need removal, 98bfea6).
+  # Consolidated into the single call above.
 
   # Run the agent against the preview.
   # Use `|| rc=$?` to suppress set -e so the script continues to
