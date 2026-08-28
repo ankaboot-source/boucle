@@ -411,7 +411,7 @@ untrack_prompt_overlay() {
 
   # 1. Ensure the .gitignore entry exists.
   if [ -f .gitignore ]; then
-    if ! grep -qxF "$entry" .gitignore 2>/dev/null; then
+    if ! grep -qxF "$entry" .gitignore 2> /dev/null; then
       printf '\n# boucle runtime prompt overlay (written by bin/jc, never tracked)\n%s\n' "$entry" >> .gitignore
       gitignore_changed=".gitignore"
     fi
@@ -421,8 +421,8 @@ untrack_prompt_overlay() {
   fi
 
   # 2. Untrack the file if git knows about it (staged or committed).
-  if git ls-files --error-unmatch "$entry" >/dev/null 2>&1; then
-    git rm --cached --quiet "$entry" 2>/dev/null || true
+  if git ls-files --error-unmatch "$entry" > /dev/null 2>&1; then
+    git rm --cached --quiet "$entry" 2> /dev/null || true
     gitignore_changed="$gitignore_changed $entry"
   fi
 

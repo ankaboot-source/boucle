@@ -251,7 +251,10 @@ $evidence"
   # Record the verdict on the health record (see reviewer.sh for why this
   # exists). Written after every fallback has resolved, so the row carries the
   # verdict the loop acted on.
-  boucle_health_outcome "$BOUCLE_ISSUE" "e2e" "${VERDICT:-UNCERTAIN}" "" || true
+  # `no-verdict`, not UNCERTAIN — see the same distinction in reviewer.sh:
+  # a posted UNCERTAIN is a judgement, an empty one is a run that produced
+  # nothing, and only the second is a failure of the agent to do its job.
+  boucle_health_outcome "$BOUCLE_ISSUE" "e2e" "${VERDICT:-no-verdict}" "" || true
 
   # ── Shared verdict routing (command-mode and agent-mode) ────────────
   case "$VERDICT" in

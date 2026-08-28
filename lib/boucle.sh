@@ -592,6 +592,11 @@ boucle_health_record() {
   local skills="${10:-}" arm="${11:-}" setup_fail="${12:-}"
   local swarm="${13:-0}"
   case "$swarm" in '' | *[!0-9]*) swarm=0 ;; esac
+  # What the SKILLS FIELD IS EVIDENCE OF, which the field itself cannot say:
+  # an empty list means "no skills used" and "the extractor does not match
+  # this transcript" identically, and the second is a broken sensor reporting
+  # a finding. See skills_evidence() in bin/jc.
+  local skills_evidence="${14:-}"
   local file="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
   mkdir -p "$(dirname "$file")" 2> /dev/null || true
   local ts skills_json
@@ -607,9 +612,9 @@ boucle_health_record() {
       | paste -sd, - 2> /dev/null || true)]"
     [ "$skills_json" = "[]" ] || [ -n "$skills_json" ] || skills_json="[]"
   fi
-  printf '{"timestamp":"%s","role":"%s","iteration":%s,"exit_code":%s,"prompt_chars":%s,"tokens":"%s","cost_usd":"%s","model":"%s","provider":"%s","skills":%s,"arm":"%s","setup_fail":"%s","swarm_spawns":%s}\n' \
+  printf '{"timestamp":"%s","role":"%s","iteration":%s,"exit_code":%s,"prompt_chars":%s,"tokens":"%s","cost_usd":"%s","model":"%s","provider":"%s","skills":%s,"skills_evidence":"%s","arm":"%s","setup_fail":"%s","swarm_spawns":%s}\n' \
     "$ts" "$role" "$iteration" "$exit_code" "$prompt_chars" "${tokens:-n/a}" "${cost:-n/a}" "$model" "$provider" \
-    "$skills_json" "${arm:-full}" "$setup_fail" "$swarm" \
+    "$skills_json" "$skills_evidence" "${arm:-full}" "$setup_fail" "$swarm" \
     >> "$file" 2> /dev/null || true
   boucle_metrics_sync_health "$iid" || true
 }
@@ -964,6 +969,13 @@ boucle_metrics_row() {
         runs: ([.[] | select(has("iteration"))] | length),
         skills: $skills,
         skills_n: ($skills | length),
+        # How much to trust skills / skills_n above. runs_skills_unparsed > 0
+        # means the extractor saw skill_manage activity it could not read, so
+        # the skill figures for this issue are wrong rather than empty — and
+        # an all-zero skills column across a project with a non-zero count
+        # here is a broken sensor, not a finding about agent behaviour.
+        runs_skills_unparsed: ([.[] | select(.skills_evidence == "unparsed")] | length),
+        runs_skills_not_invoked: ([.[] | select(.skills_evidence == "not-invoked")] | length),
         setup_failures: ($setup | length),
         setup_failure_families: ($setup | unique),
         human_spec: $spec,
