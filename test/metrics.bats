@@ -678,6 +678,21 @@ metrics_remote_config_only() {
   assert [ "$trap_line" -lt "$first_exit" ]
 }
 
+@test "jc: transcript extractors are defined before the EXIT trap" {
+  # Early exits (triage/reviewer/e2e) fire the trap before section 7c runs.
+  # If extract_skills_used / skills_evidence are defined after the trap, the
+  # trap's type-checks fail and skills_evidence is written as "" — a third
+  # state the schema does not model.
+  local trap_line skills_line evidence_line swarm_line
+  trap_line=$(grep -n 'trap emit_health_record EXIT' "$REPO/bin/jc" | cut -d: -f1)
+  skills_line=$(grep -n '^extract_skills_used() {' "$REPO/bin/jc" | cut -d: -f1)
+  evidence_line=$(grep -n '^skills_evidence() {' "$REPO/bin/jc" | cut -d: -f1)
+  swarm_line=$(grep -n '^extract_swarm_spawns() {' "$REPO/bin/jc" | cut -d: -f1)
+  assert [ "$skills_line" -lt "$trap_line" ]
+  assert [ "$evidence_line" -lt "$trap_line" ]
+  assert [ "$swarm_line" -lt "$trap_line" ]
+}
+
 @test "jc: the recorder is called once, through the trap function" {
   # A second direct call to boucle_health_record would write a duplicate row
   # on the happy path and reintroduce the drift the trap exists to prevent.
