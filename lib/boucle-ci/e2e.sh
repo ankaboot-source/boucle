@@ -197,9 +197,17 @@ $evidence"
     # Reject a foreign-SHA verdict: a marker whose sha exists but differs from
     # the e2e head is not this run's verdict (AGENTS.md P4). Accept only when
     # the marker carries no sha at all (malformed marker tolerance).
+    # Compare PREFIXES, not raw strings: agents post the FULL sha from
+    # `git rev-parse` (40 chars, per AGENTS.md §"SHA-anchored verdict") while
+    # MR_HEAD_SHORT is 7. A raw != compare rejects the run's OWN verdict
+    # every single time (observed on boucle.dev: 100% of e2e verdicts
+    # rejected as foreign-SHA, every issue stuck at boucle:merging — issue
+    # #117). Prefix equality is the correct P4 test: a different commit
+    # shares no short-prefix in practice, and a 7-char prefix collision is
+    # vanishingly unlikely on a repo's recent history.
     MR_HEAD_SHORT="${MR_HEAD:0:7}"
     FOUND_SHA=$(printf '%s' "$COMMENT" | grep -oE 'sha=[a-f0-9]+' | head -1 | cut -d= -f2 || true)
-    if [ -n "$FOUND_SHA" ] && [ -n "$MR_HEAD_SHORT" ] && [ "$FOUND_SHA" != "$MR_HEAD_SHORT" ]; then
+    if [ -n "$FOUND_SHA" ] && [ -n "$MR_HEAD_SHORT" ] && [ "${FOUND_SHA:0:7}" != "$MR_HEAD_SHORT" ]; then
       echo "[boucle] REJECTED foreign-SHA e2e verdict: marker sha=$FOUND_SHA != head $MR_HEAD_SHORT. Not accepting."
       COMMENT=""
     fi

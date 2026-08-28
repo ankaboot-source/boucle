@@ -495,7 +495,11 @@ boucle_ci_reviewer() {
     VERDICT_NOTE_ID=$(forge_mr_notes "$MR_IID" \
       | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer"))] | first | .id // 0' 2> /dev/null || echo 0)
     FOUND_SHA=$(printf '%s' "$COMMENT" | grep -oE 'sha=[a-f0-9]+' | head -1 | cut -d= -f2 || true)
-    if [ -n "$FOUND_SHA" ] && [ "$FOUND_SHA" != "$MR_HEAD_SHORT" ]; then
+    # Compare PREFIXES (7 chars), not raw strings: agents post the FULL sha
+    # from `git rev-parse` (40 chars) while MR_HEAD_SHORT is 7 — a raw !=
+    # compare rejects the run's OWN verdict every time (e2e banner twin, issue
+    # #117). Prefix equality is the correct P4 test.
+    if [ -n "$FOUND_SHA" ] && [ "${FOUND_SHA:0:7}" != "$MR_HEAD_SHORT" ]; then
       echo "[boucle] REJECTED foreign-SHA verdict: marker sha=$FOUND_SHA != MR head $MR_HEAD_SHORT. Not accepting."
       VERDICT=""
       VERDICT_SHA_MATCHED=false
@@ -591,8 +595,10 @@ boucle_ci_reviewer() {
             | jq -r '[.[] | select(.body | contains("<!-- boucle:verdict") and contains("role=reviewer"))] | first | .body // empty')
           # Reject a foreign-SHA re-fetch: a marker whose sha exists but
           # differs from the MR head is not this run's verdict (AGENTS.md P4).
+          # Prefix comparison (7 chars) — same rule as the primary check above
+          # (agents post the full 40-char sha; raw != always rejects).
           NEW_FOUND_SHA=$(printf '%s' "$NEW_COMMENT" | grep -oE 'sha=[a-f0-9]+' | head -1 | cut -d= -f2 || true)
-          if [ -n "$NEW_FOUND_SHA" ] && [ "$NEW_FOUND_SHA" != "$MR_HEAD_SHORT" ]; then
+          if [ -n "$NEW_FOUND_SHA" ] && [ "${NEW_FOUND_SHA:0:7}" != "$MR_HEAD_SHORT" ]; then
             echo "[boucle] REJECTED foreign-SHA re-fetch: marker sha=$NEW_FOUND_SHA != MR head $MR_HEAD_SHORT. Not adopting."
             NEW_COMMENT=""
           fi
