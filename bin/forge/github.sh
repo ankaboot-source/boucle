@@ -315,20 +315,27 @@ forge_mr_lookup_by_branch() {
       fi
     fi
     # No exact match — list PRs in the requested state and filter by prefix.
-    # When merged_filter=1, also filter by .merged == true.
+    # When merged_filter=1, also filter by merged. FILTER ON .merged_at, not
+    # .merged: the GitHub pulls LIST endpoint never populates .merged (it is
+    # null even for merged PRs — verified 2026-08 on boucle.dev, every closed
+    # PR with merged_at set returned merged:null), only the SINGLE-PR fetch
+    # does. Gating the doctor's merged-PR detection on .merged made every
+    # merged PR vanish from its scan → false "no open or merged PR found"
+    # escalations to boucle:human (issue #113).
     if [ "$merged_filter" -eq 1 ]; then
       _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?state=$state&per_page=100" 2> /dev/null \
-        | jq -r --arg prefix "$branch" '[.[] | select((.head.ref | startswith($prefix)) and (.merged == true))] | first | .number // empty' 2> /dev/null || true
+        | jq -r --arg prefix "$branch" '[.[] | select((.head.ref | startswith($prefix)) and (.merged_at != null))] | first | .number // empty' 2> /dev/null || true
     else
       _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?state=$state&per_page=100" 2> /dev/null \
         | jq -r --arg prefix "$branch" '[.[] | select(.head.ref | startswith($prefix))] | first | .number // empty' 2> /dev/null || true
     fi
     return 0
   fi
-  # Non-boucle/<digits> branch — exact head match.
+  # Non-boucle/<digits> branch — exact head match. Same merged_at rule as
+  # the prefix path: list responses leave .merged null even for merged PRs.
   if [ "$merged_filter" -eq 1 ]; then
     _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?head=$owner:$encoded&state=$state&per_page=1" 2> /dev/null \
-      | jq -r '[.[] | select(.merged == true)] | first | .number // empty' 2> /dev/null || true
+      | jq -r '[.[] | select(.merged_at != null)] | first | .number // empty' 2> /dev/null || true
   else
     _gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?head=$owner:$encoded&state=$state&per_page=1" 2> /dev/null \
       | jq -r '.[0].number // empty' 2> /dev/null || true
