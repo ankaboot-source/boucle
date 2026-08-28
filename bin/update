@@ -534,9 +534,35 @@ main() {
     return 0
   fi
 
-  # Already up to date?
+  # Already up to date? Then reconcile the consumer's root state anyway
+  # (issue #110): a consumer that missed one propagation — a push rejected
+  # during the #107 freeze, or an incomplete manual bump — used to stay
+  # broken forever, because the early return below skipped the same
+  # hygiene the bump path performs. The desired state (submodule current
+  # ⇒ root files propagated ⇒ overlay untracked) must be an invariant
+  # reconciled on every run, not an outcome of a bump streak with no
+  # failures. Idempotent: nothing to fix → no commit, no push.
   if ! needs_update "$current" "$upstream"; then
     echo "[boucle] up to date ($mode: $current)"
+    if [ -n "$SUBMODULE_MODE" ] && [ "$dry_run" = "false" ]; then
+      local heal_files heal_out
+      heal_files=$(propagate_consumer_root_files)
+      heal_out="${heal_files} $(untrack_prompt_overlay)"
+      # shellcheck disable=SC2086 # word-splitting is intentional.
+      if [ -n "$(echo $heal_out | tr -d ' ')" ]; then
+        echo "[boucle] healing consumer root state (files drifted from the engine) — committing"
+        git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+        git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+        # shellcheck disable=SC2086
+        git add $heal_out 2> /dev/null || true
+        git commit -m "chore(boucle): re-sync consumer root files to engine $current [skip ci]" > /dev/null 2>&1 || true
+        if push_update; then
+          echo "[boucle] consumer root state healed"
+        else
+          echo "[boucle] WARN: heal commit created locally but NOT published — will retry next pipeline" >&2
+        fi
+      fi
+    fi
     return 0
   fi
 
