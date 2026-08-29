@@ -66,6 +66,58 @@ setup() {
   unset -f git
 }
 
+@test "get_current_version falls back to the engine's own embedded git (copy-based install)" {
+  # Issue #120: a real tracked .boucle/ directory has no gitlink and no
+  # submodule status. The engine's OWN embedded .git HEAD is the version.
+  tmp=$(mktemp -d)
+  cd "$tmp" || exit 1
+  mkdir -p .boucle
+  git -C .boucle init -q
+  git -C .boucle config user.email "test@example.com"
+  git -C .boucle config user.name "test"
+  git -C .boucle commit -q --allow-empty -m "engine-only commit"
+  local engine_sha
+  engine_sha=$(git -C .boucle rev-parse HEAD)
+  unset BOUCLE_VERSION
+  ENGINE_DIR=".boucle" run get_current_version
+  assert_success
+  assert_output "$engine_sha"
+  cd - > /dev/null || exit 1
+  rm -rf "$tmp"
+}
+
+@test "get_current_version never mistakes the PARENT repo HEAD for an engine version (copy-based, no embedded .git)" {
+  # Without the $ENGINE_DIR/.git guard, `git -C .boucle rev-parse HEAD`
+  # silently walks up to the parent repo and returns ITS head — which is not
+  # an engine version, and would pin needs_update to true forever.
+  tmp=$(mktemp -d)
+  cd "$tmp" || exit 1
+  git init -q
+  git config user.email "test@example.com"
+  git config user.name "test"
+  git commit -q --allow-empty -m "parent"
+  mkdir -p .boucle
+  unset BOUCLE_VERSION
+  ENGINE_DIR=".boucle" run get_current_version
+  assert_success
+  assert_output ""
+  cd - > /dev/null || exit 1
+  rm -rf "$tmp"
+}
+
+@test "get_current_version falls back to the .boucle-version stamp (legacy copy-based)" {
+  tmp=$(mktemp -d)
+  cd "$tmp" || exit 1
+  mkdir -p .boucle
+  printf '62e7c5b3861cc8999b11ce622b6574be974eee21\n' > .boucle/.boucle-version
+  unset BOUCLE_VERSION
+  ENGINE_DIR=".boucle" run get_current_version
+  assert_success
+  assert_output "62e7c5b3861cc8999b11ce622b6574be974eee21"
+  cd - > /dev/null || exit 1
+  rm -rf "$tmp"
+}
+
 # ── needs_update ──────────────────────────────────────────────────────
 
 @test "needs_update: empty upstream → no update (returns 1)" {
