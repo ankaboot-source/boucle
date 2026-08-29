@@ -860,16 +860,27 @@ forge_ci_var_set() {
   local key="$1" value="$2" masked="${3:-true}" protected="${4:-false}"
   # GitHub Actions Variables (plaintext, readable) — NOT Secrets (write-only).
   # `gh variable set` creates or updates the variable. --body takes the value.
-  echo "$value" | GH_TOKEN="$BOUCLE_TOKEN" gh variable set "$key" --repo "$BOUCLE_PROJECT_ID" --body - 2> /dev/null || true
+  # Unbound-safe under `set -u`: bin/update runs before the CI shim exports
+  # the context (see bin/forge/gitlab.sh for the incident, issue #120).
+  local repo="${BOUCLE_PROJECT_ID:-}"
+  if [ -z "$repo" ]; then
+    echo "forge_ci_var_set: BOUCLE_PROJECT_ID unset — skipping $key write (no forge context yet)" >&2
+    return 0
+  fi
+  echo "$value" | GH_TOKEN="${BOUCLE_TOKEN:-}" gh variable set "$key" --repo "$repo" --body - 2> /dev/null || true
 }
 
 forge_ci_var_get() {
   local key="$1"
-  GH_TOKEN="$BOUCLE_TOKEN" gh variable get "$key" --repo "$BOUCLE_PROJECT_ID" 2> /dev/null || true
+  local repo="${BOUCLE_PROJECT_ID:-}"
+  [ -n "$repo" ] || return 0
+  GH_TOKEN="${BOUCLE_TOKEN:-}" gh variable get "$key" --repo "$repo" 2> /dev/null || true
 }
 
 forge_ci_var_list() {
-  GH_TOKEN="$BOUCLE_TOKEN" gh variable list --repo "$BOUCLE_PROJECT_ID" 2> /dev/null | awk '{print $1}' || true
+  local repo="${BOUCLE_PROJECT_ID:-}"
+  [ -n "$repo" ] || return 0
+  GH_TOKEN="${BOUCLE_TOKEN:-}" gh variable list --repo "$repo" 2> /dev/null | awk '{print $1}' || true
 }
 
 # ── Branch protection ────────────────────────────────────────────────────

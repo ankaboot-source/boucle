@@ -46,7 +46,18 @@ variables:
   # Variable). bin/update reads it to know the current version and writes it
   # back after a successful sync. The submodule pointer is the fallback for
   # submodule installs. No .boucle-version file.
-  BOUCLE_VERSION: "${BOUCLE_VERSION}"
+
+  # NOTE: deliberately NOT re-declared here. A job-level
+  # `BOUCLE_VERSION: "${BOUCLE_VERSION}"` does NOT expand the project
+  # variable — GitLab keeps the literal string and a job-level definition
+  # shadows the project variable entirely. The jobs then see the literal
+  # "${BOUCLE_VERSION}", `needs_update` is always true and bin/update
+  # re-extracts the engine tarball on every pipeline (observed on
+  # urgence-palestine.fr: "update available: ${BOUCLE_VERSION} → …" once the
+  # project variable was missing — issue #120). Project variables are
+  # inherited by every job natively; declaring nothing is the correct state.
+  # On a fresh consumer where neither exists, bin/update records the
+  # baseline via forge_ci_var_set and exits — see its "First run" branch.
   # NOTE: there is deliberately no BOUCLE_RUNNER_TAG here. Jobs run UNTAGGED by
   # default, so the instance's shared runners pick them up and a fresh install
   # needs no runner of its own. A variable cannot express this: GitLab expands
@@ -302,8 +313,21 @@ default:
        # branch (boucle/<iid>-<slug>) the self-update commit pollutes the MR
       # with chore(boucle): commits that are the bot's engine-sync work,
       # not the issue's work (observed on MR !105: 6 chore(boucle):
-      # commits landed on boucle/79, attributed to the human because
+       # commits landed on boucle/79, attributed to the human because
       # the clone inherited their git identity).
+      #
+      # Forge context MUST be exported BEFORE bin/update: its version
+      # bookkeeping calls forge_ci_var_set, which needs BOUCLE_PROJECT_ID and
+      # BOUCLE_FORGE_HOST. The full forge_init sourcing happens only below,
+      # AFTER the self-update, so inline jobs would otherwise hand bin/update
+      # an unset project id — under `set -u` that killed the script before
+      # the commit+push could run (urgence-palestine.fr stayed frozen on an
+      # old engine for weeks; issue #120).
+      export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:-}}"
+      # CI_SERVER_HOST is the authoritative forge host inside a GitLab job —
+      # the yaml default above is a placeholder that consumers are expected
+      # to override, but nothing guarantees it until lib/boucle-ci.sh loads.
+      export BOUCLE_FORGE_HOST="${CI_SERVER_HOST:-${BOUCLE_FORGE_HOST:-gitlab.example.com}}"
       if [ "${BOUCLE_UPDATE_DISABLE:-false}" != "true" ] \
          && [ "$BOUCLE_HOME" != "$CI_PROJECT_DIR" ] \
          && [ "${BOUCLE_PIPELINE_SOURCE:-}" != "push" ] \
