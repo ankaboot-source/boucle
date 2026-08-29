@@ -218,6 +218,29 @@ get_current_version() {
     echo "$sub_sha"
     return
   fi
+  # Copy-based install fallbacks (issue #120): a real tracked .boucle/
+  # directory has NO gitlink and NO submodule status, so without a fallback
+  # it reads "first run" forever — record-nothing, extract-nothing, and it
+  # never converges. Two sources, in order:
+  #   1. the engine's OWN embedded git repo — guard on $ENGINE_DIR/.git
+  #      existing: without it `git -C` silently walks up to the PARENT repo
+  #      and returns the parent's HEAD, which is not an engine version and
+  #      would make needs_update permanently true;
+  #   2. the legacy .bouclé-version stamp (written by bin/setup and the
+  #      pre-#120 generations of bin/update; urgence-palestine.fr carries
+  #      one) — absent in fresh installs, fine.
+  if [ "$ENGINE_DIR" != "." ] && [ -e "$ENGINE_DIR/.git" ]; then
+    local head
+    head=$(git -C "$ENGINE_DIR" rev-parse HEAD 2> /dev/null || true)
+    if [ -n "$head" ]; then
+      echo "$head"
+      return
+    fi
+  fi
+  if [ "$ENGINE_DIR" != "." ] && [ -s "$ENGINE_DIR/.boucle-version" ]; then
+    echo "$(tr -d '[:space:]' < "$ENGINE_DIR/.boucle-version")"
+    return
+  fi
   echo ""
 }
 
