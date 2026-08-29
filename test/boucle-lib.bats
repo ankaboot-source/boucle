@@ -1362,6 +1362,43 @@ HELPER
   assert_output --partial "FAIL: deploy failed in post-merge self mode"
 }
 
+@test "boucle_do_deploy exposes job-local BRANCH to the deploy command" {
+  # Regression (consumer framagit, 2026-08): the deploy consolidation into
+  # boucle_do_deploy dropped the job-local BRANCH assignment that the
+  # documented $$BRANCH contract relies on (.gitlab-ci.yml deploy templates:
+  # wrangler/netlify/rsync use $$BRANCH). Under the CI job's set -u, any
+  # BOUCLE_DEPLOY_CMD referencing $$BRANCH died with "BRANCH: unbound
+  # variable" — every post-merge deploy failed and production stopped
+  # redeploying. The eval must see BRANCH=$BOUCLE_DEFAULT_BRANCH.
+  local helper_script='$0'
+  helper_script=$(mktemp)
+  cat > "$helper_script" << 'HELPER'
+#!/usr/bin/env bash
+set -u
+BOUCLE_DEPLOY_MODE=self
+BOUCLE_DEPLOY_CMD='echo "DEPLOYED https://cdn.example.com/$BRANCH"'
+BOUCLE_DEPLOY_URL_REGEX="https://[a-zA-Z0-9./-]+"
+BOUCLE_BUILD_CMD="echo BUILD_RAN"
+BOUCLE_BUILD_OUTPUT=""
+BOUCLE_DEFAULT_BRANCH=master
+BOUCLE_FORGE_HOST=github.com
+BOUCLE_PROJECT_ID=1
+forge_issue_get() { :; }
+forge_issue_labels_get() { echo ""; }
+forge_issue_labels_set() { :; }
+curl() { echo "200"; }
+source lib/boucle.sh
+set -u
+boucle_do_deploy
+HELPER
+  chmod +x "$helper_script"
+  run "$helper_script"
+  rm -f "$helper_script"
+  assert_success
+  assert_output --partial "https://cdn.example.com/master"
+  refute_output --partial "unbound variable"
+}
+
 @test "post-merge self mode no longer polls for a push pipeline" {
   # The 60-iteration polling loop over forge_pipeline_status_for_ref is dead
   # code — the merge commit carries [skip ci], so the push-triggered deploy
