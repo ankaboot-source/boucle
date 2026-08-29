@@ -2225,6 +2225,9 @@ boucle_worker_deploy() {
     return 0
   fi
   # Fallback: run BOUCLE_DEPLOY_CMD and extract a preview URL.
+  # BRANCH (uppercase) is part of the $$BRANCH deploy-command contract
+  # (.gitlab-ci.yml deploy templates) — the worker sets it job-locally in
+  # worker.sh. Do not rename; see the contract note in boucle_do_deploy.
   (eval "$BOUCLE_DEPLOY_CMD") > "$deploy_log" 2>&1
   local rc=$?
   local url
@@ -2320,9 +2323,14 @@ boucle_do_deploy() {
     eval "$BOUCLE_BUILD_CMD" >&2
   fi
 
-  # Deploy to production (configurable via BOUCLE_DEPLOY_CMD, force default branch)
-  local branch deploy_log deploy_rc url
-  branch="$BOUCLE_DEFAULT_BRANCH"
+  # Deploy to production (configurable via BOUCLE_DEPLOY_CMD, force default
+  # branch). BRANCH (uppercase) is part of the documented deploy-command
+  # contract (.gitlab-ci.yml: deploy templates use $$BRANCH so the eval
+  # expands it at runtime with the job-local value). Restore it before the
+  # eval or any template referencing $$BRANCH (wrangler, netlify, rsync)
+  # dies on `BRANCH: unbound variable` under set -u.
+  local BRANCH deploy_log deploy_rc url
+  BRANCH="${BOUCLE_DEFAULT_BRANCH}"
   deploy_log=$(mktemp)
   (eval "$BOUCLE_DEPLOY_CMD") > "$deploy_log" 2>&1
   deploy_rc=$?
