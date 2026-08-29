@@ -660,19 +660,48 @@ forge_webhook_issue_iid() {
 
 forge_ci_var_set() {
   local key="$1" value="$2" masked="${3:-false}" protected="${4:-false}"
-  local -a args=(-X POST "/projects/$BOUCLE_PROJECT_ID/variables" -f key="$key" -f value="$value")
+  # bin/update runs under `set -u` and is invoked by the before_script BEFORE
+  # the forge context is exported (observed on urgence-palestine.fr, issue
+  # #120: the expansion below died on an unset BOUCLE_PROJECT_ID, so the
+  # self-update commit+push never ran and the consumer stayed frozen on an
+  # old engine while each job logged only the generic "self-update failed"
+  # fallback). The variable write is best-effort bookkeeping — unset context
+  # ⇒ skip with a message, never die.
+  local project_id="${BOUCLE_PROJECT_ID:-}"
+  if [ -z "$project_id" ]; then
+    echo "forge_ci_var_set: BOUCLE_PROJECT_ID unset — skipping $key write (no forge context yet)" >&2
+    return 0
+  fi
+  local host="${BOUCLE_FORGE_HOST:-gitlab}"
+  local -a args=(-X POST "/projects/$project_id/variables" -f key="$key" -f value="$value")
   [ "$masked" = true ] && args+=(-f masked=true)
   [ "$protected" = true ] && args+=(-f protected=true)
-  glab api --hostname "$BOUCLE_FORGE_HOST" "${args[@]}" > /dev/null 2>&1 || true
+  # Upsert: a POST on an existing key is rejected ("key has already been
+  # taken") and the plain `|| true` swallowed it — the version pointer then
+  # never advanced past the first write (observed: BOUCLE_VERSION stuck on a
+  # tag while the engine tracked a dev SHA, so every run re-extracted the
+  # engine tarball). Fall through to PUT (update) when the POST fails.
+  if ! glab api --hostname "$host" "${args[@]}" > /dev/null 2>&1; then
+    local -a put_args=(-X PUT "/projects/$project_id/variables/$key" -f value="$value")
+    [ "$masked" = true ] && put_args+=(-f masked=true)
+    [ "$protected" = true ] && put_args+=(-f protected=true)
+    glab api --hostname "$host" "${put_args[@]}" > /dev/null 2>&1 || true
+  fi
 }
 
 forge_ci_var_get() {
   local key="$1"
-  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/variables/$key" 2> /dev/null | jq -r '.value // empty' || true
+  local project_id="${BOUCLE_PROJECT_ID:-}"
+  [ -n "$project_id" ] || return 0
+  glab api --hostname "${BOUCLE_FORGE_HOST:-gitlab}" "/projects/$project_id/variables/$key" 2> /dev/null | jq -r '.value // empty' || true
 }
 
 forge_ci_var_list() {
-  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/variables" 2> /dev/null | jq -r '.[].key' 2> /dev/null || true
+  local project_id="${BOUCLE_PROJECT_ID:-}"
+  if [ -z "$project_id" ]; then
+    return 0
+  fi
+  glab api --hostname "${BOUCLE_FORGE_HOST:-gitlab}" "/projects/$project_id/variables" 2> /dev/null | jq -r '.[].key' 2> /dev/null || true
 }
 
 # ── Branch protection ────────────────────────────────────────────────────

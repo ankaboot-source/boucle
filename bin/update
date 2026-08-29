@@ -218,6 +218,29 @@ get_current_version() {
     echo "$sub_sha"
     return
   fi
+  # Copy-based install fallbacks (issue #120): a real tracked .boucle/
+  # directory has NO gitlink and NO submodule status, so without a fallback
+  # it reads "first run" forever — record-nothing, extract-nothing, and it
+  # never converges. Two sources, in order:
+  #   1. the engine's OWN embedded git repo — guard on $ENGINE_DIR/.git
+  #      existing: without it `git -C` silently walks up to the PARENT repo
+  #      and returns the parent's HEAD, which is not an engine version and
+  #      would make needs_update permanently true;
+  #   2. the legacy .bouclé-version stamp (written by bin/setup and the
+  #      pre-#120 generations of bin/update; urgence-palestine.fr carries
+  #      one) — absent in fresh installs, fine.
+  if [ "$ENGINE_DIR" != "." ] && [ -e "$ENGINE_DIR/.git" ]; then
+    local head
+    head=$(git -C "$ENGINE_DIR" rev-parse HEAD 2> /dev/null || true)
+    if [ -n "$head" ]; then
+      echo "$head"
+      return
+    fi
+  fi
+  if [ "$ENGINE_DIR" != "." ] && [ -s "$ENGINE_DIR/.boucle-version" ]; then
+    echo "$(tr -d '[:space:]' < "$ENGINE_DIR/.boucle-version")"
+    return
+  fi
   echo ""
 }
 
@@ -486,6 +509,57 @@ untrack_prompt_overlay() {
   return 0
 }
 
+# heal_consumer_root <current_version>
+# Reconcile the consumer root with the engine on the "up to date" path
+# (issue #110): engine-owned root docs re-propagated, orphan real dirs
+# migrated to engine symlinks, prompt overlay untracked, drift committed
+# and pushed. Applies to BOTH consumer install models — submodule AND
+# copy-based (a real tracked .boucle/ directory, the layout that let
+# urgence-palestine.fr run stale root bin/ + .jcode/ for weeks; issue
+# #120). Only the dogfood layout (ENGINE_DIR = ".") is out of scope: the
+# root IS the engine there, nothing to reconcile. Idempotent — no drift
+# → no commit, no push.
+heal_consumer_root() {
+  local current="$1"
+  local heal_files heal_out
+  heal_files=$(propagate_consumer_root_files)
+  heal_out="${heal_files} $(untrack_prompt_overlay)"
+  # shellcheck disable=SC2086 # word-splitting is intentional.
+  if [ -z "$(echo $heal_out | tr -d ' ')" ]; then
+    return 0
+  fi
+  echo "[boucle] healing consumer root state (files drifted from the engine) — committing"
+  git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+  git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+  # Filter out ignored paths before the add: untrack_prompt_overlay
+  # gitignores .jcode/prompt-overlay.md AND git-rm --cacheds it, and
+  # `git add <ignored-path>` exits 1 while staging NOTHING of that
+  # invocation — the heal commit would silently lose every other file
+  # listed alongside it (verified: git 2.55). `git add` refuses only
+  # explicitly-ignored paths; staged deletions (the overlay's rm
+  # --cached) are already in the index and need no re-add.
+  local heal_addable=""
+  for heal_path in $heal_out; do
+    if [ -e "$heal_path" ] && git check-ignore -q "$heal_path" 2> /dev/null; then
+      continue
+    fi
+    heal_addable="$heal_addable $heal_path"
+  done
+  # shellcheck disable=SC2086
+  git add $heal_addable 2> /dev/null || true
+  git commit -m "chore(boucle): re-sync consumer root files to engine $current [skip ci]" > /dev/null 2>&1 || true
+  # configure_git_push is MANDATORY here: without it the push goes out
+  # under the workflow's token and is rejected for the workflow-file
+  # sync (observed on boucle.dev — the heal commit was created but the
+  # push hit the #107 rejection). Same contract as the bump path.
+  configure_git_push
+  if push_update; then
+    echo "[boucle] consumer root state healed"
+  else
+    echo "[boucle] WARN: heal commit created locally but NOT published — will retry next pipeline" >&2
+  fi
+}
+
 # ── Main ──────────────────────────────────────────────────────────────
 
 main() {
@@ -549,49 +623,18 @@ main() {
   # (issue #110): a consumer that missed one propagation — a push rejected
   # during the #107 freeze, or an incomplete manual bump — used to stay
   # broken forever, because the early return below skipped the same
-  # hygiene the bump path performs. The desired state (submodule current
-  # ⇒ root files propagated ⇒ overlay untracked) must be an invariant
-  # reconciled on every run, not an outcome of a bump streak with no
-  # failures. Idempotent: nothing to fix → no commit, no push.
+  # hygiene the bump path performs. The desired state (engine current
+  # ⇒ root files propagated ⇒ orphan symlinks in place ⇒ overlay untracked)
+  # must be an invariant reconciled on every run, not an outcome of a bump
+  # streak with no failures. Idempotent: nothing to fix → no commit, no push.
+  # Issue #120: the heal is NOT submodule-only. Copy-based consumers (a real
+  # tracked .boucle/ directory) carry stale root files and frozen orphan
+  # tooling exactly like submodule ones — urgence-palestine.fr ran a stale
+  # root bin/ + .jcode/ for weeks. Any non-dogfood engine install heals.
   if ! needs_update "$current" "$upstream"; then
     echo "[boucle] up to date ($mode: $current)"
-    if [ -n "$SUBMODULE_MODE" ] && [ "$dry_run" = "false" ]; then
-      local heal_files heal_out
-      heal_files=$(propagate_consumer_root_files)
-      heal_out="${heal_files} $(untrack_prompt_overlay)"
-      # shellcheck disable=SC2086 # word-splitting is intentional.
-      if [ -n "$(echo $heal_out | tr -d ' ')" ]; then
-        echo "[boucle] healing consumer root state (files drifted from the engine) — committing"
-        git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
-        git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
-        # Filter out ignored paths before the add: untrack_prompt_overlay
-        # gitignores .jcode/prompt-overlay.md AND git-rm --cacheds it, and
-        # `git add <ignored-path>` exits 1 while staging NOTHING of that
-        # invocation — the heal commit would silently lose every other file
-        # listed alongside it (verified: git 2.55). `git add` refuses only
-        # explicitly-ignored paths; staged deletions (the overlay's rm
-        # --cached) are already in the index and need no re-add.
-        local heal_addable=""
-        for heal_path in $heal_out; do
-          if [ -e "$heal_path" ] && git check-ignore -q "$heal_path" 2> /dev/null; then
-            continue
-          fi
-          heal_addable="$heal_addable $heal_path"
-        done
-        # shellcheck disable=SC2086
-        git add $heal_addable 2> /dev/null || true
-        git commit -m "chore(boucle): re-sync consumer root files to engine $current [skip ci]" > /dev/null 2>&1 || true
-        # configure_git_push is MANDATORY here: without it the push goes out
-        # under the workflow's token and is rejected for the workflow-file
-        # sync (observed on boucle.dev — the heal commit was created but the
-        # push hit the #107 rejection). Same contract as the bump path.
-        configure_git_push
-        if push_update; then
-          echo "[boucle] consumer root state healed"
-        else
-          echo "[boucle] WARN: heal commit created locally but NOT published — will retry next pipeline" >&2
-        fi
-      fi
+    if [ "$ENGINE_DIR" != "." ] && [ "$dry_run" = "false" ]; then
+      heal_consumer_root "$current"
     fi
     return 0
   fi
