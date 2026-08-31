@@ -801,20 +801,25 @@ boucle_ci_dispatch() {
   # echos fire (lesson #5).
   echo "dispatch: fetching labels for #$IID (forge=$BOUCLE_FORGE_HOST, project=$BOUCLE_PROJECT_ID)"
   LABELS=$(forge_issue_labels_get "$IID")
-  # An empty list is NOT a failure: a freshly opened issue has no labels, and
-  # that is precisely the case this function exists to route to triage. Empty
-  # used to abort here, which made the "new issue with no boucle label"
-  # branch below unreachable and left every new issue to be rescued by the
-  # doctor's orphan scan minutes later. The two states are indistinguishable
-  # on stdout — forge_issue_labels_get prints nothing either way — so tell
-  # them apart by probing the issue itself. One extra API call, and only on
-  # the empty path.
+  # An empty list is NOT a failure: a freshly opened issue has no labels.
+  # It is also NOT a dispatch route by itself anymore (#124): routing on
+  # empty labels re-appropriated every issue whose boucle: labels were
+  # deliberately removed by a human (the removal webhook itself re-triaged
+  # and re-labeled — an inescapable ping-pong). Only an explicit
+  # open/opened action routes a new issue to triage; the opt-out tombstone
+  # below handles human label removal. Empty used to abort here, which
+  # made the "new issue with no boucle label" branch unreachable and left
+  # every new issue to be rescued by the doctor's orphan scan minutes
+  # later. The two states are indistinguishable on stdout —
+  # forge_issue_labels_get prints nothing either way — so tell them apart
+  # by probing the issue itself. One extra API call, and only on the
+  # empty path.
   if [ -z "$LABELS" ]; then
     if [ -z "$(forge_issue_get "$IID" | jq -r '.state // empty' 2> /dev/null)" ]; then
       echo "dispatch: ABORT — cannot reach issue #$IID to read its labels (BOUCLE_FORGE_HOST=${BOUCLE_FORGE_HOST:-unset}, project=${BOUCLE_PROJECT_ID:-unset})"
       exit 1
     fi
-    echo "dispatch: #$IID has no labels — treating as a new issue"
+    echo "dispatch: #$IID has no labels — routing depends on the event action (open/opened only)"
   fi
   echo "dispatch: labels for #$IID: $LABELS"
 
@@ -885,6 +890,47 @@ boucle_ci_dispatch() {
     echo "Issue #$IID is the boucle status board — never dispatched."
     dispatch_noop
   fi
+
+  # ── Human opt-out tombstone (#124) ──────────────────────────────────
+  # Removing the boucle: labels is the explicit "leave the loop" signal:
+  # the human wants to manage the issue interactively, outside boucle.
+  # Without this branch the removal webhook re-routed the (now unlabeled)
+  # issue to triage, which re-applied boucle:triage + boucle::status::bot
+  # and re-assigned the bot — an inescapable re-appropriation ping-pong
+  # while any webhook kept arriving. Detect the removal trace:
+  #   GitLab: the label-change webhook carries .changes.labels.previous
+  #           (the labels BEFORE this event); a boucle:-prefixed entry
+  #           there with NO boucle: label alive now = human removal.
+  #   GitHub: the `issues: unlabeled` event carries the removed label in
+  #           .label.name; same live check.
+  # The tombstone note is idempotent: once posted, later events (notes,
+  # edits, further label churn) no-op against it. The doctor's unlabeled
+  # scan skips tombstones, so the issue stays out of the loop for good.
+  # Re-entering the loop is explicit: re-adding boucle:triage or assigning
+  # the bot re-triggers triage normally (the tombstone only guards the
+  # unlabeled route).
+  BOUCLE_LABELS_REMOVED=false
+  if [ -n "$(jq -r '.changes.labels.previous // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)" ]; then
+    PREV_HAD_BOUCLE=$(jq -r '[.changes.labels.previous[] | select(startswith("boucle:"))] | length > 0' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+    if [ "$PREV_HAD_BOUCLE" = "true" ] && ! echo "$LABELS" | grep -q 'boucle:'; then
+      BOUCLE_LABELS_REMOVED=true
+    fi
+  elif [ "$ACTION" = "unlabeled" ]; then
+    REMOVED_LABEL=$(jq -r '.label.name // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+    if echo "$REMOVED_LABEL" | grep -q '^boucle:' && ! echo "$LABELS" | grep -q 'boucle:'; then
+      BOUCLE_LABELS_REMOVED=true
+    fi
+  fi
+  if [ "$BOUCLE_LABELS_REMOVED" = "true" ]; then
+    echo "dispatch: #$IID lost its boucle: labels — human opt-out, tombstoning (no re-triage)"
+    if ! forge_issue_notes "$IID" | grep -q 'boucle:opt-out'; then
+      forge_issue_note "$IID" "Les étiquettes boucle ont été retirées — sortie de la boucle à la demande de l'équipe. Replacer l'étiquette \`boucle:triage\` ou assigner le bot pour reprendre.
+
+<!-- boucle:opt-out v=1 -->" 2> /dev/null || true
+    fi
+    dispatch_noop
+  fi
+
   if echo "$LABELS" | grep -q "boucle:triage"; then
     SHOULD_TRIAGE=true
   elif echo "$LABELS" | grep -q "boucle:needs-info"; then
@@ -1055,8 +1101,15 @@ boucle_ci_dispatch() {
       echo "Amend-in-flight: human comment on issue #$IID at boucle:working — re-triggering worker with the comment as additional context"
       SHOULD_WORK=true
     fi
-  elif [ -z "$LABELS" ] || [ "$ACTION" = "open" ]; then
-    # New issue with no boucle label → triage
+  elif [ "$ACTION" = "open" ] || [ "$ACTION" = "opened" ]; then
+    # New issue with no boucle label → triage. Only an explicit open event
+    # means "brand-new issue": GitLab sends action=open, GitHub normalizes
+    # .action=opened above. An update/note/label-change event on an
+    # unlabeled issue is NOT a new issue — the human may have removed the
+    # boucle labels deliberately (opt-out, handled by the tombstone above)
+    # — and must never re-triage (#124). The rescue of new issues whose
+    # open webhook was missed is the doctor's unlabeled scan, not any
+    # webhook.
     SHOULD_TRIAGE=true
   fi
 

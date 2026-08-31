@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# shellcheck disable=SC2154 # HUMAN_REPLY_AFTER_TRIAGE is set by eval of an extracted snippet (pre-existing)
 # test/doctor.bats — smoke tests for bin/doctor.
 #
 # bin/doctor has no BASH_SOURCE guard and executes its full body on source,
@@ -414,4 +415,70 @@ extract_first_reply_counter() {
   eval "$extract"
   run doctor_mr_approval_emoji 42
   assert_output "1"
+}
+
+# ── Opt-out tombstone (#124): the unlabeled scan skips tombstones ──────
+# A human who removes the boucle: labels gets a <!-- boucle:opt-out -->
+# marker from dispatch. The issue matches the orphaned-triage profile
+# (triage comment + human reply, no boucle label) by construction, so
+# without the guard every doctor sweep would re-appropriate it. The guard
+# lives in the UNLABELED scan only — the labeled scans (needs-info,
+# spec-review, stuck) are untouched.
+
+extract_unlabeled_scan() {
+  # Extract the "Recover orphaned triages on UNLABELED open issues" block.
+  awk '
+    /# ── Recover orphaned triages on UNLABELED open issues/ { p = 1 }
+    p == 1 { print }
+    p == 1 && /# ── Recover stuck boucle:working/ { exit }
+  ' lib/boucle-ci/doctor.sh
+}
+
+@test "doctor unlabeled scan: the opt-out tombstone guard sits right after the notes fetch" {
+  block=$(extract_unlabeled_scan)
+  [ -n "$block" ] || { echo "unlabeled scan block not found"; false; }
+  # The guard must fire as soon as the notes are fetched, BEFORE any
+  # triage-comment / human-reply classification.
+  echo "$block" | grep -q 'NOTES=\$(forge_issue_notes "\$IID")'
+  echo "$block" | grep -q 'boucle:opt-out'
+  echo "$block" | grep -q 'continue'
+  # The guard must NOT touch the labeled scans (needs-info, spec-review,
+  # stuck): every boucle:opt-out occurrence must live inside the unlabeled
+  # block, bounded by its section headers.
+  start=$(grep -n '# ── Recover orphaned triages on UNLABELED open issues' lib/boucle-ci/doctor.sh | head -1 | cut -d: -f1)
+  end=$(grep -n '# ── Recover stuck boucle:working' lib/boucle-ci/doctor.sh | head -1 | cut -d: -f1)
+  [ -n "$start" ] && [ -n "$end" ] && [ "$start" -lt "$end" ]
+  while read -r line; do
+    ln=${line%%:*}
+    [ "$ln" -ge "$start" ] && [ "$ln" -lt "$end" ] || {
+      echo "boucle:opt-out at line $ln outside the unlabeled scan (lines $start-$end)"
+      return 1
+    }
+  done < <(grep -n 'boucle:opt-out' lib/boucle-ci/doctor.sh)
+}
+
+@test "doctor unlabeled scan: tombstone issues are skipped (no re-triage)" {
+  block=$(extract_unlabeled_scan)
+  [ -n "$block" ] || { echo "unlabeled scan block not found"; false; }
+  # The guard is a `continue` before any chain_to_role / set_boucle_label.
+  # Extract from the guard's condition to the closing `fi` of its if-block
+  # (the continue inside is indented 6 spaces, inside the if).
+  guard=$(echo "$block" | awk '/if echo "\$NOTES" \| grep -q .boucle:opt-out.; then/{f=1} f{print} f && /^    fi$/{exit}')
+  echo "$guard" | grep -q 'boucle:opt-out'
+  echo "$guard" | grep -q 'continue'
+  # No re-trigger machinery inside the guard: it must exit the loop
+  # iteration before any recovery action.
+  run grep -q 'chain_to_role' <<< "$guard"
+  assert_failure
+  run grep -q 'set_boucle_label' <<< "$guard"
+  assert_failure
+}
+
+@test "doctor unlabeled scan: the tombstone guard fires before triage classification" {
+  # Ordering inside the block: opt-out check must precede the
+  # LAST_TRIAGE_NOTE_ID / HUMAN_REPLY_AFTER_TRIAGE computation.
+  block=$(extract_unlabeled_scan)
+  opt_line=$(echo "$block" | grep -n 'boucle:opt-out' | head -1 | cut -d: -f1)
+  triage_line=$(echo "$block" | grep -n 'LAST_TRIAGE_NOTE_ID=' | head -1 | cut -d: -f1)
+  [ -n "$opt_line" ] && [ -n "$triage_line" ] && [ "$opt_line" -lt "$triage_line" ]
 }

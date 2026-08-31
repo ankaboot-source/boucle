@@ -489,6 +489,18 @@ boucle_ci_doctor() {
     echo "Checking #$IID (no boucle label) for orphaned triage..."
     NOTES=$(forge_issue_notes "$IID")
 
+    # Opt-out tombstone (#124): the human deliberately removed the boucle
+    # labels and dispatch posted the <!-- boucle:opt-out --> marker. The
+    # issue matches the orphaned-triage profile (triage comment + human
+    # reply, no boucle label) by construction — without this guard every
+    # doctor sweep would re-appropriate it. The tombstone only guards the
+    # unlabeled scan: re-adding boucle:triage or assigning the bot puts
+    # the issue back under label-based recovery.
+    if echo "$NOTES" | grep -q 'boucle:opt-out'; then
+      echo "  → #$IID: boucle:opt-out tombstone present (human left the loop) — skipping"
+      continue
+    fi
+
     # Does this issue have any triage comment at all?
     LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
     if [ "$LAST_TRIAGE_NOTE_ID" = "0" ]; then
