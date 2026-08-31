@@ -1,0 +1,3 @@
+{"timestamp":"2026-08-24T10:00:00Z","role":"worker","iteration":1,"exit_code":0,"prompt_chars":100,"tokens":"10","cost_usd":"n/a","model":"m","provider":"p","skills":["astro"],"arm":"full","setup_fail":""}
+{"timestamp":"2026-08-24T10:05:00Z","role":"worker","outcome":"build-fail","detail":"iteration 1"}
+{"timestamp":"2026-08-24T10:10:00Z","role":"worker","iteration":2,"exit_code":0,"prompt_chars":100,"tokens":"20","cost_usd":"n/a","model":"m","provider":"p","skills":["astro","simplify"],"arm":"full","setup_fail":"dependency"}
