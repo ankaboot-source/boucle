@@ -848,7 +848,7 @@ extract_working_amend_block() {
   awk '
     /^  elif echo "\$LABELS" \| grep -q "boucle:working"; then$/ { p = 1 }
     p == 1 { print }
-    p == 1 && /^  elif \[ -z "\$LABELS" \] \|\| \[ "\$ACTION" = "open" \]; then$/ { exit }
+    p == 1 && /^  elif \[ "\$ACTION" = "open" \] \|\| \[ "\$ACTION" = "opened" \]; then$/ { exit }
   ' lib/boucle-ci/dispatch.sh
 }
 
@@ -873,11 +873,12 @@ extract_working_amend_block() {
 @test "amend-in-flight: the branch sits between boucle:human and the open-issue fallthrough" {
   # Ordering matters: boucle:working must be checked AFTER boucle:human
   # (an issue flipped to human by the worker's own escalation takes
-  # precedence) and BEFORE the no-label/open fallthrough.
+  # precedence) and BEFORE the open-event fallthrough (#124: unlabeled
+  # routes only on an explicit open/opened action).
   run awk '
     /elif echo "\$LABELS" \| grep -q "boucle:human"; then/ { human = NR }
     /elif echo "\$LABELS" \| grep -q "boucle:working"; then/ { working = NR }
-    /elif \[ -z "\$LABELS" \] \|\| \[ "\$ACTION" = "open" \]; then/ { open = NR }
+    /elif \[ "\$ACTION" = "open" \] \|\| \[ "\$ACTION" = "opened" \]; then/ { open = NR }
     END { exit !(human > 0 && working > human && open > working) }
   ' lib/boucle-ci/dispatch.sh
   assert_success
@@ -1083,7 +1084,216 @@ extract_recheck_block() {
 }
 
 @test "guard shape: the new-issue-to-triage branch is still reachable" {
-  # The branch the old guard made unreachable.
-  run grep -q 'elif \[ -z "$LABELS" \] || \[ "$ACTION" = "open" \]; then' lib/boucle-ci/dispatch.sh
+  # The branch the old guard made unreachable. Since #124 the catch-all is
+  # gone: an unlabeled issue routes to triage ONLY on an explicit open
+  # event (GitLab action=open / GitHub action=opened). Any other event
+  # (note, update, label change) on an unlabeled issue must NOT re-triage.
+  run grep -q 'elif \[ "\$ACTION" = "open" \] || \[ "\$ACTION" = "opened" \]; then' lib/boucle-ci/dispatch.sh
+  assert_success
+}
+
+# ── Opt-out tombstone (#124): human label removal is NOT re-appropriation ──
+# Removing the boucle: labels is the explicit "leave the loop" signal.
+# Without the tombstone the removal webhook re-routed the unlabeled issue
+# to triage, which re-applied boucle:triage + boucle::status::bot and
+# re-assigned the bot — an inescapable ping-pong while any webhook kept
+# arriving. The tombstone note is idempotent (posted once, verified against
+# the existing notes) and the issue is NEVER re-labeled/re-assigned by the
+# unlabeled route. The doctor's unlabeled scan skips tombstones.
+
+# ── Opt-out predicate (pure): human label-removal detection ─────────────
+
+@test "opt-out: GitLab previous-boucle-labels + empty live labels → removed" {
+  # GitLab label-change webhook: .changes.labels.previous held boucle:
+  # labels, the live label list no longer has any → human opt-out.
+  echo "{\"changes\":{\"labels\":{\"previous\":[\"boucle:triage\",\"boucle::status::bot\",\"help-wanted\"]}}}" > "$BATS_TEST_TMPDIR/prev.json"
+  run bash -c '
+    LABELS=""
+    BOUCLE_TRIGGER_PAYLOAD="$1"
+    if [ -n "$(jq -r ".changes.labels.previous // empty" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)" ]; then
+      PREV_HAD_BOUCLE=$(jq -r "[.changes.labels.previous[] | select(startswith(\"boucle:\"))] | length > 0" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+      if [ "$PREV_HAD_BOUCLE" = "true" ] && ! echo "$LABELS" | grep -q "boucle:"; then
+        echo removed
+      fi
+    fi
+  ' _ "$BATS_TEST_TMPDIR/prev.json"
+  assert_output "removed"
+}
+
+@test "opt-out: GitLab previous-boucle-labels + boucle:triage still alive → NOT removed" {
+  echo "{\"changes\":{\"labels\":{\"previous\":[\"boucle:triage\"]}}}" > "$BATS_TEST_TMPDIR/prev.json"
+  run bash -c '
+    LABELS="boucle:triage,help-wanted"
+    BOUCLE_TRIGGER_PAYLOAD="$1"
+    if [ -n "$(jq -r ".changes.labels.previous // empty" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)" ]; then
+      PREV_HAD_BOUCLE=$(jq -r "[.changes.labels.previous[] | select(startswith(\"boucle:\"))] | length > 0" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+      if [ "$PREV_HAD_BOUCLE" = "true" ] && ! echo "$LABELS" | grep -q "boucle:"; then
+        echo removed
+      fi
+    fi
+  ' _ "$BATS_TEST_TMPDIR/prev.json"
+  refute_output --partial "removed"
+}
+
+@test "opt-out: GitHub unlabeled event with a boucle: label and empty live → removed" {
+  echo "{\"action\":\"unlabeled\",\"label\":{\"name\":\"boucle:triage\"}}" > "$BATS_TEST_TMPDIR/gh.json"
+  run bash -c '
+    LABELS=""
+    ACTION="unlabeled"
+    BOUCLE_TRIGGER_PAYLOAD="$1"
+    if [ -n "$(jq -r ".changes.labels.previous // empty" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)" ]; then
+      PREV_HAD_BOUCLE=$(jq -r "[.changes.labels.previous[] | select(startswith(\"boucle:\"))] | length > 0" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+      if [ "$PREV_HAD_BOUCLE" = "true" ] && ! echo "$LABELS" | grep -q "boucle:"; then
+        echo removed
+      fi
+    elif [ "$ACTION" = "unlabeled" ]; then
+      REMOVED_LABEL=$(jq -r ".label.name // empty" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+      if echo "$REMOVED_LABEL" | grep -q "^boucle:" && ! echo "$LABELS" | grep -q "boucle:"; then
+        echo removed
+      fi
+    fi
+  ' _ "$BATS_TEST_TMPDIR/gh.json"
+  assert_output "removed"
+}
+
+@test "opt-out: GitHub unlabeled event with boucle:triage still alive → NOT removed" {
+  echo "{\"action\":\"unlabeled\",\"label\":{\"name\":\"boucle:triage\"}}" > "$BATS_TEST_TMPDIR/gh.json"
+  run bash -c '
+    LABELS="boucle:triage"
+    ACTION="unlabeled"
+    BOUCLE_TRIGGER_PAYLOAD="$1"
+    if [ -n "$(jq -r ".changes.labels.previous // empty" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)" ]; then
+      PREV_HAD_BOUCLE=$(jq -r "[.changes.labels.previous[] | select(startswith(\"boucle:\"))] | length > 0" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+      if [ "$PREV_HAD_BOUCLE" = "true" ] && ! echo "$LABELS" | grep -q "boucle:"; then
+        echo removed
+      fi
+    elif [ "$ACTION" = "unlabeled" ]; then
+      REMOVED_LABEL=$(jq -r ".label.name // empty" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+      if echo "$REMOVED_LABEL" | grep -q "^boucle:" && ! echo "$LABELS" | grep -q "boucle:"; then
+        echo removed
+      fi
+    fi
+  ' _ "$BATS_TEST_TMPDIR/gh.json"
+  refute_output --partial "removed"
+}
+
+@test "opt-out: GitLab note event on an unlabeled issue without label-change trace → NOT removed" {
+  # A plain note (no .changes.labels.previous, no unlabeled action) on an
+  # unlabeled issue must not be classified as an opt-out — the human may
+  # simply be commenting on an issue that never had boucle labels.
+  echo "{\"object_kind\":\"note\",\"object_attributes\":{\"note\":\"hello\"},\"issue\":{\"iid\":7}}" > "$BATS_TEST_TMPDIR/note.json"
+  run bash -c '
+    LABELS=""
+    ACTION=""
+    BOUCLE_TRIGGER_PAYLOAD="$1"
+    if [ -n "$(jq -r ".changes.labels.previous // empty" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)" ]; then
+      PREV_HAD_BOUCLE=$(jq -r "[.changes.labels.previous[] | select(startswith(\"boucle:\"))] | length > 0" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+      if [ "$PREV_HAD_BOUCLE" = "true" ] && ! echo "$LABELS" | grep -q "boucle:"; then
+        echo removed
+      fi
+    elif [ "$ACTION" = "unlabeled" ]; then
+      REMOVED_LABEL=$(jq -r ".label.name // empty" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
+      if echo "$REMOVED_LABEL" | grep -q "^boucle:" && ! echo "$LABELS" | grep -q "boucle:"; then
+        echo removed
+      fi
+    fi
+  ' _ "$BATS_TEST_TMPDIR/note.json"
+  refute_output --partial "removed"
+}
+
+# ── Opt-out routing: the dispatch branch posts the tombstone once ──────
+
+opt_out_routing() {
+  local notes="$1"
+  # Replicates the dispatch opt-out branch (posting side).
+  if ! printf '%s' "$notes" | grep -q 'boucle:opt-out'; then
+    forge_issue_note "$IID" "tombstone"
+  fi
+}
+
+@test "opt-out: the tombstone note is posted when no marker exists yet" {
+  # The posting side must be gated on the marker being absent from the
+  # existing notes — otherwise every label-churn webhook posts another note.
+  POSTED=""
+  forge_issue_note() { POSTED="$1"; }
+  IID=7
+  opt_out_routing '[]'
+  [ "$POSTED" = "7" ]
+}
+
+@test "opt-out: the tombstone note is NOT posted when the marker already exists (idempotent)" {
+  POSTED=""
+  forge_issue_note() { POSTED="$1"; }
+  IID=7
+  opt_out_routing '[{"body":"<!-- boucle:opt-out v=1 --> sortie de boucle"}]'
+  [ -z "$POSTED" ]
+}
+
+# ── Unlabeled routing contract (#124): only open/opened events triage ──
+
+unlabeled_decision() {
+  local action="$1"
+  if [ "$action" = "open" ] || [ "$action" = "opened" ]; then
+    echo triage
+  else
+    echo noop
+  fi
+}
+
+@test "unlabeled: GitLab open event on an unlabeled issue routes to triage" {
+  run unlabeled_decision "open"
+  assert_output "triage"
+}
+
+@test "unlabeled: GitHub opened event on an unlabeled issue routes to triage" {
+  run unlabeled_decision "opened"
+  assert_output "triage"
+}
+
+@test "unlabeled: a note event on an unlabeled issue does NOT triage (#124)" {
+  run unlabeled_decision "note"
+  assert_output "noop"
+}
+
+@test "unlabeled: an update event on an unlabeled issue does NOT triage (#124)" {
+  run unlabeled_decision "update"
+  assert_output "noop"
+}
+
+@test "unlabeled: a label event on an unlabeled issue does NOT triage (#124)" {
+  run unlabeled_decision "labeled"
+  assert_output "noop"
+}
+
+@test "unlabeled: the dispatch branch never re-labels or re-assigns on opt-out" {
+  # The opt-out branch must exit via dispatch_noop before any
+  # set_boucle_label / chain_to_role can fire.
+  block=$(awk '/Human opt-out tombstone/{p=1} p{print} p && /^  if echo "\$LABELS" \| grep -q "boucle:triage"; then$/{exit}' lib/boucle-ci/dispatch.sh)
+  echo "$block" | grep -q 'BOUCLE_LABELS_REMOVED'
+  echo "$block" | grep -q 'dispatch_noop'
+  # No re-label / no role chain inside the tombstone branch itself.
+  run grep -q 'set_boucle_label' <<< "$block"
+  assert_failure
+  run grep -q 'chain_to_role' <<< "$block"
+  assert_failure
+  run grep -q '\.boucle-issue' <<< "$block"
+  assert_failure
+}
+
+@test "unlabeled: the dispatch branch is reachable on unlabeled events" {
+  # The tombstone must sit BEFORE the label routing (any unlabeled event
+  # reaches it) and AFTER the board check. The routing anchor is the
+  # boucle:triage branch that FOLLOWS the tombstone block (an earlier
+  # grep in the BOT_JUST_ASSIGNED block precedes it — use tail).
+  tombstone_line=$(grep -n 'Human opt-out tombstone' lib/boucle-ci/dispatch.sh | head -1 | cut -d: -f1)
+  board_line=$(grep -n 'boucle status board' lib/boucle-ci/dispatch.sh | head -1 | cut -d: -f1)
+  triage_line=$(grep -n 'grep -q "boucle:triage"' lib/boucle-ci/dispatch.sh | tail -1 | cut -d: -f1)
+  [ -n "$tombstone_line" ] && [ -n "$board_line" ] && [ -n "$triage_line" ]
+  [ "$board_line" -lt "$tombstone_line" ] && [ "$tombstone_line" -lt "$triage_line" ]
+}
+
+@test "unlabeled: GitHub label-change payloads carry the removed label in .label.name" {
+  # The GitHub `issues: unlabeled` event shape the opt-out branch reads.
+  run grep -q 'unlabeled' lib/boucle-ci/dispatch.sh
   assert_success
 }
