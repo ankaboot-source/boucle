@@ -911,7 +911,13 @@ boucle_ci_dispatch() {
   # unlabeled route).
   BOUCLE_LABELS_REMOVED=false
   if [ -n "$(jq -r '.changes.labels.previous // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)" ]; then
-    PREV_HAD_BOUCLE=$(jq -r '[.changes.labels.previous[] | select(startswith("boucle:"))] | length > 0' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+    # GitLab label-change webhooks carry label OBJECTS ({title,name,...}) in
+    # changes.labels.previous, not bare strings. Extract the label name
+    # (title//name) before the prefix test; on objects startswith would
+    # raise a jq type error (exit 5) and kill the script under set -e.
+    # Defensive `|| false` so a payload-shape surprise can never crash
+    # the dispatcher — worst case we just skip the tombstone.
+    PREV_HAD_BOUCLE=$(jq -r '[.changes.labels.previous[] | (if type == "object" then (.title // .name // "") else tostring end) | select(startswith("boucle:"))] | length > 0' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || PREV_HAD_BOUCLE=false
     if [ "$PREV_HAD_BOUCLE" = "true" ] && ! echo "$LABELS" | grep -q 'boucle:'; then
       BOUCLE_LABELS_REMOVED=true
     fi
@@ -962,7 +968,10 @@ boucle_ci_dispatch() {
     # label in .label.name, and any non-labeled event (comment, edit) on
     # a boucle:todo issue means boucle:todo was already there.
     if [ -n "$(jq -r '.changes.labels.previous // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)" ]; then
-      PREV_LABELS=$(jq -r '.changes.labels.previous | join(",")' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+      # Same label-object handling as the opt-out tombstone above: GitLab
+      # sends label objects in changes.labels.previous, so extract the
+      # name before joining (join on objects would raise a jq type error).
+      PREV_LABELS=$(jq -r '[.changes.labels.previous[] | (if type == "object" then (.title // .name // "") else tostring end)] | join(",")' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || PREV_LABELS=""
     elif [ "$ACTION" = "labeled" ]; then
       PREV_LABELS=$(jq -r 'if .label.name == "boucle:todo" then "just-added" else "boucle:todo" end' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
     else
