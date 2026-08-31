@@ -1105,13 +1105,15 @@ extract_recheck_block() {
 
 @test "opt-out: GitLab previous-boucle-labels + empty live labels → removed" {
   # GitLab label-change webhook: .changes.labels.previous held boucle:
-  # labels, the live label list no longer has any → human opt-out.
-  echo "{\"changes\":{\"labels\":{\"previous\":[\"boucle:triage\",\"boucle::status::bot\",\"help-wanted\"]}}}" > "$BATS_TEST_TMPDIR/prev.json"
+  # labels as label OBJECTS ({title,...}), the live label list no longer
+  # has any → human opt-out. The predicate normalizes objects before the
+  # prefix test (a bare startswith on an object raises a jq type error).
+  echo '{"changes":{"labels":{"previous":[{"title":"boucle:triage"},{"title":"boucle::status::bot"},{"title":"help-wanted"}]}}}' > "$BATS_TEST_TMPDIR/prev.json"
   run bash -c '
     LABELS=""
     BOUCLE_TRIGGER_PAYLOAD="$1"
     if [ -n "$(jq -r ".changes.labels.previous // empty" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)" ]; then
-      PREV_HAD_BOUCLE=$(jq -r "[.changes.labels.previous[] | select(startswith(\"boucle:\"))] | length > 0" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+      PREV_HAD_BOUCLE=$(jq -r "[.changes.labels.previous[] | (if type == \"object\" then (.title // .name // \"\") else tostring end) | select(startswith(\"boucle:\"))] | length > 0" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || PREV_HAD_BOUCLE=false
       if [ "$PREV_HAD_BOUCLE" = "true" ] && ! echo "$LABELS" | grep -q "boucle:"; then
         echo removed
       fi
@@ -1121,18 +1123,50 @@ extract_recheck_block() {
 }
 
 @test "opt-out: GitLab previous-boucle-labels + boucle:triage still alive → NOT removed" {
-  echo "{\"changes\":{\"labels\":{\"previous\":[\"boucle:triage\"]}}}" > "$BATS_TEST_TMPDIR/prev.json"
+  echo '{"changes":{"labels":{"previous":[{"title":"boucle:triage"}]}}}' > "$BATS_TEST_TMPDIR/prev.json"
   run bash -c '
     LABELS="boucle:triage,help-wanted"
     BOUCLE_TRIGGER_PAYLOAD="$1"
     if [ -n "$(jq -r ".changes.labels.previous // empty" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)" ]; then
-      PREV_HAD_BOUCLE=$(jq -r "[.changes.labels.previous[] | select(startswith(\"boucle:\"))] | length > 0" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+      PREV_HAD_BOUCLE=$(jq -r "[.changes.labels.previous[] | (if type == \"object\" then (.title // .name // \"\") else tostring end) | select(startswith(\"boucle:\"))] | length > 0" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || PREV_HAD_BOUCLE=false
       if [ "$PREV_HAD_BOUCLE" = "true" ] && ! echo "$LABELS" | grep -q "boucle:"; then
         echo removed
       fi
     fi
   ' _ "$BATS_TEST_TMPDIR/prev.json"
   refute_output --partial "removed"
+}
+
+@test "opt-out: GitLab previous-boucle-labels as STRINGS still works (legacy format)" {
+  # The fixed predicate also handles the legacy string format — the
+  # normalization is (if type == "object" then ... else tostring end).
+  echo '{"changes":{"labels":{"previous":["boucle:triage","help-wanted"]}}}' > "$BATS_TEST_TMPDIR/str.json"
+  run bash -c '
+    LABELS=""
+    BOUCLE_TRIGGER_PAYLOAD="$1"
+    if [ -n "$(jq -r ".changes.labels.previous // empty" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)" ]; then
+      PREV_HAD_BOUCLE=$(jq -r "[.changes.labels.previous[] | (if type == \"object\" then (.title // .name // \"\") else tostring end) | select(startswith(\"boucle:\"))] | length > 0" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || PREV_HAD_BOUCLE=false
+      if [ "$PREV_HAD_BOUCLE" = "true" ] && ! echo "$LABELS" | grep -q "boucle:"; then
+        echo removed
+      fi
+    fi
+  ' _ "$BATS_TEST_TMPDIR/str.json"
+  assert_output "removed"
+}
+
+@test "regression: GitLab label OBJECTS in changes.labels.previous crash the old predicate but not the fixed one" {
+  # GitLab sends label OBJECTS ({title,...}) in changes.labels.previous.
+  # The old predicate applied startswith() directly to the elements → jq
+  # type error (exit 5) → under set -e the dispatcher died mid-route. The
+  # fixed predicate normalizes objects via (.title // .name // "").
+  echo '{"changes":{"labels":{"previous":[{"title":"boucle:triage"},{"title":"help-wanted"}]}}}' > "$BATS_TEST_TMPDIR/obj.json"
+  # The OLD jq crashes on objects — this is the crash the fix prevents.
+  run jq -r '[.changes.labels.previous[] | select(startswith("boucle:"))] | length > 0' "$BATS_TEST_TMPDIR/obj.json"
+  assert_failure
+  # The FIXED jq handles objects and detects the boucle: labels.
+  run jq -r '[.changes.labels.previous[] | (if type == "object" then (.title // .name // "") else tostring end) | select(startswith("boucle:"))] | length > 0' "$BATS_TEST_TMPDIR/obj.json"
+  assert_success
+  assert_output "true"
 }
 
 @test "opt-out: GitHub unlabeled event with a boucle: label and empty live → removed" {
@@ -1142,7 +1176,7 @@ extract_recheck_block() {
     ACTION="unlabeled"
     BOUCLE_TRIGGER_PAYLOAD="$1"
     if [ -n "$(jq -r ".changes.labels.previous // empty" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)" ]; then
-      PREV_HAD_BOUCLE=$(jq -r "[.changes.labels.previous[] | select(startswith(\"boucle:\"))] | length > 0" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+      PREV_HAD_BOUCLE=$(jq -r "[.changes.labels.previous[] | (if type == \"object\" then (.title // .name // \"\") else tostring end) | select(startswith(\"boucle:\"))] | length > 0" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || PREV_HAD_BOUCLE=false
       if [ "$PREV_HAD_BOUCLE" = "true" ] && ! echo "$LABELS" | grep -q "boucle:"; then
         echo removed
       fi
@@ -1163,7 +1197,7 @@ extract_recheck_block() {
     ACTION="unlabeled"
     BOUCLE_TRIGGER_PAYLOAD="$1"
     if [ -n "$(jq -r ".changes.labels.previous // empty" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)" ]; then
-      PREV_HAD_BOUCLE=$(jq -r "[.changes.labels.previous[] | select(startswith(\"boucle:\"))] | length > 0" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+      PREV_HAD_BOUCLE=$(jq -r "[.changes.labels.previous[] | (if type == \"object\" then (.title // .name // \"\") else tostring end) | select(startswith(\"boucle:\"))] | length > 0" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || PREV_HAD_BOUCLE=false
       if [ "$PREV_HAD_BOUCLE" = "true" ] && ! echo "$LABELS" | grep -q "boucle:"; then
         echo removed
       fi
@@ -1187,7 +1221,7 @@ extract_recheck_block() {
     ACTION=""
     BOUCLE_TRIGGER_PAYLOAD="$1"
     if [ -n "$(jq -r ".changes.labels.previous // empty" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)" ]; then
-      PREV_HAD_BOUCLE=$(jq -r "[.changes.labels.previous[] | select(startswith(\"boucle:\"))] | length > 0" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
+      PREV_HAD_BOUCLE=$(jq -r "[.changes.labels.previous[] | (if type == \"object\" then (.title // .name // \"\") else tostring end) | select(startswith(\"boucle:\"))] | length > 0" "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || PREV_HAD_BOUCLE=false
       if [ "$PREV_HAD_BOUCLE" = "true" ] && ! echo "$LABELS" | grep -q "boucle:"; then
         echo removed
       fi
