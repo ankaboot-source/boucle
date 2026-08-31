@@ -1075,3 +1075,12 @@
   - 'DO resolve engine-owned files engine-first: the directory of the running script, then `$BOUCLE_HOME`, then the consumer''s workspace as a fallback for a role the engine does not ship. On a tarball install this changes nothing — the workspace copy IS the engine''s copy.'
   - 'DO warn, on every run, when a workspace copy exists and differs from the engine''s: name both paths, say which one is being used, and say how to re-sync.'
   - 'DO make version skew visible rather than survivable in silence: a consumer whose mirrored files predate its engine pin is a bug, even when the parser''s legacy fallbacks keep the loop running.'
+113:
+  title: MR-format compliance requires evidence embedded IN the MR, not pointed at
+  ❌:
+  - 'DO NOT satisfy the MR-format "Preview URL or screenshot" slot with an in-repo path, a local screenshot link, or a cross-reference ("see issue #N note_… for captures"). An interactive agent produced a flawless SHA-anchored verdict + QA note on the ISSUE while the MR description itself carried no embedded image and no preview URL — the MR-format box was checked in the agent''s head, empty on the forge. Tooling that reads the MR (attachment fetchers, screenshot-grading reviewers) sees an evidence-free MR.'
+  - 'DO NOT assume capture files living in `/tmp` or a subagent session are "done" evidence. Evidence that never reached the MR description is unproduced evidence, whatever the internal QA trail says.'
+  ✅:
+  - 'DO embed screenshots in the MR description as uploaded images (`![…](/uploads/…)` via the forge uploads API) — same as the loop''s own screenshot mode, whose MR descriptions carry the images inline — BEFORE considering the MR format complete.'
+  - 'DO run a final self-check on each MR-format section as forge-rendered values, not intentions: does the description BODY contain `![` screenshot markdown or a http(s) preview URL? If neither and this is a UI change, the MR is not done.'
+  - 'DO keep issue notes for the QA narrative, but treat them as supplementary — every image the reviewer or the pipeline must see travels inside the MR itself.'
