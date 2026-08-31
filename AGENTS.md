@@ -110,14 +110,21 @@ boucle workflow adapted for interactive execution:
 3. **Lessons** — if the harness discovers a new class of mistake, it adds
    a `LESSONS.yml` entry (running the four-point admission test, stating
    the justification on stdout/inline).
-4. **Review** — the harness reviews its own work against the acceptance
-   criteria. For UI changes, it MUST produce a **preview screenshot**
-   (browser screenshot of the rendered page) and attach it to the issue
-   or MR. The review verdict follows the SHA-anchored format:
-   `<!-- boucle:verdict v=1 role=reviewer sha=<hex> -->`.
-5. **MR/PR** — the harness creates the MR/PR with a description following
-   the boucle MR format: TL;DR, What changed (per file), Preview URL or
-   screenshot, Cost (if tracked), Acceptance criteria checklist.
+ 4. **Review** — the harness reviews its own work against the acceptance
+    criteria. For UI changes, it MUST produce a **preview screenshot**
+    (browser screenshot of the rendered page) and embed it in the MR
+    description as an uploaded image (`![description](/uploads/…)` via the
+    forge `/uploads` API) — the loop's tooling (`bin/fetch-mr-attachments`,
+    screenshot-mode reviewer grading) reads MR attachments only, so a
+    screenshot that lives ONLY in an issue note is invisible to the
+    pipeline. The review verdict follows the SHA-anchored format:
+    `<!-- boucle:verdict v=1 role=reviewer sha=<hex> -->`.
+ 5. **MR/PR** — the harness creates the MR/PR with a description following
+    the boucle MR format: TL;DR, What changed (per file), Preview URL or
+    screenshot — when there is no preview URL (screenshot/auto-fallback
+    mode), the EMBEDDED screenshots go in the MR description itself, never
+    as "see issue #N for captures" cross-references —, Cost (if tracked),
+    Acceptance criteria checklist.
 6. **Docs** — the harness updates impacted charter docs (AGENTS.md,
    DESIGN.md, LOOP.md, CONTEXT.md) in the same MR as the code.
 
@@ -133,6 +140,12 @@ boucle workflow adapted for interactive execution:
 - **NEVER** assign an issue to the boucle bot unless dispatching the loop.
 - **NEVER** skip the review step (preview screenshot + SHA-anchored
   verdict) for UI changes.
+- **NEVER** bury UI evidence outside the MR: screenshots MUST be embedded
+  IN the MR description (`![…](/uploads/…)`), never stored only in an
+  issue note or replaced by a "see issue #N" cross-reference — the loop's
+  attachment tooling and the reviewer's screenshot grading read the MR
+  only, so evidence that lives elsewhere makes the MR unauditable by the
+  pipeline.
 - **NEVER** bypass the `LESSONS.yml` admission test when adding a lesson.
 
 ### Why
