@@ -1347,6 +1347,100 @@ unlabeled_decision() {
   assert_failure
 }
 
+# ── Bot assignment: the OTHER way into the loop, on both forges ───────
+#
+# With BOUCLE_ENTRY_MODE defaulting to opt-in, assignment is load-bearing:
+# README.md and SKILL.md both promise "add boucle:triage OR assign the bot",
+# and the open-event route no longer covers for a broken one.
+#
+# It was broken on GitHub, structurally and twice over. The old test was
+#     [ "$ACTION" = "update" ] && .changes.assignees.current/previous
+# but GitHub sends action=assigned (never "update") and has no `changes`
+# object at all — it sends `.assignee`, the single user just assigned. So
+# the predicate was false on every GitHub payload, and assigning the bot
+# there did nothing. Auto-triage-on-open hid it.
+
+@test "bot assignment: GitLab update + assignees change is an assignment" {
+  echo '{"object_kind":"issue","object_attributes":{"action":"update"},"changes":{"assignees":{"previous":[],"current":[{"id":42,"username":"up-bot"}]}}}' > "$PAYLOAD"
+  BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" BOUCLE_BOT_ID=42 run dispatch_bot_just_assigned "update"
+  assert_success
+}
+
+@test "bot assignment: GitLab already-assigned is NOT a new assignment" {
+  # The bot in BOTH lists means this event is some later edit that happens
+  # to carry the same assignee — not the transition.
+  echo '{"object_kind":"issue","object_attributes":{"action":"update"},"changes":{"assignees":{"previous":[{"id":42,"username":"up-bot"}],"current":[{"id":42,"username":"up-bot"}]}}}' > "$PAYLOAD"
+  BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" BOUCLE_BOT_ID=42 run dispatch_bot_just_assigned "update"
+  assert_failure
+}
+
+@test "bot assignment: GitLab someone else assigned is not the bot" {
+  echo '{"object_kind":"issue","object_attributes":{"action":"update"},"changes":{"assignees":{"previous":[],"current":[{"id":7,"username":"alice"}]}}}' > "$PAYLOAD"
+  BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" BOUCLE_BOT_ID=42 run dispatch_bot_just_assigned "update"
+  assert_failure
+}
+
+@test "bot assignment: GitLab falls back to the username when no numeric id" {
+  echo '{"object_kind":"issue","object_attributes":{"action":"update"},"changes":{"assignees":{"previous":[],"current":[{"username":"up-bot"}]}}}' > "$PAYLOAD"
+  BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" BOUCLE_BOT_USERNAME=up-bot run dispatch_bot_just_assigned "update"
+  assert_success
+}
+
+@test "bot assignment: GitHub assigned + .assignee is an assignment (regression)" {
+  # The case that never worked: no `changes` object, action is "assigned".
+  echo '{"action":"assigned","issue":{"number":7},"assignee":{"login":"up-bot","id":99}}' > "$PAYLOAD"
+  BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" BOUCLE_BOT_USERNAME=up-bot run dispatch_bot_just_assigned "assigned"
+  assert_success
+}
+
+@test "bot assignment: GitHub matches on the bot id when the login differs" {
+  echo '{"action":"assigned","issue":{"number":7},"assignee":{"login":"some-app[bot]","id":99}}' > "$PAYLOAD"
+  BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" BOUCLE_BOT_USERNAME=up-bot BOUCLE_BOT_ID=99 run dispatch_bot_just_assigned "assigned"
+  assert_success
+}
+
+@test "bot assignment: GitHub someone else assigned is not the bot" {
+  echo '{"action":"assigned","issue":{"number":7},"assignee":{"login":"alice","id":7}}' > "$PAYLOAD"
+  BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" BOUCLE_BOT_USERNAME=up-bot BOUCLE_BOT_ID=99 run dispatch_bot_just_assigned "assigned"
+  assert_failure
+}
+
+@test "bot assignment: GitHub unassigned is not an assignment" {
+  echo '{"action":"unassigned","issue":{"number":7},"assignee":{"login":"up-bot","id":99}}' > "$PAYLOAD"
+  BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" BOUCLE_BOT_USERNAME=up-bot run dispatch_bot_just_assigned "unassigned"
+  assert_failure
+}
+
+@test "bot assignment: an unreadable payload declines rather than entering" {
+  # The payload file can vanish mid-job (jq exit 5, pipeline #1433434).
+  # "No assignment" is the safe degradation: it declines to enter the loop
+  # rather than entering it on a payload nobody could read.
+  BOUCLE_TRIGGER_PAYLOAD="$BATS_TEST_TMPDIR/gone.json" run dispatch_bot_just_assigned "assigned"
+  assert_failure
+  BOUCLE_TRIGGER_PAYLOAD="" run dispatch_bot_just_assigned "assigned"
+  assert_failure
+}
+
+@test "bot assignment: both call sites use the shared predicate" {
+  # The closed-issue guard and the main routing block each carried their own
+  # copy of the four jq reads. Two copies of a forge-shape test is how one
+  # of them ends up fixed and the other not.
+  run grep -c 'dispatch_bot_just_assigned' lib/boucle-ci/dispatch.sh
+  refute_output "0"
+  # No inline copy left behind.
+  run grep -c 'GUARD_BOT_IN_CURRENT' lib/boucle-ci/dispatch.sh
+  assert_output "0"
+  run grep -c 'BOT_IN_PREVIOUS' lib/boucle-ci/dispatch.sh
+  assert_output "0"
+}
+
+@test "bot assignment: the closed-issue guard reads BOTH action shapes" {
+  # .object_attributes.action is GitLab's, .action is GitHub's. Reading
+  # only the first made the guard blind on GitHub.
+  block=$(awk '/Closed-issue guard for issue webhooks/{p=1} p{print} p && /GUARD_BOT_ASSIGNED" != "true"/{exit}' lib/boucle-ci/dispatch.sh)
+  echo "$block" | grep -q 'object_attributes.action // .action'
+}
+
 @test "entry policy: boucle's own issue creators pass boucle:triage at creation" {
   # Opt-in mode must not strand the issues boucle opens for itself:
   # schedules, triage sub-issues and the e2e follow-up. They route on the

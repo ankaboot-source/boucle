@@ -1132,3 +1132,21 @@
   - 'DO keep every doctor recovery path idempotent and re-entrant, so a sweep that arrives hours late recovers exactly what an on-time one would. That property is what makes the platform''s throttling a latency problem instead of a correctness one.'
   - 'DO lean on the paths that do not depend on the sweep where latency matters on GitHub: the webhook routes (a comment, a label, a bot assignment re-enter dispatch immediately) and `workflow_dispatch` for running a role on demand.'
   - 'DO measure a platform claim against the platform''s own API before designing on it. `list_workflow_runs` answers "how often does this actually fire?" in one call.'
+119:
+  title: Narrowing one entry route exposes every other route that never worked
+  ❌:
+  - 'DO NOT assume the entry routes a doc promises all work. README.md and SKILL.md both say "add `boucle:triage` OR assign the bot". On GitHub the assignment route was structurally dead, twice over: the predicate required `$ACTION = "update"` (GitLab''s word — GitHub sends `assigned`, never `update`) and then read `.changes.assignees.current/previous`, an object GitHub does not send at all. Auto-triage-on-open had been covering for it, so nothing looked broken.'
+  - 'DO NOT ship a narrowing without auditing what the removed path was masking. Making entry opt-in did not create this bug — it made it load-bearing, and would have left GitHub consumers with ONE way in while the docs advertised two.'
+  - 'DO NOT keep two copies of a forge-shape test. The closed-issue guard and the routing block each carried their own four jq reads of the same payload; two copies is how one gets fixed and the other does not.'
+  ✅:
+  - 'DO fold forge-shape differences into ONE named predicate and give it the payload contract in its comment: GitLab sends the full before/after lists and the diff IS the test; GitHub sends the single user just assigned and the action IS the transition. They share no field, so a single jq filter cannot cover both.'
+  - 'DO read both action shapes wherever an action is read: `.object_attributes.action // .action`. A GitLab-only read is silently false on GitHub, and silence is the failure mode with no error to grep for.'
+  - 'DO reproduce the old failure before claiming the fix: run the OLD predicate against a real payload of the OTHER forge and watch it return false. A test that only proves the new code works does not prove the old code was broken.'
+120:
+  title: Subscribe to the events you route, not the events that exist
+  ❌:
+  - 'DO NOT subscribe a workflow to event types the router has no arm for. `.github/workflows/boucle.yml` took `pull_request: [opened, edited, closed, reopened, ready_for_review, review_requested, synchronize]` while `dispatch_github_mr_action` maps only opened/synchronize/reopened/closed and returns EMPTY for the rest — deliberately, per its own contract. Each of the three dead types still spun a full workflow run (checkout, toolchain bootstrap, forge init) to reach the router''s `*)` arm and no-op.'
+  - 'DO NOT overlook the self-inflicted ones. `edited` was the expensive type precisely because boucle rewrites its OWN MR descriptions — the worker writes the body, the reviewer embeds evidence — so the harness generated its own dead runs. The same file had already reasoned its way to removing `edited` from `issue_comment` for exactly this; the pull_request half was missed.'
+  ✅:
+  - 'DO derive the subscription from the router, and test it in BOTH directions: no subscribed type without an arm, no arm without a subscription. Parse the arms out of the shell source rather than hardcoding them, so the test fails on the next drift instead of the next audit.'
+  - 'DO watch your own pipeline while you work on it. This one reproduced in front of me: editing a PR description spawned a second full run on an unchanged SHA.'

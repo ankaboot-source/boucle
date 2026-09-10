@@ -251,3 +251,45 @@ PY
   assert_success
   assert_output "ok"
 }
+
+@test "github: the pull_request trigger subscribes only to routable types" {
+  # dispatch_github_mr_action has an arm for opened/synchronize/reopened/
+  # closed and returns EMPTY for everything else, by its own documented
+  # contract. A type with no arm still costs a full workflow run — checkout,
+  # toolchain bootstrap, forge init — to reach the router's `*)` no-op.
+  # `edited` was the expensive one: boucle rewrites its own MR descriptions,
+  # so every self-edit fired a dead run.
+  run python3 - <<'PY2'
+import yaml
+w = yaml.safe_load(open(".github/workflows/boucle.yml"))
+# YAML parses a bare `on:` key as the boolean True.
+trig = w.get("on", w.get(True))
+got = set(trig["pull_request"]["types"])
+routable = {"opened", "synchronize", "reopened", "closed"}
+assert got == routable, "pull_request types drifted from the router's arms: " + str(sorted(got))
+print("ok")
+PY2
+  assert_success
+  assert_output "ok"
+}
+
+@test "github: every subscribed pull_request type has a router arm" {
+  # The other direction: this reads the arms out of dispatch.sh rather than
+  # hardcoding them, so adding an arm and forgetting the trigger (or the
+  # reverse) is a red test.
+  run python3 - <<'PY2'
+import re, yaml
+src = open("lib/boucle-ci/dispatch.sh").read()
+body = src.split("dispatch_github_mr_action() {", 1)[1]
+pr_case = body.split("pull_request)", 1)[1].split("pull_request_review)", 1)[0]
+arms = set(re.findall(r"^\s{8}([a-z_]+)\)", pr_case, re.M))
+trig = yaml.safe_load(open(".github/workflows/boucle.yml"))
+trig = trig.get("on", trig.get(True))
+subscribed = set(trig["pull_request"]["types"])
+dead = subscribed - arms
+assert not dead, "subscribed pull_request types with no router arm: " + str(sorted(dead))
+print("ok")
+PY2
+  assert_success
+  assert_output "ok"
+}

@@ -24,7 +24,22 @@ on:
     # all, so the check on the PR stayed pinned to the SHA it opened with.
     # It is also the event dispatch maps to the GitLab `update` action, which
     # re-triggers the reviewer on a revised MR (SKILL.md §4.4).
-    types: [opened, edited, closed, reopened, ready_for_review, review_requested, synchronize]
+    #
+    # Four types, and only four, because `dispatch_github_mr_action` has an
+    # arm for exactly these: opened→open, synchronize→update,
+    # reopened→reopen, closed→merge|close. `edited`, `ready_for_review` and
+    # `review_requested` map to EMPTY there — deliberately, per that
+    # function's own contract — so each one spun a full workflow run
+    # (checkout, toolchain bootstrap, forge init) to reach the router's `*)`
+    # arm and no-op. `edited` was the expensive one: boucle rewrites its own
+    # MR descriptions (the worker writes the body, the reviewer embeds
+    # evidence), so every self-edit fired a dead run. Same reasoning already
+    # applied to `issue_comment` below — this is the pull_request half of it.
+    #
+    # A review that is not an approval still re-triggers the worker: it
+    # arrives as `pull_request_review` / `pull_request_review_comment`, both
+    # still subscribed below.
+    types: [opened, closed, reopened, synchronize]
   pull_request_review:
     types: [submitted, dismissed]
   # No `edited`: boucle rewrites its own comments in place — triage via

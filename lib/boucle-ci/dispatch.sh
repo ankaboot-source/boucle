@@ -187,6 +187,71 @@ dispatch_auto_entry_enabled() {
   [ "$(printf '%s' "${BOUCLE_ENTRY_MODE:-label}" | tr '[:upper:]' '[:lower:]')" = "auto" ]
 }
 
+# dispatch_bot_just_assigned [action]
+#
+# True when THIS event is a human assigning the bot to the issue. That is
+# one of the two ways into the loop (the other is the boucle:triage label),
+# and since BOUCLE_ENTRY_MODE defaults to opt-in it is load-bearing: the
+# open-event route no longer covers for it.
+#
+# It has to speak both payload shapes, because they share no field:
+#
+#   GitLab  action=update, .changes.assignees.{previous,current} — the two
+#           full lists. The bot being in `current` and not in `previous` is
+#           what makes this event the assignment rather than some later
+#           edit that happens to carry the same assignee.
+#   GitHub  action=assigned, .assignee — the single user just assigned, and
+#           the event fires once per assignee added. There is no `changes`
+#           object at all and no `previous` list to diff against: the
+#           action IS the transition, so `.assignee` being the bot is the
+#           whole test.
+#
+# The GitLab-only version of this test was silently false on GitHub twice
+# over — `$ACTION` is never "update" there, and `.changes` does not exist —
+# so assigning the bot did nothing. It went unnoticed while every issue was
+# auto-triaged on open; opt-in entry is what makes it visible.
+#
+# Bot identity: prefer the numeric id (BOUCLE_BOT_ID, GitLab) and fall back
+# to the username (BOUCLE_BOT_USERNAME), same order as every other bot
+# check in this file. On GitHub the id is a login, so the username branch is
+# the one that runs.
+#
+# Every read is guarded (`2> /dev/null || …=false`): the payload file can
+# vanish mid-job (jq exit 5, pipeline #1433434), and "no assignment" is the
+# safe degradation — it declines to enter the loop rather than entering it
+# on a payload nobody could read.
+#
+# Takes the action as an argument for testability; falls back to $ACTION.
+# shellcheck disable=SC2120
+dispatch_bot_just_assigned() {
+  local action="${1:-${ACTION:-}}"
+  [ -n "${BOUCLE_TRIGGER_PAYLOAD:-}" ] || return 1
+  [ -f "$BOUCLE_TRIGGER_PAYLOAD" ] || return 1
+
+  # GitHub: `issues: assigned`, one event per assignee added.
+  if [ "$action" = "assigned" ]; then
+    local assignee
+    assignee=$(jq -r '.assignee.login // .assignee.username // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || assignee=""
+    [ -n "$assignee" ] && [ "$assignee" = "${BOUCLE_BOT_USERNAME:-}" ] && return 0
+    local assignee_id
+    assignee_id=$(jq -r '.assignee.id // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || assignee_id=""
+    [ -n "$assignee_id" ] && [ -n "${BOUCLE_BOT_ID:-}" ] && [ "$assignee_id" = "$BOUCLE_BOT_ID" ] && return 0
+    return 1
+  fi
+
+  # GitLab: `update` carrying an assignee change.
+  [ "$action" = "update" ] || return 1
+  local in_current in_previous
+  if [ -n "${BOUCLE_BOT_ID:-}" ] && [[ "$BOUCLE_BOT_ID" =~ ^[0-9]+$ ]]; then
+    in_current=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.current // [] | map(.id | tostring) | index($bid) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || in_current=false
+    in_previous=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.previous // [] | map(.id | tostring) | index($bid) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || in_previous=false
+  else
+    in_current=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-}" '.changes.assignees.current // [] | map(.username) | index($bname) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || in_current=false
+    in_previous=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-}" '.changes.assignees.previous // [] | map(.username) | index($bname) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || in_previous=false
+  fi
+  [ "$in_current" = "true" ] && [ "$in_previous" != "true" ]
+}
+
 boucle_ci_dispatch() {
   # Shared gate functions (check_sibling_gate, maybe_unblock_dependents) —
   # single source of truth in lib/boucle-ci/gates.sh.
@@ -729,22 +794,14 @@ boucle_ci_dispatch() {
     if [ "$ISSUE_STATE_FOR_GUARD" = "closed" ]; then
       # Check if this is a BOT_JUST_ASSIGNED event — if so, let it through
       # (the human explicitly assigned the bot to reopen the issue).
-      GUARD_ACTION=$(jq -r '.object_attributes.action // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
+      # Read the action from BOTH shapes: .object_attributes.action is
+      # GitLab's, .action is GitHub's. The GitLab-only read made this guard
+      # blind on GitHub, where it fell through to "not an assignment" and
+      # no-oped every re-trigger on a closed issue.
+      GUARD_ACTION=$(jq -r '.object_attributes.action // .action // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null || echo "")
       GUARD_BOT_ASSIGNED=false
-      if [ "$OBJECT_KIND" = "issue" ] && [ "$GUARD_ACTION" = "update" ]; then
-        if [ -n "${BOUCLE_BOT_ID:-}" ] && [[ "$BOUCLE_BOT_ID" =~ ^[0-9]+$ ]]; then
-          # Late payload reads — same vanished-file guard as the inline
-          # dispatch copy (jq exit 5, pipeline #1433434): degrade to
-          # "no assignee change" instead of dying under set -e.
-          GUARD_BOT_IN_CURRENT=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.current // [] | map(.id | tostring) | index($bid) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || GUARD_BOT_IN_CURRENT=false
-          GUARD_BOT_IN_PREVIOUS=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.previous // [] | map(.id | tostring) | index($bid) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || GUARD_BOT_IN_PREVIOUS=false
-        else
-          GUARD_BOT_IN_CURRENT=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-}" '.changes.assignees.current // [] | map(.username) | index($bname) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || GUARD_BOT_IN_CURRENT=false
-          GUARD_BOT_IN_PREVIOUS=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-}" '.changes.assignees.previous // [] | map(.username) | index($bname) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || GUARD_BOT_IN_PREVIOUS=false
-        fi
-        if [ "$GUARD_BOT_IN_CURRENT" = "true" ] && [ "$GUARD_BOT_IN_PREVIOUS" != "true" ]; then
-          GUARD_BOT_ASSIGNED=true
-        fi
+      if [ "$OBJECT_KIND" = "issue" ] && dispatch_bot_just_assigned "$GUARD_ACTION"; then
+        GUARD_BOT_ASSIGNED=true
       fi
       if [ "$GUARD_BOT_ASSIGNED" != "true" ]; then
         echo "boucle: issue #$IID is closed — skipping $OBJECT_KIND webhook (no-op on closed issue)"
@@ -872,20 +929,17 @@ boucle_ci_dispatch() {
   # issue to the bot, without needing to add a boucle: label. The ACTOR
   # guard above already filters bot-originated events, so this only fires
   # when a HUMAN assigns the bot — no loop risk.
+  # Both payload shapes, one predicate — see dispatch_bot_just_assigned.
+  # GitLab says action=update + .changes.assignees; GitHub says
+  # action=assigned + .assignee. The GitLab-only test that used to live
+  # here was structurally false on GitHub, so this entry route did not
+  # exist there. It mattered little while every issue was auto-triaged on
+  # open; with BOUCLE_ENTRY_MODE defaulting to opt-in it is one of the two
+  # ways in, and the docs promise both.
   BOT_JUST_ASSIGNED=false
-  if [ "$OBJECT_KIND" = "issue" ] && [ "$ACTION" = "update" ]; then
-    if [ -n "${BOUCLE_BOT_ID:-}" ] && [[ "$BOUCLE_BOT_ID" =~ ^[0-9]+$ ]]; then
-      BOT_IN_CURRENT=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.current // [] | map(.id | tostring) | index($bid) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
-      BOT_IN_PREVIOUS=$(jq -r --arg bid "$BOUCLE_BOT_ID" '.changes.assignees.previous // [] | map(.id | tostring) | index($bid) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
-    else
-      # Fallback: detect by bot username when BOUCLE_BOT_ID is unset
-      BOT_IN_CURRENT=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-}" '.changes.assignees.current // [] | map(.username) | index($bname) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
-      BOT_IN_PREVIOUS=$(jq -r --arg bname "${BOUCLE_BOT_USERNAME:-}" '.changes.assignees.previous // [] | map(.username) | index($bname) != null' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null)
-    fi
-    if [ "$BOT_IN_CURRENT" = "true" ] && [ "$BOT_IN_PREVIOUS" != "true" ]; then
-      BOT_JUST_ASSIGNED=true
-      echo "Issue #$IID: bot was just assigned — will trigger triage"
-    fi
+  if [ "$OBJECT_KIND" = "issue" ] && dispatch_bot_just_assigned "$ACTION"; then
+    BOT_JUST_ASSIGNED=true
+    echo "Issue #$IID: bot was just assigned — will trigger triage"
   fi
 
   # If the bot was just assigned by a human, trigger triage — unless the
