@@ -1,10 +1,10 @@
-# Diagram theme — boucle.dev design system (light/transparent)
+# Diagram theme — boucle.dev design system (light surface)
 
 > **Static source of truth** for every Mermaid diagram emitted in a boucle spec.
 > The triage agent references this file instead of inlining the theme block, so the
 > design system lives in one place and never drifts across agent prompts.
 >
-> **Light or transparent background ONLY** — the forge comment surface is white.
+> **Light background ONLY**, and an OPAQUE one — never `transparent`, see below.
 > **NEVER** dark, **NEVER** the default Mermaid theme (purple/indigo) — both are off-brand.
 
 ## Boucle.dev tokens (extracted from boucle.dev CSS)
@@ -15,22 +15,51 @@ light surface while keeping the brand identity (gold, violet, cyan).
 | Token | Value | Role in diagrams |
 |---|---|---|
 | `primaryColor` | `#f5c842` | boucle gold — primary nodes |
-| `primaryTextColor` | `#0d1117` | dark text on gold (contrast) |
+| `primaryTextColor` | `#0d1117` | ink on gold (11.9:1) |
 | `primaryBorderColor` | `#c9a233` | gold dim — node borders |
 | `secondaryColor` | `#fdf3d7` | light gold tint — secondary nodes |
 | `tertiaryColor` | `#e8e6f5` | light violet tint (echoes `#7b2ff7`) — tertiary nodes |
-| `lineColor` | `#a0a0b8` | muted — edges/arrows |
+| `lineColor` | `#6b6f80` | edges/arrows — 4.99:1 on white |
 | `clusterBkg` | `#faf7f2` | warm off-white — subgraph backgrounds |
 | `clusterBorder` | `#c9a233` | gold dim — subgraph borders |
 | `edgeLabelBackground` | `#ffffff` | white — edge label backgrounds |
-| `background` | `transparent` | blends into the forge comment; use `#ffffff` if opaque is required |
+| `background` | `#ffffff` | opaque white — see "two traps" below |
+| `textColor` / `titleColor` / `nodeTextColor` | `#0d1117` | every text color pinned, none derived |
+| `attributeBackgroundColorOdd` / `…Even` | `#ffffff` / `#faf7f2` | `erDiagram` attribute rows |
 | `fontFamily` | `Sora, system-ui, sans-serif` | boucle body font |
 | `fontSize` | `14px` | readable on white |
+
+### Two traps this palette exists to avoid
+
+**`background` must be an opaque color, never `transparent`.** Mermaid does not paint
+the value — it *computes* with it, through `khroma`. `lighten("transparent", 12)`
+returns `hsla(0, 0%, 12%, 0)`: alpha zero. Every variable derived from `background`
+inherits that alpha and disappears. Measured on mermaid 11.17.2, `background:
+"transparent"` produced `attributeBackgroundColorOdd` and `…Even` fully transparent
+(so `erDiagram` attribute rows had no fill at all, leaving `#0d1117` text on the bare
+comment surface) and the same for the `xychart-beta` plot area. On a forge in dark
+mode that is ink on ink: an invisible diagram, reported as "unreadable", not as
+"broken", because the parser is perfectly happy with it.
+
+**Every text color is pinned, none derived.** Mermaid fills the gaps
+(`textColor ||= primaryTextColor`, `titleColor ||= tertiaryTextColor = invert(tertiaryColor)`),
+and the values it invents are not the ones in the table above — the old block got
+`titleColor: #17190a`, a green-black nobody chose. Pinning them costs a few hundred
+bytes in the fence and removes a whole class of "why is that label a different color".
+
+**Known limit — dark mode.** This is a light-surface palette, and a Mermaid `%%{init}%%`
+block overrides the theme the forge would otherwise pick for the reader. Text that sits
+inside a filled shape (flowchart nodes, cluster labels, edge labels, `erDiagram` rows —
+the overwhelming majority of what boucle emits) stays legible either way, because the
+fill travels with it. Free-floating text in a `sequenceDiagram` or an `xychart-beta` is
+`#0d1117` on whatever the reader's forge paints behind it. If a project's readers work
+in dark mode, the fix is not another palette — it is dropping the `%%{init}%%` block
+and letting the forge theme the diagram.
 
 ## Mermaid theme block (paste as the FIRST line of every Mermaid fence)
 
 ```
-%%{init: {"theme":"base","themeVariables":{"background":"transparent","primaryColor":"#f5c842","primaryTextColor":"#0d1117","primaryBorderColor":"#c9a233","lineColor":"#a0a0b8","secondaryColor":"#fdf3d7","tertiaryColor":"#e8e6f5","clusterBkg":"#faf7f2","clusterBorder":"#c9a233","edgeLabelBackground":"#ffffff","fontFamily":"Sora, system-ui, sans-serif","fontSize":"14px"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#f5c842","primaryTextColor":"#0d1117","primaryBorderColor":"#c9a233","secondaryColor":"#fdf3d7","secondaryTextColor":"#0d1117","tertiaryColor":"#e8e6f5","tertiaryTextColor":"#0d1117","textColor":"#0d1117","titleColor":"#0d1117","nodeTextColor":"#0d1117","lineColor":"#6b6f80","clusterBkg":"#faf7f2","clusterBorder":"#c9a233","edgeLabelBackground":"#ffffff","labelBackgroundColor":"#ffffff","attributeBackgroundColorOdd":"#ffffff","attributeBackgroundColorEven":"#faf7f2","actorTextColor":"#0d1117","signalTextColor":"#0d1117","noteBkgColor":"#fdf3d7","noteTextColor":"#0d1117","labelBoxBkgColor":"#fdf3d7","labelTextColor":"#0d1117","fontFamily":"Sora, system-ui, sans-serif","fontSize":"14px"}}}%%
 ```
 
 ## Diagram-type catalogue (27 types — from [diagram-design](https://github.com/cathrynlavery/diagram-design))

@@ -170,7 +170,7 @@ flowchart LR
 
 | Stage | Trigger (`BOUCLE_ROLE` gating) | `resource_group` | What it does | Script |
 |---|---|---|---|---|
-| `check` | push / MR to default branch | — | shellcheck, shfmt, bats, doc-sync lint | `lib/boucle-ci/check.sh` |
+| `check` | push / MR to default branch, `boucle/*` branches | — | **engine repo:** shellcheck, shfmt, bats, doc-sync lint. **consumer repo:** `check-boucle-sync` only — the engine's gate is not the consumer's, and running `make check` against their Makefile turned their pipeline red on every push | `lib/boucle-ci/check.sh` |
 | `dispatch` | webhook (no `BOUCLE_ROLE`) | `boucle-dispatch` | webhook router: parse payload, route to role | `lib/boucle-ci/dispatch.sh` |
 | `triage` | webhook (no `BOUCLE_ROLE`) | — (no `BOUCLE_ISSUE` at eval) | analyse issue, draft spec | `lib/boucle-ci/triage.sh` |
 | `worker` | trigger `BOUCLE_ROLE=worker` | `boucle-issue-$BOUCLE_ISSUE` | implement on `boucle/<iid>-<slug>`, deploy preview | `lib/boucle-ci/worker.sh` |
@@ -178,7 +178,8 @@ flowchart LR
 | `merger` | trigger `BOUCLE_ROLE=merger` | `boucle-merge` (serial) | rebase + merge after approval | `lib/boucle-ci/merger.sh` |
 | `post-merge` | trigger `BOUCLE_ROLE=post-merge` (from merger, catchup, or doctor) | — | deploy-wait + e2e trigger | `lib/boucle-ci/post-merge.sh` |
 | `catchup` | trigger `BOUCLE_ROLE=catchup` | — | direct-merge recovery: audit note + chain to post-merge | `lib/boucle-ci/catchup.sh` |
-| `deploy` | push to default branch | — | build + deploy (Cloudflare Pages / GitLab Pages) | `lib/boucle-ci/deploy.sh` |
+| `build-site` | push to default branch, unless `BOUCLE_DEPLOY_MODE=external` or no publisher is configured | — | one build, consumed as an artifact by `deploy` and `pages` | inline |
+| `deploy` | push to default branch, unless `BOUCLE_DEPLOY_MODE=external` | — | build + deploy (Cloudflare Pages / GitLab Pages) | `lib/boucle-ci/deploy.sh` |
 | `e2e` | trigger `BOUCLE_ROLE=e2e` | `boucle-issue-$BOUCLE_ISSUE` | verify production URL, SHA-anchored verdict | `lib/boucle-ci/e2e.sh` |
 | `doctor` | schedule (every 10 min) | — | self-healing board sweep | `lib/boucle-ci/doctor.sh` |
 | `pages` | push to default branch | — | GitLab Pages publish | inline |

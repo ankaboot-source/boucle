@@ -160,6 +160,10 @@ env:
   BOUCLE_FALLBACK_API_KEY: ${{ secrets.BOUCLE_FALLBACK_API_KEY || '' }}
   BOUCLE_MONO_USER: ${{ vars.BOUCLE_MONO_USER || 'false' }}
   BOUCLE_ALLOWED_USERS: ${{ vars.BOUCLE_ALLOWED_USERS || '' }}
+  # Entry policy: "label" (default) = opt-in, an issue opened with no
+  # boucle: label is left alone until a human adds boucle:triage or assigns
+  # the bot. "auto" = legacy, every new issue is taken into the loop.
+  BOUCLE_ENTRY_MODE: ${{ vars.BOUCLE_ENTRY_MODE || 'label' }}
   BOUCLE_VISION_ROUTING: ${{ vars.BOUCLE_VISION_ROUTING || 'enabled' }}
   BOUCLE_VISION_MODEL: ${{ vars.BOUCLE_VISION_MODEL || 'minimax-m3' }}
   BOUCLE_VISION_ROLES: ${{ vars.BOUCLE_VISION_ROLES || 'triage,worker,reviewer' }}

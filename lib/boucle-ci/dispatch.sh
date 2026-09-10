@@ -159,6 +159,34 @@ dispatch_noop() {
   exit 0
 }
 
+# dispatch_auto_entry_enabled
+#
+# Entry policy: does a NEWLY OPENED issue that carries no boucle: label
+# enter the loop by itself?
+#
+#   BOUCLE_ENTRY_MODE=label (DEFAULT) — no. The loop is opt-in: a plain
+#     issue stays a plain issue. A human opts in by adding boucle:triage
+#     or by assigning the bot; both routes already exist above and are
+#     unaffected by this predicate.
+#   BOUCLE_ENTRY_MODE=auto — yes, the legacy behaviour: every issue opened
+#     in the project is triaged, labelled and assigned to the bot.
+#
+# `auto` was the only behaviour until now, and it is the wrong default for
+# a shared project: a colleague filing a bug report, a note-to-self, a
+# duplicate — each one came back labelled, assigned to the bot and carrying
+# a spec the reporter never asked for. Opting IN is one label; opting OUT
+# of an appropriation you did not want is a tombstone (#124) and a cleanup.
+#
+# Boucle's own issue creators are unaffected either way: schedules
+# (boucle_schedules_run), triage sub-issues and the e2e follow-up all pass
+# boucle:triage at creation, so they route on the label branch, never here.
+#
+# Anything other than "auto" (unset, empty, a typo) reads as opt-in: the
+# quiet mode is the safe one to fall back to.
+dispatch_auto_entry_enabled() {
+  [ "$(printf '%s' "${BOUCLE_ENTRY_MODE:-label}" | tr '[:upper:]' '[:lower:]')" = "auto" ]
+}
+
 boucle_ci_dispatch() {
   # Shared gate functions (check_sibling_gate, maybe_unblock_dependents) —
   # single source of truth in lib/boucle-ci/gates.sh.
@@ -1119,7 +1147,16 @@ boucle_ci_dispatch() {
     # — and must never re-triage (#124). The rescue of new issues whose
     # open webhook was missed is the doctor's unlabeled scan, not any
     # webhook.
-    SHOULD_TRIAGE=true
+    #
+    # And even on an explicit open event, entering the loop is a CHOICE:
+    # dispatch_auto_entry_enabled reads BOUCLE_ENTRY_MODE. Opt-in is the
+    # default — a plain issue in a shared project is not a work order.
+    if dispatch_auto_entry_enabled; then
+      SHOULD_TRIAGE=true
+    else
+      echo "dispatch: #$IID opened with no boucle: label and BOUCLE_ENTRY_MODE=${BOUCLE_ENTRY_MODE:-label} (opt-in) — not entering the loop. Add boucle:triage or assign @${BOUCLE_BOT_USERNAME:-the bot} to hand it over."
+      dispatch_noop
+    fi
   fi
 
   if [ "$SHOULD_TRIAGE" = "true" ]; then

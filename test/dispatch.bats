@@ -1268,20 +1268,94 @@ opt_out_routing() {
 unlabeled_decision() {
   local action="$1"
   if [ "$action" = "open" ] || [ "$action" = "opened" ]; then
-    echo triage
+    dispatch_auto_entry_enabled && echo triage || echo noop
   else
     echo noop
   fi
 }
 
-@test "unlabeled: GitLab open event on an unlabeled issue routes to triage" {
-  run unlabeled_decision "open"
+@test "unlabeled: GitLab open event on an unlabeled issue routes to triage in auto mode" {
+  BOUCLE_ENTRY_MODE=auto run unlabeled_decision "open"
   assert_output "triage"
 }
 
-@test "unlabeled: GitHub opened event on an unlabeled issue routes to triage" {
-  run unlabeled_decision "opened"
+@test "unlabeled: GitHub opened event on an unlabeled issue routes to triage in auto mode" {
+  BOUCLE_ENTRY_MODE=auto run unlabeled_decision "opened"
   assert_output "triage"
+}
+
+# ── Entry policy: the loop is opt-in by default ───────────────────────
+# A plain issue in a shared tracker is not a work order. Until this gate
+# existed, opening ANY issue in a project running boucle got it triaged,
+# labelled boucle:triage + boucle::status::bot, assigned to the bot and
+# answered with a spec — a colleague's bug report, a note-to-self, a
+# duplicate. Opting IN is one label; opting OUT of an appropriation you
+# never asked for is a tombstone (#124) and a cleanup.
+
+@test "entry policy: default (unset) is opt-in — a new issue does NOT enter the loop" {
+  unset BOUCLE_ENTRY_MODE
+  run unlabeled_decision "open"
+  assert_output "noop"
+  run unlabeled_decision "opened"
+  assert_output "noop"
+}
+
+@test "entry policy: BOUCLE_ENTRY_MODE=label is opt-in" {
+  BOUCLE_ENTRY_MODE=label run unlabeled_decision "open"
+  assert_output "noop"
+}
+
+@test "entry policy: dispatch_auto_entry_enabled is true only for auto" {
+  BOUCLE_ENTRY_MODE=auto run dispatch_auto_entry_enabled
+  assert_success
+  BOUCLE_ENTRY_MODE=AUTO run dispatch_auto_entry_enabled
+  assert_success
+  BOUCLE_ENTRY_MODE=label run dispatch_auto_entry_enabled
+  assert_failure
+}
+
+@test "entry policy: an unset, empty or misspelled mode falls back to opt-in" {
+  # The quiet mode is the safe fallback: a typo in a CI variable must not
+  # silently re-enable mass appropriation.
+  unset BOUCLE_ENTRY_MODE
+  run dispatch_auto_entry_enabled
+  assert_failure
+  BOUCLE_ENTRY_MODE="" run dispatch_auto_entry_enabled
+  assert_failure
+  BOUCLE_ENTRY_MODE="atuo" run dispatch_auto_entry_enabled
+  assert_failure
+  BOUCLE_ENTRY_MODE="true" run dispatch_auto_entry_enabled
+  assert_failure
+}
+
+@test "entry policy: the open-event branch is gated on dispatch_auto_entry_enabled" {
+  # Guard shape: the gate must live INSIDE the open/opened branch, and the
+  # opt-in path must leave via dispatch_noop — never via set_boucle_label
+  # or chain_to_role.
+  block=$(awk '
+    /^  elif \[ "\$ACTION" = "open" \] \|\| \[ "\$ACTION" = "opened" \]; then$/ { p = 1 }
+    p { print }
+    p && /^  fi$/ { exit }
+  ' lib/boucle-ci/dispatch.sh)
+  [ -n "$block" ] || { echo "open-event branch not found"; false; }
+  echo "$block" | grep -q 'dispatch_auto_entry_enabled'
+  echo "$block" | grep -q 'SHOULD_TRIAGE=true'
+  echo "$block" | grep -q 'dispatch_noop'
+  run grep -q 'set_boucle_label' <<< "$block"
+  assert_failure
+  run grep -q 'chain_to_role' <<< "$block"
+  assert_failure
+}
+
+@test "entry policy: boucle's own issue creators pass boucle:triage at creation" {
+  # Opt-in mode must not strand the issues boucle opens for itself:
+  # schedules, triage sub-issues and the e2e follow-up. They route on the
+  # LABEL branch, never on the open-event branch, because every one of them
+  # passes boucle:triage to forge_issue_create.
+  # schedules: the label list is built one line above the create call.
+  grep -q 'all_labels="boucle:triage,boucle:scheduled"' lib/boucle.sh
+  grep -q 'forge_issue_create .*"boucle:triage,' lib/boucle-ci/triage.sh
+  grep -q 'forge_issue_create .*"boucle:triage,' lib/boucle-ci/e2e.sh
 }
 
 @test "unlabeled: a note event on an unlabeled issue does NOT triage (#124)" {

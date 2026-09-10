@@ -307,3 +307,78 @@ _invalid_notes() {
   assert_output --partial "RC=0"
   refute_output --partial "LABEL:42:boucle:triage"
 }
+
+# ── Theme block: one palette, three files, no derived colors ──────────
+#
+# The `%%{init}%%` line is duplicated by construction: templates/triage.md
+# is the spec skeleton, .jcode/agents/triage.md is what the agent reads, and
+# templates/diagram-theme.md is the documented source of truth. Nothing at
+# runtime reconciles them, so a fix applied to one and not the others ships
+# a diagram that renders differently depending on which file the agent
+# happened to follow.
+
+THEME_FILES=(templates/diagram-theme.md templates/triage.md .jcode/agents/triage.md)
+
+theme_line() {
+  grep -m1 -h '^%%{init:' "$REPO_ROOT/$1"
+}
+
+@test "diagram theme: the init block is byte-identical across the three files" {
+  local ref
+  ref="$(theme_line "${THEME_FILES[0]}")"
+  [ -n "$ref" ] || { echo "no %%{init:}%% line in ${THEME_FILES[0]}"; false; }
+  local f
+  for f in "${THEME_FILES[@]}"; do
+    local line
+    line="$(theme_line "$f")"
+    [ "$line" = "$ref" ] || {
+      echo "theme drift in $f"
+      echo "expected: $ref"
+      echo "found:    $line"
+      false
+    }
+  done
+}
+
+@test "diagram theme: background is opaque, never transparent" {
+  # Mermaid does not paint `background` — it COMPUTES with it, via khroma.
+  # lighten("transparent", 12) returns hsla(0, 0%, 12%, 0): alpha zero.
+  # Everything derived from it inherits that alpha and vanishes —
+  # attributeBackgroundColorOdd/Even (erDiagram rows) and the xychart plot
+  # area were fully transparent, leaving #0d1117 text on the bare comment
+  # surface. Verified against mermaid 11.17.2.
+  local f
+  for f in "${THEME_FILES[@]}"; do
+    run grep -c '"background":"transparent"' "$REPO_ROOT/$f"
+    assert_output "0"
+  done
+}
+
+@test "diagram theme: every text color is pinned, none left to mermaid" {
+  # Unpinned, mermaid fills the gaps with values nobody chose:
+  # titleColor ||= tertiaryTextColor = invert(tertiaryColor) = #17190a.
+  local ref
+  ref="$(theme_line "${THEME_FILES[0]}")"
+  local key
+  for key in textColor titleColor nodeTextColor secondaryTextColor \
+    tertiaryTextColor labelTextColor actorTextColor signalTextColor \
+    noteTextColor attributeBackgroundColorOdd attributeBackgroundColorEven; do
+    echo "$ref" | grep -q "\"$key\":" || {
+      echo "theme variable not pinned: $key"
+      false
+    }
+  done
+}
+
+@test "diagram theme: the canonical block parses as JSON" {
+  # A malformed init directive is not a parse error for Mermaid — it is
+  # SILENTLY IGNORED, and every diagram falls back to the default purple
+  # theme. Nothing else in the pipeline would notice.
+  if ! command -v node > /dev/null 2>&1; then skip "node not installed"; fi
+  local ref json
+  ref="$(theme_line "${THEME_FILES[0]}")"
+  json="${ref#'%%{init: '}"
+  json="${json%'}%%'}"
+  run node -e "JSON.parse(process.argv[1])" "$json"
+  assert_success
+}
