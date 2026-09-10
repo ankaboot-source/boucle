@@ -310,7 +310,7 @@ all have sane defaults — override them only when you need to:
 
 | Variable | Default | What it controls |
 | --- | --- | --- |
-| `BOUCLE_ENABLED` | `true` | Master switch: `true` (default) or `false` to pause boucle. |
+| `BOUCLE_ENABLED` | `true` | Master switch: `false` pauses boucle — every CI job is skipped without allocating a runner. Unset reads as enabled on GitHub; on GitLab the variable must be exactly `true` (`bin/setup` seeds it). |
 | `BOUCLE_LLM_API_KEY` | *(unset)* | LLM provider key. Set as a **masked** variable. |
 | `BOUCLE_LLM_BASE_URL` | `https://ollama.com/v1` | LLM provider endpoint (any OpenAI-compatible API). |
 | `BOUCLE_ENTRY_MODE` | `label` | How a new issue enters the loop: `label` (default — opt-in: add `boucle:triage` or assign the bot) or `auto` (every issue opened in the project is triaged). |

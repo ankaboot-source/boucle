@@ -279,7 +279,7 @@ following E2E-fail origin markers.
 ## 7. Doctor
 
 `lib/boucle-ci/doctor.sh` (`boucle_ci_doctor`) is the scheduled self-healing
-sweep (every 10 min). It:
+sweep. It:
 
 - **Board maintenance.** Detects orphaned triages, stuck `boucle:triage`
   issues, orphaned `boucle:needs-info` / `boucle:spec-review` issues, and
@@ -302,6 +302,36 @@ sweep (every 10 min). It:
 - **File-impact gate (planned).** A `git merge-tree` safety-net gate defers
   parallel workers on file overlap (design spec
   `docs/superpowers/specs/2026-08-12-file-impact-gate-design.md`).
+
+### Cadence: what is asked for vs what is delivered
+
+Both CI files ask for `*/10 * * * *` — 144 sweeps a day. GitLab schedules
+honour that. **GitHub Actions does not**, and the gap is not marginal.
+Measured on this repository's own `boucle` workflow over 12.3 days
+(2026-08-29 → 2026-09-10, 87 scheduled runs):
+
+| | asked | delivered |
+|---|---|---|
+| runs/day | 144 | **7.1** |
+| gap between sweeps | 10 min | **median 209 min, max 468 min** |
+
+GitHub throttles and drops high-frequency `schedule` events at will, and the
+`on: schedule` block cannot be parameterised (Actions expands neither `vars`
+nor shell variables there), so this is not a setting to tune — it is a
+property of the platform to design around.
+
+The consequence is on recovery latency, not correctness. Every doctor
+recovery path is idempotent and re-entrant, so a late sweep recovers exactly
+what an on-time one would. But `BOUCLE_STALENESS_THRESHOLD` (default 2400 s /
+40 min) sizes the *threshold*, not the *sweep*: on GitHub a stuck
+`boucle:working` issue crosses that threshold in 40 minutes and then waits a
+median 3.5 hours — up to 7.8 — for a sweep to notice. Lowering the threshold
+does not help; nothing is running to read it.
+
+Where recovery latency matters on GitHub, the paths that do not depend on the
+sweep are the ones to lean on: the webhook routes (a comment, a label, a bot
+assignment all re-enter dispatch immediately) and `workflow_dispatch`, which
+runs a role on demand.
 
 ## 8. Self-update
 

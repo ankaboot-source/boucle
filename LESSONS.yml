@@ -1113,3 +1113,22 @@
   - 'DO pin every color the diagram uses, and use an opaque one for `background`. A theme variable left unset is a value invented by the library, not a value inherited from the design system.'
   - 'DO verify a theme claim against the real library rather than reasoning about it: `getThemeVariables(overrides)` and khroma are two npm installs and answer the question exactly.'
   - 'DO test the init block itself — byte-identical across the three files that carry it, valid JSON (a malformed directive is SILENTLY IGNORED and every diagram falls back to the default purple theme), and no unpinned text color.'
+117:
+  title: A documented switch nobody wired is worse than no switch
+  ❌:
+  - 'DO NOT let the two CI files drift on a CONTRACT. `BOUCLE_ENABLED` — "false to pause boucle", per README.md and LOOP.md — appeared 16 times in .gitlab-ci.yml and ZERO times in .github/workflows/boucle.yml. `bin/setup` created the variable on every GitHub install (`gh variable set BOUCLE_ENABLED --body true`) and nothing read it. A consumer who set it to false to stop the noise got every job running exactly as before: dispatch on every issue, comment and PR event, the doctor on every schedule firing, deploy on every push, with no way to stop any of it short of deleting the workflow.'
+  - 'DO NOT copy a fail-CLOSED gate across forges without asking what an absent variable means there. GitLab''s `!= "true" -> never` silences a project that never had the variable — correct where bin/setup always writes it, catastrophic where an install may predate or outlive that line, because an autonomous loop going quiet with no error is indistinguishable from one with nothing to do.'
+  ✅:
+  - 'DO grep the OTHER forge''s CI file for every variable a doc promises. The docs are the contract; two implementations of it drift silently, and the one nobody dogfoods drifts first.'
+  - 'DO gate at the job level, not inside the script: a job whose `if` is false is skipped without allocating a runner, so the pause costs nothing. A script that exits early has already paid for the runner, the checkout and the toolchain.'
+  - 'DO test the contract, not the prose: a test that parses the workflow and asserts EVERY job carries the gate catches the next job added without it.'
+118:
+  title: A GitHub cron asks; GitHub decides
+  ❌:
+  - 'DO NOT size a recovery path on the cron you wrote. Both CI files ask for `*/10 * * * *` (144 sweeps/day). Measured on boucle''s own GitHub workflow over 12.3 days, 87 scheduled runs: 7.1 runs/day, median gap 209 min, max 468 min. GitHub throttles and drops high-frequency schedule events at will.'
+  - 'DO NOT try to fix it with a variable: `on: schedule` expands neither `vars` nor shell variables, so the cadence is not configurable per consumer.'
+  - 'DO NOT lower `BOUCLE_STALENESS_THRESHOLD` to compensate. The threshold sizes when an issue COUNTS as stuck, not when anything looks: on GitHub a stuck issue crosses 40 minutes and then waits a median 3.5 hours for a sweep to read the threshold at all.'
+  ✅:
+  - 'DO keep every doctor recovery path idempotent and re-entrant, so a sweep that arrives hours late recovers exactly what an on-time one would. That property is what makes the platform''s throttling a latency problem instead of a correctness one.'
+  - 'DO lean on the paths that do not depend on the sweep where latency matters on GitHub: the webhook routes (a comment, a label, a bot assignment re-enter dispatch immediately) and `workflow_dispatch` for running a role on demand.'
+  - 'DO measure a platform claim against the platform''s own API before designing on it. `list_workflow_runs` answers "how often does this actually fire?" in one call.'

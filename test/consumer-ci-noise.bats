@@ -20,6 +20,12 @@
 #                  BOUCLE_DEPLOY_MODE=external, where boucle deploys nothing
 #                  and both consumers of the artifact (deploy, pages) skip.
 #
+# The GitHub workflow has the same problem from the other end: `deploy` ran
+# unguarded in external mode, and BOUCLE_ENABLED — the master switch README.md
+# and LOOP.md both document as "false to pause boucle" — was never wired in at
+# all. 16 gates in .gitlab-ci.yml, zero in .github/workflows/boucle.yml, while
+# bin/setup created the variable on every GitHub install.
+#
 # These tests read the YAML, not the prose: a rule deleted in a refactor is
 # a red test, not a silent return of the noise.
 
@@ -172,6 +178,76 @@ assert gl == "label", gl
 assert "label" in gh, gh
 print("ok")
 '
+  assert_success
+  assert_output "ok"
+}
+
+
+# ── GitHub: the master switch, and the same deploy waste ──────────────
+#
+# These read the workflow through PyYAML in a quoted heredoc: the conditions
+# under test are themselves full of single quotes ('false', 'external'), and
+# nesting those inside a bats `run python3 -c '...'` ends the bash string at
+# the first inner quote.
+
+@test "github: BOUCLE_ENABLED gates EVERY job" {
+  # The switch README.md and LOOP.md document ("false to pause boucle").
+  # .gitlab-ci.yml had 16 of these gates; this workflow had none, so a
+  # consumer who set it to false got every job running exactly as before.
+  run python3 - <<'PY'
+import yaml
+w = yaml.safe_load(open(".github/workflows/boucle.yml"))
+missing = [n for n, j in w["jobs"].items()
+           if "vars.BOUCLE_ENABLED != 'false'" not in " ".join(str(j.get("if", "")).split())]
+assert not missing, "ungated jobs: " + ", ".join(missing)
+print("ok")
+PY
+  assert_success
+  assert_output "ok"
+}
+
+@test "github: the gate is fail-OPEN, unlike GitLab's" {
+  # GitLab: `$BOUCLE_ENABLED != "true" -> never` (a project missing the
+  # variable runs nothing). Copying that polarity here would silence every
+  # install whose variable predates or outlives bin/setup's `gh variable
+  # set` line — an autonomous loop going quiet with no error. Unset must
+  # read as enabled, which is also the documented default.
+  run grep -c "BOUCLE_ENABLED == .true." .github/workflows/boucle.yml
+  assert_output "0"
+  run grep -c "vars.BOUCLE_ENABLED != .false." .github/workflows/boucle.yml
+  refute_output "0"
+}
+
+@test "github: triage keeps always() first in its condition" {
+  # triage runs after a dispatch marked continue-on-error, so `always()`
+  # must survive having the gate prepended — without it the job is skipped
+  # whenever dispatch exits non-zero, which is a normal dispatch outcome.
+  run python3 - <<'PY'
+import yaml
+cond = " ".join(str(yaml.safe_load(open(".github/workflows/boucle.yml"))["jobs"]["triage"]["if"]).split())
+assert cond.startswith("always()"), cond
+print("ok")
+PY
+  assert_success
+  assert_output "ok"
+}
+
+@test "github: deploy never runs in external deploy mode" {
+  # Same waste as build-site on GitLab, one step earlier: boucle-ci deploy
+  # returns immediately in external mode, but the checkout (fetch-depth: 0
+  # + submodules), setup-node, dependency install and self-update step all
+  # ran first, on every push to the consumer's default branch.
+  #
+  # It must read `vars`, not `env`: the env context is NOT available in a
+  # job-level `if` (only in steps[*].if), so env.BOUCLE_DEPLOY_MODE would
+  # evaluate to empty and the guard would never fire.
+  run python3 - <<'PY'
+import yaml
+cond = " ".join(str(yaml.safe_load(open(".github/workflows/boucle.yml"))["jobs"]["deploy"]["if"]).split())
+assert "vars.BOUCLE_DEPLOY_MODE != 'external'" in cond, cond
+assert "env.BOUCLE_DEPLOY_MODE" not in cond, cond
+print("ok")
+PY
   assert_success
   assert_output "ok"
 }
