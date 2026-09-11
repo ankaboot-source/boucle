@@ -32,7 +32,7 @@ boucle_ci_check() {
 
   # Install the toolchain (shellcheck/shfmt/bats, pinned) via the shared
   # root-safe bootstrap — falls back to $HOME/.local/bin when /usr/local/bin
-  # is not writable (shared shell executors, e.g. framagit's non-root runner).
+  # is not writable (shared shell executors running as a non-root user).
   "${BOUCLE_HOME:-.}/bin/check-bootstrap.sh"
 
   # Run the quality gate

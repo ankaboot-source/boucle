@@ -27,7 +27,7 @@
 # Raster images added/modified by the PR itself (e.g. public/og-image.png)
 # are NOT comment attachments, so bin/describe-images never saw them — the
 # reviewer then improvised, Read the PNG, and the text-only model 400'd on
-# image input, killing the run (boucle.dev PR #94, 2026-08-27: 5/5 identical
+# image input, killing the run (observed on a consumer, 2026-08-27: 5/5 identical
 # failed iterations, escalated to boucle:human). This function extracts those
 # images from the MR head into .boucle-state/$ISSUE/repo-images/ so
 # describe-images can describe them as text like any attachment.
@@ -183,7 +183,7 @@ boucle_ci_reviewer() {
       # artifact — the human closed a zombie/empty MR while the issue is
       # queued for work (boucle:todo/boucle:working). In case (b),
       # boucle:done is WRONG: the work is not finished, and closing the
-      # issue kills the loop (consumer MR !59: the human closed a
+      # issue kills the loop (observed on a consumer: the human closed a
       # 0-commit zombie MR, the reviewer marked the issue boucle:done and
       # closed it 2 minutes after the recovery). Gate the done-transition
       # on the issue's current detail label.
@@ -292,7 +292,7 @@ boucle_ci_reviewer() {
   # Collect raster images ADDED/MODIFIED by the PR itself (repo-images).
   # They are not comment attachments, so without this the vision pipeline
   # never sees them and the text-only reviewer model 400s if it Reads one
-  # (boucle.dev PR #94: reviewer Read public/og-image.png, 5/5 iterations
+  # (observed on a consumer: reviewer Read public/og-image.png, 5/5 iterations
   # crashed). Extracted from the MR head into
   # .boucle-state/$ISSUE/repo-images/ for describe-images below. Fail-open:
   # any git error yields an empty list, never a blocked review.
@@ -409,7 +409,7 @@ boucle_ci_reviewer() {
   # Without these, the reviewer grades against MR notes + issue body alone and
   # misses amendments the human posted on the ISSUE (not the MR). The worker
   # already receives BOUCLE_ISSUE_NOTES; the reviewer MUST too, so it can
-  # verify those amendments are addressed (framagit 2026-08, MR !61: the
+  # verify those amendments are addressed (observed on a consumer, 2026-08: the
   # human posted "embed Instagram + related articles" as an ISSUE note; the
   # worker marked them SUPPRIMÉE and the reviewer PASSed because it never saw
   # the issue note — only the MR notes and issue body).
@@ -710,7 +710,7 @@ boucle_ci_reviewer() {
   # below), while an empty verdict re-triggers the reviewer up to
   # BOUCLE_MAX_ITERATIONS (the assertion at the end of this function).
   # Recording both as "UNCERTAIN" made those indistinguishable in the health
-  # log — observed on boucle.dev #92, which shows ten UNCERTAIN rows that were
+  # log — observed on a consumer, which shows ten UNCERTAIN rows that were
   # in fact ten runs where the agent posted nothing at all, five of them on a
   # byte-identical prompt. Reading that row as "the reviewer was unsure" is
   # the wrong diagnosis and points at the wrong fix.
@@ -838,7 +838,7 @@ boucle_ci_reviewer() {
       # (agent crashed / step-exhausted before posting a verdict) is
       # handled by the post-case assertion below, which re-triggers the
       # reviewer instead of prematurely escalating to human. Conflating
-      # the two caused MR !40 on a consumer repo: the reviewer
+      # the two caused a real failure on a consumer: the reviewer
       # posted only drafts on iterations 1-2 (no VERDICT line), the
       # catch-all fired, assigned the MR to the human and set
       # boucle:human BEFORE the re-triggered reviewer could finish —

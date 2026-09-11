@@ -228,7 +228,7 @@ JSONL
   # two states take different paths through reviewer.sh — a posted
   # `VERDICT: UNCERTAIN` escalates to a human immediately, an empty one
   # re-triggers the reviewer up to BOUCLE_MAX_ITERATIONS — so one name for
-  # both makes the health log point at the wrong bug. boucle.dev #92
+  # both makes the health log point at the wrong bug. a consumer
   # escalated twice showing ten UNCERTAIN rows that were, every one of them,
   # a run where the agent posted nothing at all.
   run grep -c 'VERDICT:-no-verdict' lib/boucle-ci/reviewer.sh lib/boucle-ci/e2e.sh

@@ -282,7 +282,7 @@ extract_agent_resolution() { # $1 = outfile, $2 = engine dir, $3 = end regex
 }
 
 @test "build_prompt: reviewer prompt includes MR/PR number when BOUCLE_MR_IID is set" {
-  # Bug fix (boucle.dev #73): the reviewer agent posted its verdict on the
+  # Bug fix (on a consumer): the reviewer agent posted its verdict on the
   # issue instead of the PR because the prompt never told it the PR number.
   # BOUCLE_MR_IID is exported by reviewer.sh; bin/jc must inject it into the
   # prompt so the agent posts on the MR/PR, not the issue.

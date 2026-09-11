@@ -19,8 +19,8 @@ primitives (issues, labels, MRs, approvals, webhooks). The loop is **async by
 design** (I3): it runs on CI, and the human intervenes at two named gates —
 spec approval and MR review — rather than in a live chat.
 
-The engine is split from the consumer site it once described (the
-urgence-palestine.fr Astro site was extracted; see [CONTEXT.md](CONTEXT.md) §1).
+The engine is split from the consumer site it once described (that Astro
+site was extracted to its own repo; see [CONTEXT.md](CONTEXT.md) §1).
 This document describes the engine itself.
 
 ### The 8-stage pipeline

@@ -113,7 +113,7 @@ caption that the Mermaid is a structural sketch of a type the skill renders as H
 ## Syntax rules — the traps that break a render
 
 A diagram the Mermaid parser rejects renders as an **error box**, not as a diagram
-(boucle.dev#86 shipped one). `bin/check-mermaid` parses every `mermaid` fence in the
+(a real spec shipped one). `bin/check-mermaid` parses every `mermaid` fence in the
 spec with the real Mermaid parser and blocks the spec gate on a parse error, so these
 are not style preferences — a spec that breaks one of them goes back to triage.
 

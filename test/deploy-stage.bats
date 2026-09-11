@@ -7,7 +7,7 @@
 #
 #   - deploy      — the inline copy did NOT rebuild (build-site hands it
 #                   public/ as an artifact; rebuilding OOMs WASM toolchains on
-#                   shell executors, framagit 2026-08), while the shared one
+#                   shell executors), while the shared one
 #                   always ran $BOUCLE_BUILD_CMD.
 #   - post-merge  — the inline copy had no BOUCLE_DEPLOY_MODE=external branch
 #                   at all, so on GitLab external mode never waited for the

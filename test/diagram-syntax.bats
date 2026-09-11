@@ -2,7 +2,7 @@
 #
 # test/diagram-syntax.bats — the deterministic diagram syntax gate.
 #
-# Regression target: boucle.dev#86. That spec passed every gate — it declared
+# Regression target: a real spec that passed every gate — it declared
 # `data-model` impacts, carried a `## Diagram` section AND a valid
 # `<!-- boucle:diagram v=1 -->` marker — and still reached the human with a
 # diagram the forge rendered as an error box, because nothing had ever asked
@@ -89,7 +89,7 @@ have_parser() {
 
 # ── bin/check-mermaid: verdicts (need the real parser) ─────────────────
 
-@test "check-mermaid: rejects the erDiagram that shipped in boucle.dev#86" {
+@test "check-mermaid: rejects the erDiagram that shipped in a real spec" {
   have_parser || skip "mermaid/jsdom not installed"
   # Verbatim shape of the failure: an erDiagram attribute line whose third
   # token is a bare path. The grammar allows `type name [PK|FK|UK]

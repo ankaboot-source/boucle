@@ -340,7 +340,7 @@ HTML
   assert_success
 }
 
-# Regression for boucle.dev #73: the visual preview block was nested inside
+# Regression for an incident on a consumer: the visual preview block was nested inside
 # the READY) case branch, so NEEDS-INFO / NEEDS-SPLIT issues never had their
 # mockup rendered — even though the triage agent produces preview.html +
 # RENDER_REQUEST for any UI/UX issue regardless of disposition. The block

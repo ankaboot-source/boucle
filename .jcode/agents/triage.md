@@ -250,7 +250,7 @@ mattered. Work in this order, every time:
   impact kind happened to be `data-model`. `erDiagram` describes DATA — entities and
   their fields. If the boxes are not data, it is the wrong block type.
 
-**Worked example — the failure this rule exists for (boucle.dev#86).** The issue added
+**Worked example — the failure this rule exists for.** The issue added
 an "open source" section to a landing page, between quick-start and the footer, fed by a
 new content collection. The spec declared `kinds=data-model,ui` and drew:
 

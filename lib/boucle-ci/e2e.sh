@@ -45,7 +45,7 @@ boucle_ci_e2e() {
   # via workflow_dispatch (recovery path), which carries none of the deploy
   # job's env. Under set -u, expanding an unset default (line 44's
   # "$BOUCLE_PRODUCTION_URL") crashed the whole job ("unbound variable",
-  # observed on boucle.dev #116) BEFORE any message could be printed, so the
+  # observed on a consumer) BEFORE any message could be printed, so the
   # recovery pass burned a full runner per retry. Resolution ladder: deploy
   # URL → production URL → Pages URL (the consumer's canonical pages URL,
   # the same thing the worker's deploy step resolves) → empty (skip loudly).

@@ -374,8 +374,8 @@ part of the install**: it is not a separate step.
 If the GitLab service-account API is unavailable on your instance (feature
 flag off, or the endpoint 403s), setup falls back to the manual flow: create
 the bot from your project's **Service accounts** page (GitLab → Project →
-Settings → Service accounts, e.g. on framagit:
-`https://<your-gitlab-host>/<group>/<project>/-/settings/service_accounts`).
+Settings → Service accounts):
+`https://<your-gitlab-host>/<group>/<project>/-/settings/service_accounts`.
 That page lets a project owner provision a bot without platform admin. Then:
 
 1. Create a Personal Access Token for the bot account (scope: `api`) — this

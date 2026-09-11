@@ -552,8 +552,8 @@ fi
 # AGENTS.md is consumer-owned: every consumer project has its own AGENTS.md
 # with project-specific context (tech stack, constraints, lessons). Overwriting
 # it with the engine's AGENTS.md destroys the consumer's project context — a
-# regression observed during the m3llm ADT→boucle migration (setup overwrote
-# m3llm's AGENTS.md, which documents the LiteLLM/OpenWebUI/Supabase stack, with
+# regression observed during a real migration onto boucle (setup overwrote the
+# consumer's AGENTS.md, which documented its own service stack, with
 # the engine's generic AGENTS.md). The engine's AGENTS.md is still available
 # inside the .boucle/ submodule for reference; it is NOT copied to the consumer
 # root. Consumer-owned docs (AGENTS.md, README.md, LOOP.md, CONTEXT.md, the

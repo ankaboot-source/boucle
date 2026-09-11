@@ -177,7 +177,7 @@ approver() {
 # triage, refining next.") with the FINAL marker + ## Disposition READY
 # but no ## TL;DR would be promoted by those paths, routing an EMPTY
 # spec to the spec gate and asking the human to approve nothing
-# (boucle.dev #73). The guard refuses to promote a comment without
+# (a consumer). The guard refuses to promote a comment without
 # ## TL;DR and escalates to human instead of routing an empty spec.
 
 @test "spec-completeness: comment_has_tldr detects a ## TL;DR section header" {
@@ -269,7 +269,7 @@ READY' && echo yes || echo no
 # not bound by them. When the worker must pick between variants, the
 # choice changes what gets built, so it is a blocking question. A READY
 # spec with three directions and no question forces the worker to guess
-# (boucle.dev #73).
+# (a consumer).
 
 @test "prompt: triage.md distinguishes advisory proposals from blocking choices" {
   # The prompt must tell the agent that mutually-exclusive user-visible

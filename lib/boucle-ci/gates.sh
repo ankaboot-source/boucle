@@ -175,7 +175,7 @@ check_diagram_gate() {
 
 # ── Diagram syntax gate (deterministic — LESSONS.yml #109) ───────────────
 # The diagram gate above proves a diagram is PRESENT. It says nothing about
-# whether the forge can render it: boucle.dev#86 shipped a `## Diagram`
+# whether the forge can render it: a real spec shipped a `## Diagram`
 # section with a valid marker and an erDiagram the Mermaid parser rejects
 # (`string file src/content/open-source/open-source.md` — a bare path where
 # the grammar allows only `type name [PK|FK|UK] ["comment"]`), so the human

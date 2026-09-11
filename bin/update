@@ -227,7 +227,7 @@ get_current_version() {
   #      and returns the parent's HEAD, which is not an engine version and
   #      would make needs_update permanently true;
   #   2. the legacy .bouclé-version stamp (written by bin/setup and the
-  #      pre-#120 generations of bin/update; urgence-palestine.fr carries
+  #      pre-#120 generations of bin/update; early consumers carry
   #      one) — absent in fresh installs, fine.
   if [ "$ENGINE_DIR" != "." ] && [ -e "$ENGINE_DIR/.git" ]; then
     local head
@@ -342,14 +342,14 @@ download_and_extract() {
 # uses the root file, which drifts and references paths that don't exist
 # outside .boucle/ (e.g. $CI_PROJECT_DIR/bin/render-preview instead of
 # $BOUCLE_HOME/bin/render-preview — the triage render-preview failure
-# class, observed on urgence-palestine.fr #85).
+# class, observed on a consumer).
 #
 # On GitHub, the workflow file MUST be at the repo root — GitHub Actions
 # only reads .github/workflows/ at the root, not inside .boucle/. So the
 # workflow IS propagated.
 # AGENTS.md is consumer-owned (project-specific context); SKILL.md and
 # ARCHITECTURE.md are engine-owned. See bin/setup §"Charter docs" for the
-# rationale (consumer AGENTS.md overwrite regression during m3llm migration).
+# rationale (consumer AGENTS.md overwrite regression during a real migration).
 CONSUMER_ROOT_DOCS="SKILL.md ARCHITECTURE.md"
 
 # propagate_consumer_root_files
@@ -514,8 +514,8 @@ untrack_prompt_overlay() {
 # (issue #110): engine-owned root docs re-propagated, orphan real dirs
 # migrated to engine symlinks, prompt overlay untracked, drift committed
 # and pushed. Applies to BOTH consumer install models — submodule AND
-# copy-based (a real tracked .boucle/ directory, the layout that let
-# urgence-palestine.fr run stale root bin/ + .jcode/ for weeks; issue
+# copy-based (a real tracked .boucle/ directory, the layout that let a
+# consumer run stale root bin/ + .jcode/ for weeks; issue
 # #120). Only the dogfood layout (ENGINE_DIR = ".") is out of scope: the
 # root IS the engine there, nothing to reconcile. Idempotent — no drift
 # → no commit, no push.
@@ -629,7 +629,7 @@ main() {
   # streak with no failures. Idempotent: nothing to fix → no commit, no push.
   # Issue #120: the heal is NOT submodule-only. Copy-based consumers (a real
   # tracked .boucle/ directory) carry stale root files and frozen orphan
-  # tooling exactly like submodule ones — urgence-palestine.fr ran a stale
+  # tooling exactly like submodule ones — a consumer ran a stale
   # root bin/ + .jcode/ for weeks. Any non-dogfood engine install heals.
   if ! needs_update "$current" "$upstream"; then
     echo "[boucle] up to date ($mode: $current)"

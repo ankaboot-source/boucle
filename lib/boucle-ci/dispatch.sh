@@ -217,7 +217,7 @@ dispatch_auto_entry_enabled() {
 # the one that runs.
 #
 # Every read is guarded (`2> /dev/null || …=false`): the payload file can
-# vanish mid-job (jq exit 5, pipeline #1433434), and "no assignment" is the
+# vanish mid-job (jq exit 5), and "no assignment" is the
 # safe degradation — it declines to enter the loop rather than entering it
 # on a payload nobody could read.
 #
@@ -274,7 +274,7 @@ boucle_ci_dispatch() {
 
   # Clear any stale .boucle-issue / .boucle-noop from a previous run. The
   # files are NOT in .gitignore and survive `git clean` on some runner
-  # configurations (observed on framagit 2026-08: a previous issue-webhook
+  # configurations (observed on a consumer, 2026-08: a previous issue-webhook
   # dispatch wrote .boucle-issue; the next run's MR-note trigger dispatch
   # didn't write it, but the file still existed — the EXIT trap found it
   # and didn't flip to exit 1, so triage ran and re-triaged the issue,
@@ -288,7 +288,7 @@ boucle_ci_dispatch() {
   # the path can be unset, empty, or point to a deleted file. Without this
   # guard, `set -e` (GitLab default) propagates jq's exit 5 (system error,
   # file not found) and the script terminates silently with zero stdout —
-  # exactly the failure that hit pipeline #1433434 on a consumer repo.
+  # exactly the failure that hit a consumer pipeline.
   # Always produce a breadcrumb (lessons #5, #47) so the next failure mode
   # is visible in the trace.
   echo "dispatch: begin (runner has jq=$(command -v jq 2> /dev/null || echo MISSING), BOUCLE_TRIGGER_PAYLOAD='${BOUCLE_TRIGGER_PAYLOAD:-unset}')"
@@ -454,7 +454,7 @@ boucle_ci_dispatch() {
   # merge actions (which trigger catchup → post-merge → e2e).
   if [ "$OBJECT_KIND" = "merge_request" ]; then
     # Late payload reads: the trigger payload file can vanish mid-job (jq
-    # exit 5 "system error" — same failure as pipeline #1433434 on a
+    # exit 5 "system error" — same failure seen on a
     # consumer repo). Deferred with a fallback so a vanished file degrades
     # to an empty value instead of killing dispatch silently under set -e.
     # Forge-agnostic by trying both shapes rather than branching on

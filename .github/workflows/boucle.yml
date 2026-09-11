@@ -151,7 +151,7 @@ env:
   BOUCLE_STALENESS_THRESHOLD: ${{ vars.BOUCLE_STALENESS_THRESHOLD || '2400' }}
   # MUST stay in sync with the .gitlab-ci.yml default and LOOP.md: a build
   # without dependency install exits 127 ("astro: not found") on a fresh
-  # runner — observed on boucle.dev issue #81, where every iteration burned
+  # runner — observed on a consumer, where every iteration burned
   # on the same missing-node_modules failure.
   BOUCLE_BUILD_CMD: ${{ vars.BOUCLE_BUILD_CMD || 'npm ci && npm run build' }}
   BOUCLE_BUILD_OUTPUT: ${{ vars.BOUCLE_BUILD_OUTPUT || 'public' }}
@@ -224,7 +224,7 @@ permissions:
 #     with cancel-in-progress: false, so a comment dispatch still waiting
 #     for a runner is cancelled by any newer run in the same group —
 #     notably the issues:labeled webhook of the worker's OWN terminal
-#     transition (observed on boucle.dev #91: the amend dispatch was
+#     transition (observed on a consumer: the amend dispatch was
 #     cancelled 34s after the comment, the worker transitioned to
 #     boucle:review, the amendment never reached a worker, and the
 #     reviewer graded the wrong file against the frozen spec).
@@ -339,7 +339,7 @@ jobs:
       - name: Bootstrap chain smoke test
         run: |
           set -euo pipefail
-          export BOUCLE_HOME="$PWD" BOUCLE_FORGE=gitlab BOUCLE_FORGE_HOST=framagit.org
+          export BOUCLE_HOME="$PWD" BOUCLE_FORGE=gitlab BOUCLE_FORGE_HOST=gitlab.example.com
           source bin/forge/common.sh
           forge_init
           source lib/boucle.sh

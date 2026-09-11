@@ -535,7 +535,7 @@ and may produce conflicts with in-flight MRs.
 ## 7. Known gaps
 
 - **Dogfood suspended.** The engine repo no longer dogfoods on a consumer
-  (urgence-palestine.fr split out). Dogfooding will resume via a dedicated test
+  (the origin site was split out). Dogfooding will resume via a dedicated test
   consumer once the engine/consumer separation is stable. Until then, the
   73 LESSONS.yml lessons catalog the forward-looking operating principles; new classes of bugs are
   discovered on real consumers. (CONTEXT.md §1.)

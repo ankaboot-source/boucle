@@ -436,7 +436,7 @@ extract_spec_review_block() {
 }
 
 @test "the GitHub workflow runs comment dispatches in their own concurrency lane" {
-  # Amend-in-flight (issue #2, boucle.dev #91): a human comment during a
+  # Amend-in-flight (issue #2, a consumer): a human comment during a
   # worker run fires an issue_comment dispatch that must re-trigger the
   # worker. GitHub Actions de-duplicates QUEUED runs inside one
   # concurrency group even with cancel-in-progress: false — so if the
@@ -942,7 +942,7 @@ extract_working_amend_block() {
   echo "$guard_block" | grep -q 'amended-in-flight'
 }
 
-# ── Direct amend recheck (boucle.dev #91): the worker's own safety net ──
+# ── Direct amend recheck (a consumer): the worker's own safety net ──
 # The label guard above only fires when the amend-in-flight dispatch
 # ALREADY ran and set boucle:todo. On GitHub Actions that dispatch can be
 # cancelled before it runs: queued workflow runs are de-duplicated inside
@@ -1061,7 +1061,7 @@ extract_recheck_block() {
   # A freshly opened issue has no labels, so this aborted on exactly the case
   # the routing table handles as "new issue with no boucle label → triage",
   # making that branch unreachable and leaving every new issue to the doctor's
-  # orphan scan minutes later. Observed on boucle.dev#84.
+  # orphan scan minutes later. Observed on a consumer.
   #
   # The old message also lied: forge_issue_labels_get ends in `|| true`, so it
   # never exits non-zero. Its absence is the regression anchor.
@@ -1412,7 +1412,7 @@ unlabeled_decision() {
 }
 
 @test "bot assignment: an unreadable payload declines rather than entering" {
-  # The payload file can vanish mid-job (jq exit 5, pipeline #1433434).
+  # The payload file can vanish mid-job (jq exit 5).
   # "No assignment" is the safe degradation: it declines to enter the loop
   # rather than entering it on a payload nobody could read.
   BOUCLE_TRIGGER_PAYLOAD="$BATS_TEST_TMPDIR/gone.json" run dispatch_bot_just_assigned "assigned"

@@ -52,8 +52,8 @@ variables:
   # variable — GitLab keeps the literal string and a job-level definition
   # shadows the project variable entirely. The jobs then see the literal
   # "${BOUCLE_VERSION}", `needs_update` is always true and bin/update
-  # re-extracts the engine tarball on every pipeline (observed on
-  # urgence-palestine.fr: "update available: ${BOUCLE_VERSION} → …" once the
+  # re-extracts the engine tarball on every pipeline (observed on a
+  # consumer: "update available: ${BOUCLE_VERSION} → …" once the
   # project variable was missing — issue #120). Project variables are
   # inherited by every job natively; declaring nothing is the correct state.
   # On a fresh consumer where neither exists, bin/update records the
@@ -322,7 +322,7 @@ default:
        # Self-update MUST only run on the default branch — on a worker
        # branch (boucle/<iid>-<slug>) the self-update commit pollutes the MR
       # with chore(boucle): commits that are the bot's engine-sync work,
-      # not the issue's work (observed on MR !105: 6 chore(boucle):
+      # not the issue's work (observed on a consumer MR: 6 chore(boucle):
        # commits landed on boucle/79, attributed to the human because
       # the clone inherited their git identity).
       #
@@ -331,7 +331,7 @@ default:
       # BOUCLE_FORGE_HOST. The full forge_init sourcing happens only below,
       # AFTER the self-update, so inline jobs would otherwise hand bin/update
       # an unset project id — under `set -u` that killed the script before
-      # the commit+push could run (urgence-palestine.fr stayed frozen on an
+      # the commit+push could run (a consumer stayed frozen on an
       # old engine for weeks; issue #120).
       export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:-}}"
       # CI_SERVER_HOST is the authoritative forge host inside a GitLab job —
@@ -362,7 +362,7 @@ default:
       # BOUCLE_PROJECT_ID is normalized by lib/boucle-ci.sh for bin/boucle-ci
       # jobs; INLINE jobs (merger, doctor, ...) must get it here too, or the
       # forge_* triggers/notes POST to an empty project id (silently dropped
-      # by `|| true`) — observed re-trigger failure on framagit, 2026-08.
+      # by `|| true`) — observed re-trigger failure on a consumer, 2026-08.
       export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:-}}"
       export BOUCLE_WORKSPACE="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-$(pwd)}}"
       source "$BOUCLE_HOME/lib/boucle.sh"
@@ -515,7 +515,7 @@ check:
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
     # Run on pushes and MRs to $CI_DEFAULT_BRANCH.
-    # NOTE (framagit, 2026-08): the merge-request rule MUST reference
+    # NOTE (observed on a consumer, 2026-08): the merge-request rule MUST reference
     # $CI_PIPELINE_SOURCE == "merge_request_event" as a STANDALONE comparison —
     # GitLab's MR-pipeline creation only triggers on the simple reference.
     # A combined rule ("... == X && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == ...")
@@ -549,7 +549,7 @@ check:
     # in the job PATH (the bootstrap installs/verifies git itself).
     # Toolchain (shellcheck/shfmt/bats, pinned) — root-safe bootstrap:
     # falls back to $HOME/.local/bin when /usr/local/bin is not writable
-    # (shared shell executors, e.g. framagit's non-root runner). Fails with
+    # (shared shell executors running as a non-root user). Fails with
     # an actionable message when a system tool (make/tar/xz/...) is missing.
     #
     # Consumers skip the whole bootstrap: their half of this job is
@@ -952,7 +952,7 @@ doctor:
   # dedicated runners") does not strand the doctor behind a running worker.
   tags: []
   # resource_group: prevents concurrent doctor runs. On shared runners
-  # (framagit, GitLab.com SaaS), the doctor schedule fires every 10 min
+  # (SaaS or self-hosted), the doctor schedule fires every 10 min
   # and each run occupies a runner slot. Without this group, a slow
   # doctor run overlaps with the next schedule and consumes 2+ slots,
   # starving webhook-triggered dispatch/triage pipelines.
@@ -970,7 +970,7 @@ doctor:
 # The site is built ONCE here on a docker runner (node:22-slim, tags: []) and
 # published via artifact. Both `pages` (GitLab Pages) and `deploy` (CF/other)
 # consume public/ instead of re-building — this fixes the WASM Out-of-memory
-# failures seen when the build ran on small shell executors (framagit 2026-08).
+# failures seen when the build ran on small shell executors.
 build-site:
   stage: deploy
   image: node:22-slim
