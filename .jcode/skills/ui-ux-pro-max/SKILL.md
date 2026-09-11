@@ -62,7 +62,7 @@ This command:
 
 **Example:**
 ```bash
-python3 .jcode/skills/ui-ux-pro-max/scripts/search.py "humanitarian NGO editorial brutalist dark" --design-system -p "Urgence Palestine"
+python3 .jcode/skills/ui-ux-pro-max/scripts/search.py "editorial brutalist dark" --design-system -p "My Project"
 ```
 
 ### Step 2b: Persist Design System (Master + Overrides Pattern)
