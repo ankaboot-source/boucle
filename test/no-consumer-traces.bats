@@ -3,7 +3,7 @@
 # test/no-consumer-traces.bats — the engine names no consumer.
 #
 # boucle ships to other people's repositories. Every incident note it keeps
-# ("observed on X", "MR !N", "X.dev#86", "X's non-root runner") was written
+# ("observed on X", "MR !N", "<project>#86", "X's non-root runner") was written
 # while debugging a REAL consumer, and each one carries that consumer's
 # identity into a public engine: which host they use, which tracker, which
 # issue numbers, which source files, which service stack. None of it helps a
@@ -63,8 +63,8 @@ engine_files() {
 }
 
 @test "no cross-project issue or MR reference" {
-  # A number QUALIFIED BY A PROJECT — `something.dev #86`, `some.host#12`,
-  # `owner/project #71` — points into a tracker that is not this
+  # A number QUALIFIED BY A PROJECT — `<project>.<tld> #86`, `<host>#12`,
+  # `<owner>/<project> #71` — points into a tracker that is not this
   # repository's. A bare `#120` or `!105` is this repo's own and stays; so
   # does `MR !${MR_IID}` in runtime output and `"MR !123"` documenting the
   # reference-token format. Matching the bare forms would fire on all of
