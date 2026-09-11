@@ -6,7 +6,7 @@
 # The worker MUST NOT commit that file — on GitHub the App token lacks
 # the `workflows` permission, so a push that includes it is
 # remote-rejected, stranding the issue at boucle:working with no branch.
-# Regression for the incident on ankaboot-source/boucle.dev #71 (2026-08).
+# Regression for an incident on a consumer (2026-08).
 
 setup() {
   load 'test_helper/bats-support/load'

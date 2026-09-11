@@ -12,7 +12,7 @@
 # Environment:
 #   BOUCLE_PROJECT_ID     — GitLab project ID (numeric)
 #   BOUCLE_PROJECT_PATH   — e.g. "group/project"
-#   BOUCLE_FORGE_HOST     — e.g. "framagit.org"
+#   BOUCLE_FORGE_HOST     — e.g. "gitlab.example.com"
 #   BOUCLE_DEFAULT_BRANCH — e.g. "main"
 #   BOUCLE_TOKEN          — GitLab PAT (PRIVATE-TOKEN header)
 #   BOUCLE_BOT_ID         — bot user ID (numeric)
@@ -123,7 +123,7 @@ forge_issue_list_by_label() {
   local label_csv="$1" state="${2:-opened}"
   # URL-encode ':' → %3A: boucle:* labels contain a colon, and a raw ':' in the
   # labels= query param makes GitLab return [] (doctor never found spec-review
-  # / todo issues — approvals stranded at boucle:spec-review, framagit 2026-08).
+  # / todo issues — approvals stranded at boucle:spec-review, 2026-08).
   label_csv=$(printf '%s' "$label_csv" | sed 's/:/%3A/g')
   glab api --hostname "$BOUCLE_FORGE_HOST" \
     "/projects/$BOUCLE_PROJECT_ID/issues?state=$state&labels=$label_csv&per_page=100" 2> /dev/null || echo "[]"
@@ -661,7 +661,7 @@ forge_webhook_issue_iid() {
 forge_ci_var_set() {
   local key="$1" value="$2" masked="${3:-false}" protected="${4:-false}"
   # bin/update runs under `set -u` and is invoked by the before_script BEFORE
-  # the forge context is exported (observed on urgence-palestine.fr, issue
+  # the forge context is exported (observed on a consumer, issue
   # #120: the expansion below died on an unset BOUCLE_PROJECT_ID, so the
   # self-update commit+push never ran and the consumer stayed frozen on an
   # old engine while each job logged only the generic "self-update failed"

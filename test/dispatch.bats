@@ -436,7 +436,7 @@ extract_spec_review_block() {
 }
 
 @test "the GitHub workflow runs comment dispatches in their own concurrency lane" {
-  # Amend-in-flight (issue #2, boucle.dev #91): a human comment during a
+  # Amend-in-flight (issue #2, a consumer): a human comment during a
   # worker run fires an issue_comment dispatch that must re-trigger the
   # worker. GitHub Actions de-duplicates QUEUED runs inside one
   # concurrency group even with cancel-in-progress: false — so if the
@@ -942,7 +942,7 @@ extract_working_amend_block() {
   echo "$guard_block" | grep -q 'amended-in-flight'
 }
 
-# ── Direct amend recheck (boucle.dev #91): the worker's own safety net ──
+# ── Direct amend recheck (a consumer): the worker's own safety net ──
 # The label guard above only fires when the amend-in-flight dispatch
 # ALREADY ran and set boucle:todo. On GitHub Actions that dispatch can be
 # cancelled before it runs: queued workflow runs are de-duplicated inside
@@ -1061,7 +1061,7 @@ extract_recheck_block() {
   # A freshly opened issue has no labels, so this aborted on exactly the case
   # the routing table handles as "new issue with no boucle label → triage",
   # making that branch unreachable and leaving every new issue to the doctor's
-  # orphan scan minutes later. Observed on boucle.dev#84.
+  # orphan scan minutes later. Observed on a consumer.
   #
   # The old message also lied: forge_issue_labels_get ends in `|| true`, so it
   # never exits non-zero. Its absence is the regression anchor.
@@ -1268,20 +1268,188 @@ opt_out_routing() {
 unlabeled_decision() {
   local action="$1"
   if [ "$action" = "open" ] || [ "$action" = "opened" ]; then
-    echo triage
+    dispatch_auto_entry_enabled && echo triage || echo noop
   else
     echo noop
   fi
 }
 
-@test "unlabeled: GitLab open event on an unlabeled issue routes to triage" {
-  run unlabeled_decision "open"
+@test "unlabeled: GitLab open event on an unlabeled issue routes to triage in auto mode" {
+  BOUCLE_ENTRY_MODE=auto run unlabeled_decision "open"
   assert_output "triage"
 }
 
-@test "unlabeled: GitHub opened event on an unlabeled issue routes to triage" {
-  run unlabeled_decision "opened"
+@test "unlabeled: GitHub opened event on an unlabeled issue routes to triage in auto mode" {
+  BOUCLE_ENTRY_MODE=auto run unlabeled_decision "opened"
   assert_output "triage"
+}
+
+# ── Entry policy: the loop is opt-in by default ───────────────────────
+# A plain issue in a shared tracker is not a work order. Until this gate
+# existed, opening ANY issue in a project running boucle got it triaged,
+# labelled boucle:triage + boucle::status::bot, assigned to the bot and
+# answered with a spec — a colleague's bug report, a note-to-self, a
+# duplicate. Opting IN is one label; opting OUT of an appropriation you
+# never asked for is a tombstone (#124) and a cleanup.
+
+@test "entry policy: default (unset) is opt-in — a new issue does NOT enter the loop" {
+  unset BOUCLE_ENTRY_MODE
+  run unlabeled_decision "open"
+  assert_output "noop"
+  run unlabeled_decision "opened"
+  assert_output "noop"
+}
+
+@test "entry policy: BOUCLE_ENTRY_MODE=label is opt-in" {
+  BOUCLE_ENTRY_MODE=label run unlabeled_decision "open"
+  assert_output "noop"
+}
+
+@test "entry policy: dispatch_auto_entry_enabled is true only for auto" {
+  BOUCLE_ENTRY_MODE=auto run dispatch_auto_entry_enabled
+  assert_success
+  BOUCLE_ENTRY_MODE=AUTO run dispatch_auto_entry_enabled
+  assert_success
+  BOUCLE_ENTRY_MODE=label run dispatch_auto_entry_enabled
+  assert_failure
+}
+
+@test "entry policy: an unset, empty or misspelled mode falls back to opt-in" {
+  # The quiet mode is the safe fallback: a typo in a CI variable must not
+  # silently re-enable mass appropriation.
+  unset BOUCLE_ENTRY_MODE
+  run dispatch_auto_entry_enabled
+  assert_failure
+  BOUCLE_ENTRY_MODE="" run dispatch_auto_entry_enabled
+  assert_failure
+  BOUCLE_ENTRY_MODE="atuo" run dispatch_auto_entry_enabled
+  assert_failure
+  BOUCLE_ENTRY_MODE="true" run dispatch_auto_entry_enabled
+  assert_failure
+}
+
+@test "entry policy: the open-event branch is gated on dispatch_auto_entry_enabled" {
+  # Guard shape: the gate must live INSIDE the open/opened branch, and the
+  # opt-in path must leave via dispatch_noop — never via set_boucle_label
+  # or chain_to_role.
+  block=$(awk '
+    /^  elif \[ "\$ACTION" = "open" \] \|\| \[ "\$ACTION" = "opened" \]; then$/ { p = 1 }
+    p { print }
+    p && /^  fi$/ { exit }
+  ' lib/boucle-ci/dispatch.sh)
+  [ -n "$block" ] || { echo "open-event branch not found"; false; }
+  echo "$block" | grep -q 'dispatch_auto_entry_enabled'
+  echo "$block" | grep -q 'SHOULD_TRIAGE=true'
+  echo "$block" | grep -q 'dispatch_noop'
+  run grep -q 'set_boucle_label' <<< "$block"
+  assert_failure
+  run grep -q 'chain_to_role' <<< "$block"
+  assert_failure
+}
+
+# ── Bot assignment: the OTHER way into the loop, on both forges ───────
+#
+# With BOUCLE_ENTRY_MODE defaulting to opt-in, assignment is load-bearing:
+# README.md and SKILL.md both promise "add boucle:triage OR assign the bot",
+# and the open-event route no longer covers for a broken one.
+#
+# It was broken on GitHub, structurally and twice over. The old test was
+#     [ "$ACTION" = "update" ] && .changes.assignees.current/previous
+# but GitHub sends action=assigned (never "update") and has no `changes`
+# object at all — it sends `.assignee`, the single user just assigned. So
+# the predicate was false on every GitHub payload, and assigning the bot
+# there did nothing. Auto-triage-on-open hid it.
+
+@test "bot assignment: GitLab update + assignees change is an assignment" {
+  echo '{"object_kind":"issue","object_attributes":{"action":"update"},"changes":{"assignees":{"previous":[],"current":[{"id":42,"username":"up-bot"}]}}}' > "$PAYLOAD"
+  BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" BOUCLE_BOT_ID=42 run dispatch_bot_just_assigned "update"
+  assert_success
+}
+
+@test "bot assignment: GitLab already-assigned is NOT a new assignment" {
+  # The bot in BOTH lists means this event is some later edit that happens
+  # to carry the same assignee — not the transition.
+  echo '{"object_kind":"issue","object_attributes":{"action":"update"},"changes":{"assignees":{"previous":[{"id":42,"username":"up-bot"}],"current":[{"id":42,"username":"up-bot"}]}}}' > "$PAYLOAD"
+  BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" BOUCLE_BOT_ID=42 run dispatch_bot_just_assigned "update"
+  assert_failure
+}
+
+@test "bot assignment: GitLab someone else assigned is not the bot" {
+  echo '{"object_kind":"issue","object_attributes":{"action":"update"},"changes":{"assignees":{"previous":[],"current":[{"id":7,"username":"alice"}]}}}' > "$PAYLOAD"
+  BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" BOUCLE_BOT_ID=42 run dispatch_bot_just_assigned "update"
+  assert_failure
+}
+
+@test "bot assignment: GitLab falls back to the username when no numeric id" {
+  echo '{"object_kind":"issue","object_attributes":{"action":"update"},"changes":{"assignees":{"previous":[],"current":[{"username":"up-bot"}]}}}' > "$PAYLOAD"
+  BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" BOUCLE_BOT_USERNAME=up-bot run dispatch_bot_just_assigned "update"
+  assert_success
+}
+
+@test "bot assignment: GitHub assigned + .assignee is an assignment (regression)" {
+  # The case that never worked: no `changes` object, action is "assigned".
+  echo '{"action":"assigned","issue":{"number":7},"assignee":{"login":"up-bot","id":99}}' > "$PAYLOAD"
+  BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" BOUCLE_BOT_USERNAME=up-bot run dispatch_bot_just_assigned "assigned"
+  assert_success
+}
+
+@test "bot assignment: GitHub matches on the bot id when the login differs" {
+  echo '{"action":"assigned","issue":{"number":7},"assignee":{"login":"some-app[bot]","id":99}}' > "$PAYLOAD"
+  BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" BOUCLE_BOT_USERNAME=up-bot BOUCLE_BOT_ID=99 run dispatch_bot_just_assigned "assigned"
+  assert_success
+}
+
+@test "bot assignment: GitHub someone else assigned is not the bot" {
+  echo '{"action":"assigned","issue":{"number":7},"assignee":{"login":"alice","id":7}}' > "$PAYLOAD"
+  BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" BOUCLE_BOT_USERNAME=up-bot BOUCLE_BOT_ID=99 run dispatch_bot_just_assigned "assigned"
+  assert_failure
+}
+
+@test "bot assignment: GitHub unassigned is not an assignment" {
+  echo '{"action":"unassigned","issue":{"number":7},"assignee":{"login":"up-bot","id":99}}' > "$PAYLOAD"
+  BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" BOUCLE_BOT_USERNAME=up-bot run dispatch_bot_just_assigned "unassigned"
+  assert_failure
+}
+
+@test "bot assignment: an unreadable payload declines rather than entering" {
+  # The payload file can vanish mid-job (jq exit 5).
+  # "No assignment" is the safe degradation: it declines to enter the loop
+  # rather than entering it on a payload nobody could read.
+  BOUCLE_TRIGGER_PAYLOAD="$BATS_TEST_TMPDIR/gone.json" run dispatch_bot_just_assigned "assigned"
+  assert_failure
+  BOUCLE_TRIGGER_PAYLOAD="" run dispatch_bot_just_assigned "assigned"
+  assert_failure
+}
+
+@test "bot assignment: both call sites use the shared predicate" {
+  # The closed-issue guard and the main routing block each carried their own
+  # copy of the four jq reads. Two copies of a forge-shape test is how one
+  # of them ends up fixed and the other not.
+  run grep -c 'dispatch_bot_just_assigned' lib/boucle-ci/dispatch.sh
+  refute_output "0"
+  # No inline copy left behind.
+  run grep -c 'GUARD_BOT_IN_CURRENT' lib/boucle-ci/dispatch.sh
+  assert_output "0"
+  run grep -c 'BOT_IN_PREVIOUS' lib/boucle-ci/dispatch.sh
+  assert_output "0"
+}
+
+@test "bot assignment: the closed-issue guard reads BOTH action shapes" {
+  # .object_attributes.action is GitLab's, .action is GitHub's. Reading
+  # only the first made the guard blind on GitHub.
+  block=$(awk '/Closed-issue guard for issue webhooks/{p=1} p{print} p && /GUARD_BOT_ASSIGNED" != "true"/{exit}' lib/boucle-ci/dispatch.sh)
+  echo "$block" | grep -q 'object_attributes.action // .action'
+}
+
+@test "entry policy: boucle's own issue creators pass boucle:triage at creation" {
+  # Opt-in mode must not strand the issues boucle opens for itself:
+  # schedules, triage sub-issues and the e2e follow-up. They route on the
+  # LABEL branch, never on the open-event branch, because every one of them
+  # passes boucle:triage to forge_issue_create.
+  # schedules: the label list is built one line above the create call.
+  grep -q 'all_labels="boucle:triage,boucle:scheduled"' lib/boucle.sh
+  grep -q 'forge_issue_create .*"boucle:triage,' lib/boucle-ci/triage.sh
+  grep -q 'forge_issue_create .*"boucle:triage,' lib/boucle-ci/e2e.sh
 }
 
 @test "unlabeled: a note event on an unlabeled issue does NOT triage (#124)" {

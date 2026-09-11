@@ -307,7 +307,7 @@ setup() {
   # AGENTS.md is consumer-owned (project-specific context). The engine has
   # its own AGENTS.md inside .boucle/, but it MUST NOT overwrite the consumer's.
   # Regression: bin/setup/bin/update used to copy AGENTS.md from the engine,
-  # destroying the consumer's project context (observed during m3llm migration).
+  # destroying the consumer's project context (observed during a real migration).
   # shellcheck disable=SC2154
   local tmpdir="$BATS_TEST_TMPDIR"
   mkdir -p "$tmpdir/.boucle"
@@ -462,14 +462,14 @@ setup() {
 
 @test "configure_git_push still honours CI_PROJECT_PATH as a fallback" {
   BOUCLE_TOKEN="pat-secret"
-  BOUCLE_FORGE_HOST="framagit.org"
+  BOUCLE_FORGE_HOST="gitlab.example.com"
   unset BOUCLE_PROJECT_PATH
   CI_PROJECT_PATH="group/proj"
   git() { echo "git $*"; }
   export -f git
   run configure_git_push
   assert_success
-  assert_output --partial "https://up-bot:pat-secret@framagit.org/group/proj.git"
+  assert_output --partial "https://up-bot:pat-secret@gitlab.example.com/group/proj.git"
   unset -f git
 }
 

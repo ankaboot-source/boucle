@@ -31,7 +31,7 @@ set -euo pipefail
 # Normalize BOUCLE_WORKSPACE IMMEDIATELY: it is used below (agent file
 # discovery, STATE_DIR, ...) before the later default assignment — a job
 # that does not source lib/boucle-ci.sh (inline GitLab jobs) crashed with
-# "BOUCLE_WORKSPACE: unbound variable" (observed on framagit, 2026-08).
+# "BOUCLE_WORKSPACE: unbound variable" (observed on a consumer, 2026-08).
 : "${BOUCLE_WORKSPACE:=${CI_PROJECT_DIR:-$(pwd)}}"
 
 # ── Shared library ────────────────────────────────────────────────────
@@ -1364,7 +1364,7 @@ Add it to \`LESSONS.yml\` and validate with \`bin/check-lessons LESSONS.yml\` be
 
 Verify content fidelity: the issue body below is the original spec. Check that the MR preserves the instructed content (URLs, citations, texts) verbatim — no placeholders, no rewrites, no substitutions. A MR that degrades instructed content is a FAIL even if it satisfies the latest amendments.
 
-HARD RULE — NEVER use the Read tool on raster image files (.png .jpg .jpeg .gif .webp .avif .bmp). Your model is text-only: image input kills the session (boucle.dev PR #94: a reviewer Read public/og-image.png and the run 400'd, 5/5 iterations failed). Raster images changed by the PR are described as text in the image descriptions section below; if an image you need is NOT covered there, use non-visual analysis (e.g. python3 pixel statistics: dimensions, color histogram, dominant colors) and note the limitation in your verdict. SVG files are text/XML — you MAY Read those.
+HARD RULE — NEVER use the Read tool on raster image files (.png .jpg .jpeg .gif .webp .avif .bmp). Your model is text-only: image input kills the session (observed on a consumer: a reviewer Read public/og-image.png and the run 400'd, 5/5 iterations failed). Raster images changed by the PR are described as text in the image descriptions section below; if an image you need is NOT covered there, use non-visual analysis (e.g. python3 pixel statistics: dimensions, color histogram, dominant colors) and note the limitation in your verdict. SVG files are text/XML — you MAY Read those.
 "
       # C3: Inject the correct MR head SHA so the agent posts the verdict
       # marker with the right SHA. Without this, the agent guesses (or copies
@@ -1428,8 +1428,8 @@ Issue body: NOT available — fetch it via \`bin/forge-note issue ${ISSUE}\` or 
       fi
       # Inject issue notes (human amendments posted as ISSUE comments, not MR
       # comments). Without these, the reviewer misses amendments the human
-      # posted on the issue and PASSes a MR that ignores them (framagit
-      # 2026-08, MR !61: "embed Instagram" was an issue note; the worker
+      # posted on the issue and PASSes a MR that ignores them (a consumer
+      # 2026-08: "embed Instagram" was an issue note; the worker
       # marked it SUPPRIMÉE and the reviewer PASSed because it never saw the
       # issue note). Mirrors the worker's issue-notes injection.
       local issue_notes
@@ -1957,7 +1957,7 @@ record_swarm_spawns() {
 #
 # Why a name list alone is not enough: "no skills used" and "the extractor
 # does not match this transcript format" produce the SAME empty list, and the
-# second is a broken sensor reporting a finding. Observed on boucle.dev #91
+# second is a broken sensor reporting a finding. Observed on a consumer
 # and #92 — 60+ runs, `skills: []` on every one, with no way to tell which.
 #
 # The tool jcode exposes is `skill_manage`. Its presence in the transcript is

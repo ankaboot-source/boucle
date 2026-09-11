@@ -280,7 +280,7 @@ _Maintained by boucle. Edited in place — do not reply here; act on the linked 
   # across 4 sections). A transition that fired between two calls (e.g.
   # boucle:approval → boucle:merging, which itself triggers a board refresh
   # via set_boucle_label) made the same issue appear in TWO sections at
-  # once — a contradictory board (boucle.dev #34). One snapshot cannot
+  # once — a contradictory board (a consumer). One snapshot cannot
   # split a single issue across sections.
   #
   # Deduplication: each issue appears in the FIRST section whose label set
@@ -2313,7 +2313,7 @@ boucle_do_deploy() {
 
   # Build — unless the build output is already populated. On GitLab the
   # build-site job hands this job `public/` as an artifact, and rebuilding
-  # here OOMs WASM toolchains on shell executors (framagit, 2026-08). On
+  # here OOMs WASM toolchains on shell executors. On
   # GitHub there is no build-site job, so the tree is empty and this builds
   # exactly as before.
   if [ -n "${BOUCLE_BUILD_OUTPUT:-}" ] && [ -d "$BOUCLE_BUILD_OUTPUT" ] \
@@ -2631,7 +2631,7 @@ parse_diagram_marker() {
 #    (continue/skip loop handles empty commits when a resolution makes a
 #    commit a no-op). A blind abort+retry can NEVER resolve a semantic
 #    conflict — the agent must see the tree (observed on a consumer:
-#    MR !88, 5 mechanical retries, zero agent runs).
+#    5 mechanical retries, zero agent runs).
 #
 #  - Any other run: bounded abort → re-trigger → escalate (unchanged).
 #
@@ -2699,7 +2699,7 @@ check_dependencies_and_gate() {
 #    and `git add`s the resolutions — it may also complete the rebase
 #    itself (cascading conflicts on later commits get the same judgment).
 #    A blind abort+retry can NEVER resolve a semantic conflict — the
-#    agent must see the tree (observed on a consumer: MR !88, 5
+#    agent must see the tree (observed on a consumer: 5
 #    mechanical retries, zero agent runs).
 #
 #  - Any other run: bounded abort → re-trigger → escalate (unchanged).
@@ -2809,7 +2809,7 @@ boucle_worker_rebase_conflict() {
 # boundary and `git rebase origin/<default>` fails with CONFLICT (add/add)
 # on EVERY file — "Rebasing (1/N)" then a wall of Auto-merging + add/add
 # conflicts — even when the server-side merge is trivially mergeable
-# (framagit 2026-08, MR !61: 3 worker rebase attempts + 1 merger attempt
+# (observed on a consumer, 2026-08: 3 worker rebase attempts + 1 merger attempt
 # all failed this way and the issue escalated to boucle:human). Call this
 # AFTER `git fetch origin <refs>` and BEFORE `git rebase`.
 boucle_deepen_rebase_fetch() {

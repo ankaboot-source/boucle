@@ -371,7 +371,7 @@ boucle_ci_doctor() {
       # declares a dependency on OPEN siblings must NOT start the worker —
       # park it at boucle:blocked until every dep closes. The webhook path
       # (dispatch) does this; the doctor must too, or a missed emoji webhook
-      # starts premature work (framagit #56/#55, 2026-08).
+      # starts premature work (observed on a consumer's tracker, 2026-08).
       DEP_IIDS=$(parse_depends_on "$(forge_issue_get "$IID" | jq -r '.description // ""' 2> /dev/null)" 2> /dev/null)
       if [ -n "$DEP_IIDS" ]; then
         OPEN_DEPS=""
@@ -1046,7 +1046,7 @@ boucle_ci_doctor() {
     # The human must resolve it manually (the escalation note gives them
     # options). Without this check, the doctor re-triggers the merger
     # every run (10 min) for a conflicted MR at boucle:human, producing
-    # an infinite loop of duplicate merge-conflict notes (framagit
+    # an infinite loop of duplicate merge-conflict notes (a consumer
     # 2026-08, issue #62: 100+ duplicate notes in ~15 hours).
     ESCALATION_NOTES=$(forge_issue_notes "$IID" 2> /dev/null \
       | jq -r '[.[] | select(.body | test("Merge conflict — human intervention required"))] | length' 2> /dev/null || echo 0)

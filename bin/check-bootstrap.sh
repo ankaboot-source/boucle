@@ -3,7 +3,7 @@
 #
 # Installs shellcheck, shfmt and bats (pinned versions) when missing, then
 # verifies the tools `make check` needs. Root-safe: when /usr/local/bin is
-# not writable (shared shell executors, e.g. framagit's non-root runner),
+# not writable (shared shell executors running as a non-root user),
 # tools land in $HOME/.local/bin instead. Idempotent.
 #
 # Usage: bin/check-bootstrap.sh   (call from the check job's before_script)

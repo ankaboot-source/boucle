@@ -400,7 +400,7 @@
   - 'DO: prefer `ci/lint` with `merge_request_pipeline=true` to verify rule evaluation, but remember it does NOT prove pipeline creation — the creation trigger is the standalone-string detection.'
   ❌: 'DO NOT gate a GitLab rule as a COMBINED comparison, e.g. `if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "$CI_DEFAULT_BRANCH"`, when the job must run in
     a merge-request pipeline. The CI lint accepts the combined rule (jobs evaluate correctly), but GitLab''s MR-pipeline CREATION only triggers on the standalone reference `$CI_PIPELINE_SOURCE == "merge_request_event"`
-    — with a combined rule NO pipeline is created and the job silently never runs (observed on framagit 2026-08: same branch, combined rule → no pipeline; pure rule → pipeline created instantly). A rule
+    — with a combined rule NO pipeline is created and the job silently never runs (observed on a consumer, 2026-08: same branch, combined rule → no pipeline; pure rule → pipeline created instantly). A rule
     using only MR variables (`$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`) also never creates one.'
 53:
   title: Reviewer MUST verify every human amendment is addressed before PASS
@@ -511,7 +511,7 @@
   - 'DO: treat an empty `BOUCLE_DEPLOY_CMD` as a first-class mode: the worker skips the preview deploy, screenshot mode auto-activates when no per-branch preview is available (degrades to diff on failure), the deploy job skips
     cleanly, and post-merge/e2e resolve the live URL to `$CI_PAGES_URL` (gitlab-pages) instead of the `pages.dev` fallback. Document the mode in LOOP.md alongside `self`/`external`.'
   - 'DO: display the GitLab Pages URL even though the mechanics differ from Cloudflare: when `BOUCLE_DEPLOY_PROVIDER=gitlab-pages` and `$CI_PAGES_URL` is set, the worker writes `Site (GitLab Pages): $CI_PAGES_URL`
-    in the MR description alongside embedded screenshots (auto-screenshot mode). The reviewer''s `pages.dev` extraction regex cannot match the forge''s Pages domain (frama.io/gitlab.io/...),
+    in the MR description alongside embedded screenshots (auto-screenshot mode). The reviewer''s `pages.dev` extraction regex cannot match the forge''s Pages domain (gitlab.io, or whatever Pages domain the instance serves),
     so it grades screenshots locally and never probes the production site as a preview.'
   - 'DO: centralize the decision in `boucle_worker_should_deploy` (`lib/boucle.sh`) so the extracted worker gets it for free, and mirror it in the inline worker job with the identical guard.'
   ❌:
@@ -522,7 +522,7 @@
   - 'DO NOT port the guard to ONE copy only. The inline jobs (`.gitlab-ci.yml`) and the extracted functions (`lib/boucle-ci/*.sh`) must stay symmetric — the consumer ran the inline copy, which had no guard,
     while the extracted one (used by the GitHub port) had the shared `boucle_worker_should_deploy` helper. A fix in one copy leaves the bug live on the other (lesson #56 greps ALL copies).'
   - 'DO NOT ship `pages.path_prefix`-based branch previews on CE instances. Parallel deployments (`pages.path_prefix`, GitLab ≥ 17.9) are a **Premium** feature: CE accepts the keyword at CI-lint time but
-    ignores it at RUNTIME — the branch job publishes at the ROOT and clobbers the production deployment. Verified empirically on framagit (GitLab CE 19.2.1, 2026-08): lint `valid: true`, deployment created
+    ignores it at RUNTIME — the branch job publishes at the ROOT and clobbers the production deployment. Verified empirically on a consumer, 2026-08. On GitLab CE 19.2.1 (2026-08): lint `valid: true`, deployment created
     with `path_prefix: null` at the site root.'
 61:
   title: Doctor re-trigger must NOT be skipped by a stale closed MR
@@ -594,7 +594,7 @@
   - 'DO: grep the engine for hardcoded emails after any git-identity edit — the inline `.gitlab-ci.yml` jobs and the extracted `lib/boucle-ci/*.sh` copies drift, and a fix in one copy leaves the bug live
     on the other (lesson #56 greps ALL copies).'
   ❌:
-  - 'DO NOT hardcode a consumer-specific email (e.g. `bot@ankaboot.dev`) in `git config user.email` across the engine. The engine ships to multiple consumers, each with its own forge instance, bot account,
+  - 'DO NOT hardcode a consumer-specific email (e.g. `bot@consumer.example`) in `git config user.email` across the engine. The engine ships to multiple consumers, each with its own forge instance, bot account,
     and email domain. A hardcoded email attributes the bot''s commits to a consumer that is not theirs — observed on a consumer MR: 6 `chore(boucle):` commits displayed the upstream maintainer''s email
     as the author because `bin/update` preserved the clone''s inherited git identity (the human''s) and `worker.sh`/`merger.sh` hardcoded the upstream email as committer.'
   - DO NOT preserve the clone's inherited git identity in `bin/update`. On a CI runner the clone inherits the human's `user.name`/`user.email`, so a `git config user.email > /dev/null 2>&1 || git config...`
@@ -613,12 +613,12 @@
   - 'DO: the doctor MUST scan `boucle:merging` issues with no active pipeline for longer than STALENESS. Re-trigger the merger (it is idempotent — rebase + push + merge or MWPS). Before re-triggering, verify
     the MR still exists and is still approved — if the human closed the MR or revoked approval while the issue sat at `boucle:merging`, escalate to `boucle:human` instead. The scan lives in BOTH the extracted
     `lib/boucle-ci/doctor.sh` and the inline doctor job in `.gitlab-ci.yml` — a fix in one copy leaves the bug live on the other (lesson #56 greps ALL copies).'
-  - 'DO: the merger timeout MUST be at least 10m (not 5m) to accommodate `git push --force` on a congested network. The 5m timeout killed a merger that was mid-push on framagit (the rebase succeeded, the
+  - 'DO: the merger timeout MUST be at least 10m (not 5m) to accommodate `git push --force` on a congested network. The 5m timeout killed a merger that was mid-push (the rebase succeeded, the
     push was in flight, the timeout fired mid-transfer). The doctor timeout MUST also be at least 10m — the doctor''s scan is API-heavy and can timeout on a slow forge before finishing.'
   ❌: 'DO NOT let an issue sit at `boucle:merging` forever after a merger failure (runner timeout, network "remote end hung up unexpectedly", TLS handshake timeout, runner crash). The doctor scanned `boucle:working`,
     `boucle:review`, `boucle:blocked`, `boucle:human`, `boucle:approval` — but NOT `boucle:merging`. A failed merger left the issue stranded at `boucle:merging` with no recovery path: no webhook re-triggers
     it (the MR is already approved, so no `approved` webhook fires again), and the doctor never scanned the label. Observed on a consumer (2026-08): was approved + `mergeable` but the merger timed out at
-    5m during `git push --force` ("the remote end hung up unexpectedly" on framagit). The issue sat at `boucle:merging` for 2+ hours with no recovery, blocking the single worker slot (`BOUCLE_MAX_PARALLEL_ISSUES=1`)
+    5m during `git push --force` ("the remote end hung up unexpectedly"). The issue sat at `boucle:merging` for 2+ hours with no recovery, blocking the single worker slot (`BOUCLE_MAX_PARALLEL_ISSUES=1`)
     and stalling all other queued issues.'
 69:
   title: Interactive mode — a local harness can take over an issue and hand it back
@@ -714,7 +714,7 @@
     This handles the race condition where a human merges manually before the merger job runs.'
 78:
   title: Doctor job MUST use a resource_group to prevent runner starvation
-  ❌: 'DO NOT run the doctor job without a `resource_group`. On shared runners (framagit, GitLab.com SaaS), the doctor schedule fires every 10 min and each run occupies a runner slot. Without a
+  ❌: 'DO NOT run the doctor job without a `resource_group`. On shared runners (SaaS or self-hosted), the doctor schedule fires every 10 min and each run occupies a runner slot. Without a
     resource_group, a slow doctor run (10m timeout) overlaps with the next schedule fire, consuming 2+ runner slots and starving webhook-triggered dispatch/triage pipelines. Observed on a consumer:
     30+ min delays on trigger pipelines stuck in `waiting_for_resource` while the doctor occupied runner slots every 10 min.'
   ✅: 'DO: add `resource_group: boucle-doctor` to the doctor job in `.gitlab-ci.yml`. This serializes doctor runs so only one is active at a time — the next schedule queues behind it. The doctor makes
@@ -745,7 +745,7 @@
   title: User identifiers passed to forge assignment calls MUST match each forge''s accepted form
   ❌: 'DO NOT feed a numeric forge user ID into a GitHub `assignees[]` assignment call. GitHub''s issue/PR `assignees` array accepts logins (usernames) only; a numeric `author.id` is silently
     dropped — the PATCH returns 200-ish, `_gh_api_silent` swallows any 422, and the caller proceeds as if the MR were assigned. `resolve_reporter_id` returned `.author.id` (numeric) on every
-    forge; on GitHub that value went straight into `forge_mr_assign`/`forge_issue_assign` → `assignees[]=6049027`, which GitHub rejects. Observed on boucle.dev PR !38: reviewer verdict PASS,
+    forge; on GitHub that value went straight into `forge_mr_assign`/`forge_issue_assign` → `assignees[]=6049027`, which GitHub rejects. Observed on a consumer: reviewer verdict PASS,
     issue moved to `boucle:approval`, but the PR was never assigned to the human — the approval gate was silently invisible to the human.'
   ✅: 'DO: follow the `BOUCLE_BOT_ID` convention (bin/forge/common.sh) — numeric on GitLab (`assignee_ids[]`), login on GitHub (`assignees[]`). `resolve_reporter_id` returns field 2 (username)
     on GitHub, field 1 (numeric id) on GitLab, so its sole consumers (`forge_issue_assign` / `forge_mr_assign`) receive a value the forge actually accepts. Any new call site that resolves a
@@ -869,7 +869,7 @@
 91:
   title: Re-check merge state before escalating to boucle:human on a failed merge API call
   ❌:
-  - 'DO NOT escalate an issue to `boucle:human` on an empty merge SHA without first re-checking whether the PR is actually merged. The merge API call can return an empty SHA for reasons that do NOT mean the merge failed: a forge bug (the `--paginate` bug, lesson #90), a transient API error, or a concurrent manual merge via the forge UI. Meanwhile GitHub auto-closes the issue when the PR body contains `Closes #N` (the worker stamps this keyword in every MR description), so the issue may already be closed. Escalating a closed issue to `boucle:human` creates an inconsistent state: the issue is closed (the merge landed) but labeled `boucle:human` (boucle thinks it failed). Observed on boucle.dev #71: the merger''s PUT failed (--paginate bug), the PR was merged manually, GitHub closed the issue via `Closes #71`, and the merger labeled it `boucle:human` — all in the same second.'
+  - 'DO NOT escalate an issue to `boucle:human` on an empty merge SHA without first re-checking whether the PR is actually merged. The merge API call can return an empty SHA for reasons that do NOT mean the merge failed: a forge bug (the `--paginate` bug, lesson #90), a transient API error, or a concurrent manual merge via the forge UI. Meanwhile GitHub auto-closes the issue when the PR body contains `Closes #N` (the worker stamps this keyword in every MR description), so the issue may already be closed. Escalating a closed issue to `boucle:human` creates an inconsistent state: the issue is closed (the merge landed) but labeled `boucle:human` (boucle thinks it failed). Observed on a consumer: the merger''s PUT failed (--paginate bug), the PR was merged manually, GitHub closed the issue via `Closes #71`, and the merger labeled it `boucle:human` — all in the same second.'
   ✅:
   - 'DO re-check `forge_mr_get` for `.merged == true` before escalating to `boucle:human` on an empty merge SHA. If the PR is actually merged, transition to `boucle:done` and chain to post-merge (the merged code needs to deploy + e2e). The merge API call returning empty does not mean the merge did not happen — it means the call did not confirm it. Confirm before escalating.'
   - 'DO treat "the issue is already closed" as a signal that the merge may have landed via another path. The merger''s failure path runs after the forge may have already processed the merge event (GitHub auto-close on `Closes #N` is near-instant). A closed issue + an empty merge SHA is the signature of a race — re-check the PR state, do not escalate blindly.'
@@ -877,7 +877,7 @@
 92:
   title: Recovery paths must enforce the same structural guard as the main path
   ❌:
-  - 'DO NOT let a recovery/fallback path parse a structurally weaker signal than the main path. The main jq COMMENT filter requires BOTH `## TL;DR` and `## Disposition` to route a triage comment (lesson #45: distinguish draft from final by structure). But three recovery paths (pre-agent draft promotion, log-scraping fallback, posted-draft promotion) parsed `## Disposition` DIRECTLY, bypassing the `## TL;DR` check. An agent that posted a draft stub ("DRAFT — first-pass triage, refining next.") with the FINAL marker + `## Disposition READY` but no `## TL;DR` was promoted by those paths, routing an EMPTY spec to the spec gate and asking the human to approve nothing (boucle.dev #73).'
+  - 'DO NOT let a recovery/fallback path parse a structurally weaker signal than the main path. The main jq COMMENT filter requires BOTH `## TL;DR` and `## Disposition` to route a triage comment (lesson #45: distinguish draft from final by structure). But three recovery paths (pre-agent draft promotion, log-scraping fallback, posted-draft promotion) parsed `## Disposition` DIRECTLY, bypassing the `## TL;DR` check. An agent that posted a draft stub ("DRAFT — first-pass triage, refining next.") with the FINAL marker + `## Disposition READY` but no `## TL;DR` was promoted by those paths, routing an EMPTY spec to the spec gate and asking the human to approve nothing (a consumer).'
   ✅:
   - 'DO enforce the same structural guard on every path that adopts a disposition. A `comment_has_tldr` helper (grep for the `^## TL;DR[[:space:]]*$` section header) is called by all three recovery paths before promoting a draft. A draft without `## TL;DR` is an incomplete spec: leave it in place for the agent (or a later run) to refine, never promote it to a routing decision.'
   - 'DO escalate to human when the only available comment is an incomplete spec, instead of leaving the issue stuck at `boucle:triage` for the doctor to re-trigger the same broken triage every sweep. An `INCOMPLETE_SPEC` flag set by the recovery paths drives a dedicated escalation branch in the no-disposition handler: it posts an explanatory note and sets `boucle:human`. An empty spec routed to the spec gate is worse than a human escalation — it asks the human to approve nothing.'
@@ -886,7 +886,7 @@
 93:
   title: A post-disposition step must not be nested inside one case branch
   ❌:
-  - 'DO NOT nest a step that applies to ALL dispositions inside a single `case "$DISPOSITION" in` branch. The visual preview block (render `preview.html` → PNG → embed in the triage comment) was nested inside the `READY)` branch of `lib/boucle-ci/triage.sh`, so it only ran when disposition was READY. But the triage agent produces `preview.html` + `RENDER_REQUEST` for ANY UI/UX issue regardless of disposition (mandatory per the agent prompt). A NEEDS-INFO issue that asks the author to pick between visual options A/B/C is exactly where the mockup is most useful — yet CI never rendered it, and the comment said "proposed in the mockup" with no mockup attached (boucle.dev #73).'
+  - 'DO NOT nest a step that applies to ALL dispositions inside a single `case "$DISPOSITION" in` branch. The visual preview block (render `preview.html` → PNG → embed in the triage comment) was nested inside the `READY)` branch of `lib/boucle-ci/triage.sh`, so it only ran when disposition was READY. But the triage agent produces `preview.html` + `RENDER_REQUEST` for ANY UI/UX issue regardless of disposition (mandatory per the agent prompt). A NEEDS-INFO issue that asks the author to pick between visual options A/B/C is exactly where the mockup is most useful — yet CI never rendered it, and the comment said "proposed in the mockup" with no mockup attached (a consumer).'
   ✅:
   - 'DO move a step that applies to all dispositions OUT of the `case`/`esac` and run it after the routing `case` completes, before the final assert. The block is self-guarding (it no-ops when `RENDER_REQUEST` is absent or `BOUCLE_PREVIEW_DISABLE=true`), so running it unconditionally is safe — non-UI/UX issues and disabled previews cost nothing.'
   - 'DO add a regression test that asserts the block lives outside the `case`/`esac` (compare the line number of the block header to the main `esac`). A grep-based test catches a future refactor that re-nests the block inside a branch.'
@@ -895,7 +895,7 @@
 94:
   title: Mutually-exclusive user-visible options are blocking questions, not creative proposals
   ❌:
-  - 'DO NOT present mutually-exclusive user-visible outcomes as `## Creative proposals` with `Questions: none` and Disposition `READY`. Creative proposals are advisory — the worker is not bound by them and the reviewer MUST NOT grade them. But when two or more proposals are variants the worker MUST pick between (different taglines, different logo treatments, a modal vs. a banner, a light vs. a dark theme), the worker cannot pick freely: the choice changes what gets built. A READY spec with three mutually-exclusive directions and `Questions: none` forces the worker to guess, and the reviewer cannot grade the guess against an unspecified target (boucle.dev #73: three subtitle taglines + three logo treatments, all presented as creative proposals, disposition READY).'
+  - 'DO NOT present mutually-exclusive user-visible outcomes as `## Creative proposals` with `Questions: none` and Disposition `READY`. Creative proposals are advisory — the worker is not bound by them and the reviewer MUST NOT grade them. But when two or more proposals are variants the worker MUST pick between (different taglines, different logo treatments, a modal vs. a banner, a light vs. a dark theme), the worker cannot pick freely: the choice changes what gets built. A READY spec with three mutually-exclusive directions and `Questions: none` forces the worker to guess, and the reviewer cannot grade the guess against an unspecified target (observed on a consumer: three subtitle taglines + three logo treatments, all presented as creative proposals, disposition READY).'
   ✅:
   - 'DO move mutually-exclusive user-visible choices into `## Questions` as a blocking question ("Which of these directions do you want: A, B, or C?"), set Disposition to `NEEDS-INFO`, and drop the variants from `## Creative proposals`. The test: "if the worker picks the wrong one, is the result visibly wrong?" → blocking; "if the worker ignores it, is the result still correct?" → advisory.'
   - 'DO keep `## Creative proposals` for *additive* ideas the worker may adopt or ignore without changing the core deliverable (an extra micro-interaction, a progressive-enhancement fallback, a telemetry hook). The advisory section expands the solution space; it does not define the deliverable.'
@@ -1036,7 +1036,7 @@
 109:
   title: A diagram MUST parse (gate it) and MUST draw the decision (prompt it) — do not swap the two
   ❌:
-  - 'DO NOT treat the presence of a `## Diagram` section + a `<!-- boucle:diagram v=1 types=... -->` marker as proof the spec has a usable diagram. boucle.dev#86 passed every marker check and still reached the human with an `erDiagram` the Mermaid parser rejects (`string file src/content/open-source/open-source.md` — the grammar allows `type name [PK|FK|UK] ["comment"]` and nothing else), which the forge renders as an error box.'
+  - 'DO NOT treat the presence of a `## Diagram` section + a `<!-- boucle:diagram v=1 types=... -->` marker as proof the spec has a usable diagram. A real spec passed every marker check and still reached the human with an `erDiagram` the Mermaid parser rejects (`string file src/content/open-source/open-source.md` — the grammar allows `type name [PK|FK|UK] ["comment"]` and nothing else), which the forge renders as an error box.'
   - 'DO NOT hand-roll a Mermaid grammar approximation in shell to answer "does this parse?". An approximation both misses real errors and invents fake ones, and a gate that blocks a correct diagram is worse than no gate. Run the real parser.'
   - 'DO NOT build a CI gate for whether the diagram is the RIGHT diagram. Whether an `erDiagram` of four source files answers the reader''s question is a judgement, and a deterministic proxy for it (type-vs-impact-kind tables, entity-name-vs-impacted-file matching) blocks correct specs on a rule that was never the real criterion. The same #86 spec that failed to parse ALSO drew the four files it was about to edit for a landing-page navigation change — that second defect belongs to the triage prompt, not to CI.'
   - 'DO NOT let the declared impact kind pick the diagram type mechanically. A table row reading `data-model → erDiagram` is what turned "we add a content collection" into an entity model of `content_config_ts`, `open_source_md`, `index_astro`, `admin_config_yml`. The impact kind decides WHETHER a diagram is required; the reader''s decision decides WHICH one.'
@@ -1084,3 +1084,69 @@
   - 'DO embed screenshots in the MR description as uploaded images (`![…](/uploads/…)` via the forge uploads API) — same as the loop''s own screenshot mode, whose MR descriptions carry the images inline — BEFORE considering the MR format complete.'
   - 'DO run a final self-check on each MR-format section as forge-rendered values, not intentions: does the description BODY contain `![` screenshot markdown or a http(s) preview URL? If neither and this is a UI change, the MR is not done.'
   - 'DO keep issue notes for the QA narrative, but treat them as supplementary — every image the reviewer or the pipeline must see travels inside the MR itself.'
+114:
+  title: The loop enters an issue on invitation, not on sight
+  ❌:
+  - 'DO NOT route a newly opened, unlabelled issue to triage by default. Every issue filed in a project running boucle — a colleague''s bug report, a note-to-self, a duplicate — came back labelled `boucle:triage` + `boucle::status::bot`, assigned to the bot and answered with a spec its author never asked for. The README documented the opposite ("add the `boucle:triage` label"); the code was more permissive than its own contract.'
+  - 'DO NOT treat opting out as symmetric with opting in. Opting in is one label. Opting out of an appropriation you never asked for is a tombstone (#124), a label cleanup and an explanation to whoever got assigned.'
+  ✅:
+  - 'DO make entry an explicit act: `boucle:triage` added, or the bot assigned. Both routes already existed; the open-event route was the only one nobody chose.'
+  - 'DO leave the legacy behaviour reachable behind one variable (`BOUCLE_ENTRY_MODE=auto`) for a tracker that exists for boucle and nothing else — and make anything but that exact value fall back to opt-in, so a typo in a CI variable cannot silently re-enable mass appropriation.'
+  - 'DO check what the engine creates for itself before narrowing an entry path: schedules, triage sub-issues and the e2e follow-up all pass `boucle:triage` at creation, so they route on the label branch and the narrowing costs nothing.'
+115:
+  title: An engine job is not a consumer job
+  ❌:
+  - 'DO NOT ship the engine''s own quality gate in the pipeline consumers include. `make check` lints boucle''s shell sources against boucle''s Makefile, LESSONS.yml and bats suite. In a consumer repo that target does not exist, so the job failed on every push to their default branch, every MR and every worker branch — boucle turning someone else''s pipeline red for a gate that was never theirs. The GitHub workflow had guarded this since day one (`github.repository == ''ankaboot-source/boucle''`); the GitLab file never did.'
+  - 'DO NOT run `build-site` / `deploy` when `BOUCLE_DEPLOY_MODE=external`. `boucle_do_deploy` already returns immediately in that mode — but `build-site` ran `npm ci && npm run build` first, unguarded, on every push to the consumer''s default branch. A red job on any repo that is not a Node site, wasted runner minutes on the ones that are, for a build whose only consumers are themselves skipping.'
+  - 'DO NOT reach for `rules:exists` to tell engine from consumer. The engine is installed as a git SUBMODULE at `.boucle/`; a gitlink''s contents are not in the parent project''s file list, which is what `rules:exists` is evaluated against.'
+  ✅:
+  - 'DO split engine-only work from consumer-relevant work inside the SCRIPT, where the checked-out filesystem can answer "which am I?" — and keep the consumer half to what is actually theirs (`check-boucle-sync`, seconds, no toolchain bootstrap).'
+  - 'DO keep one always-matching job on push/MR in a consumer pipeline. GitLab refuses to create a pipeline in which no job matches and reports the refusal on the push — scoping every job out trades one kind of noise for another.'
+  - 'DO count what a consumer''s pipeline page looks like as part of the feature. A harness that installs into someone else''s CI owns the noise it adds there.'
+116:
+  title: Mermaid computes with `background`, it does not paint it
+  ❌:
+  - 'DO NOT set `"background":"transparent"` in a Mermaid `themeVariables` block to "blend into the forge comment". Mermaid never paints that value — it derives other variables from it, through khroma. Measured on mermaid 11.17.2: `lighten("transparent", 12)` returns `hsla(0, 0%, 12%, 0)` — alpha zero. `attributeBackgroundColorOdd`/`…Even` (the `erDiagram` attribute rows) and the `xychart-beta` plot area came out fully transparent, leaving `#0d1117` text on the bare comment surface. The parser is perfectly happy with it, so the syntax gate passes and the reader reports "unreadable", not "broken".'
+  - 'DO NOT leave text colors to be derived. Unpinned, `titleColor ||= tertiaryTextColor = invert(tertiaryColor)` produced `#17190a`, a green-black nobody chose.'
+  - 'DO NOT pick an edge color by eye. `#a0a0b8` on white is 2.56:1 — below the 3:1 WCAG 1.4.11 floor for graphical objects. `#6b6f80` is 4.99:1.'
+  ✅:
+  - 'DO pin every color the diagram uses, and use an opaque one for `background`. A theme variable left unset is a value invented by the library, not a value inherited from the design system.'
+  - 'DO verify a theme claim against the real library rather than reasoning about it: `getThemeVariables(overrides)` and khroma are two npm installs and answer the question exactly.'
+  - 'DO test the init block itself — byte-identical across the three files that carry it, valid JSON (a malformed directive is SILENTLY IGNORED and every diagram falls back to the default purple theme), and no unpinned text color.'
+117:
+  title: A documented switch nobody wired is worse than no switch
+  ❌:
+  - 'DO NOT let the two CI files drift on a CONTRACT. `BOUCLE_ENABLED` — "false to pause boucle", per README.md and LOOP.md — appeared 16 times in .gitlab-ci.yml and ZERO times in .github/workflows/boucle.yml. `bin/setup` created the variable on every GitHub install (`gh variable set BOUCLE_ENABLED --body true`) and nothing read it. A consumer who set it to false to stop the noise got every job running exactly as before: dispatch on every issue, comment and PR event, the doctor on every schedule firing, deploy on every push, with no way to stop any of it short of deleting the workflow.'
+  - 'DO NOT copy a fail-CLOSED gate across forges without asking what an absent variable means there. GitLab''s `!= "true" -> never` silences a project that never had the variable — correct where bin/setup always writes it, catastrophic where an install may predate or outlive that line, because an autonomous loop going quiet with no error is indistinguishable from one with nothing to do.'
+  ✅:
+  - 'DO grep the OTHER forge''s CI file for every variable a doc promises. The docs are the contract; two implementations of it drift silently, and the one nobody dogfoods drifts first.'
+  - 'DO gate at the job level, not inside the script: a job whose `if` is false is skipped without allocating a runner, so the pause costs nothing. A script that exits early has already paid for the runner, the checkout and the toolchain.'
+  - 'DO test the contract, not the prose: a test that parses the workflow and asserts EVERY job carries the gate catches the next job added without it.'
+118:
+  title: A GitHub cron asks; GitHub decides
+  ❌:
+  - 'DO NOT size a recovery path on the cron you wrote. Both CI files ask for `*/10 * * * *` (144 sweeps/day). Measured on boucle''s own GitHub workflow over 12.3 days, 87 scheduled runs: 7.1 runs/day, median gap 209 min, max 468 min. GitHub throttles and drops high-frequency schedule events at will.'
+  - 'DO NOT try to fix it with a variable: `on: schedule` expands neither `vars` nor shell variables, so the cadence is not configurable per consumer.'
+  - 'DO NOT lower `BOUCLE_STALENESS_THRESHOLD` to compensate. The threshold sizes when an issue COUNTS as stuck, not when anything looks: on GitHub a stuck issue crosses 40 minutes and then waits a median 3.5 hours for a sweep to read the threshold at all.'
+  ✅:
+  - 'DO keep every doctor recovery path idempotent and re-entrant, so a sweep that arrives hours late recovers exactly what an on-time one would. That property is what makes the platform''s throttling a latency problem instead of a correctness one.'
+  - 'DO lean on the paths that do not depend on the sweep where latency matters on GitHub: the webhook routes (a comment, a label, a bot assignment re-enter dispatch immediately) and `workflow_dispatch` for running a role on demand.'
+  - 'DO measure a platform claim against the platform''s own API before designing on it. `list_workflow_runs` answers "how often does this actually fire?" in one call.'
+119:
+  title: Narrowing one entry route exposes every other route that never worked
+  ❌:
+  - 'DO NOT assume the entry routes a doc promises all work. README.md and SKILL.md both say "add `boucle:triage` OR assign the bot". On GitHub the assignment route was structurally dead, twice over: the predicate required `$ACTION = "update"` (GitLab''s word — GitHub sends `assigned`, never `update`) and then read `.changes.assignees.current/previous`, an object GitHub does not send at all. Auto-triage-on-open had been covering for it, so nothing looked broken.'
+  - 'DO NOT ship a narrowing without auditing what the removed path was masking. Making entry opt-in did not create this bug — it made it load-bearing, and would have left GitHub consumers with ONE way in while the docs advertised two.'
+  - 'DO NOT keep two copies of a forge-shape test. The closed-issue guard and the routing block each carried their own four jq reads of the same payload; two copies is how one gets fixed and the other does not.'
+  ✅:
+  - 'DO fold forge-shape differences into ONE named predicate and give it the payload contract in its comment: GitLab sends the full before/after lists and the diff IS the test; GitHub sends the single user just assigned and the action IS the transition. They share no field, so a single jq filter cannot cover both.'
+  - 'DO read both action shapes wherever an action is read: `.object_attributes.action // .action`. A GitLab-only read is silently false on GitHub, and silence is the failure mode with no error to grep for.'
+  - 'DO reproduce the old failure before claiming the fix: run the OLD predicate against a real payload of the OTHER forge and watch it return false. A test that only proves the new code works does not prove the old code was broken.'
+120:
+  title: Subscribe to the events you route, not the events that exist
+  ❌:
+  - 'DO NOT subscribe a workflow to event types the router has no arm for. `.github/workflows/boucle.yml` took `pull_request: [opened, edited, closed, reopened, ready_for_review, review_requested, synchronize]` while `dispatch_github_mr_action` maps only opened/synchronize/reopened/closed and returns EMPTY for the rest — deliberately, per its own contract. Each of the three dead types still spun a full workflow run (checkout, toolchain bootstrap, forge init) to reach the router''s `*)` arm and no-op.'
+  - 'DO NOT overlook the self-inflicted ones. `edited` was the expensive type precisely because boucle rewrites its OWN MR descriptions — the worker writes the body, the reviewer embeds evidence — so the harness generated its own dead runs. The same file had already reasoned its way to removing `edited` from `issue_comment` for exactly this; the pull_request half was missed.'
+  ✅:
+  - 'DO derive the subscription from the router, and test it in BOTH directions: no subscribed type without an arm, no arm without a subscription. Parse the arms out of the shell source rather than hardcoding them, so the test fails on the next drift instead of the next audit.'
+  - 'DO watch your own pipeline while you work on it. This one reproduced in front of me: editing a PR description spawned a second full run on an unchanged SHA.'

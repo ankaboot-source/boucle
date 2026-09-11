@@ -7,7 +7,7 @@
 {{diagram_caption}}
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"background":"transparent","primaryColor":"#f5c842","primaryTextColor":"#0d1117","primaryBorderColor":"#c9a233","lineColor":"#a0a0b8","secondaryColor":"#fdf3d7","tertiaryColor":"#e8e6f5","clusterBkg":"#faf7f2","clusterBorder":"#c9a233","edgeLabelBackground":"#ffffff","fontFamily":"Sora, system-ui, sans-serif","fontSize":"14px"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#f5c842","primaryTextColor":"#0d1117","primaryBorderColor":"#c9a233","secondaryColor":"#fdf3d7","secondaryTextColor":"#0d1117","tertiaryColor":"#e8e6f5","tertiaryTextColor":"#0d1117","textColor":"#0d1117","titleColor":"#0d1117","nodeTextColor":"#0d1117","lineColor":"#6b6f80","clusterBkg":"#faf7f2","clusterBorder":"#c9a233","edgeLabelBackground":"#ffffff","labelBackgroundColor":"#ffffff","attributeBackgroundColorOdd":"#ffffff","attributeBackgroundColorEven":"#faf7f2","actorTextColor":"#0d1117","signalTextColor":"#0d1117","noteBkgColor":"#fdf3d7","noteTextColor":"#0d1117","labelBoxBkgColor":"#fdf3d7","labelTextColor":"#0d1117","fontFamily":"Sora, system-ui, sans-serif","fontSize":"14px"}}}%%
 {{mermaid_body}}
 ```
 

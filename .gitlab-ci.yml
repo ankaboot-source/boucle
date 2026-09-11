@@ -52,8 +52,8 @@ variables:
   # variable — GitLab keeps the literal string and a job-level definition
   # shadows the project variable entirely. The jobs then see the literal
   # "${BOUCLE_VERSION}", `needs_update` is always true and bin/update
-  # re-extracts the engine tarball on every pipeline (observed on
-  # urgence-palestine.fr: "update available: ${BOUCLE_VERSION} → …" once the
+  # re-extracts the engine tarball on every pipeline (observed on a
+  # consumer: "update available: ${BOUCLE_VERSION} → …" once the
   # project variable was missing — issue #120). Project variables are
   # inherited by every job natively; declaring nothing is the correct state.
   # On a fresh consumer where neither exists, bin/update records the
@@ -92,6 +92,16 @@ variables:
   # Defaults: 10 MiB per attachment, 50 MiB total. Attachments over either cap are skipped.
   BOUCLE_IMAGE_MAX_BYTES: "10485760"
   BOUCLE_IMAGE_TOTAL_MAX_BYTES: "52428800"
+  # Entry policy: how a NEW issue enters the loop.
+  #   "label" (default) — opt-in. An issue opened with no boucle: label is
+  #     left alone; a human hands it over by adding boucle:triage or by
+  #     assigning the bot. Issues boucle creates itself (schedules, triage
+  #     sub-issues, the e2e follow-up) already carry boucle:triage, so they
+  #     are unaffected.
+  #   "auto" — the legacy behaviour: EVERY issue opened in the project is
+  #     triaged, labelled and assigned to the bot. Only sane on a repo whose
+  #     issue tracker exists for boucle and nothing else.
+  BOUCLE_ENTRY_MODE: "label"
   # Concurrency: max issues allowed in boucle:working state simultaneously.
   # Default 5. 0 = unlimited (GitLab runner tag + resource_group are the only
   # limits) if you explicitly override it back. Triage won't trigger a new
@@ -312,7 +322,7 @@ default:
        # Self-update MUST only run on the default branch — on a worker
        # branch (boucle/<iid>-<slug>) the self-update commit pollutes the MR
       # with chore(boucle): commits that are the bot's engine-sync work,
-      # not the issue's work (observed on MR !105: 6 chore(boucle):
+      # not the issue's work (observed on a consumer MR: 6 chore(boucle):
        # commits landed on boucle/79, attributed to the human because
       # the clone inherited their git identity).
       #
@@ -321,7 +331,7 @@ default:
       # BOUCLE_FORGE_HOST. The full forge_init sourcing happens only below,
       # AFTER the self-update, so inline jobs would otherwise hand bin/update
       # an unset project id — under `set -u` that killed the script before
-      # the commit+push could run (urgence-palestine.fr stayed frozen on an
+      # the commit+push could run (a consumer stayed frozen on an
       # old engine for weeks; issue #120).
       export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:-}}"
       # CI_SERVER_HOST is the authoritative forge host inside a GitLab job —
@@ -352,7 +362,7 @@ default:
       # BOUCLE_PROJECT_ID is normalized by lib/boucle-ci.sh for bin/boucle-ci
       # jobs; INLINE jobs (merger, doctor, ...) must get it here too, or the
       # forge_* triggers/notes POST to an empty project id (silently dropped
-      # by `|| true`) — observed re-trigger failure on framagit, 2026-08.
+      # by `|| true`) — observed re-trigger failure on a consumer, 2026-08.
       export BOUCLE_PROJECT_ID="${BOUCLE_PROJECT_ID:-${CI_PROJECT_ID:-}}"
       export BOUCLE_WORKSPACE="${BOUCLE_WORKSPACE:-${CI_PROJECT_DIR:-$(pwd)}}"
       source "$BOUCLE_HOME/lib/boucle.sh"
@@ -461,12 +471,36 @@ default:
           ;;
       esac
 
-# ── Quality gate (lint + unit tests) ─────────────────────────────────────
+# ── Quality gate (lint + unit tests) — ENGINE REPO ONLY ──────────────────
 # Runs shellcheck + shfmt + bats on push/MR pipelines only. Never runs on
 # webhook triggers (the autonomous loop) or schedules — those are the dev-loop
 # pipeline and the doctor sweep, which don't touch the harness source.
 # Uses the default node:22-slim image and installs its own tools (shellcheck,
 # shfmt, bats) so it's self-contained and doesn't depend on the shell executor.
+#
+# `make check` lints the ENGINE's own shell sources against the ENGINE's
+# Makefile, LESSONS.yml and test/ suite. A consumer repo has none of that, so
+# there `make check` either fails outright ("No rule to make target 'check'")
+# or runs the consumer's own unrelated target — on every push to their default
+# branch, every MR and every worker branch. That is boucle turning someone
+# else's pipeline red for a gate that was never theirs. The GitHub workflow
+# already scopes its equivalent with
+# `if: github.repository == 'ankaboot-source/boucle'`.
+#
+# The split is made in the SCRIPT, not in `rules:`, on purpose. `rules:exists`
+# is evaluated against the parent project's file list at pipeline-creation
+# time, and the engine is installed as a git SUBMODULE at .boucle/ — a
+# gitlink, whose contents are not in the parent tree. The filesystem after
+# checkout is the only place where "engine or consumer?" has a reliable
+# answer, and the script runs there.
+#
+# Keeping ONE always-matching job also keeps consumer pipelines from being
+# EMPTY: GitLab refuses to create a pipeline in which no job matches and
+# reports the refusal on the push. Every loop job is gated on a trigger
+# pipeline, and (below) build-site/deploy no longer run in external deploy
+# mode — so on a consumer this job is what a push, an MR or a worker-branch
+# pipeline has to match. On a consumer it does one thing, in seconds:
+# check-boucle-sync.
 check:
   stage: check
   # Run on any available runner (including the shared docker runner) so a
@@ -481,7 +515,7 @@ check:
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
     # Run on pushes and MRs to $CI_DEFAULT_BRANCH.
-    # NOTE (framagit, 2026-08): the merge-request rule MUST reference
+    # NOTE (observed on a consumer, 2026-08): the merge-request rule MUST reference
     # $CI_PIPELINE_SOURCE == "merge_request_event" as a STANDALONE comparison —
     # GitLab's MR-pipeline creation only triggers on the simple reference.
     # A combined rule ("... == X && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == ...")
@@ -504,8 +538,10 @@ check:
     - |
       if [ -d "$CI_PROJECT_DIR/.boucle/bin" ]; then
         export BOUCLE_HOME="$CI_PROJECT_DIR/.boucle"
+        export BOUCLE_CONSUMER_INSTALL=true
       else
         export BOUCLE_HOME="$CI_PROJECT_DIR"
+        export BOUCLE_CONSUMER_INSTALL=false
       fi
       export PATH="$BOUCLE_HOME/bin:$PATH"
     # No git submodule update here: GitLab's get_sources already initialized
@@ -513,21 +549,40 @@ check:
     # in the job PATH (the bootstrap installs/verifies git itself).
     # Toolchain (shellcheck/shfmt/bats, pinned) — root-safe bootstrap:
     # falls back to $HOME/.local/bin when /usr/local/bin is not writable
-    # (shared shell executors, e.g. framagit's non-root runner). Fails with
+    # (shared shell executors running as a non-root user). Fails with
     # an actionable message when a system tool (make/tar/xz/...) is missing.
-    - check-bootstrap.sh
-    - shellcheck --version
-    - shfmt --version
-    - bats --version
+    #
+    # Consumers skip the whole bootstrap: their half of this job is
+    # check-boucle-sync, which needs git and nothing else. Downloading three
+    # pinned binaries to run a five-line guard is minutes of runner time per
+    # push, spent on a lint that will not run.
+    - |
+      if [ "$BOUCLE_CONSUMER_INSTALL" = "true" ]; then
+        echo "consumer install detected ($BOUCLE_HOME) — skipping the engine lint toolchain"
+      else
+        check-bootstrap.sh
+        shellcheck --version
+        shfmt --version
+        bats --version
+      fi
   script:
     # Pure merge_request_event rule above must create the pipeline; this guard
     # keeps the MR gate scoped to MRs targeting the default branch.
     - if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ] && [ "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" != "$CI_DEFAULT_BRANCH" ]; then echo "check skipped (MR targets $CI_MERGE_REQUEST_TARGET_BRANCH_NAME, not default)"; exit 0; fi
     # Reject any commit that modified .boucle/ without an authorized bot
     # subject (chore(boucle): ...). .boucle/ is the engine dir owned by
-    # bin/update — manual edits get overwritten on the next sync.
+    # bin/update — manual edits get overwritten on the next sync. This half
+    # runs everywhere: in a consumer it is the whole job, in the engine repo
+    # it is a no-op (nothing to protect) that costs a git log.
     - check-boucle-sync
-    - make check
+    # `make check` is the ENGINE's gate — its Makefile, its LESSONS.yml, its
+    # bats suite. Never run it in a consumer: see the note above the job.
+    - |
+      if [ "$BOUCLE_CONSUMER_INSTALL" = "true" ]; then
+        echo "check: consumer install — the engine's lint/test gate is not this repo's gate, nothing else to run"
+        exit 0
+      fi
+      make check
 
 # ── Dispatcher ──────────────────────────────────────────────────────────
 dispatch:
@@ -786,6 +841,14 @@ deploy:
   rules:
     - if: $BOUCLE_ENABLED != "true"
       when: never
+    # External deploy mode: the consumer's own CI ships the site. boucle
+    # deploys nothing, so this job had nothing to do — boucle_do_deploy
+    # already returns immediately on `boucle_is_external_deploy`. What it
+    # still did was run: a job on every push to the consumer's default
+    # branch, waiting on build-site (see there), to print one skip line.
+    # Not running is the same behaviour minus the pipeline entry.
+    - if: $BOUCLE_DEPLOY_MODE == "external"
+      when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
   needs:
     - job: build-site
@@ -889,7 +952,7 @@ doctor:
   # dedicated runners") does not strand the doctor behind a running worker.
   tags: []
   # resource_group: prevents concurrent doctor runs. On shared runners
-  # (framagit, GitLab.com SaaS), the doctor schedule fires every 10 min
+  # (SaaS or self-hosted), the doctor schedule fires every 10 min
   # and each run occupies a runner slot. Without this group, a slow
   # doctor run overlaps with the next schedule and consumes 2+ slots,
   # starving webhook-triggered dispatch/triage pipelines.
@@ -907,13 +970,25 @@ doctor:
 # The site is built ONCE here on a docker runner (node:22-slim, tags: []) and
 # published via artifact. Both `pages` (GitLab Pages) and `deploy` (CF/other)
 # consume public/ instead of re-building — this fixes the WASM Out-of-memory
-# failures seen when the build ran on small shell executors (framagit 2026-08).
+# failures seen when the build ran on small shell executors.
 build-site:
   stage: deploy
   image: node:22-slim
   tags: []
   rules:
     - if: $BOUCLE_ENABLED != "true"
+      when: never
+    # Nothing consumes this artifact when boucle is not the one deploying.
+    # Unguarded, this job ran `npm ci && npm run build` (the default
+    # BOUCLE_BUILD_CMD) on EVERY push to the consumer's default branch, in
+    # external mode as much as in self mode — a red job on any repo that is
+    # not a Node site, and wasted runner minutes on the ones that are, for a
+    # build whose only consumers (deploy, pages) are themselves skipped.
+    - if: $BOUCLE_DEPLOY_MODE == "external"
+      when: never
+    # Same reasoning one step further: with no deploy command AND no
+    # declarative Pages provider, there is no publisher at all.
+    - if: $BOUCLE_DEPLOY_CMD == "" && $BOUCLE_DEPLOY_PROVIDER != "gitlab-pages"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
   script:

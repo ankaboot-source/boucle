@@ -50,7 +50,7 @@ _resolve_local_forge_identity() {
     https://*)
       remote_body="${remote_url#https://}"
       # Strip embedded credentials (user:pass@) — common in OAuth URLs
-      # like https://oauth2:glpat-xxx@framagit.org/group/proj.git
+      # like https://oauth2:glpat-xxx@gitlab.example.com/group/proj.git
       remote_body="${remote_body#*@}"
       remote_host="${remote_body%%/*}"
       remote_path="${remote_body#*/}"

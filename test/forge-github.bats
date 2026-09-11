@@ -87,7 +87,7 @@ setup() {
   # fires reliably; reactions have NO webhook on GitHub) or 👍 emoji on GitLab
   # (emoji webhook fires reliably). The instruction MUST point at the right
   # signal per forge.
-  # Regression (boucle.dev #40, 2026-08-18): the doctor auto-merged on the
+  # Regression (on a consumer, 2026-08-18): the doctor auto-merged on the
   # PASS verdict alone — the gate was decorative. The human gate is now mandatory.
   run bash -c 'export BOUCLE_FORGE=github BOUCLE_MONO_USER=true; source bin/forge/common.sh; forge_mr_approve_instruction'
   assert_success
@@ -169,7 +169,7 @@ setup() {
 # without echoing anything, so EVERY successful GitHub merge was reported as
 # a failure. The PR was actually merged, but the loop escalated to human and
 # never chained to post-merge (merged code never deployed). Observed on the
-# boucle.dev consumer: PR #51 and PR #44 both merged but reported as failed.
+# a consumer both merged but reported as failed.
 
 @test "github forge_mr_merge echoes the merge commit SHA on a clean merge" {
   run bash -c '
@@ -297,7 +297,7 @@ setup() {
   # stderr (which _gh_api discarded), resp was empty, and the merger
   # reported "merge API call failed" even though the PUT never ran.
   # The fix calls gh api directly and captures stderr so the failure is
-  # diagnosable. See boucle.dev PR #72 (merge reported as failed, was
+  # diagnosable. See an incident on a consumer (merge reported as failed, was
   # actually merged manually as a workaround).
   run bash -c '
     BOUCLE_PROJECT_ID="test/repo"

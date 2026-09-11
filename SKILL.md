@@ -174,7 +174,7 @@ does NOT approve.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> triage: issue opened / bot assigned
+    [*] --> triage: boucle:triage added / bot assigned
     triage --> needs_info: triage needs more info
     triage --> spec_review: triage validated spec (Size S)
     triage --> todo: triage validated spec (auto / DND / autonomous)
@@ -202,6 +202,16 @@ stateDiagram-v2
     split --> triage: all sub-issues closed (parent re-queued)
     blocked --> todo: dependency closed (unblock)
 ```
+
+**Entry is opt-in.** An issue opened with no `boucle:` label does NOT enter
+the state machine: it has no boucle state at all, and the loop never touches
+it. A human hands it over by adding `boucle:triage` or by assigning the bot
+(`BOT_JUST_ASSIGNED`) — the two edges out of `[*]` above. Issues boucle opens
+for itself (schedules, triage sub-issues, the e2e follow-up) pass
+`boucle:triage` at creation, so they enter through the same edge as anything
+a human hands over. Setting `BOUCLE_ENTRY_MODE=auto` restores the legacy
+behaviour, where the `issue opened` webhook alone was enough — appropriate
+only for a tracker that exists for boucle and nothing else.
 
 ### 2.4 Transition table
 
@@ -525,7 +535,7 @@ and may produce conflicts with in-flight MRs.
 ## 7. Known gaps
 
 - **Dogfood suspended.** The engine repo no longer dogfoods on a consumer
-  (urgence-palestine.fr split out). Dogfooding will resume via a dedicated test
+  (the origin site was split out). Dogfooding will resume via a dedicated test
   consumer once the engine/consumer separation is stable. Until then, the
   73 LESSONS.yml lessons catalog the forward-looking operating principles; new classes of bugs are
   discovered on real consumers. (CONTEXT.md §1.)

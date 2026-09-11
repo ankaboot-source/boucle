@@ -178,9 +178,13 @@ prefer to wire in an existing account instead.
 1. Add `BOUCLE_LLM_API_KEY` as a masked secret (GitLab: Settings → CI/CD →
    Variables; GitHub: Settings → Secrets and variables → Actions).
 2. Create an issue. To dispatch the autonomous loop, add the `boucle:triage`
-   label and assign the bot. To work interactively (a local harness drives
-   the work), create the issue with **no** boucle labels — see
+   label **or** assign the bot — either one hands the issue over. An issue
+   with no boucle label is left alone: your tracker stays your tracker, and
+   a colleague's bug report is not a work order. To work interactively (a
+   local harness drives the work), that is exactly what you want — see
    [AGENTS.md](AGENTS.md) §"Interactive agents (harness)".
+   Set `BOUCLE_ENTRY_MODE=auto` if you want the opposite: every issue
+   opened in the project taken into the loop on sight.
 
 From there, the pipeline takes over. You only answer the human prompts:
 spec validation and MR approval. The `doctor` job (a scheduled
@@ -306,9 +310,10 @@ all have sane defaults — override them only when you need to:
 
 | Variable | Default | What it controls |
 | --- | --- | --- |
-| `BOUCLE_ENABLED` | `true` | Master switch: `true` (default) or `false` to pause boucle. |
+| `BOUCLE_ENABLED` | `true` | Master switch: `false` pauses boucle — every CI job is skipped without allocating a runner. Unset reads as enabled on GitHub; on GitLab the variable must be exactly `true` (`bin/setup` seeds it). |
 | `BOUCLE_LLM_API_KEY` | *(unset)* | LLM provider key. Set as a **masked** variable. |
 | `BOUCLE_LLM_BASE_URL` | `https://ollama.com/v1` | LLM provider endpoint (any OpenAI-compatible API). |
+| `BOUCLE_ENTRY_MODE` | `label` | How a new issue enters the loop: `label` (default — opt-in: add `boucle:triage` or assign the bot) or `auto` (every issue opened in the project is triaged). |
 | `BOUCLE_SPEC_PROFILE` | `strict` | Spec gate strictness: `strict` (default — gates all sizes), `product` (gates Size M only), `off` (never gates); unknown → `strict`. |
 | `BOUCLE_DND_ENABLED` | `false` | Do-Not-Disturb master switch: `true` (opt-in) or `false` (default). |
 | `BOUCLE_DND_START` / `BOUCLE_DND_END` / `BOUCLE_DND_TZ` | `22:00` / `07:00` / `UTC` | Quiet-hours window: HH:MM 24h start/end + IANA timezone (e.g. `Europe/Paris`). |
@@ -369,8 +374,8 @@ part of the install**: it is not a separate step.
 If the GitLab service-account API is unavailable on your instance (feature
 flag off, or the endpoint 403s), setup falls back to the manual flow: create
 the bot from your project's **Service accounts** page (GitLab → Project →
-Settings → Service accounts, e.g. on framagit:
-`https://<your-gitlab-host>/<group>/<project>/-/settings/service_accounts`).
+Settings → Service accounts):
+`https://<your-gitlab-host>/<group>/<project>/-/settings/service_accounts`.
 That page lets a project owner provision a bot without platform admin. Then:
 
 1. Create a Personal Access Token for the bot account (scope: `api`) — this

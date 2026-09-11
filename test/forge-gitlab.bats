@@ -38,7 +38,7 @@ setup() {
   LOG="$tmp/calls.log"
   run env TEST_LOG="$LOG" bash -c '
     BOUCLE_PROJECT_ID="126561"
-    BOUCLE_FORGE_HOST="framagit.org"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
     glab() {
       local method="" prev="" a
       for a in "$@"; do

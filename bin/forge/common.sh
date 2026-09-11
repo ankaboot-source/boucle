@@ -26,7 +26,7 @@
 # ── Project identity (set by CI wrapper, not by forge backends) ──────────
 #   BOUCLE_PROJECT_ID    — numeric project ID (GitLab) or "owner/repo" (GitHub)
 #   BOUCLE_PROJECT_PATH  — human-readable project path (e.g. "group/proj" or "owner/repo")
-#   BOUCLE_FORGE_HOST    — API hostname (e.g. "framagit.org" or "github.com")
+#   BOUCLE_FORGE_HOST    — API hostname (e.g. "gitlab.example.com" or "github.com")
 #   BOUCLE_DEFAULT_BRANCH — default branch name (e.g. "main" or "master")
 #   BOUCLE_WORKSPACE     — checkout directory (CI_PROJECT_DIR or GITHUB_WORKSPACE)
 #

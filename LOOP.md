@@ -120,7 +120,7 @@ the mechanics differ from Cloudflare Pages (no per-branch previews: branch
 previews would need GitLab **parallel deployments** (`pages.path_prefix`,
 GitLab ≥ 17.9), a **Premium** feature that CE instances ignore *silently* —
 a prefixed job publishes at the ROOT and clobbers production; verified
-empirically on framagit 2026-08).
+empirically on a CE instance, 2026-08).
 
 The loop adapts automatically to an empty `BOUCLE_DEPLOY_CMD`:
 
@@ -181,7 +181,7 @@ branch (Settings → Pages → Source: Deploy from a branch → `gh-pages` / roo
 | Mode | Behavior |
 |------|----------|
 | `preview` (default) | Worker deploys preview, reviewer tests against `BOUCLE_PREVIEW_URL` extracted from MR description via `BOUCLE_DEPLOY_URL_REGEX`. SHA-anchored freshness assertion. **Auto-fallback:** when the deploy provider has no per-branch preview (`github-pages`, `gitlab-pages`), screenshot mode is auto-activated — the worker captures screenshots locally (no production clobber) and the reviewer grades from those screenshots. A screenshot failure degrades to diff review. |
-| `diff` | Worker skips preview deploy. Reviewer runs code-review mode: fetches PR diff via `forge_mr_diff`, waits for PR check suites via `forge_mr_check_suites` (bounded by `BOUCLE_REVIEW_CHECKS_WAIT`, default 900s), plus instructed-content fidelity checks. Verdict stays SHA-anchored. Raster images **added or modified by the PR itself** (`.png .jpg .jpeg .gif .webp .avif .bmp`, SVG excluded — text/XML) are extracted from the MR head (`git show "$MR_HEAD:<path>"`) into `.boucle-state/$ISSUE/repo-images/` and described by the vision model like any attachment, so the text-only reviewer never needs to Read a binary image (boucle.dev PR #94: a reviewer Read `public/og-image.png` and the run 400'd). Caps: 8 images, 8 MB each; skips are logged. Fail-open: any git error yields an empty set — the review proceeds. |
+| `diff` | Worker skips preview deploy. Reviewer runs code-review mode: fetches PR diff via `forge_mr_diff`, waits for PR check suites via `forge_mr_check_suites` (bounded by `BOUCLE_REVIEW_CHECKS_WAIT`, default 900s), plus instructed-content fidelity checks. Verdict stays SHA-anchored. Raster images **added or modified by the PR itself** (`.png .jpg .jpeg .gif .webp .avif .bmp`, SVG excluded — text/XML) are extracted from the MR head (`git show "$MR_HEAD:<path>"`) into `.boucle-state/$ISSUE/repo-images/` and described by the vision model like any attachment, so the text-only reviewer never needs to Read a binary image (observed on a consumer: a reviewer Read `public/og-image.png` and the run 400'd). Caps: 8 images, 8 MB each; skips are logged. Fail-open: any git error yields an empty set — the review proceeds. |
 | `screenshot` | Worker builds the site, serves it locally (`python3 -m http.server` — zero dependencies), captures screenshots of impacted pages via a browser (reusing `bin/render-preview` with HTTP URL support), uploads them as MR attachments. Reviewer receives the screenshots as text descriptions via `bin/describe-images --criteria` — the vision model answers each acceptance criterion (MET/NOT MET/UNCLEAR) from `state.md`, and the reviewer grades against those text descriptions. No deploy command, no token, no CDN propagation wait. Ideal for GitLab CE (no per-branch Pages) or any token-less setup where visual review still matters. Fail-open: a screenshot failure degrades to diff review, never blocks the loop. |
 
 ### Per-provider URL regex defaults
@@ -249,8 +249,8 @@ verdict MUST stay SHA-anchored in both modes.
 
 ### Recipe 1: Docker-compose backend service
 
-A backend API (e.g. LiteLLM + OpenWebUI + Postgres) deployed via SSH to a remote
-host.
+A self-hosted backend API (app + database, behind a reverse proxy) deployed via
+SSH to a remote host.
 
 - `BOUCLE_DEPLOY_MODE=external` — the consumer's own CI deploys via SSH.
 - `BOUCLE_REVIEW_MODE=diff` — no preview URL per MR.
@@ -288,9 +288,10 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `BOUCLE_ENABLED` | `true` | Master switch: `true` or `false` (pause boucle). |
+| `BOUCLE_ENABLED` | `true` | Master switch. `false` pauses boucle: every job in both CI files is skipped, without allocating a runner. Polarity differs by forge, on purpose. GitLab gates on `$BOUCLE_ENABLED != "true" → never` (fail-closed: a project missing the variable runs nothing); GitHub gates on `vars.BOUCLE_ENABLED != 'false'` (fail-open: unset reads as enabled, the documented default), because silencing an install whose variable predates or outlives `bin/setup`'s `gh variable set` would mean an autonomous loop going quiet with no error. `bin/setup` seeds it to `true` on both forges. |
 | `BOUCLE_FORGE` | *(auto-detected)* | Active forge: `gitlab` or `github`. Auto-detected from the origin git remote (github.com → github, gitlab.com → gitlab, self-hosted via hostname heuristic or API probe). Override with a subcommand (`setup gitlab` / `setup github`), `--forge`, or `BOUCLE_FORGE`. |
 | `BOUCLE_MONO_USER` | *(empty)* | `true` when one account owns both the issues and the loop (the default when no `--bot-id` is given). Swaps the actor-based anti-loop guard for the `<!-- boucle:agent -->` marker, drops the `boucle::status::*` gross label and both assignee side effects. `false` is treated as unset. Degrades notifications — see README. |
+| `BOUCLE_ENTRY_MODE` | `label` | How a NEW issue enters the loop. `label` (default) is opt-in: an issue opened with no `boucle:` label is left alone; a human hands it over by adding `boucle:triage` or by assigning the bot, and both routes are unaffected by this variable. `auto` restores the legacy behaviour — every issue opened in the project is triaged, labelled and assigned to the bot — and is only sane on a tracker that exists for boucle and nothing else. Anything other than `auto` (unset, empty, a typo) reads as `label`: the quiet mode is the safe fallback. Issues boucle creates itself (schedules, triage sub-issues, the e2e follow-up) pass `boucle:triage` at creation and route on the label branch either way. |
 | `BOUCLE_SPEC_PROFILE` | `strict` | Default spec-validation policy **handed to the triage agent**, which decides and emits `Validation:`. `strict` (default, always require the author), `product` (require the author when the issue leaves real latitude), `off` (never). Applied as a size×profile mapping only as a fallback, when a triage comment carries no `Validation:` field; unknown → `strict`. |
 | `BOUCLE_DND_ENABLED` | `false` | Do-Not-Disturb master switch: `true` (opt-in) or `false` (default). |
 | `BOUCLE_DND_START` / `BOUCLE_DND_END` | `22:00` / `07:00` | Quiet-hours window: HH:MM 24h start/end. |
@@ -433,7 +434,7 @@ and the human reacts with 👍 (or any canonical approval emoji) on that note.
 The doctor polls the note's reactions via `forge_note_reactions` and
 triggers the merger only when a non-bot user reacted. The old behavior
 treated the reviewer's VERDICT: PASS bot comment as the approval signal
-and merged with no human action — that was a regression (boucle.dev #40,
+and merged with no human action — that was a regression (on a consumer,
 2026-08-18) and is removed. `forge_mr_approve_instruction` returns the emoji
 instruction for mono-user on **all** forges; bot mode keeps the native
 Approve / approving-review instruction. See

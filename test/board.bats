@@ -19,7 +19,7 @@ stub_forge() {
   cat <<'STUB'
 # The board reads a SINGLE atomic snapshot (forge_issue_list_all) and
 # partitions it client-side, so a transition between two per-label queries
-# can no longer split one issue across two sections (boucle.dev #34).
+# can no longer split one issue across two sections (a consumer).
 forge_issue_list_all() {
   case "$1" in
     opened)
@@ -230,7 +230,7 @@ STUB
 }
 
 @test "board: an issue appears in only ONE section even with two state labels" {
-  # Regression guard for boucle.dev #34: issue #73 appeared in BOTH
+  # Regression for an incident on a consumer: issue #73 appeared in BOTH
   # "Waiting on you" (boucle:approval) and "In flight" (boucle:merging)
   # because the old render issued one forge call per label and a transition
   # fired between two calls. The single-snapshot render partitions

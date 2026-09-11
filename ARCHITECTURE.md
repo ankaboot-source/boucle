@@ -19,8 +19,8 @@ primitives (issues, labels, MRs, approvals, webhooks). The loop is **async by
 design** (I3): it runs on CI, and the human intervenes at two named gates —
 spec approval and MR review — rather than in a live chat.
 
-The engine is split from the consumer site it once described (the
-urgence-palestine.fr Astro site was extracted; see [CONTEXT.md](CONTEXT.md) §1).
+The engine is split from the consumer site it once described (that Astro
+site was extracted to its own repo; see [CONTEXT.md](CONTEXT.md) §1).
 This document describes the engine itself.
 
 ### The 8-stage pipeline
@@ -170,7 +170,7 @@ flowchart LR
 
 | Stage | Trigger (`BOUCLE_ROLE` gating) | `resource_group` | What it does | Script |
 |---|---|---|---|---|
-| `check` | push / MR to default branch | — | shellcheck, shfmt, bats, doc-sync lint | `lib/boucle-ci/check.sh` |
+| `check` | push / MR to default branch, `boucle/*` branches | — | **engine repo:** shellcheck, shfmt, bats, doc-sync lint. **consumer repo:** `check-boucle-sync` only — the engine's gate is not the consumer's, and running `make check` against their Makefile turned their pipeline red on every push | `lib/boucle-ci/check.sh` |
 | `dispatch` | webhook (no `BOUCLE_ROLE`) | `boucle-dispatch` | webhook router: parse payload, route to role | `lib/boucle-ci/dispatch.sh` |
 | `triage` | webhook (no `BOUCLE_ROLE`) | — (no `BOUCLE_ISSUE` at eval) | analyse issue, draft spec | `lib/boucle-ci/triage.sh` |
 | `worker` | trigger `BOUCLE_ROLE=worker` | `boucle-issue-$BOUCLE_ISSUE` | implement on `boucle/<iid>-<slug>`, deploy preview | `lib/boucle-ci/worker.sh` |
@@ -178,7 +178,8 @@ flowchart LR
 | `merger` | trigger `BOUCLE_ROLE=merger` | `boucle-merge` (serial) | rebase + merge after approval | `lib/boucle-ci/merger.sh` |
 | `post-merge` | trigger `BOUCLE_ROLE=post-merge` (from merger, catchup, or doctor) | — | deploy-wait + e2e trigger | `lib/boucle-ci/post-merge.sh` |
 | `catchup` | trigger `BOUCLE_ROLE=catchup` | — | direct-merge recovery: audit note + chain to post-merge | `lib/boucle-ci/catchup.sh` |
-| `deploy` | push to default branch | — | build + deploy (Cloudflare Pages / GitLab Pages) | `lib/boucle-ci/deploy.sh` |
+| `build-site` | push to default branch, unless `BOUCLE_DEPLOY_MODE=external` or no publisher is configured | — | one build, consumed as an artifact by `deploy` and `pages` | inline |
+| `deploy` | push to default branch, unless `BOUCLE_DEPLOY_MODE=external` | — | build + deploy (Cloudflare Pages / GitLab Pages) | `lib/boucle-ci/deploy.sh` |
 | `e2e` | trigger `BOUCLE_ROLE=e2e` | `boucle-issue-$BOUCLE_ISSUE` | verify production URL, SHA-anchored verdict | `lib/boucle-ci/e2e.sh` |
 | `doctor` | schedule (every 10 min) | — | self-healing board sweep | `lib/boucle-ci/doctor.sh` |
 | `pages` | push to default branch | — | GitLab Pages publish | inline |
@@ -278,7 +279,7 @@ following E2E-fail origin markers.
 ## 7. Doctor
 
 `lib/boucle-ci/doctor.sh` (`boucle_ci_doctor`) is the scheduled self-healing
-sweep (every 10 min). It:
+sweep. It:
 
 - **Board maintenance.** Detects orphaned triages, stuck `boucle:triage`
   issues, orphaned `boucle:needs-info` / `boucle:spec-review` issues, and
@@ -301,6 +302,36 @@ sweep (every 10 min). It:
 - **File-impact gate (planned).** A `git merge-tree` safety-net gate defers
   parallel workers on file overlap (design spec
   `docs/superpowers/specs/2026-08-12-file-impact-gate-design.md`).
+
+### Cadence: what is asked for vs what is delivered
+
+Both CI files ask for `*/10 * * * *` — 144 sweeps a day. GitLab schedules
+honour that. **GitHub Actions does not**, and the gap is not marginal.
+Measured on this repository's own `boucle` workflow over 12.3 days
+(2026-08-29 → 2026-09-10, 87 scheduled runs):
+
+| | asked | delivered |
+|---|---|---|
+| runs/day | 144 | **7.1** |
+| gap between sweeps | 10 min | **median 209 min, max 468 min** |
+
+GitHub throttles and drops high-frequency `schedule` events at will, and the
+`on: schedule` block cannot be parameterised (Actions expands neither `vars`
+nor shell variables there), so this is not a setting to tune — it is a
+property of the platform to design around.
+
+The consequence is on recovery latency, not correctness. Every doctor
+recovery path is idempotent and re-entrant, so a late sweep recovers exactly
+what an on-time one would. But `BOUCLE_STALENESS_THRESHOLD` (default 2400 s /
+40 min) sizes the *threshold*, not the *sweep*: on GitHub a stuck
+`boucle:working` issue crosses that threshold in 40 minutes and then waits a
+median 3.5 hours — up to 7.8 — for a sweep to notice. Lowering the threshold
+does not help; nothing is running to read it.
+
+Where recovery latency matters on GitHub, the paths that do not depend on the
+sweep are the ones to lean on: the webhook routes (a comment, a label, a bot
+assignment all re-enter dispatch immediately) and `workflow_dispatch`, which
+runs a role on demand.
 
 ## 8. Self-update
 

@@ -75,8 +75,8 @@ boucle_ci_merger() {
     git rebase --abort 2> /dev/null || true
     # S4: classify the conflict, then hand it to the human IMMEDIATELY with
     # structured options — never re-trigger the worker blindly (a fresh run
-    # would reproduce the same semantic conflict; observed on framagit with a
-    # modify/delete on MobilisationBlock.astro, 2026-08).
+    # would reproduce the same semantic conflict; observed on a consumer
+    # with a modify/delete on a component file, 2026-08).
     boucle_escalate_merge_conflict "$BOUCLE_ISSUE" "$MR_IID" "$BOUCLE_DEFAULT_BRANCH" "$REBASE_OUTPUT"
     exit 1
   fi
@@ -157,7 +157,7 @@ boucle_ci_merger() {
     # closes the issue when the PR body contains "Closes #N", so the
     # issue may already be closed — escalating to boucle:human on a
     # closed issue creates an inconsistent state (closed + boucle:human).
-    # Observed on boucle.dev #71: the merger's PUT failed (--paginate
+    # observed on a consumer: the merger's PUT failed (--paginate
     # bug), but the PR was merged manually and GitHub closed the issue
     # via the "Closes #71" keyword in the PR body, while the merger
     # simultaneously labeled it boucle:human.

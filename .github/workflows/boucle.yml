@@ -24,7 +24,22 @@ on:
     # all, so the check on the PR stayed pinned to the SHA it opened with.
     # It is also the event dispatch maps to the GitLab `update` action, which
     # re-triggers the reviewer on a revised MR (SKILL.md §4.4).
-    types: [opened, edited, closed, reopened, ready_for_review, review_requested, synchronize]
+    #
+    # Four types, and only four, because `dispatch_github_mr_action` has an
+    # arm for exactly these: opened→open, synchronize→update,
+    # reopened→reopen, closed→merge|close. `edited`, `ready_for_review` and
+    # `review_requested` map to EMPTY there — deliberately, per that
+    # function's own contract — so each one spun a full workflow run
+    # (checkout, toolchain bootstrap, forge init) to reach the router's `*)`
+    # arm and no-op. `edited` was the expensive one: boucle rewrites its own
+    # MR descriptions (the worker writes the body, the reviewer embeds
+    # evidence), so every self-edit fired a dead run. Same reasoning already
+    # applied to `issue_comment` below — this is the pull_request half of it.
+    #
+    # A review that is not an approval still re-triggers the worker: it
+    # arrives as `pull_request_review` / `pull_request_review_comment`, both
+    # still subscribed below.
+    types: [opened, closed, reopened, synchronize]
   pull_request_review:
     types: [submitted, dismissed]
   # No `edited`: boucle rewrites its own comments in place — triage via
@@ -136,7 +151,7 @@ env:
   BOUCLE_STALENESS_THRESHOLD: ${{ vars.BOUCLE_STALENESS_THRESHOLD || '2400' }}
   # MUST stay in sync with the .gitlab-ci.yml default and LOOP.md: a build
   # without dependency install exits 127 ("astro: not found") on a fresh
-  # runner — observed on boucle.dev issue #81, where every iteration burned
+  # runner — observed on a consumer, where every iteration burned
   # on the same missing-node_modules failure.
   BOUCLE_BUILD_CMD: ${{ vars.BOUCLE_BUILD_CMD || 'npm ci && npm run build' }}
   BOUCLE_BUILD_OUTPUT: ${{ vars.BOUCLE_BUILD_OUTPUT || 'public' }}
@@ -160,6 +175,10 @@ env:
   BOUCLE_FALLBACK_API_KEY: ${{ secrets.BOUCLE_FALLBACK_API_KEY || '' }}
   BOUCLE_MONO_USER: ${{ vars.BOUCLE_MONO_USER || 'false' }}
   BOUCLE_ALLOWED_USERS: ${{ vars.BOUCLE_ALLOWED_USERS || '' }}
+  # Entry policy: "label" (default) = opt-in, an issue opened with no
+  # boucle: label is left alone until a human adds boucle:triage or assigns
+  # the bot. "auto" = legacy, every new issue is taken into the loop.
+  BOUCLE_ENTRY_MODE: ${{ vars.BOUCLE_ENTRY_MODE || 'label' }}
   BOUCLE_VISION_ROUTING: ${{ vars.BOUCLE_VISION_ROUTING || 'enabled' }}
   BOUCLE_VISION_MODEL: ${{ vars.BOUCLE_VISION_MODEL || 'minimax-m3' }}
   BOUCLE_VISION_ROLES: ${{ vars.BOUCLE_VISION_ROLES || 'triage,worker,reviewer' }}
@@ -205,7 +224,7 @@ permissions:
 #     with cancel-in-progress: false, so a comment dispatch still waiting
 #     for a runner is cancelled by any newer run in the same group —
 #     notably the issues:labeled webhook of the worker's OWN terminal
-#     transition (observed on boucle.dev #91: the amend dispatch was
+#     transition (observed on a consumer: the amend dispatch was
 #     cancelled 34s after the comment, the worker transitioned to
 #     boucle:review, the amendment never reached a worker, and the
 #     reviewer graded the wrong file against the frozen spec).
@@ -228,6 +247,28 @@ concurrency:
   cancel-in-progress: false
 
 # ── Jobs ────────────────────────────────────────────────────────────────────────
+#
+# EVERY job below opens with `vars.BOUCLE_ENABLED != 'false'`. That gate is the
+# master switch README.md and LOOP.md have always documented ("`false` to pause
+# boucle") and this file never implemented: .gitlab-ci.yml carried 16 of them,
+# this workflow carried zero. A consumer who set BOUCLE_ENABLED=false to stop
+# the noise got every job running exactly as before — dispatch on every issue,
+# comment and PR event, the doctor on every schedule firing, deploy on every
+# push — with no way to turn any of it off short of deleting the workflow.
+# `bin/setup` has been creating the variable on GitHub installs the whole time
+# (`gh variable set BOUCLE_ENABLED --body true`); nothing read it.
+#
+# The polarity differs from GitLab on purpose. GitLab gates on
+# `$BOUCLE_ENABLED != "true" → never`: fail-CLOSED, so a project missing the
+# variable runs nothing. Applying that here would silence every GitHub install
+# whose variable predates or outlives that setup line — an autonomous loop
+# going quiet with no error is the worst failure mode this harness has. So:
+# unset reads as ENABLED, which is also the documented default (`true`), and
+# only an explicit `false` pauses. GitHub's `!=` on strings is
+# case-insensitive, so `False` and `FALSE` pause too.
+#
+# A job whose `if` is false is skipped without allocating a runner: the pause
+# is free, not a fleet of no-op jobs.
 jobs:
   # ── check: lint + tests on push/PR to default branch ─────────────────────────
   check:
@@ -236,7 +277,8 @@ jobs:
     # have a Makefile, test/ directory, or bats tests. Running `make check` on
     # a consumer fails and sends spurious failure notifications.
     if: |
-      github.repository == 'ankaboot-source/boucle'
+      vars.BOUCLE_ENABLED != 'false'
+      && github.repository == 'ankaboot-source/boucle'
       && (github.event_name == 'push' || github.event_name == 'pull_request')
       && !contains(github.event.head_commit.message, '[skip ci]')
     steps:
@@ -287,7 +329,7 @@ jobs:
     # Only run on the engine repo itself (ankaboot-source/boucle), never on
     # consumers — the smoke test sources bin/forge/common.sh directly, which
     # only exists at the engine root, not inside the .boucle/ submodule.
-    if: github.repository == 'ankaboot-source/boucle'
+    if: vars.BOUCLE_ENABLED != 'false' && github.repository == 'ankaboot-source/boucle'
     runs-on: ubuntu-latest
     continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     steps:
@@ -297,7 +339,7 @@ jobs:
       - name: Bootstrap chain smoke test
         run: |
           set -euo pipefail
-          export BOUCLE_HOME="$PWD" BOUCLE_FORGE=gitlab BOUCLE_FORGE_HOST=framagit.org
+          export BOUCLE_HOME="$PWD" BOUCLE_FORGE=gitlab BOUCLE_FORGE_HOST=gitlab.example.com
           source bin/forge/common.sh
           forge_init
           source lib/boucle.sh
@@ -319,11 +361,14 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     if: |
-      github.event_name == 'issues'
-      || github.event_name == 'pull_request'
-      || github.event_name == 'issue_comment'
-      || github.event_name == 'pull_request_review'
-      || github.event_name == 'pull_request_review_comment'
+      vars.BOUCLE_ENABLED != 'false'
+      && (
+        github.event_name == 'issues'
+        || github.event_name == 'pull_request'
+        || github.event_name == 'issue_comment'
+        || github.event_name == 'pull_request_review'
+        || github.event_name == 'pull_request_review_comment'
+      )
     outputs:
       issue-iid: ${{ steps.dispatch.outputs.issue-iid }}
       role: ${{ steps.dispatch.outputs.role }}
@@ -417,7 +462,7 @@ jobs:
     # workflow_dispatch branch lets the doctor's re-trigger reach triage
     # (GitHub parity with GitLab's `$CI_PIPELINE_SOURCE == "trigger"` rule).
     if: |
-      always() && (
+      always() && vars.BOUCLE_ENABLED != 'false' && (
         needs.dispatch.outputs.issue-iid != ''
         || (github.event_name == 'workflow_dispatch' && (github.event.inputs.BOUCLE_ROLE == '' || github.event.inputs.BOUCLE_ROLE == 'triage'))
       )
@@ -519,8 +564,11 @@ jobs:
     runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
     continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     if: |
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'worker')
-      || (github.event_name == 'issues' && contains(github.event.action, 'labeled') && contains(github.event.label.name, 'boucle:todo'))
+      vars.BOUCLE_ENABLED != 'false'
+      && (
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'worker')
+        || (github.event_name == 'issues' && contains(github.event.action, 'labeled') && contains(github.event.label.name, 'boucle:todo'))
+      )
     timeout-minutes: 30
     # Job-level concurrency: serialize ALL worker runs for the same issue,
     # regardless of trigger source (workflow_dispatch from chain_to_role OR
@@ -665,7 +713,8 @@ jobs:
     runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
     continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     if: |
-      github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'reviewer'
+      vars.BOUCLE_ENABLED != 'false'
+      && github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'reviewer'
     timeout-minutes: 30
     # Job-level concurrency: serialize reviewer runs per issue (mirrors
     # GitLab's resource_group: boucle-issue-$BOUCLE_ISSUE). The reviewer
@@ -775,7 +824,8 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     if: |
-      github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'merger'
+      vars.BOUCLE_ENABLED != 'false'
+      && github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'merger'
     timeout-minutes: 10
     concurrency:
       group: boucle-merge
@@ -855,7 +905,8 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     if: |
-      github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'post-merge'
+      vars.BOUCLE_ENABLED != 'false'
+      && github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'post-merge'
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -935,8 +986,11 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     if: |
-      (github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true)
-      || (github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'catchup')
+      vars.BOUCLE_ENABLED != 'false'
+      && (
+        (github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true)
+        || (github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'catchup')
+      )
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -1024,10 +1078,24 @@ jobs:
           $BOUCLE_HOME/bin/boucle-ci catchup
 
   # ── deploy: build + deploy to Cloudflare Pages (on push to default) ───────────
+  # External deploy mode: the consumer's own CI ships the site, so
+  # `boucle-ci deploy` returns immediately (boucle_is_external_deploy). What
+  # still ran was everything before it — a full checkout with fetch-depth: 0
+  # and submodules, setup-node, the dependency install, the self-update step —
+  # on EVERY push to the consumer's default branch, to reach a step that
+  # prints one skip line. Not running is the same behaviour minus the entry
+  # in their Actions tab. Mirrors the same guard on `build-site` and `deploy`
+  # in .gitlab-ci.yml.
+  #
+  # `vars.BOUCLE_DEPLOY_MODE`, not the `env:` value: the env context is NOT
+  # available in a job-level `if` (only in `steps[*].if`). Unset reads as ''
+  # here, which is correctly != 'external' — self mode is the default.
   deploy:
     runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
     if: |
-      github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      vars.BOUCLE_ENABLED != 'false'
+      && vars.BOUCLE_DEPLOY_MODE != 'external'
+      && github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -1094,7 +1162,8 @@ jobs:
     runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
     continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     if: |
-      github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'e2e'
+      vars.BOUCLE_ENABLED != 'false'
+      && github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'e2e'
     timeout-minutes: 20
     # Job-level concurrency: serialize e2e runs per issue (mirrors GitLab's
     # resource_group: boucle-issue-$BOUCLE_ISSUE). Defense-in-depth: the e2e
@@ -1209,7 +1278,8 @@ jobs:
     runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
     continue-on-error: true  # boucle manages its own retries — exit 1 is normal
     if: |
-      github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'cmd-log'
+      vars.BOUCLE_ENABLED != 'false'
+      && github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'cmd-log'
     timeout-minutes: 2
     concurrency:
       group: boucle-cmd-${{ github.event.inputs.BOUCLE_ISSUE }}
@@ -1235,7 +1305,8 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true  # boucle manages its own retries — exit 1 is normal
     if: |
-      github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'cmd-status'
+      vars.BOUCLE_ENABLED != 'false'
+      && github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'cmd-status'
     timeout-minutes: 2
     concurrency:
       group: boucle-cmd-${{ github.event.inputs.BOUCLE_ISSUE }}
@@ -1260,7 +1331,8 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true  # boucle manages its own retries — exit 1 is normal
     if: |
-      github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'cmd-help'
+      vars.BOUCLE_ENABLED != 'false'
+      && github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'cmd-help'
     timeout-minutes: 2
     concurrency:
       group: boucle-cmd-${{ github.event.inputs.BOUCLE_ISSUE }}
@@ -1286,8 +1358,11 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     if: |
-      github.event_name == 'schedule'
-      || (github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'doctor')
+      vars.BOUCLE_ENABLED != 'false'
+      && (
+        github.event_name == 'schedule'
+        || (github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'doctor')
+      )
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4

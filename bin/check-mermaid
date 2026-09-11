@@ -6,7 +6,7 @@
 # Extracts every ```mermaid fence from the given markdown (a spec comment, a
 # doc, stdin) and parses it with the REAL Mermaid parser. A diagram the parser
 # rejects is a diagram the forge renders as "Unable to render rich display" —
-# the failure this gate exists to catch (boucle.dev#86: an erDiagram whose
+# the failure this gate exists to catch (an erDiagram whose
 # attribute line carried a bare path as a third token).
 #
 # Exit codes:

@@ -716,7 +716,7 @@ metrics_remote_config_only() {
 
 # ── Telling a broken sensor from a real zero ─────────────────────────────
 #
-# boucle.dev #91 and #92 produced 60+ runs with `skills: []` on every one.
+# a consumer produced 60+ runs with `skills: []` on every one.
 # That is what an agent loading no skills looks like, and it is also exactly
 # what an extractor that does not match the transcript format looks like.
 # The name list alone cannot separate them; skills_evidence can.
@@ -772,7 +772,7 @@ EOF
 
 # ── An empty verdict is not an UNCERTAIN verdict ─────────────────────────
 #
-# boucle.dev #92 escalated to boucle:human twice showing ten UNCERTAIN rows.
+# a consumer escalated to boucle:human twice showing ten UNCERTAIN rows.
 # All ten were runs where the agent posted NOTHING — five of them on a
 # byte-identical prompt. The two states take different paths through
 # reviewer.sh (immediate escalation vs re-trigger), so recording them under

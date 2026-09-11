@@ -265,7 +265,7 @@ EOF
     # mkdir is NOT conditional here: the restore-from-cache block above only
     # creates .boucle-state/<iid>/ when the cache exists — on a first run (or after
     # GIT_CLEAN_FLAGS wiped the gitignored dir) the seed below would fail
-    # with "No such file or directory" (observed on framagit, 2026-08).
+    # with "No such file or directory" (observed on a consumer, 2026-08).
     mkdir -p ".boucle-state/$BOUCLE_ISSUE"
     cat > ".boucle-state/$BOUCLE_ISSUE/iterations.md" << 'EOF'
 # Iteration log — issue #$BOUCLE_ISSUE
@@ -575,7 +575,7 @@ EOF
       # naming a nonexistent command — an environment/config problem the agent
       # cannot fix by editing project files. Say so in the feedback and the
       # note, so the next iteration (and the human) do not chase a phantom
-      # code bug. Observed on boucle.dev #81: `npm run build` without `npm ci`
+      # code bug. Observed on a consumer: `npm run build` without `npm ci`
       # burned every iteration with the same 127.
       local build_hint note_hint
       build_hint=""
@@ -1073,7 +1073,7 @@ ${screenshot_urls}"
   # (still queued — no runner yet) is cancelled by the issues:labeled
   # webhook of THIS run's own terminal transition. boucle:todo is then
   # never set, the guard above passes, and the amendment is silently
-  # graded away against the frozen spec (boucle.dev #91: the human said
+  # graded away against the frozen spec (observed on a consumer: the human said
   # "wrong SVG, it is card-7", the worker changed card-6, the reviewer
   # PASSed card-6). Recheck the issue notes directly: if a NON-boucle
   # note arrived after the job-start snapshot (BOUCLE_MAX_NOTE_ID), treat

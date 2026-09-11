@@ -267,7 +267,7 @@ HELP_EOF
   # An agent that posts a draft stub ("DRAFT — first-pass triage, refining
   # next.") with the FINAL marker + a Disposition of READY but no ## TL;DR
   # would be promoted by those paths, routing an EMPTY spec to the spec
-  # gate and asking the human to approve nothing (boucle.dev #73).
+  # gate and asking the human to approve nothing (a consumer).
   #
   # comment_has_tldr returns 0 (true) when the comment has a ## TL;DR
   # section header, 1 (false) otherwise. Every recovery path MUST call it
@@ -362,7 +362,7 @@ HELP_EOF
   # A draft without ## TL;DR is an incomplete spec (lesson #92): leave it
   # in place for the agent to refine, do NOT promote it to a routing
   # decision. Promoting an empty spec routes the issue to the spec gate
-  # with no spec to approve (boucle.dev #73).
+  # with no spec to approve (a consumer).
   PRE_PROMOTED_DISPOSITION=""
   PRE_PROMOTED_SIZE=""
   PRE_PROMOTED_NOTE_ID=0
@@ -477,7 +477,7 @@ HELP_EOF
         # stub the agent posted with the final marker before refining —
         # the #42 pattern). Do NOT post it as a triage comment and do NOT
         # parse its disposition: routing an empty spec to the spec gate
-        # asks the human to approve nothing (boucle.dev #73). Leave the
+        # asks the human to approve nothing (a consumer). Leave the
         # issue at boucle:triage for a re-run to produce a complete spec.
         if ! comment_has_tldr "$DRAFTED_COMMENT"; then
           echo "[boucle] WARN: scraped draft has a disposition but no ## TL;DR — incomplete spec, NOT posting (lesson #92)."
@@ -602,7 +602,7 @@ HELP_EOF
     # draft stub it shipped with the final marker before refining (the
     # #42 pattern). The recovery paths refused to promote it (correctly),
     # so DISPOSITION is empty. Escalate to human: an empty spec routed to
-    # the spec gate asks the human to approve nothing (boucle.dev #73),
+    # the spec gate asks the human to approve nothing (a consumer),
     # and leaving the issue at boucle:triage makes the doctor re-trigger
     # the same broken triage every sweep. The human can re-trigger triage
     # after the agent prompt / provider issue is resolved.

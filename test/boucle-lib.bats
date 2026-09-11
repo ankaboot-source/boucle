@@ -433,7 +433,7 @@ source_with_mock_forge() {
 # GitHub, numeric on GitLab" (bin/forge/common.sh:34); the reporter-id
 # resolver follows the same convention so its sole consumers
 # (forge_issue_assign / forge_mr_assign) receive a value the forge
-# accepts. Regression: PR !38 on boucle.dev was never assigned to the
+# accepts. Regression: a PR on a consumer was never assigned to the
 # human after a reviewer PASS because the numeric author.id was sent to
 # assignees[] and silently dropped.
 
@@ -453,7 +453,7 @@ source_with_mock_forge() {
 
 @test "resolve_reporter_id still returns numeric id on GitLab (assignee_ids[])" {
   run bash -c '
-    BOUCLE_FORGE=gitlab BOUCLE_FORGE_HOST=framagit.org CI_PROJECT_ID=1
+    BOUCLE_FORGE=gitlab BOUCLE_FORGE_HOST=gitlab.example.com CI_PROJECT_ID=1
     BOUCLE_BOT_USERNAME=up-bot BOUCLE_FORGE=gitlab
     forge_issue_get() {
       printf "%s" "{\"author\":{\"id\":999,\"username\":\"alice\"}}"
@@ -1363,7 +1363,7 @@ HELPER
 }
 
 @test "boucle_do_deploy exposes job-local BRANCH to the deploy command" {
-  # Regression (consumer framagit, 2026-08): the deploy consolidation into
+  # Regression (observed on a consumer, 2026-08): the deploy consolidation into
   # boucle_do_deploy dropped the job-local BRANCH assignment that the
   # documented $$BRANCH contract relies on (.gitlab-ci.yml deploy templates:
   # wrangler/netlify/rsync use $$BRANCH). Under the CI job's set -u, any
@@ -1410,7 +1410,7 @@ HELPER
 }
 
 @test ".gitlab-ci.yml: forge backend sourced BEFORE lib/boucle.sh (before_script bootstrap)" {
-  # Regression (consumer framagit, 2026-08): the before_script sourced
+  # Regression (observed on a consumer, 2026-08): the before_script sourced
   # lib/boucle.sh without bin/forge/*, so set_boucle_label failed with
   # "forge_issue_labels_get: command not found" on every inline job
   # (merger/doctor). Each `source "…lib/boucle.sh"` must be preceded by
@@ -1435,7 +1435,7 @@ HELPER
 }
 
 @test "forge_trigger_role falls back to CI_DEFAULT_BRANCH (never bare 'main')" {
-  # Regression (consumer framagit, 2026-08): forge_trigger_role POSTed the
+  # Regression (observed on a consumer, 2026-08): forge_trigger_role POSTed the
   # role-trigger pipeline with ref=${BOUCLE_DEFAULT_BRANCH:-main}; the var is
   # never set by GitLab CI, so consumers with master as default branch
   # triggered against a non-existent "main" ref — the curl error was swallowed
@@ -1449,9 +1449,9 @@ HELPER
 # ── S4: merge-conflict escalation ─────────────────────────────────────
 
 @test "boucle_parse_merge_conflicts classifies modify/delete and content" {
-  run bash -c 'source lib/boucle.sh; out=$(printf "CONFLICT (modify/delete): src/components/MobilisationBlock.astro deleted in a19ed86 and modified in HEAD.\nCONFLICT (content): Merge conflict in src/pages/index.astro\nOK line"); boucle_parse_merge_conflicts "$out"'
+  run bash -c 'source lib/boucle.sh; out=$(printf "CONFLICT (modify/delete): src/components/HeroBlock.astro deleted in a19ed86 and modified in HEAD.\nCONFLICT (content): Merge conflict in src/pages/index.astro\nOK line"); boucle_parse_merge_conflicts "$out"'
   assert_success
-  assert_output --partial "- src/components/MobilisationBlock.astro (modify/delete)"
+  assert_output --partial "- src/components/HeroBlock.astro (modify/delete)"
   assert_output --partial "- src/pages/index.astro (content (modify/modify))"
 }
 
@@ -1958,8 +1958,7 @@ extract_notify() {
   # comment. Hardcoding "MR !<iid>" produces GitLab wording on GitHub,
   # where the forge-native reference is "PR #<iid>". The instruction MUST
   # use forge_mr_ref / forge_mr_term so the wording matches the forge
-  # (regression: boucle.dev #69 comment talked about "MR !70" on a GitHub
-  # PR).
+  # (Regression: a consumer comment used GitLab wording on a GitHub PR).
   # Grep the approval_suffix block (10 lines around the assignment).
   run bash -c "grep -n -B10 'approval_suffix=' lib/boucle-ci/reviewer.sh"
   assert_success
@@ -1968,7 +1967,7 @@ extract_notify() {
   assert_output --partial 'forge_mr_ref'
   assert_output --partial 'forge_mr_term'
   # The approval instruction must be forge-aware too (GitHub has no Approve
-  # button — regression: boucle.dev #69 told the user to "click Approve").
+  # button — Regression: an incident on a consumer told the user to "click Approve").
   assert_output --partial 'forge_mr_approve_instruction'
   refute_output --partial 'click the **Approve** button'
 }
@@ -2003,7 +2002,7 @@ extract_notify() {
 }
 
 # ── Mono-user MR-approval gate (emoji-reaction) ───────────────────────
-# Regression suite for boucle.dev #40 (2026-08-18): in mono-user mode the
+# Regression suite for an incident on a consumer (2026-08-18): in mono-user mode the
 # doctor auto-merged on the reviewer'"'"'s PASS verdict comment alone — no
 # human ever approved. The human MR gate documented in LOOP.md ("MR approval
 # stays human-gated") was silently removed. These tests pin the fix: the
