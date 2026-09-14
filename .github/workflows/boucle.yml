@@ -179,6 +179,12 @@ env:
   # boucle: label is left alone until a human adds boucle:triage or assigns
   # the bot. "auto" = legacy, every new issue is taken into the loop.
   BOUCLE_ENTRY_MODE: ${{ vars.BOUCLE_ENTRY_MODE || 'label' }}
+  # Opportunistic doctor sweep at the end of dispatch — recovery rides
+  # the webhooks that arrive instead of a schedule that delivers 6.5% of
+  # its firings here. "auto" (default) = on for GitHub. See
+  # lib/boucle-ci/doctor.sh for the measurement.
+  BOUCLE_DOCTOR_ON_DISPATCH: ${{ vars.BOUCLE_DOCTOR_ON_DISPATCH || 'auto' }}
+  BOUCLE_DOCTOR_ON_DISPATCH_INTERVAL: ${{ vars.BOUCLE_DOCTOR_ON_DISPATCH_INTERVAL || '600' }}
   BOUCLE_VISION_ROUTING: ${{ vars.BOUCLE_VISION_ROUTING || 'enabled' }}
   BOUCLE_VISION_MODEL: ${{ vars.BOUCLE_VISION_MODEL || 'minimax-m3' }}
   BOUCLE_VISION_ROLES: ${{ vars.BOUCLE_VISION_ROLES || 'triage,worker,reviewer' }}
@@ -448,6 +454,21 @@ jobs:
             echo "issue-iid=$(cat .boucle-issue)" >> "$GITHUB_OUTPUT"
             echo "role=triage" >> "$GITHUB_OUTPUT"
           fi
+      # The doctor's `schedule` delivers 6.5% of what it asks for here
+      # (measured, 20 days — see lib/boucle-ci/doctor.sh). A webhook
+      # arrives, so the sweep rides one. Rate-limited inside the stage; the
+      # schedule stays as the backstop.
+      #
+      # if: always() is the point — a dispatch no-op exits non-zero BY
+      # DESIGN (the anti-accumulation trap), and that is exactly a run
+      # whose sweep is worth having. `|| true` because nothing in a
+      # best-effort sweep is worth failing the loop's most critical job.
+      - name: Doctor sweep (opportunistic)
+        if: always()
+        run: |
+          export BOUCLE_PROJECT_ID="${{ github.repository }}"
+          [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
+          $BOUCLE_HOME/bin/boucle-ci doctor-opportunistic || true
 
   # ── triage: analyze issue, post structured comment ───────────────────────────
   triage:
