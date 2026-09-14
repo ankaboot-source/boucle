@@ -86,15 +86,25 @@ setup() {
 # boucle_ci_doctor is stubbed: this asserts the rate limit and the stamp
 # ordering, not the sweep itself (doctor.bats covers that).
 
+# stage_with <last-stamp> [interval] [persist]
+#
+# The forge-variable stubs behave like a real store by default: the
+# read-back after the write sees what was written. Pass persist=no to
+# simulate a token that cannot write forge variables.
 stage_with() {
-  local last="$1" interval="${2:-600}"
+  local last="$1" interval="${2:-600}" persist="${3:-yes}"
   BOUCLE_FORGE=github \
     BOUCLE_DOCTOR_ON_DISPATCH_INTERVAL="$interval" \
     bash -c "
       BOUCLE_HOME='$PWD'
       source lib/boucle-ci/doctor.sh
-      forge_ci_var_get() { printf '%s' '$last'; }
-      forge_ci_var_set() { echo \"STAMP:\$1=\$2\"; }
+      STORE='$last'
+      forge_ci_var_get() { printf '%s' \"\$STORE\"; }
+      forge_ci_var_set() {
+        echo \"STAMP:\$1=\$2\"
+        [ '$persist' = yes ] && STORE=\"\$2\"
+        return 0
+      }
       boucle_ci_doctor() { echo 'SWEPT'; }
       boucle_ci_doctor_opportunistic
     "
@@ -117,6 +127,10 @@ stage_with() {
   run stage_with ""
   assert_success
   assert_output --partial "SWEPT"
+  # And says so, rather than reporting the epoch as an elapsed time — the
+  # first real run logged "last sweep 1789377418s ago".
+  assert_output --partial "no sweep recorded yet"
+  refute_output --partial "WARN"
 }
 
 @test "stage: stamps BEFORE sweeping, so a storm cannot multi-sweep" {
@@ -222,4 +236,34 @@ print("ok")
 PY
   assert_success
   assert_output "ok"
+}
+
+# ── The rate limit must fail loudly, not silently ─────────────────────
+
+@test "stage: warns when the stamp does not persist" {
+  # forge_ci_var_set is fire-and-forget by contract (every forge_* call is
+  # best-effort), so a token that cannot write forge variables leaves the
+  # stamp unwritten and says nothing. The rate limit would be dead and
+  # every dispatch would sweep — invisible, because the sweep itself looks
+  # healthy.
+  run stage_with "$(($(date +%s) - 1200))" 600 no
+  assert_success
+  assert_output --partial "SWEPT"
+  assert_output --partial "WARN"
+  assert_output --partial "rate limit is NOT holding"
+}
+
+@test "stage: stays quiet when the stamp does persist" {
+  run stage_with "$(($(date +%s) - 1200))" 600 yes
+  assert_success
+  assert_output --partial "SWEPT"
+  refute_output --partial "WARN"
+}
+
+@test "stage: the read-back is on the sweep path only" {
+  # It must not cost an extra call on the common path, which is the skip.
+  run stage_with "$(($(date +%s) - 60))"
+  assert_success
+  refute_output --partial "STAMP:"
+  refute_output --partial "WARN"
 }

@@ -1284,6 +1284,23 @@ boucle_ci_doctor_opportunistic() {
   # A sweep lost to a crash costs one interval; the schedule is still there.
   forge_ci_var_set BOUCLE_DOCTOR_LAST_SWEEP "$now" false false || true
 
-  echo "doctor-opportunistic: last sweep ${age}s ago (>= ${interval}s) — sweeping"
+  # Read the stamp back. forge_ci_var_set is fire-and-forget by contract —
+  # every forge_* call is best-effort so a transient API error never kills
+  # the loop — which means a token that cannot write forge variables leaves
+  # the stamp unwritten and says nothing. The rate limit would then be
+  # silently dead and EVERY dispatch would sweep: the opposite of the point,
+  # and invisible in the logs because the sweep itself looks healthy. One
+  # extra call, on the sweep path only, turns that into a warning.
+  local stamped
+  stamped=$(forge_ci_var_get BOUCLE_DOCTOR_LAST_SWEEP 2> /dev/null | tr -dc '0-9' || true)
+  if [ "$stamped" != "$now" ]; then
+    echo "doctor-opportunistic: WARN — BOUCLE_DOCTOR_LAST_SWEEP did not persist (read back '${stamped:-empty}', wrote '$now'). The rate limit is NOT holding: every dispatch will sweep until the bot token can write forge variables." >&2
+  fi
+
+  if [ "$last" -eq 0 ]; then
+    echo "doctor-opportunistic: no sweep recorded yet — sweeping"
+  else
+    echo "doctor-opportunistic: last sweep ${age}s ago (>= ${interval}s) — sweeping"
+  fi
   boucle_ci_doctor
 }
