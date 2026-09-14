@@ -240,20 +240,40 @@ PY
 
 # ── The rate limit must fail loudly, not silently ─────────────────────
 
-@test "stage: warns when the stamp does not persist" {
-  # forge_ci_var_set is fire-and-forget by contract (every forge_* call is
-  # best-effort), so a token that cannot write forge variables leaves the
-  # stamp unwritten and says nothing. The rate limit would be dead and
-  # every dispatch would sweep — invisible, because the sweep itself looks
-  # healthy.
-  run stage_with "$(($(date +%s) - 1200))" 600 no
+@test "stage: a stamp that does not persist SKIPS the sweep, loudly" {
+  # The lease is the rate limit. Without it, sweeping on every dispatch is
+  # unbounded runner time — worse than both alternatives. Refusing falls
+  # back to the schedule, i.e. the behaviour that existed before this
+  # feature. Verified against the real failure: the first production run
+  # read back nothing.
+  # Empty store, and the write does not land — exactly what the first
+  # production run saw: no variable before, nothing readable after.
+  run stage_with "" 600 no
   assert_success
-  assert_output --partial "SWEPT"
+  refute_output --partial "SWEPT"
   assert_output --partial "WARN"
-  assert_output --partial "rate limit is NOT holding"
+  assert_output --partial "did not persist"
+  assert_output --partial "SKIPPED"
 }
 
-@test "stage: stays quiet when the stamp does persist" {
+@test "stage: stands down when another dispatch holds the lease" {
+  # A concurrent dispatch stamped after us: it is sweeping, and two sweeps
+  # of the same board is waste.
+  run bash -c "
+    BOUCLE_HOME='$PWD'
+    source lib/boucle-ci/doctor.sh
+    forge_ci_var_get() { printf '%s' '9999999999'; }
+    forge_ci_var_set() { return 0; }
+    boucle_ci_doctor() { echo 'SWEPT'; }
+    BOUCLE_FORGE=github BOUCLE_DOCTOR_ON_DISPATCH_INTERVAL=600 \
+      boucle_ci_doctor_opportunistic
+  "
+  assert_success
+  refute_output --partial "SWEPT"
+  assert_output --partial "another dispatch holds the lease"
+}
+
+@test "stage: sweeps when it holds the lease" {
   run stage_with "$(($(date +%s) - 1200))" 600 yes
   assert_success
   assert_output --partial "SWEPT"

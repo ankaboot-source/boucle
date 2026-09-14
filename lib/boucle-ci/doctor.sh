@@ -1284,17 +1284,35 @@ boucle_ci_doctor_opportunistic() {
   # A sweep lost to a crash costs one interval; the schedule is still there.
   forge_ci_var_set BOUCLE_DOCTOR_LAST_SWEEP "$now" false false || true
 
-  # Read the stamp back. forge_ci_var_set is fire-and-forget by contract —
-  # every forge_* call is best-effort so a transient API error never kills
-  # the loop — which means a token that cannot write forge variables leaves
-  # the stamp unwritten and says nothing. The rate limit would then be
-  # silently dead and EVERY dispatch would sweep: the opposite of the point,
-  # and invisible in the logs because the sweep itself looks healthy. One
-  # extra call, on the sweep path only, turns that into a warning.
+  # The stamp is a LEASE, and we sweep only if we hold it. Read it back and
+  # compare to what we just wrote:
+  #
+  #   equal     — we hold it. Sweep.
+  #   different — a concurrent dispatch stamped after us and is sweeping.
+  #               Stand down; two sweeps of the same board is waste.
+  #   empty     — the write did not land at all. forge_ci_var_set is
+  #               fire-and-forget by contract (every forge_* call is
+  #               best-effort so a transient API error never kills the
+  #               loop), so a bot token that cannot write forge variables
+  #               fails here in total silence.
+  #
+  # That last case is not hypothetical: it is what the first production run
+  # of this feature did. Without a lease, "the write silently failed" means
+  # the rate limit is dead and EVERY dispatch sweeps — unbounded runner time
+  # on a busy repo, and invisible in the logs because each sweep looks
+  # healthy. Refusing to sweep is the safe degradation: it falls back to the
+  # schedule, which is exactly the behaviour that existed before this
+  # feature, instead of falling back to something more expensive than
+  # either. Loudly, so the cause is fixable rather than mysterious.
   local stamped
   stamped=$(forge_ci_var_get BOUCLE_DOCTOR_LAST_SWEEP 2> /dev/null | tr -dc '0-9' || true)
+  if [ -z "$stamped" ]; then
+    echo "doctor-opportunistic: WARN — BOUCLE_DOCTOR_LAST_SWEEP did not persist (wrote '$now', read back nothing). Without it there is no rate limit, so the sweep is SKIPPED rather than run on every dispatch; recovery falls back to the schedule. Fix: let the bot token write forge variables (the same permission bin/update needs for BOUCLE_VERSION)." >&2
+    return 0
+  fi
   if [ "$stamped" != "$now" ]; then
-    echo "doctor-opportunistic: WARN — BOUCLE_DOCTOR_LAST_SWEEP did not persist (read back '${stamped:-empty}', wrote '$now'). The rate limit is NOT holding: every dispatch will sweep until the bot token can write forge variables." >&2
+    echo "doctor-opportunistic: another dispatch holds the lease (read back '$stamped', wrote '$now') — standing down"
+    return 0
   fi
 
   if [ "$last" -eq 0 ]; then
