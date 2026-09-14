@@ -118,7 +118,27 @@ variables:
   # otherwise the doctor fires while a job is legitimately still running,
   # producing parasitic duplicate triggers. Lower = faster recovery but
   # more false-positive re-triggers.
+  #
+  # This threshold sizes when an issue COUNTS as stuck, never when anything
+  # looks. Lowering it buys nothing if no sweep runs — on GitHub the
+  # schedule delivers 6.5% of its firings (measured; see
+  # lib/boucle-ci/doctor.sh), so recovery latency is set by the sweep
+  # cadence, not by this number. BOUCLE_DOCTOR_ON_DISPATCH is the lever
+  # there.
   BOUCLE_STALENESS_THRESHOLD: "2400"
+  # Opportunistic sweep: run the doctor at the end of dispatch, so recovery
+  # rides the webhooks that actually arrive instead of a schedule that
+  # mostly does not.
+  #   "auto" (default) — on for GitHub, off for GitLab. The 6.5% delivery
+  #     measurement behind this is GitHub's; there is no GitLab equivalent
+  #     in hand, so auto does not presume one.
+  #   "true" / "false" — force, either way.
+  # BOUCLE_DOCTOR_ON_DISPATCH_INTERVAL (seconds, default 600) is the minimum
+  # gap between two opportunistic sweeps, stamped in the
+  # BOUCLE_DOCTOR_LAST_SWEEP forge variable so it survives an ephemeral
+  # runner.
+  BOUCLE_DOCTOR_ON_DISPATCH: "auto"
+  BOUCLE_DOCTOR_ON_DISPATCH_INTERVAL: "600"
   # Disable Chromium visual preview in triage (saves ~120 MiB per triage job).
   # true = skip preview rendering entirely. false = default (mandatory for UI/UX issues via RENDER_REQUEST).
   BOUCLE_PREVIEW_DISABLE: "false"
@@ -629,7 +649,19 @@ dispatch:
   # installing the rest is negligible on the pre-baked agents image and the
   # shared runner caches $HOME/.local/bin across runs.
   script:
-    - boucle-ci dispatch
+    # The sweep must run whatever dispatch decided, and dispatch's exit code
+    # must survive it untouched: `triage` declares `needs: [dispatch]`
+    # WITHOUT `optional`, so a hard failure here is the signal that skips
+    # triage (anti-accumulation). Capture, sweep, re-exit.
+    #
+    # No-op on GitLab unless BOUCLE_DOCTOR_ON_DISPATCH says otherwise — the
+    # delivery-rate measurement behind this is GitHub's, not GitLab's.
+    - |
+      set +e
+      boucle-ci dispatch
+      DISPATCH_RC=$?
+      boucle-ci doctor-opportunistic || true
+      exit "$DISPATCH_RC"
   artifacts:
     paths:
       - .boucle-issue

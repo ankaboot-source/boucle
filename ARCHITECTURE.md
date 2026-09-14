@@ -333,6 +333,30 @@ sweep are the ones to lean on: the webhook routes (a comment, a label, a bot
 assignment all re-enter dispatch immediately) and `workflow_dispatch`, which
 runs a role on demand.
 
+### The sweep rides dispatch
+
+That last point is now wired rather than advice. `boucle_ci_doctor_opportunistic`
+(the `doctor-opportunistic` stage) runs as the last step of the `dispatch`
+job and calls the same `boucle_ci_doctor` the schedule calls, behind a rate
+limit:
+
+| | |
+|---|---|
+| when | end of every `dispatch` job, `if: always()` — a dispatch no-op exits non-zero by design, and that is exactly a run worth sweeping after |
+| gate | `BOUCLE_DOCTOR_ON_DISPATCH` (`auto` = GitHub only) |
+| rate limit | `BOUCLE_DOCTOR_ON_DISPATCH_INTERVAL`, default 600 s |
+| stamp | the `BOUCLE_DOCTOR_LAST_SWEEP` forge variable, written **before** the sweep so a webhook storm cannot multi-sweep |
+
+It reads the right way round: a board needs sweeping when something is
+happening to it, and a repository with no events has nothing to recover. It
+adds no run to the Actions tab and no job to the pipeline — one more step in
+a job already booted, with the forge context already loaded.
+
+On GitLab the `dispatch` script captures the stage's exit code, sweeps, then
+re-exits with it: `triage` declares `needs: [dispatch]` without `optional`,
+so dispatch's hard failure is the signal that skips triage, and swallowing it
+would run triage on every no-op webhook.
+
 ## 8. Self-update
 
 `bin/update` keeps a consumer's engine in sync with upstream boucle. It:

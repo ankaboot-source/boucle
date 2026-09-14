@@ -1200,3 +1200,125 @@ boucle_ci_doctor() {
 
   echo "Doctor complete. Recovered $RECOVERED orphaned issue(s)."
 }
+
+# ── Opportunistic sweep: the doctor on events, not on a schedule ───────
+#
+# Measured on the engine's own GitHub workflow over 20 days (187 scheduled
+# runs): `*/10 * * * *` asks for 144 firings a day, GitHub delivers 9.3 —
+# a 6.5% delivery rate, median gap 54 min, p90 4.5 h, worst 5.7 days. The
+# delivered minutes are spread flat across all six /10 buckets, which rules
+# out the usual "move the cron off the top of the hour" advice: the firings
+# are not arriving late, they are not arriving.
+#
+# A webhook does arrive — the loop already stakes everything else on that.
+# So run the sweep at the end of dispatch, rate-limited. It reads the right
+# way round, too: a board needs sweeping when something is happening to it,
+# and a repository with no events has nothing to recover. It costs no new
+# run in the Actions tab and no new job in the pipeline — one more step in
+# a job that is already booted, with the forge context already loaded.
+#
+# The schedule stays, as the backstop it actually is.
+#
+# Why the stamp lives in a forge CI variable and not $BOUCLE_STATE_CACHE:
+# that cache is under $HOME on a GitHub-hosted runner, which is ephemeral,
+# and actions/cache is wired for the worker job only. The doctor's own
+# fingerprint and dedup markers already degrade to "never found" there —
+# documented above as deliberate. A rate limit that never persists is not a
+# rate limit, so this one goes where bin/update keeps BOUCLE_VERSION.
+
+# boucle_doctor_on_dispatch_enabled
+#
+#   auto (default) — on for GitHub, off for GitLab. GitHub's delivery rate
+#     is the measurement above. For GitLab there is no equivalent
+#     measurement in hand, and the 10-minute schedule is the documented
+#     design there, so `auto` does NOT turn it on: an unmeasured default is
+#     a guess wearing a default's clothes. A GitLab consumer who measures
+#     the same shortfall flips the variable.
+#   true / false   — force, either way. Anything else reads as auto.
+boucle_doctor_on_dispatch_enabled() {
+  case "$(printf '%s' "${BOUCLE_DOCTOR_ON_DISPATCH:-auto}" | tr '[:upper:]' '[:lower:]')" in
+    true) return 0 ;;
+    false) return 1 ;;
+    *) [ "${BOUCLE_FORGE:-gitlab}" = "github" ] ;;
+  esac
+}
+
+# boucle_doctor_sweep_interval — minimum seconds between opportunistic
+# sweeps. Defaults to 600: the cadence the cron asks for and does not get.
+# A non-numeric override falls back rather than disabling the rate limit.
+boucle_doctor_sweep_interval() {
+  local v="${BOUCLE_DOCTOR_ON_DISPATCH_INTERVAL:-600}"
+  case "$v" in
+    '' | *[!0-9]*) v=600 ;;
+  esac
+  printf '%s' "$v"
+}
+
+# boucle_ci_doctor_opportunistic — the dispatch-time entry point.
+#
+# Fail-open throughout: this runs inside the loop's most critical job, and
+# nothing here is worth breaking dispatch for.
+boucle_ci_doctor_opportunistic() {
+  set +o pipefail
+  if ! boucle_doctor_on_dispatch_enabled; then
+    echo "doctor-opportunistic: off (BOUCLE_DOCTOR_ON_DISPATCH=${BOUCLE_DOCTOR_ON_DISPATCH:-auto}, forge=${BOUCLE_FORGE:-gitlab})"
+    return 0
+  fi
+
+  local interval now last age
+  interval=$(boucle_doctor_sweep_interval)
+  now=$(date +%s)
+  last=$(forge_ci_var_get BOUCLE_DOCTOR_LAST_SWEEP 2> /dev/null | tr -dc '0-9' || true)
+  [ -n "$last" ] || last=0
+  age=$((now - last))
+  # A stamp from the future — clock skew, a hand-edited variable — must not
+  # park the sweep until the future catches up.
+  [ "$age" -lt 0 ] && age="$interval"
+  if [ "$age" -lt "$interval" ]; then
+    echo "doctor-opportunistic: last sweep ${age}s ago (< ${interval}s) — skipping"
+    return 0
+  fi
+
+  # Stamp BEFORE sweeping, not after. A webhook storm runs dispatch jobs
+  # concurrently, and stamping after would let every one of them sweep.
+  # A sweep lost to a crash costs one interval; the schedule is still there.
+  forge_ci_var_set BOUCLE_DOCTOR_LAST_SWEEP "$now" false false || true
+
+  # The stamp is a LEASE, and we sweep only if we hold it. Read it back and
+  # compare to what we just wrote:
+  #
+  #   equal     — we hold it. Sweep.
+  #   different — a concurrent dispatch stamped after us and is sweeping.
+  #               Stand down; two sweeps of the same board is waste.
+  #   empty     — the write did not land at all. forge_ci_var_set is
+  #               fire-and-forget by contract (every forge_* call is
+  #               best-effort so a transient API error never kills the
+  #               loop), so a bot token that cannot write forge variables
+  #               fails here in total silence.
+  #
+  # That last case is not hypothetical: it is what the first production run
+  # of this feature did. Without a lease, "the write silently failed" means
+  # the rate limit is dead and EVERY dispatch sweeps — unbounded runner time
+  # on a busy repo, and invisible in the logs because each sweep looks
+  # healthy. Refusing to sweep is the safe degradation: it falls back to the
+  # schedule, which is exactly the behaviour that existed before this
+  # feature, instead of falling back to something more expensive than
+  # either. Loudly, so the cause is fixable rather than mysterious.
+  local stamped
+  stamped=$(forge_ci_var_get BOUCLE_DOCTOR_LAST_SWEEP 2> /dev/null | tr -dc '0-9' || true)
+  if [ -z "$stamped" ]; then
+    echo "doctor-opportunistic: WARN — BOUCLE_DOCTOR_LAST_SWEEP did not persist (wrote '$now', read back nothing). Without it there is no rate limit, so the sweep is SKIPPED rather than run on every dispatch; recovery falls back to the schedule. Fix: let the bot token write forge variables (the same permission bin/update needs for BOUCLE_VERSION)." >&2
+    return 0
+  fi
+  if [ "$stamped" != "$now" ]; then
+    echo "doctor-opportunistic: another dispatch holds the lease (read back '$stamped', wrote '$now') — standing down"
+    return 0
+  fi
+
+  if [ "$last" -eq 0 ]; then
+    echo "doctor-opportunistic: no sweep recorded yet — sweeping"
+  else
+    echo "doctor-opportunistic: last sweep ${age}s ago (>= ${interval}s) — sweeping"
+  fi
+  boucle_ci_doctor
+}
