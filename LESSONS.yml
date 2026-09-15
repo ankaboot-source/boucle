@@ -1150,3 +1150,27 @@
   ✅:
   - 'DO derive the subscription from the router, and test it in BOTH directions: no subscribed type without an arm, no arm without a subscription. Parse the arms out of the shell source rather than hardcoding them, so the test fails on the next drift instead of the next audit.'
   - 'DO watch your own pipeline while you work on it. This one reproduced in front of me: editing a PR description spawned a second full run on an unchanged SHA.'
+121:
+  title: A paginated list is a STREAM of pages, not a list
+  ❌:
+  - 'DO NOT pipe `glab api --paginate` or `gh api --paginate` straight into jq. Both CLIs emit one JSON document PER PAGE — a two-page list arrives as `[...]\n[...]`, not as one merged array — so jq runs the caller''s filter once per page and prints one result per page. `first`, `last`, `length` and `any` then answer PER PAGE, which is not an error and produces no warning.'
+  - 'DO NOT assume a list endpoint stays single-page. `forge_issue_notes` had used `--paginate` since it was written and was correct for two years, because no boucle issue had crossed 100 notes. Observed on a consumer (2026-09): one did. The doctor captured `LAST_TRIAGE_NOTE_ID` as the two-line string "2452949\n0" (a match on page 1, the `// 0` default on page 2), the next filter did `$tid | tonumber`, and jq exited 5 with "Unexpected extra JSON values" — taking the whole doctor sweep down.'
+  - 'DO NOT be reassured by the crash. The crash was the lucky half: `tonumber` is the only consumer that refuses a two-line scalar. Every `first`/`last`/`length` over the same list had been silently wrong for as long as any list had two pages, and nothing went red.'
+  - 'DO NOT fix it by piping the CLI into jq inside the API wrapper. The pipeline''s exit status becomes jq''s, so an API failure (auth, 404, rate limit) turns into a successful empty result and the caller''s fallback never fires.'
+  ✅:
+  - 'DO collapse the stream in ONE shared helper (`forge_merge_pages` in bin/forge/common.sh) that every paginated call site pipes through: a sequence of arrays concatenates, a lone document passes through untouched, empty stays empty so the callers'' `|| echo "[]"` still decides what an error looks like.'
+  - 'DO capture the CLI''s exit status and re-raise it before merging, so a failed API call stays a failure.'
+  - 'DO test the diagnosis, not only the fix: keep a case that feeds UNMERGED pages through the original filter and asserts the two-line result. If that stops reproducing, the explanation is wrong and the fix is cargo cult.'
+  - 'DO assert coverage mechanically — count paginated invocations against merge pipes in the backend and require equality — so the next paginated endpoint cannot be added without the merge.'
+122:
+  title: A pre-baked image that drifts is slower than no image at all
+  ❌:
+  - 'DO NOT let a pin in a Dockerfile drift from the pin in the before_script that installs the same tool. The guards compare the installed version to the pin and REINSTALL on a mismatch, so drift never goes red — it just re-downloads the binary on every job while the image ships it. Observed: the agents image carried glab 1.50.0 against the pipeline''s 1.111.0 and jcode v0.73.0 against v0.75.3, so both of the two heaviest binaries were downloaded on every single run and the image''s entire reason for existing was gone.'
+  - 'DO NOT assume a slim base image contains the usual system tools. `debian:bookworm-slim` is 88 packages: no `make`, no compiler (`gcc-12-base` is runtime files only), no `procps` (so no `pgrep`), no `/usr/bin/time`, no `unzip`. The default `BOUCLE_BUILD_CMD` is `npm ci && npm run build`, so any dependency with a node-gyp step died on `make: not found`, and bin/jc''s peak-RSS accounting — which needs `pgrep` OR `/usr/bin/time` — reported "unavailable" on every run because neither existed.'
+  - 'DO NOT leave a job without a `tags:` field and expect it to see the image. A job with no tags is eligible for ANY runner, including a tagged SHELL executor, and a shell executor ignores `image:` entirely. Lesson #74 fixed this on `worker`; `triage`, `reviewer`, `deploy` and `e2e` were left as they were. `triage` is the worst case: it drives both bin/render-preview and bin/check-mermaid, and check-mermaid''s "parser unavailable" exit (3) is treated as a PASS, so the diagram gate silently stops gating.'
+  - 'DO NOT install a tool to `$HOME/.local/bin` in a Dockerfile whose `ENV PATH` does not contain it. `codebase-memory-mcp` landed in /root/.local/bin and only ever resolved because the before_script prepends `$HOME/.local/bin` AND the job happens to run as root.'
+  ✅:
+  - 'DO assert the toolchain in the image BUILD — one loop over `command -v` for every tool a job expects — so a missing package breaks the build, not a job three weeks later in a log that never names the image.'
+  - 'DO probe the image-only tools in the before_script by name, and say what each one breaks. A shell executor otherwise prints a clean Environment block and dies hundreds of lines later on a binary nobody looked for.'
+  - 'DO test the pins for equality across every file that carries them (Dockerfile ARG, both CI files, the script defaults). A bump applied in one place only is the failure mode, and it is invisible by construction.'
+  - 'DO read the base image''s real package manifest rather than reasoning about it. debuerreotype publishes `bookworm/slim/rootfs.manifest`; it answers "is make in there?" in one fetch.'

@@ -57,6 +57,43 @@ forge_init() {
   source "$backend"
 }
 
+# ── Contract: paginated list responses are ONE JSON value ────────────────
+#
+# Both CLIs stream one JSON document PER PAGE when paginating: `glab api
+# --paginate` and `gh api --paginate` emit `[...]\n[...]` for a two-page
+# list, not a single merged array. jq then applies the caller's filter once
+# per page and prints one result per page — which is not an error, so it
+# goes unnoticed until a value is used as a scalar.
+#
+# Observed on a consumer (2026-09): issue #148 crossed 100 notes, so
+# forge_issue_notes returned two pages. The doctor's
+#
+#   LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[...] | first | .id // 0')
+#
+# matched the triage note on page 1 and fell through to the `// 0` default
+# on page 2, yielding the two-line string "2452949\n0". The next filter did
+# `$tid | tonumber` on it and jq died with "Unexpected extra JSON values
+# (while parsing '2452949\n0')", exit 5, taking the whole doctor job down.
+#
+# The silent half is worse than the crash: `first`, `last`, `length` and
+# `any` were all being evaluated PER PAGE, so every answer computed over a
+# multi-page list was wrong long before anything went red.
+#
+# forge_merge_pages
+#   Filter stdin → stdout, collapsing a paginated stream into one value:
+#   a sequence of arrays becomes a single concatenated array, a lone
+#   document passes through untouched, and empty input stays empty (so the
+#   callers' `|| echo "[]"` fallbacks still decide what an error looks
+#   like). Compact output, matching what the CLIs emit for one page.
+forge_merge_pages() {
+  jq -c -s '
+    if length == 0 then empty
+    elif length == 1 then .[0]
+    elif all(.[]; type == "array") then add
+    else .[] end
+  ' 2> /dev/null
+}
+
 # ── Agent marker (#8) ────────────────────────────────────────────────────
 #
 # Every comment the pipeline posts carries an invisible HTML marker. It lets

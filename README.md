@@ -472,11 +472,17 @@ runner use a JSON array of labels:
 BOUCLE_RUNS_ON = ["self-hosted", "linux", "x64"]
 ```
 
-**Either forge.** Agent jobs run on the pre-baked
-`docker.io/ankabootops/boucle-agents` image (node 22, glab, jcode,
-codebase-memory-mcp), so docker executors skip the toolchain download. Shell
-executors ignore `image:` and fall back to a `before_script` that installs
-only what is missing — both executor types work unchanged.
+**GitLab.** Agent jobs run on the pre-baked
+`docker.io/ankabootops/boucle-agents` image (node 22, glab, jcode, chromium,
+agent-browser, mermaid/jsdom, python3, make/g++, codebase-memory-mcp), so
+docker executors skip the toolchain download. Every job pins `tags: []` to
+stay on a docker runner: a shell executor ignores `image:` entirely, and the
+`before_script` reinstalls glab/jcode/node but *not* the browser and diagram
+toolchain, which exists only in the image.
+
+**GitHub.** Actions runners do not use that image. `ubuntu-latest` already
+ships the system toolchain, and each job installs jcode and the rest itself;
+`BOUCLE_RUNS_ON` only picks the runner labels.
 
 ## 🗺️ Roadmap
 

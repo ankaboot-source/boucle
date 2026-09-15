@@ -19,13 +19,39 @@
 #   BOUCLE_BOT_USERNAME   — bot username (default "up-bot")
 #   BOUCLE_TRIGGER_TOKEN  — empty (GitHub uses workflow_dispatch, not trigger tokens)
 
+# ── Contract helpers ─────────────────────────────────────────────────────
+# This backend calls forge_merge_pages, which lives in common.sh. The normal
+# entry point (forge_init) sources common.sh first, but bin/doctor and the
+# bats suite source a backend directly — and a missing helper here does not
+# raise, it makes every paginated call return NOTHING, which the callers'
+# `|| echo "[]"` then dresses up as an empty list. Load it if it is absent.
+# Sourcing common.sh does not re-enter this file: it only DEFINES forge_init.
+if ! declare -F forge_merge_pages > /dev/null 2>&1; then
+  # shellcheck disable=SC1091
+  . "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
+fi
+
 # ── Helper: gh api with auth ──────────────────────────────────────────────
 
 _gh_api() {
   # --paginate: gh api does NOT auto-paginate (30 items/page default).
   # Boucle lists (notes, issues, labels, pipelines) routinely exceed one
   # page, so paginate by default. Harmless no-op on single-object GETs.
-  GH_TOKEN="$BOUCLE_TOKEN" gh api --paginate "$@" 2> /dev/null
+  #
+  # forge_merge_pages: --paginate emits one JSON document PER PAGE, so a
+  # two-page list arrives as `[...]\n[...]` and every jq filter downstream
+  # runs once per page — `first`/`last`/`length` silently answer per page,
+  # and a scalar capture becomes a two-line string. See the contract note in
+  # common.sh. A single-object GET passes through untouched.
+  #
+  # gh's exit status is captured and re-raised deliberately: piping straight
+  # into jq would hand callers jq's status instead, turning an API failure
+  # into a successful empty result.
+  local out rc=0
+  out=$(GH_TOKEN="$BOUCLE_TOKEN" gh api --paginate "$@" 2> /dev/null) || rc=$?
+  [ "$rc" -eq 0 ] || return "$rc"
+  printf '%s\n' "$out" | forge_merge_pages
+  return 0
 }
 
 _gh_api_silent() {
