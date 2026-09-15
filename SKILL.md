@@ -776,7 +776,7 @@ Every role in the loop has a fallback chain. The system MUST always produce
 
 | Priority | Agent | Condition | Boucle implementation |
 |---|---|---|---|
-| 1 (primary) | Full-capability model (e.g. deepseek-v4-flash) | Default | `AGENT` env var per role |
+| 1 (primary) | Full-capability model (e.g. deepseek-v4.1-flash) | Default | `AGENT` env var per role |
 | 2 (fallback) | Fallback model on exit-4 | Primary down / quota exhausted | `BOUCLE_FALLBACK_PROVIDER` + `BOUCLE_FALLBACK_MODEL_<ROLE>` (lesson #30) |
 | 3 (degraded) | Log-scraping fallback (post from stdout) | Agent exhausted steps before posting | `bin/jc` scrapes `agent-output.log` for drafted verdict/triage (lessons #27, #47) |
 | 4 (human) | Human escalation | All automated paths fail | `boucle:human` + diagnostic comment (lesson #59) |

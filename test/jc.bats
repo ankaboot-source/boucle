@@ -766,7 +766,7 @@ NEEDS-SPLIT" > "$LOG"
     export BOUCLE_LLM_BASE_URL='https://example.com/v1'
     export BOUCLE_LLM_API_KEY='sk-test'
     export JCODE_HOME='$WORKDIR'
-    export MODEL='glm-5.2'
+    export MODEL='glm-5.3-flash'
     export PROVIDER_PROFILE='boucle'
     source '$TMPF'
     ensure_jcode_config
@@ -775,7 +775,7 @@ NEEDS-SPLIT" > "$LOG"
   assert_success
   assert_output --partial 'base_url = "https://example.com/v1"'
   assert_output --partial 'api_key_env = "BOUCLE_LLM_API_KEY"'
-  assert_output --partial 'default_model = "glm-5.2"'
+  assert_output --partial 'default_model = "glm-5.3-flash"'
   assert_output --partial '[providers.boucle]'
   rm -f "$TMPF"
   rm -rf "$WORKDIR"
@@ -823,7 +823,7 @@ NEEDS-SPLIT" > "$LOG"
 # When bin/describe-images has described the attachments as TEXT, bin/jc
 # strips image extensions (png/jpg/...) from BOUCLE_ISSUE_ATTACHMENTS and
 # BOUCLE_MR_ATTACHMENTS so the agent CANNOT Read the raw binaries (a
-# text-only model like deepseek-v4-flash 400s on image input, killing the
+# text-only model 400s on image input, killing the
 # worker run with zero commits — consumer 2026-08, issue #55: 3 iterations
 # shipped nothing because the agent kept Reading the PNGs despite the
 # prompt instruction).
@@ -925,7 +925,7 @@ EOF
 
 # ── Model override (BOUCLE_MODEL_<ROLE>) ──────────────────────────────
 # bin/jc lets CI swap models per-role without editing the agent files
-# (e.g. BOUCLE_MODEL_TRIAGE=glm-5.2-flash for a cheaper triage).
+# (e.g. BOUCLE_MODEL_TRIAGE=glm-5.3-flash-cheap for a cheaper triage).
 # The block reads OVERRIDE_VAR="BOUCLE_MODEL_$(echo "$ROLE" | tr '[:lower:]' '[:upper:]')".
 # We test by sourcing bin/jc partially (the MODEL-extraction + override block)
 # and asserting the right MODEL is set after the override application.
@@ -936,7 +936,7 @@ EOF
   mkdir -p "$AGENT_DIR"
   cat > "$AGENT_DIR/triage.md" <<'EOF'
 ---
-model: ollama-cloud/glm-5.2
+model: ollama-cloud/glm-5.3-flash
 temperature: 0.3
 ---
 triage agent body
@@ -948,12 +948,12 @@ EOF
     CI_PROJECT_DIR='$(dirname "$(dirname "$AGENT_DIR")")'
     AGENT='triage'
     ROLE='triage'
-    export BOUCLE_MODEL_TRIAGE='glm-5.2-flash'
+    export BOUCLE_MODEL_TRIAGE='glm-5.3-flash-cheap'
     source '$TMPF'
     echo \"MODEL=\$MODEL\"
   "
   assert_success
-  assert_output --partial "MODEL=glm-5.2-flash"
+  assert_output --partial "MODEL=glm-5.3-flash-cheap"
   rm -f "$TMPF"
   rm -rf "$(dirname "$(dirname "$AGENT_DIR")")"
 }
@@ -963,7 +963,7 @@ EOF
   mkdir -p "$AGENT_DIR"
   cat > "$AGENT_DIR/triage.md" <<'EOF'
 ---
-model: ollama-cloud/glm-5.2
+model: ollama-cloud/glm-5.3-flash
 temperature: 0.3
 ---
 triage agent body
@@ -980,7 +980,7 @@ EOF
     echo \"MODEL=\$MODEL\"
   "
   assert_success
-  assert_output --partial "MODEL=glm-5.2"
+  assert_output --partial "MODEL=glm-5.3-flash"
   # The provider prefix 'ollama-cloud/' must have been stripped.
   refute_output --partial 'ollama-cloud/'
   rm -f "$TMPF"
@@ -992,7 +992,7 @@ EOF
   mkdir -p "$AGENT_DIR"
   cat > "$AGENT_DIR/worker.md" <<'EOF'
 ---
-model: ollama-cloud/deepseek-v4-flash
+model: ollama-cloud/deepseek-v4.1-flash
 ---
 worker agent body
 EOF
@@ -1003,12 +1003,12 @@ EOF
     CI_PROJECT_DIR='$(dirname "$(dirname "$AGENT_DIR")")'
     AGENT='worker'
     ROLE='worker'
-    export BOUCLE_MODEL_WORKER='deepseek-v4-flash-fast'
+    export BOUCLE_MODEL_WORKER='deepseek-v4.1-flash-fast'
     source '$TMPF'
     echo \"MODEL=\$MODEL\"
   "
   assert_success
-  assert_output --partial "MODEL=deepseek-v4-flash-fast"
+  assert_output --partial "MODEL=deepseek-v4.1-flash-fast"
   rm -f "$TMPF"
   rm -rf "$(dirname "$(dirname "$AGENT_DIR")")"
 }
@@ -1017,14 +1017,14 @@ EOF
 # bin/jc reads reasoning_effort from the agent file frontmatter and exports
 # it as JCODE_OPENAI_REASONING_EFFORT for jcode v0.73.0+ (sent verbatim as
 # reasoning_effort in the OpenAI request body). The value lives in the agent
-# file — worker.md/reviewer.md ship deepseek-v4-flash:0731 with max.
+# file — worker.md/reviewer.md ship deepseek-v4.1-flash with max.
 
 @test "reasoning effort: frontmatter value extracted" {
   AGENT_DIR=$(mktemp -d)/.jcode/agents
   mkdir -p "$AGENT_DIR"
   cat > "$AGENT_DIR/worker.md" <<'EOF'
 ---
-model: ollama-cloud/deepseek-v4-flash:0731
+model: ollama-cloud/deepseek-v4.1-flash
 reasoning_effort: max
 ---
 worker agent body
@@ -1051,7 +1051,7 @@ EOF
   mkdir -p "$AGENT_DIR"
   cat > "$AGENT_DIR/triage.md" <<'EOF'
 ---
-model: ollama-cloud/glm-5.2
+model: ollama-cloud/glm-5.3-flash
 temperature: 0.5
 ---
 triage agent body
@@ -1078,7 +1078,7 @@ EOF
   mkdir -p "$AGENT_DIR"
   cat > "$AGENT_DIR/worker.md" <<'EOF'
 ---
-model: ollama-cloud/deepseek-v4-flash:0731
+model: ollama-cloud/deepseek-v4.1-flash
 reasoning_effort: max
 ---
 worker agent body
@@ -1862,7 +1862,7 @@ make_agent_tree() { # $1 = body marker
   local root
   root=$(mktemp -d)
   mkdir -p "$root/.jcode/agents"
-  printf -- '---\nmodel: ollama-cloud/glm-5.2\ntemperature: 0.3\n---\n%s\n' "$1" \
+  printf -- '---\nmodel: ollama-cloud/glm-5.3-flash\ntemperature: 0.3\n---\n%s\n' "$1" \
     > "$root/.jcode/agents/triage.md"
   echo "$root"
 }

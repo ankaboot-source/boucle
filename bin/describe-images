@@ -7,8 +7,8 @@
 # vision model (minimax-m3) ONLY to describe images, then writes the
 # descriptions to .boucle-state/$ISSUE/.image-descriptions.md. bin/jc reads
 # that file and injects the descriptions into the agent prompt as text — so the
-# worker/reviewer/triage stay on their default models (deepseek-v4-flash,
-# glm-5.2) and get image context as text, not as raw binaries.
+# worker/reviewer/triage stay on their default models (deepseek-v4.1-flash,
+# glm-5.3-flash) and get image context as text, not as raw binaries.
 #
 # Output: writes .boucle-state/$ISSUE/.image-descriptions.md (markdown with
 #         one

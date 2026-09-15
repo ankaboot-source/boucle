@@ -4,10 +4,10 @@
 # Swapping to another coding agent = editing this one file.
 #
 # Role mapping (boucle role → engine-owned agent in .jcode/agents/):
-#   triage   → triage    (glm-5.2, analyzes issue)
-#   worker   → worker    (deepseek-v4-flash, implements)
-#   reviewer → reviewer  (glm-5.2, adversarial review)
-#   e2e      → e2e       (deepseek-v4-flash, visual verification)
+#   triage   → triage    (glm-5.3-flash, analyzes issue)
+#   worker   → worker    (deepseek-v4.1-flash, implements)
+#   reviewer → reviewer  (deepseek-v4.1-flash, adversarial review)
+#   e2e      → e2e       (glm-5.3-flash, visual verification)
 #
 # jcode loads AGENTS.md (charter doc, repo root) + .jcode/prompt-overlay.md
 # (role-specific prompt, written per invocation) + .jcode/skills/. The agent's
@@ -182,15 +182,15 @@ TOML
 
 # ── Parse model + temperature from agent file YAML frontmatter ────────
 # The agent files (.jcode/agents/<role>.md) have YAML frontmatter:
-#   model: ollama-cloud/glm-5.2
+#   model: ollama-cloud/glm-5.3-flash
 #   temperature: 0.3
 # jcode needs the model name without the provider prefix (jcode uses
 # --provider-profile for the provider, --model for the model name).
 #
 # Model override: BOUCLE_MODEL_<ROLE> env var takes precedence over the
 # agent file default. This lets CI swap models per-role without editing
-# the agent files (e.g. BOUCLE_MODEL_TRIAGE=glm-5.2-flash for a cheaper
-# triage, BOUCLE_MODEL_WORKER=deepseek-v4-flash for a faster worker).
+# the agent files (e.g. BOUCLE_MODEL_TRIAGE=glm-5.3-flash for a cheaper
+# triage, BOUCLE_MODEL_WORKER=deepseek-v4.1-flash for a faster worker).
 # The agent file default is the "good default" — override only when needed.
 #
 # Prompt resolution: the ENGINE's copy wins over the consumer's.
@@ -268,7 +268,7 @@ TEMPERATURE=$(awk '/^temperature:/{sub(/^temperature:[[:space:]]*/,""); print; e
 # Frontmatter key:
 #   reasoning_effort: max   # none|minimal|low|medium|high|xhigh|max
 # The value lives in the agent file: worker.md/reviewer.md ship model
-# deepseek-v4-flash:0731 with `reasoning_effort: max`. No model sniffing here.
+# deepseek-v4.1-flash with `reasoning_effort: max`. No model sniffing here.
 REASONING_EFFORT=$(awk '/^reasoning_effort:/{sub(/^reasoning_effort:[[:space:]]*/,""); print; exit}' "$AGENT_FILE")
 
 # ── Provider fallback config ───────────────────────────────────────────
@@ -281,10 +281,10 @@ FALLBACK_PROVIDER="${BOUCLE_FALLBACK_PROVIDER:-}"
 FALLBACK_MODEL=""
 if [ -n "$FALLBACK_PROVIDER" ]; then
   case "$ROLE" in
-    triage) FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_TRIAGE:-glm-5.2}" ;;
-    worker) FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_WORKER:-deepseek-v4-flash}" ;;
-    reviewer) FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_REVIEWER:-glm-5.2}" ;;
-    e2e) FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_E2E:-deepseek-v4-flash}" ;;
+    triage) FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_TRIAGE:-glm-5.3-flash}" ;;
+    worker) FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_WORKER:-deepseek-v4.1-flash}" ;;
+    reviewer) FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_REVIEWER:-glm-5.3-flash}" ;;
+    e2e) FALLBACK_MODEL="${BOUCLE_FALLBACK_MODEL_E2E:-deepseek-v4.1-flash}" ;;
   esac
 fi
 FALLBACK_USED=""
@@ -799,7 +799,7 @@ BOUCLE_MR_ATTACHMENTS="${BOUCLE_MR_ATTACHMENTS:-}"
 # each image as text, writing to .boucle-state/$ISSUE/.image-descriptions.md.
 # This replaces the old detect-vision-need approach which swapped the worker's
 # entire model to a vision model (minimax-m3) — worse at code and prone to
-# WASM OOM crashes. With describe-images, the worker stays on deepseek-v4-flash
+# WASM OOM crashes. With describe-images, the worker stays on deepseek-v4.1-flash
 # (the code model) and gets image context as TEXT in the prompt.
 IMAGE_DESC_FILE="$STATE_DIR/.image-descriptions.md"
 BOUCLE_IMAGE_DESCRIPTIONS=""
@@ -810,10 +810,12 @@ fi
 # ── 3c. Strip image paths from attachment lists when descriptions exist ─
 # When bin/describe-images has already described the attachments as TEXT
 # (vision model ran separately), the agent MUST NOT Read the raw image
-# binaries: a text-only model (deepseek-v4-flash) 400s on image input,
-# killing the worker run (consumer 2026-08, issue #55: worker exited 1
+# binaries: a text-only model 400s on image input, killing the worker run
+# (consumer 2026-08, issue #55 on deepseek-v4-flash:0731: worker exited 1
 # with "this model does not support image input" and shipped zero commits
-# for 3 iterations). Strip image extensions from the paths exposed to the
+# for 3 iterations). The 2026-09 defaults (deepseek-v4.1-flash, glm-5.3-flash)
+# are natively multimodal, so the strip may become unnecessary — it stays
+# until that is measured, and it still protects any text-only override. Strip image extensions from the paths exposed to the
 # agent so it can only rely on the descriptions. Non-image attachments
 # (PDF, zip, ...) keep their paths — they are not readable as images and
 # must still be inspectable. The ship-as-asset case is covered by the

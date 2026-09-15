@@ -861,8 +861,8 @@ if [ "$FORGE" = "gitlab" ]; then
   if [ -n "$EXISTING" ]; then
     log_skip "BOUCLE_FALLBACK_MODEL_TRIAGE already exists"
   else
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_FALLBACK_MODEL_TRIAGE -f value=${BOUCLE_FALLBACK_MODEL_TRIAGE:-glm-5.2} -f masked=false -f protected=false >/dev/null"
-    log_pass "BOUCLE_FALLBACK_MODEL_TRIAGE set (${BOUCLE_FALLBACK_MODEL_TRIAGE:-glm-5.2})"
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_FALLBACK_MODEL_TRIAGE -f value=${BOUCLE_FALLBACK_MODEL_TRIAGE:-glm-5.3-flash} -f masked=false -f protected=false >/dev/null"
+    log_pass "BOUCLE_FALLBACK_MODEL_TRIAGE set (${BOUCLE_FALLBACK_MODEL_TRIAGE:-glm-5.3-flash})"
   fi
 
   # BOUCLE_FALLBACK_MODEL_WORKER
@@ -870,8 +870,8 @@ if [ "$FORGE" = "gitlab" ]; then
   if [ -n "$EXISTING" ]; then
     log_skip "BOUCLE_FALLBACK_MODEL_WORKER already exists"
   else
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_FALLBACK_MODEL_WORKER -f value=${BOUCLE_FALLBACK_MODEL_WORKER:-deepseek-v4-flash} -f masked=false -f protected=false >/dev/null"
-    log_pass "BOUCLE_FALLBACK_MODEL_WORKER set (${BOUCLE_FALLBACK_MODEL_WORKER:-deepseek-v4-flash})"
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_FALLBACK_MODEL_WORKER -f value=${BOUCLE_FALLBACK_MODEL_WORKER:-deepseek-v4.1-flash} -f masked=false -f protected=false >/dev/null"
+    log_pass "BOUCLE_FALLBACK_MODEL_WORKER set (${BOUCLE_FALLBACK_MODEL_WORKER:-deepseek-v4.1-flash})"
   fi
 
   # BOUCLE_FALLBACK_MODEL_REVIEWER
@@ -879,8 +879,8 @@ if [ "$FORGE" = "gitlab" ]; then
   if [ -n "$EXISTING" ]; then
     log_skip "BOUCLE_FALLBACK_MODEL_REVIEWER already exists"
   else
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_FALLBACK_MODEL_REVIEWER -f value=${BOUCLE_FALLBACK_MODEL_REVIEWER:-glm-5.2} -f masked=false -f protected=false >/dev/null"
-    log_pass "BOUCLE_FALLBACK_MODEL_REVIEWER set (${BOUCLE_FALLBACK_MODEL_REVIEWER:-glm-5.2})"
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_FALLBACK_MODEL_REVIEWER -f value=${BOUCLE_FALLBACK_MODEL_REVIEWER:-glm-5.3-flash} -f masked=false -f protected=false >/dev/null"
+    log_pass "BOUCLE_FALLBACK_MODEL_REVIEWER set (${BOUCLE_FALLBACK_MODEL_REVIEWER:-glm-5.3-flash})"
   fi
 
   # BOUCLE_FALLBACK_MODEL_E2E
@@ -888,8 +888,8 @@ if [ "$FORGE" = "gitlab" ]; then
   if [ -n "$EXISTING" ]; then
     log_skip "BOUCLE_FALLBACK_MODEL_E2E already exists"
   else
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_FALLBACK_MODEL_E2E -f value=${BOUCLE_FALLBACK_MODEL_E2E:-deepseek-v4-flash} -f masked=false -f protected=false >/dev/null"
-    log_pass "BOUCLE_FALLBACK_MODEL_E2E set (${BOUCLE_FALLBACK_MODEL_E2E:-deepseek-v4-flash})"
+    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_FALLBACK_MODEL_E2E -f value=${BOUCLE_FALLBACK_MODEL_E2E:-deepseek-v4.1-flash} -f masked=false -f protected=false >/dev/null"
+    log_pass "BOUCLE_FALLBACK_MODEL_E2E set (${BOUCLE_FALLBACK_MODEL_E2E:-deepseek-v4.1-flash})"
   fi
 
   # BOUCLE_FALLBACK_BASE_URL (masked — only when env var is set)
@@ -1102,20 +1102,20 @@ else
   fi
 
   # BOUCLE_FALLBACK_MODEL_TRIAGE
-  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FALLBACK_MODEL_TRIAGE --repo \"$PROJECT_ID\" --body \"${BOUCLE_FALLBACK_MODEL_TRIAGE:-glm-5.2}\" 2>/dev/null"
-  log_pass "BOUCLE_FALLBACK_MODEL_TRIAGE set to ${BOUCLE_FALLBACK_MODEL_TRIAGE:-glm-5.2} (vars)"
+  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FALLBACK_MODEL_TRIAGE --repo \"$PROJECT_ID\" --body \"${BOUCLE_FALLBACK_MODEL_TRIAGE:-glm-5.3-flash}\" 2>/dev/null"
+  log_pass "BOUCLE_FALLBACK_MODEL_TRIAGE set to ${BOUCLE_FALLBACK_MODEL_TRIAGE:-glm-5.3-flash} (vars)"
 
   # BOUCLE_FALLBACK_MODEL_WORKER
-  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FALLBACK_MODEL_WORKER --repo \"$PROJECT_ID\" --body \"${BOUCLE_FALLBACK_MODEL_WORKER:-deepseek-v4-flash}\" 2>/dev/null"
-  log_pass "BOUCLE_FALLBACK_MODEL_WORKER set to ${BOUCLE_FALLBACK_MODEL_WORKER:-deepseek-v4-flash} (vars)"
+  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FALLBACK_MODEL_WORKER --repo \"$PROJECT_ID\" --body \"${BOUCLE_FALLBACK_MODEL_WORKER:-deepseek-v4.1-flash}\" 2>/dev/null"
+  log_pass "BOUCLE_FALLBACK_MODEL_WORKER set to ${BOUCLE_FALLBACK_MODEL_WORKER:-deepseek-v4.1-flash} (vars)"
 
   # BOUCLE_FALLBACK_MODEL_REVIEWER
-  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FALLBACK_MODEL_REVIEWER --repo \"$PROJECT_ID\" --body \"${BOUCLE_FALLBACK_MODEL_REVIEWER:-glm-5.2}\" 2>/dev/null"
-  log_pass "BOUCLE_FALLBACK_MODEL_REVIEWER set to ${BOUCLE_FALLBACK_MODEL_REVIEWER:-glm-5.2} (vars)"
+  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FALLBACK_MODEL_REVIEWER --repo \"$PROJECT_ID\" --body \"${BOUCLE_FALLBACK_MODEL_REVIEWER:-glm-5.3-flash}\" 2>/dev/null"
+  log_pass "BOUCLE_FALLBACK_MODEL_REVIEWER set to ${BOUCLE_FALLBACK_MODEL_REVIEWER:-glm-5.3-flash} (vars)"
 
   # BOUCLE_FALLBACK_MODEL_E2E
-  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FALLBACK_MODEL_E2E --repo \"$PROJECT_ID\" --body \"${BOUCLE_FALLBACK_MODEL_E2E:-deepseek-v4-flash}\" 2>/dev/null"
-  log_pass "BOUCLE_FALLBACK_MODEL_E2E set to ${BOUCLE_FALLBACK_MODEL_E2E:-deepseek-v4-flash} (vars)"
+  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_FALLBACK_MODEL_E2E --repo \"$PROJECT_ID\" --body \"${BOUCLE_FALLBACK_MODEL_E2E:-deepseek-v4.1-flash}\" 2>/dev/null"
+  log_pass "BOUCLE_FALLBACK_MODEL_E2E set to ${BOUCLE_FALLBACK_MODEL_E2E:-deepseek-v4.1-flash} (vars)"
 
   # BOUCLE_ALLOWED_USERS (issue allow-list — safety net)
   ALLOWED_USERS_VALUE="${BOUCLE_ALLOWED_USERS:-}"
