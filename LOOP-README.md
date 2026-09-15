@@ -33,10 +33,10 @@ Four jcode agents in `.boucle/.jcode/agents/`:
 
 | Agent | Model (default) | Purpose |
 |-------|-----------------|---------|
-| `triage` | ollama-cloud/glm-5.2 | Analyzes issues, drafts acceptance criteria |
-| `worker` | ollama-cloud/deepseek-v4-flash:0731 | Implements on a branch |
-| `reviewer` | ollama-cloud/deepseek-v4-flash:0731 | Adversarial review against deployed preview |
-| `e2e` | ollama-cloud/glm-5.2 | Verifies on live production URL |
+| `triage` | ollama-cloud/glm-5.3-flash | Analyzes issues, drafts acceptance criteria |
+| `worker` | ollama-cloud/deepseek-v4.1-flash | Implements on a branch |
+| `reviewer` | ollama-cloud/deepseek-v4.1-flash | Adversarial review against deployed preview |
+| `e2e` | ollama-cloud/glm-5.3-flash | Verifies on live production URL |
 
 Models are BYOK: override per role with `BOUCLE_MODEL_<ROLE>` CI variables,
 or switch provider with `BOUCLE_LLM_BASE_URL` + `BOUCLE_LLM_API_KEY`.

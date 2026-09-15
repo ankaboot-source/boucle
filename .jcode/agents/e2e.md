@@ -1,7 +1,7 @@
 ---
 description: E2E agent — verifies acceptance criteria on the live production URL
 mode: primary
-model: ollama-cloud/glm-5.2
+model: ollama-cloud/glm-5.3-flash
 reasoning_effort: off
 steps: 30
 ---

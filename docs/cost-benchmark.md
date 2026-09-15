@@ -1,11 +1,71 @@
 # Cost & quality benchmark
 
-> All figures from [Artificial Analysis](https://artificialanalysis.ai) Intelligence Index v4.1.1
+> **⚠️ Stale for the current defaults — re-measure before quoting.**
+> On 2026-09-15 the loop moved to `glm-5.3-flash` (triage, e2e) and
+> `deepseek-v4.1-flash` (worker, reviewer). Every measured figure below
+> describes the **previous** defaults (GLM-5.2 + DeepSeek V4 Flash 0731) and
+> has **not** been re-measured. The quality model (intelligence gaps, the
+> three failure modes, the sensitivity tables) is driven by Intelligence
+> Index scores that do not exist yet for the new pair on the same index
+> version as Opus 5 / Sonnet 5 — so it cannot be recomputed by arithmetic.
+> See [New defaults](#new-defaults-2026-09) for published token prices and a
+> scaled cost estimate, and [What a re-measure needs](#what-a-re-measure-needs)
+> for the exact inputs.
+
+> All figures below from [Artificial Analysis](https://artificialanalysis.ai) Intelligence Index v4.1.1
 > (max-effort reasoning), retrieved 2026-08-09. Plan prices from
 > [Ollama pricing](https://ollama.com/pricing) and
 > [Claude pricing](https://claude.com/pricing) / [Anthropic support](https://support.claude.com/en/articles/11049741-what-is-the-max-plan).
 
-## Per-task cost (Artificial Analysis, max-effort reasoning)
+## New defaults (2026-09)
+
+Published list prices, per 1M tokens. These are vendor/aggregator figures, not
+measurements taken by this repo.
+
+| Role | Model | In | Out | Context | Vision |
+| --- | --- | ---: | ---: | ---: | --- |
+| triage, e2e | GLM-5.3-Flash | $0.15 | $0.50 | 1M | native |
+| worker, reviewer | DeepSeek-V4.1-Flash | $0.30 / $0.15¹ | $1.20 / $0.60¹ | 1M | native |
+
+¹ Peak / off-peak. DeepSeek prices by time of day; cached input is an order of
+magnitude cheaper again.
+
+Against the previous defaults (GLM-5.2 at $1.35/$4.29, DeepSeek V4 Flash 0731
+at $0.14/$0.28), the swap cuts the triage/e2e token price ~8.6× and multiplies
+the worker/reviewer output token price by ~4.3× at peak, ~2.1× off-peak.
+
+**Estimated $/feature (inference, not measurement).** Scaling the measured
+$0.31 and $0.03 per-task figures by the output-price ratio, holding token
+consumption constant — the assumption that most likely fails, since a
+different model emits a different number of tokens for the same task:
+
+| | triage+e2e | worker+reviewer (×6) | **$/feature** |
+| --- | ---: | ---: | ---: |
+| Previous defaults (measured) | 2 × $0.31 | 6 × $0.03 | **$0.80** |
+| New defaults, peak (estimated) | 2 × ~$0.04 | 6 × ~$0.13 | **~$0.84** |
+| New defaults, off-peak (estimated) | 2 × ~$0.04 | 6 × ~$0.06 | **~$0.46** |
+
+Read: at peak pricing this swap is roughly cost-neutral. The GLM-5.3-Flash
+saving is real but lands on only 2 of the 8 invocations per feature, and the
+DeepSeek-V4.1-Flash output price increase lands on the other 6. The win, if
+there is one, has to come from quality or from off-peak scheduling — not from
+the sticker price.
+
+### What a re-measure needs
+
+To rebuild the tables below on the new pair, three inputs are required and
+none of them can be derived from what is already in this file:
+
+1. Intelligence Index scores for GLM-5.3-Flash, DeepSeek-V4.1-Flash, Opus 5
+   and Sonnet 5 **on one single index version**. The v4.1.1 scores here
+   (53/52/63/55) are not comparable to the v4.3 scores now published.
+2. Artificial Analysis' total eval-suite cost and total output tokens per
+   model — the source of every `$/task` figure in this file.
+3. Real token counts per role from the loop's own telemetry
+   (`.boucle-state/*/health.jsonl`: role, iteration, tokens, cost, model),
+   which is the only input here that does not depend on a third party.
+
+## Per-task cost — previous defaults (Artificial Analysis, max-effort reasoning)
 
 | Model | Intelligence | Cost per task | $/intel-pt |
 | --- | ---: | ---: | ---: |
@@ -26,7 +86,7 @@ the spec) → **worker** (implement, up to 3 iterations) → **reviewer** (verif
 the preview, up to 3 iterations) → **e2e** (verify the live deployment). The
 cost of one feature is the sum of all role invocations.
 
-| Role | What it does | boucle | $/task | Claude Code | $/task |
+| Role | What it does | boucle (previous defaults) | $/task | Claude Code | $/task |
 | --- | --- | --- | ---: | --- | ---: |
 | triage | analyze issue, draft spec | [GLM-5.2](https://z.ai/blog/glm-5.2) (intel 53) | $0.31 | Opus 5 (intel 63) | $2.34 |
 | worker (×3) | implement | [DeepSeek V4 Flash 0731](https://artificialanalysis.ai/models/deepseek-v4-flash) (intel 52) | $0.03 | Sonnet 5 (intel 55) | $1.72 |
@@ -76,7 +136,7 @@ Cost ratios grounded in these published totals (same benchmark suite):
 | Recommended plan | **Max — $100/mo** (continuous agents, 10 concurrent) | **Max 20× — $200/mo** (20× Pro usage) |
 | Capacity model | session limits reset every 5h, weekly every 7d; compute-weighted | usage limits, 5× or 20× Pro |
 | Concurrency | Pro: 3 models · Max: 10 models | (not published) |
-| Models included | GLM-5.2, DeepSeek V4 Flash 0731, Kimi K3, + 40k community | Opus 5, Sonnet 5, Haiku |
+| Models included | GLM-5.3-Flash, DeepSeek-V4.1-Flash, Kimi K3, + 40k community | Opus 5, Sonnet 5, Haiku |
 | Data retention | zero data retention, no training on prompts | Anthropic's standard policy |
 
 Source: [Ollama pricing](https://ollama.com/pricing),
@@ -92,7 +152,7 @@ reviewer iterations (the default `BOUCLE_MAX_ITERATIONS=5`).
 
 ### Role assignments
 
-| Role | boucle actuelle | boucle Kimi+DeepSeek | boucle full DeepSeek | Claude Code |
+| Role | boucle (previous defaults) | boucle Kimi+DeepSeek | boucle full DeepSeek | Claude Code |
 | --- | --- | --- | --- | --- |
 | triage | GLM-5.2 (53) | Kimi K3 (60) | DeepSeek (52) | Opus 5 (63) |
 | e2e | GLM-5.2 (53) | DeepSeek (52) | DeepSeek (52) | Opus 5 (63) |
@@ -103,7 +163,7 @@ reviewer iterations (the default `BOUCLE_MAX_ITERATIONS=5`).
 
 | Config | Intel avg | $/task avg | $/issue | vs Claude Code |
 | --- | ---: | ---: | ---: | ---: |
-| boucle actuelle (GLM-5.2 + DeepSeek) | 52.5 | $0.170 | $0.80 | 18.8× cheaper |
+| boucle (previous defaults: GLM-5.2 + DeepSeek) | 52.5 | $0.170 | $0.80 | 18.8× cheaper |
 | boucle Kimi K3 triage + DeepSeek | 54.0 | $0.275 | $1.22 | 12.3× cheaper |
 | boucle full DeepSeek | 52.0 | $0.030 | $0.24 | 62.5× cheaper |
 | Claude Code (Opus 5 + Sonnet 5) | 59.0 | $2.030 | $15.00 | — |
@@ -128,7 +188,7 @@ The quality gap is real but asymmetric across roles:
   boucle puts the cheapest model on the heaviest roles — where the cost
   saving compounds across iterations.
 - **Triage** — the strategic role (issue analysis + spec). Three options:
-  - **GLM-5.2** (intel 53): 84% of Opus 5, 7.5× cheaper. The current default.
+  - **GLM-5.2** (intel 53): 84% of Opus 5, 7.5× cheaper. The default until 2026-09.
   - **Kimi K3** (intel 60): 95% of Opus 5, 2.3× cheaper. Closes most of the
     gap for +$0.42/issue — a quality upgrade at marginal cost.
   - **DeepSeek** (intel 52): 83% of Opus 5, 78× cheaper. The budget option;
@@ -192,7 +252,7 @@ Mode C — E[bugs] = (Δ_reviewer + Δ_e2e) × s_C
 Adjusted cost = cost_A + cost_B + cost_C
 ```
 
-### Results — nominal scenario, boucle default (GLM-5.2 + DeepSeek)
+### Results — nominal scenario, previous defaults (GLM-5.2 + DeepSeek)
 
 | Size | Mode A | Mode B | Mode C | **Adjusted $/feature** | vs Claude Code |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -208,7 +268,7 @@ extra iterations cost almost nothing at $0.03 each.
 
 ### Sensitivity — all configs, all sizes, pessimistic/nominal/optimistic
 
-**boucle default (GLM-5.2 + DeepSeek) — base $0.80**
+**boucle, previous defaults (GLM-5.2 + DeepSeek) — base $0.80**
 
 | Size | Pessimistic | Nominal | Optimistic |
 | --- | ---: | ---: | ---: |
@@ -234,7 +294,7 @@ extra iterations cost almost nothing at $0.03 each.
 
 ### Break-even analysis
 
-For boucle default ($0.80 base), the break-even vs Claude Code ($15.00) is
+For boucle's previous defaults ($0.80 base), the break-even vs Claude Code ($15.00) is
 reached at a **18.8× cost multiplier**. The sensitivity factor `s_A` needed
 to reach it is **17.4** — meaning each 1% of worker intelligence gap would
 need to cause a 17.4% probability of complete feature failure. The nominal
@@ -271,7 +331,8 @@ decides what to *attempt*; the gates and skills decide what *ships*.
 | Config | Triage quality | $/issue | Use case |
 | --- | --- | --- | --- |
 | full DeepSeek | intel 52 (lowest) | $0.24 (cheapest) | Minimal budget, sufficient quality — triage DeepSeek is near-equal to GLM (−1 pt) at 10× lower cost on that role |
-| actuelle (GLM + DeepSeek) | intel 53 | $0.80 | Current default — GLM adds +1 pt on triage for 10× the cost of DeepSeek on that role |
+| GLM-5.2 + DeepSeek V4 Flash 0731 | intel 53 | $0.80 | The default until 2026-09 — GLM adds +1 pt on triage for 10× the cost of DeepSeek on that role |
+| GLM-5.3-Flash + DeepSeek-V4.1-Flash | not measured | ~$0.46–0.84 (estimated) | **Current default** — see [New defaults](#new-defaults-2026-09); the range is off-peak to peak DeepSeek pricing |
 | Kimi K3 triage + DeepSeek | intel 60 (highest) | $1.22 | Max triage quality — closes the gap vs Opus 5 (from −10 to −3 pts) for +$0.42/issue, still 12.3× cheaper than Claude Code |
 
 The full-DeepSeek configuration ($0.24/issue, 62.5× cheaper than Claude Code)

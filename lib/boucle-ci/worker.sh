@@ -319,7 +319,7 @@ EOF
   "$BOUCLE_HOME/bin/fetch-issue-attachments" || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
 
   # ── Describe image attachments (vision model → text) ─────────────
-  # Replaces detect-vision-need: the worker stays on deepseek-v4-flash
+  # Replaces detect-vision-need: the worker stays on deepseek-v4.1-flash
   # (code model) and gets image context as text descriptions.
   "$BOUCLE_HOME/bin/describe-images worker" || echo "[boucle] WARN: image description failed — continuing without descriptions"
 

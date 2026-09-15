@@ -68,7 +68,7 @@ shaped the design.
 | Forge | GitLab, GitHub |
 | CI/CD | GitLab CI (8 stages) / GitHub Actions (8 stages) — shared shell library `lib/boucle-ci/` |
 | AI agents | jcode (4 agents: triage, worker, reviewer, e2e) |
-| Models | glm-5.2 (triage, e2e), deepseek-v4-flash:0731 (worker, reviewer) — open-weight preference |
+| Models | glm-5.3-flash (triage, e2e), deepseek-v4.1-flash (worker, reviewer) — open-weight preference |
 | Knowledge graph | codebase-memory-mcp |
 | Deployment | Pluggable: Cloudflare Pages (default), GitHub Pages, GitLab Pages, external (consumer's own CI) |
 | Tests | bats (shell), shellcheck, shfmt |
