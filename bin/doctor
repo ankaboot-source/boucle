@@ -266,8 +266,13 @@ if [ "$AUDIT_MODE" -eq 1 ]; then
   exit $?
 fi
 
-# Source forge backend
+# Source forge backend. common.sh FIRST: the backends call helpers defined
+# there (forge_merge_pages), and sourcing github.sh alone leaves them
+# undefined — which fails silently, as an empty API result rather than an
+# error.
 if [ "$FORGE" = "github" ]; then
+  # shellcheck disable=SC1090
+  source "$BOUCLE_HOME/bin/forge/common.sh"
   # shellcheck disable=SC1090
   source "$BOUCLE_HOME/bin/forge/github.sh"
 fi

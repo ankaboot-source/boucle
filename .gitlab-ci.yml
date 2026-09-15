@@ -233,15 +233,20 @@ variables:
     - .boucle-state/**/cost.json
     - .boucle-state/**/skills-used.json
 
-# ── Default: use node:22-slim (has node, npm, curl — much smaller than node:22) ─
-# The shared runner is a docker executor. node:22-slim is ~250MB vs ~1GB.
-# before_script installs glab + jcode + wrangler (not in the image).
+# ── Default: the pre-baked agents image (docker/Dockerfile.agents) ───────────
+# The shared runner is a docker executor. The image is node:22-slim plus the
+# toolchain every agent job needs (glab, jcode, chromium, agent-browser,
+# mermaid/jsdom, python3, make/g++, codebase-memory-mcp); the before_script
+# below reinstalls only what a SHELL executor would be missing, since a shell
+# executor ignores `image:` entirely.
 default:
-  # Pre-baked agent toolchain (glab/jq/git/node/python3/jcode/codebase-memory-mcp)
-  # so docker-based runners skip the ~60s of downloads in the before_script
-  # below. Shell executors ignore `image:` entirely and fall back to that
-  # before_script, which probes `command -v` before installing anything — so
-  # the same configuration serves both executor types.
+  # Pre-baked agent toolchain (glab, jcode, chromium, agent-browser,
+  # mermaid/jsdom, python3, make/g++, jq, git, codebase-memory-mcp) so docker
+  # runners skip the ~60s of downloads in the before_script below. That
+  # before_script probes `command -v` before installing anything, so it is a
+  # no-op on the image and a partial rescue on a shell executor — partial
+  # because it cannot install the browser and diagram toolchain, which is why
+  # every job below pins `tags: []`.
   image: docker.io/ankabootops/boucle-agents:latest
   # interruptible: true allows a running job to be cancelled when a newer
   # pipeline supersedes it (combined with workflow:auto_cancel above and the
@@ -250,9 +255,13 @@ default:
   # runs to completion (~40s) even though it will no-op, blocking real work
   # (deploy, worker, reviewer) for minutes.
   interruptible: true
-  # NO `tags:` here, on purpose: jobs run UNTAGGED so the instance's shared
-  # runners can pick them up. A fresh install therefore needs no runner of its
-  # own — see README "Advanced — dedicated runners" to route to one instead.
+  # No `tags:` at the default level: each job declares its own `tags: []`,
+  # which means "a runner with NO tags" — the instance's shared docker
+  # runners. A fresh install therefore needs no runner of its own; see README
+  # "Advanced — dedicated runners" to route to one instead. Setting it here
+  # instead of per job would be worse: a job added without tags would inherit
+  # silently, and inheriting is exactly what must never happen (a job with no
+  # tags at all accepts TAGGED shell executors, which ignore `image:`).
   before_script:
     - |
       # Trace commands only when CI_DEBUG_TRACE is set (GitLab's native debug flag).
@@ -467,11 +476,42 @@ default:
       echo "=== Environment ==="
       node --version 2>/dev/null || echo "node: MISSING"
       npm --version 2>/dev/null || echo "npm: MISSING"
-      glab version 2>/dev/null | head -1 || echo "glab: MISSING"
+      # `glab version | head -1 || echo MISSING` could never print MISSING:
+      # the pipeline's status is head's, and head succeeds on empty input.
+      # An absent glab printed a blank line instead.
+      if command -v glab >/dev/null 2>&1; then glab version 2>/dev/null | head -1; else echo "glab: MISSING"; fi
       jcode --version 2>/dev/null || echo "jcode: MISSING"
       echo "BOUCLE_PROVIDER_PROFILE=${BOUCLE_PROVIDER_PROFILE:-ollama-cloud}"
       case "$CI_JOB_NAME" in worker|deploy) echo "$BOUCLE_DEPLOY_CMD" | grep -q wrangler && { wrangler --version 2>/dev/null || echo "wrangler: MISSING"; } || echo "wrangler: not needed";; *) echo "wrangler: not needed (job: $CI_JOB_NAME)";; esac
       codebase-memory-mcp --version 2>/dev/null || echo "codebase-memory-mcp: MISSING"
+      # Tools that ONLY the agents image provides. The before_script installs
+      # none of them, so on a shell executor (which ignores `image:`) every
+      # one is absent — and the job used to discover that hundreds of lines
+      # later, in an error that never named the binary. Probe with
+      # `command -v` (cheap, no process spawned) and say what breaks, so the
+      # log diagnoses itself.
+      _probe() {
+        if command -v "$1" >/dev/null 2>&1; then
+          echo "$1: ok"
+        else
+          echo "$1: MISSING — $2"
+        fi
+      }
+      _probe chromium       "bin/render-preview (triage preview, worker screenshots)"
+      _probe agent-browser  "bin/render-preview (triage preview, worker screenshots)"
+      _probe python3        "worker screenshot server, bin/check-lessons"
+      _probe make           "npm ci native modules (node-gyp), make check"
+      _probe git            "every forge operation"
+      _probe jq             "every state read"
+      # mermaid + jsdom are npm globals, not binaries — bin/check-mermaid
+      # exits 3 (treated as PASS) when they are absent, so a missing pair
+      # silently disables the diagram gate rather than failing it.
+      if [ -d "$(npm root -g 2>/dev/null)/mermaid" ] && [ -d "$(npm root -g 2>/dev/null)/jsdom" ]; then
+        echo "mermaid+jsdom: ok"
+      else
+        echo "mermaid+jsdom: MISSING — bin/check-mermaid degrades to a no-op gate"
+      fi
+      unset -f _probe
       echo "==================="
 
       # ── Index repo for codebase-memory-mcp (agents query the graph) ──
@@ -495,8 +535,11 @@ default:
 # Runs shellcheck + shfmt + bats on push/MR pipelines only. Never runs on
 # webhook triggers (the autonomous loop) or schedules — those are the dev-loop
 # pipeline and the doctor sweep, which don't touch the harness source.
-# Uses the default node:22-slim image and installs its own tools (shellcheck,
+# Uses the default agents image and installs its own pinned tools (shellcheck,
 # shfmt, bats) so it's self-contained and doesn't depend on the shell executor.
+# `make`, `tar` and `xz` come from the image — check-bootstrap.sh cannot
+# install them (there is no sudo in the image) and fails loudly if they are
+# absent, which is what the missing `make` used to do here.
 #
 # `make check` lints the ENGINE's own shell sources against the ENGINE's
 # Makefile, LESSONS.yml and test/ suite. A consumer repo has none of that, so
@@ -669,8 +712,16 @@ dispatch:
 # ── Triage ──────────────────────────────────────────────────────────────
 triage:
   stage: triage
+  # Pin to docker runners (`tags: []` = runners with NO tags). Without it the
+  # job is eligible for ANY runner, including a TAGGED SHELL EXECUTOR — and a
+  # shell executor ignores `image:` entirely, so none of the agents image is
+  # there. The before_script reinstalls glab/jcode/node, but NOT chromium,
+  # agent-browser, mermaid/jsdom or python3: those exist only in the image.
+  # This job needs them (LESSONS.yml #74 — same failure, fixed on `worker`
+  # only at the time).
+  tags: []
   # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
-  # The triage job runs untagged (default has no tags) — if the assigned runner is broken,
+  # The triage job runs on any untagged (docker) runner — if the assigned runner is broken,
   # the job fails instantly with runner_system_failure and the issue is stranded.
   # retry lets GitLab reassign to another runner.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
@@ -739,8 +790,11 @@ worker:
 # ── Reviewer ────────────────────────────────────────────────────────────
 reviewer:
   stage: review
+  # Pin to docker runners — see the note on `triage`: a shell executor
+  # ignores `image:` and this job would run without the agents toolchain.
+  tags: []
   # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
-  # The reviewer job runs untagged (default has no tags) — if the assigned runner is broken,
+  # The reviewer job runs on any untagged (docker) runner — if the assigned runner is broken,
   # the job fails instantly with runner_system_failure and the MR is stranded.
   # retry lets GitLab reassign to another runner.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
@@ -851,8 +905,11 @@ catchup:
 # ── Deploy (on push to $CI_DEFAULT_BRANCH) ─────────────────────────────────────────
 deploy:
   stage: deploy
+  # Pin to docker runners — see the note on `triage`: a shell executor
+  # ignores `image:` and this job would run without the agents toolchain.
+  tags: []
   # Auto-retry transient runner failures (runner busy/offline, OOM, daemon restart).
-  # The deploy job runs untagged (default has no tags). On an install pinned to a
+  # The deploy job runs on any untagged (docker) runner. On an install pinned to a
   # dedicated runner it contends with worker jobs, which produces
   # runner_system_failure; retrying recovers without human intervention.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
@@ -895,8 +952,11 @@ deploy:
 # ── E2E (after deploy) ─────────────────────────────────────────────────
 e2e:
   stage: verify
+  # Pin to docker runners — see the note on `triage`: a shell executor
+  # ignores `image:` and this job would run without the agents toolchain.
+  tags: []
   # Auto-retry transient runner failures (broken/offline runner, OOM, daemon restart).
-  # The e2e job runs untagged (default has no tags) — if the assigned runner is broken,
+  # The e2e job runs on any untagged (docker) runner — if the assigned runner is broken,
   # the job fails instantly with runner_system_failure and the issue is stranded.
   # retry lets GitLab reassign to another runner.
   # See AGENTS.md and GitLab docs: retry:when: runner_system_failure.
@@ -999,13 +1059,18 @@ doctor:
   timeout: 10m
 
 # ── build-site: one build, many publishers (W1.7 + memory fix) ───────────
-# The site is built ONCE here on a docker runner (node:22-slim, tags: []) and
-# published via artifact. Both `pages` (GitLab Pages) and `deploy` (CF/other)
-# consume public/ instead of re-building — this fixes the WASM Out-of-memory
-# failures seen when the build ran on small shell executors.
+# The site is built ONCE here on a docker runner (tags: []) and published via
+# artifact. Both `pages` (GitLab Pages) and `deploy` (CF/other) consume public/
+# instead of re-building — this fixes the WASM Out-of-memory failures seen when
+# the build ran on small shell executors.
+#
+# No `image:` override, on purpose: this job runs the default BOUCLE_BUILD_CMD
+# (`npm ci && npm run build`). On a bare node:22-slim — which is
+# debian:bookworm-slim, so no make and no compiler — any dependency with a
+# node-gyp step died with `gyp ERR! ... make: not found`. The agents image
+# carries the build toolchain, so inherit it.
 build-site:
   stage: deploy
-  image: node:22-slim
   tags: []
   rules:
     - if: $BOUCLE_ENABLED != "true"
