@@ -30,7 +30,7 @@ if ! command -v shellcheck > /dev/null 2>&1; then
 fi
 
 if ! command -v shfmt > /dev/null 2>&1; then
-  SHFMT_VER="v3.13.1"
+  SHFMT_VER="v3.14.1"
   curl -sSL -o "$PREFIX/bin/shfmt" "https://github.com/mvdan/sh/releases/download/${SHFMT_VER}/shfmt_${SHFMT_VER}_linux_amd64"
   chmod +x "$PREFIX/bin/shfmt"
 fi

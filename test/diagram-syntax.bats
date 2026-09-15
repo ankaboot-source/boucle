@@ -346,7 +346,7 @@ theme_line() {
   # Everything derived from it inherits that alpha and vanishes —
   # attributeBackgroundColorOdd/Even (erDiagram rows) and the xychart plot
   # area were fully transparent, leaving #0d1117 text on the bare comment
-  # surface. Verified against mermaid 11.17.2.
+  # surface. Verified against mermaid 11.17.2, re-verified on 12.0.0.
   local f
   for f in "${THEME_FILES[@]}"; do
     run grep -c '"background":"transparent"' "$REPO_ROOT/$f"

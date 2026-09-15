@@ -24,6 +24,7 @@
 # no --variant/--thinking (reasoning effort not controllable per-call),
 # no --log-level (use --quiet to suppress banner).
 # MCP disabled via JCODE_RUN_MCP=0, auto-poke via JCODE_RUN_AUTO_POKE=0,
+# telemetry via JCODE_NO_TELEMETRY=1,
 # idle timeout via JCODE_STREAM_IDLE_TIMEOUT_SECS=1800.
 # Temperature via JCODE_OPENAI_EXTRA_BODY='{"temperature":0.3}' env per role.
 
@@ -470,6 +471,11 @@ export JCODE_NO_UPDATE="${JCODE_NO_UPDATE:-1}"
 export JCODE_NO_SELFDEV="${JCODE_NO_SELFDEV:-1}"
 # Disable emoji (avoid ANSI codes in output that break log-scraping).
 export JCODE_NO_EMOJI="${JCODE_NO_EMOJI:-1}"
+# Disable telemetry. jcode prints a six-line anonymous-statistics notice on
+# first run and phones home on every run; boucle executes it unattended in
+# consumer repos, where neither the banner (it lands in $AGENT_LOG, which
+# bin/jc scrapes for tool activity) nor the outbound call is wanted.
+export JCODE_NO_TELEMETRY="${JCODE_NO_TELEMETRY:-1}"
 
 # Set temperature via JCODE_OPENAI_EXTRA_BODY if the agent file specifies one.
 if [ -n "$TEMPERATURE" ]; then
