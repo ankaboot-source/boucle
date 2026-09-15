@@ -458,7 +458,7 @@ thesis, and belong behind P1 so their effect is observable rather than asserted.
   labels that exist (κ = 0.952); rare modes may be underrepresented, and the
   authors say so.
 - Its agent–model pairings are Codex/GPT-5.3-Codex and Gemini CLI/Gemini-3.1-Pro.
-  Boucle runs glm-5.2 and deepseek-v4-flash. Whether open-weight models at a
+  Boucle runs glm-5.3-flash and deepseek-v4.1-flash. Whether open-weight models at a
   third of the intelligence index show the same procedural-anchoring benefit is
   untested, and the paper's own limitations section flags scaffold and model
   generalisation as open.

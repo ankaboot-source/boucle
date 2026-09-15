@@ -275,15 +275,21 @@ allowance divided by the per-feature cost — not serialized.
 
 | Plan | Price | Config | $/feature | Features/month |
 | --- | ---: | --- | ---: | ---: |
-| Ollama Max | $100 | **default (GLM-5.2 + DeepSeek)** | $0.80 | **~125** |
+| Ollama Max | $100 | **default (GLM-5.3-Flash + DeepSeek-V4.1-Flash)** | ~$0.46–0.84¹ | **~119–217**¹ |
+| Ollama Max | $100 | previous default (GLM-5.2 + DeepSeek V4 Flash 0731) | $0.80 | ~125 |
 | Ollama Max | $100 | full DeepSeek | $0.24 | ~416 |
 | Ollama Max | $100 | Kimi K3 triage + DeepSeek | $1.22 | ~82 |
 | Claude Code Max 20× | $200 | Opus 5 + Sonnet 5 | $15.00 | ~13 |
 
+¹ Estimated, not measured. The models changed on 2026-09-15 and the per-task
+figures have not been re-measured; the range spans DeepSeek's off-peak and peak
+token pricing. See [docs/cost-benchmark.md](docs/cost-benchmark.md).
+
 For **half the monthly fee**, boucle on Ollama Max ships **6–32× more
 features** than Claude Code Max 20×. The capacity gap comes from the
 per-feature cost gap (18.8×), not the plan price gap (2×) — and parallelism
-multiplies it further.
+multiplies it further. The 18.8× figure is measured on the previous defaults;
+on the current pair it is an estimate pending re-measure.
 
 ### CI compute is the second meter
 

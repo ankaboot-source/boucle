@@ -288,7 +288,7 @@ default:
       [ "${BOUCLE_PREVIEW_DISABLE:-false}" != "true" ] && _NEED_NODE=1
       if [ "$_NEED_NODE" = "1" ] && { ! command -v node &>/dev/null || ! command -v npm &>/dev/null; }; then
         echo "Installing Node.js (shell executor has no image support)..."
-        NODE_VER="v22.19.0"
+        NODE_VER="v22.23.2"
         mkdir -p "$HOME/.local"
         NODE_TMP="/tmp/node-${CI_JOB_ID:-local}.tar.xz"
         curl -sL "https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-linux-x64.tar.xz" -o "$NODE_TMP"
@@ -301,7 +301,7 @@ default:
       # Install or upgrade: the shell executor caches $HOME/.local/bin across
       # runs, so a pinned old version would otherwise never update. Reinstall
       # when the cached version differs from GLAB_VER (cheap, ~3MB tarball).
-      GLAB_VER="1.111.0"
+      GLAB_VER="1.118.0"
       _GLAB_INSTALLED="$(glab version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)"
       if [ -z "$_GLAB_INSTALLED" ] || [ "$_GLAB_INSTALLED" != "$GLAB_VER" ]; then
         echo "Installing glab v${GLAB_VER} (was: ${_GLAB_INSTALLED:-MISSING})..."
@@ -413,7 +413,7 @@ default:
       # runner pinned to an old version indefinitely (observed: consumer
       # ran v0.68.0 for days despite JCODE_VER=v0.73.0 in the config). Now
       # we check the installed version matches JCODE_VER and reinstall if not.
-      JCODE_VER="${JCODE_VERSION:-v0.75.3}"
+      JCODE_VER="${JCODE_VERSION:-v0.84.0}"
       if ! command -v jcode &>/dev/null || ! jcode --version 2>/dev/null | grep -q "$JCODE_VER"; then
         echo "Installing jcode coding agent (standalone binary, $JCODE_VER)..."
         mkdir -p "$HOME/.local/bin"

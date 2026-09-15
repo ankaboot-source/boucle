@@ -21,10 +21,10 @@ and [CONTEXT.md](CONTEXT.md).
 
 | Agent   | Model                       | Steps | Temp | Role                                                                                                                |
 | ------- | ---------------------------- | ----- | ---- | ------------------------------------------------------------------------------------------------------------------- |
-| triage  | ollama-cloud/glm-5.2        | 200   | 0.3  | Analyzes issue, posts structured comment (TL;DR + Diagram + Analysis + one `## Criteria` section: acceptance, must-haves, non-goals + Questions + one collapsed `## Metadata` section: impacts, impacted files, size S/M/L, validation, disposition) |
-| worker  | ollama-cloud/deepseek-v4-flash:0731 | 100   | —    | Implements on branch `boucle/<iid>-<slug>`, reads `state.md`, uses codebase-memory-mcp, conventional commit          |
-| reviewer| ollama-cloud/deepseek-v4-flash:0731 | 35    | 0.2  | Adversarial review against preview URL, SHA-anchored verdict                                                       |
-| e2e     | ollama-cloud/glm-5.2         | 30    | —    | Verifies on production URL, SHA-anchored verdict                                                                    |
+| triage  | ollama-cloud/glm-5.3-flash  | 200   | 0.3  | Analyzes issue, posts structured comment (TL;DR + Diagram + Analysis + one `## Criteria` section: acceptance, must-haves, non-goals + Questions + one collapsed `## Metadata` section: impacts, impacted files, size S/M/L, validation, disposition) |
+| worker  | ollama-cloud/deepseek-v4.1-flash   | 100   | —    | Implements on branch `boucle/<iid>-<slug>`, reads `state.md`, uses codebase-memory-mcp, conventional commit          |
+| reviewer| ollama-cloud/deepseek-v4.1-flash   | 35    | 0.2  | Adversarial review against preview URL, SHA-anchored verdict                                                       |
+| e2e     | ollama-cloud/glm-5.3-flash   | 30    | —    | Verifies on production URL, SHA-anchored verdict                                                                    |
 
 See [LOOP.md](LOOP.md) for the pipeline and state machine details.
 

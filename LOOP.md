@@ -346,10 +346,10 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_FALLBACK_PROVIDER` | *(empty)* | Fallback provider profile name; empty = disabled. Requires `BOUCLE_FALLBACK_BASE_URL` + `BOUCLE_FALLBACK_API_KEY` (masked). Retries on exit-4 (provider down / quota exhausted) before escalating. |
 | `BOUCLE_FALLBACK_BASE_URL` | *(empty)* | Fallback provider endpoint (OpenAI-compatible). |
 | `BOUCLE_FALLBACK_API_KEY` | *(empty)* | Fallback provider key (masked secret). |
-| `BOUCLE_FALLBACK_MODEL_TRIAGE` | `glm-5.2` | Per-role fallback model overrides. |
-| `BOUCLE_FALLBACK_MODEL_WORKER` | `deepseek-v4-flash` | |
-| `BOUCLE_FALLBACK_MODEL_REVIEWER` | `glm-5.2` | |
-| `BOUCLE_FALLBACK_MODEL_E2E` | `deepseek-v4-flash` | |
+| `BOUCLE_FALLBACK_MODEL_TRIAGE` | `glm-5.3-flash` | Per-role fallback model overrides. |
+| `BOUCLE_FALLBACK_MODEL_WORKER` | `deepseek-v4.1-flash` | |
+| `BOUCLE_FALLBACK_MODEL_REVIEWER` | `glm-5.3-flash` | |
+| `BOUCLE_FALLBACK_MODEL_E2E` | `deepseek-v4.1-flash` | |
 | `BOUCLE_PROVIDER_PROFILE` | `boucle` | jcode provider profile name. |
 | `BOUCLE_IMAGE_MAX_BYTES` | `10485760` | Max bytes per attachment (10 MiB). |
 | `BOUCLE_IMAGE_TOTAL_MAX_BYTES` | `52428800` | Max total bytes per issue (50 MiB). |

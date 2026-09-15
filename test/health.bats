@@ -20,10 +20,10 @@ health_funcs() {
   T=$(mktemp -d)
   mkdir -p "$T/.boucle-state/7"
   health_funcs "$TMPF"
-  run bash -c "BOUCLE_WORKSPACE='$T'; source '$TMPF'; boucle_health_record 7 worker 2 0 1500 400 0.01 'deepseek-v4-flash' 'boucle'"
+  run bash -c "BOUCLE_WORKSPACE='$T'; source '$TMPF'; boucle_health_record 7 worker 2 0 1500 400 0.01 'deepseek-v4.1-flash' 'boucle'"
   assert_success
   run jq -r 'select(.role=="worker") | .role + ":" + (.iteration|tostring) + ":" + (.exit_code|tostring) + ":" + (.prompt_chars|tostring) + ":" + .tokens + ":" + .cost_usd + ":" + .model + ":" + .provider' "$T/.boucle-state/7/health.jsonl"
-  assert_output "worker:2:0:1500:400:0.01:deepseek-v4-flash:boucle"
+  assert_output "worker:2:0:1500:400:0.01:deepseek-v4.1-flash:boucle"
   run jq -r 'select(.role=="worker") | .timestamp' "$T/.boucle-state/7/health.jsonl"
   assert_output --regexp '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
   rm -rf "$TMPF" "$T"

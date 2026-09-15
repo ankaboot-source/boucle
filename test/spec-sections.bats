@@ -226,7 +226,7 @@ Nothing structured here.'
   local log
   log="$(mktemp)"
   {
-    printf '> triage · glm-5.2\n'
+    printf '> triage · glm-5.3-flash\n'
     printf '%s\n' "$NEW_SPEC"
     printf 'Done in 42 steps.\n'
   } > "$log"

@@ -13,8 +13,8 @@
 #   - curl, jq, git, ca-certificates
 #   - make + g++                    — node-gyp (npm ci), and `make check`
 #   - procps + time                 — bin/jc peak-RSS accounting
-#   - glab 1.111.0                  — GitLab CLI (API calls)
-#   - jcode v0.75.3                 — agent runtime (Rust binary, replaces opencode/pi)
+#   - glab 1.118.0                  — GitLab CLI (API calls)
+#   - jcode v0.84.0                 — agent runtime (Rust binary, replaces opencode/pi)
 #   - codebase-memory-mcp           — knowledge-graph MCP server
 #   - mermaid + jsdom               — bin/check-mermaid (diagram syntax gate)
 #
@@ -71,7 +71,7 @@ RUN apt-get update \
 # Keep in sync with GLAB_VER in .gitlab-ci.yml's before_script: that guard
 # reinstalls glab whenever the installed version differs, so a stale pin here
 # means every job re-downloads it and the bake buys nothing.
-ARG GLAB_VERSION=1.111.0
+ARG GLAB_VERSION=1.118.0
 RUN mkdir -p /tmp/glab \
     && curl -fsSL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_amd64.tar.gz" -o /tmp/glab.tar.gz \
     && tar -xzf /tmp/glab.tar.gz -C /tmp/glab \
@@ -83,15 +83,17 @@ RUN mkdir -p /tmp/glab \
 # Keep in sync with JCODE_VER in .gitlab-ci.yml's before_script and in
 # .github/workflows/boucle.yml: that guard compares `jcode --version` to the
 # pin and reinstalls on a mismatch, so a stale pin here is a re-download on
-# every single job. bin/jc also depends on v0.73.0+ behaviour
-# (JCODE_NO_AUTO_UPDATE, --no-selfdev, JCODE_OPENAI_REASONING_EFFORT).
-ARG JCODE_VERSION=v0.75.3
+# every single job.
+# The version check runs with the same three env vars bin/jc exports: v0.84.0
+# phones home and prints a telemetry banner on first run, and an image build
+# is not the place to do either.
+ARG JCODE_VERSION=v0.84.0
 RUN mkdir -p /tmp/jcode \
     && curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VERSION}/jcode-linux-x86_64.tar.gz" -o /tmp/jcode.tar.gz \
     && tar -xzf /tmp/jcode.tar.gz -C /tmp/jcode \
     && install -m 0755 /tmp/jcode/jcode-linux-x86_64.bin /usr/local/bin/jcode \
     && rm -rf /tmp/jcode.tar.gz /tmp/jcode \
-    && JCODE_NO_AUTO_UPDATE=1 JCODE_NO_UPDATE=1 jcode --version
+    && JCODE_NO_AUTO_UPDATE=1 JCODE_NO_UPDATE=1 JCODE_NO_TELEMETRY=1 jcode --version
 
 # codebase-memory-mcp — knowledge-graph MCP server (static binary).
 # `--dir` is not optional: the installer defaults to $HOME/.local/bin, i.e.
@@ -117,7 +119,7 @@ RUN chromium --version
 # Pinned: an unpinned install already bit us once, when @sparticuz/chromium
 # moved its exports to ESM in a minor bump and `headless` silently became
 # undefined.
-ARG AGENT_BROWSER_VERSION=0.34.0
+ARG AGENT_BROWSER_VERSION=0.37.1
 RUN npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
     && agent-browser --version
 
@@ -131,7 +133,7 @@ RUN npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
 # Pinned: mermaid's grammar changes between minors, and an unpinned parser
 # means the gate's verdict drifts under the loop without a commit. Keep these
 # in sync with the defaults in bin/check-mermaid.
-ARG MERMAID_VERSION=11.17.2
+ARG MERMAID_VERSION=12.0.0
 ARG JSDOM_VERSION=30.0.1
 RUN npm install -g "mermaid@${MERMAID_VERSION}" "jsdom@${JSDOM_VERSION}"
 
