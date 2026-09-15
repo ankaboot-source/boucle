@@ -348,6 +348,16 @@ export BOUCLE_VERDICT_FILE
 #
 # Mode priority: Legacy (BOUCLE_LLM_BASE_URL + BOUCLE_LLM_API_KEY) >
 # Freeride (BOUCLE_<PROVIDER>_API_KEY) > No-key (triage posts help).
+#
+# Model IDs here are each provider's own, NOT the ollama-cloud names the
+# agent files carry — they track what the provider actually serves, so the
+# two DeepSeek entries name different generations on purpose. The HF router
+# serves DeepSeek-V4.1-Flash (via Novita, 272K context cap, not the model's
+# native 1M). NVIDIA's hosted API documents deepseek-v4-flash and
+# deepseek-v4-flash-0731 only; its V4.1 page is NeMo AutoModel (fine-tuning
+# coverage), which is a different product from integrate.api.nvidia.com —
+# so that entry stays on V4. Re-check both against /models before bumping:
+# a name this catalog gets wrong fails the free-tier path silently.
 freeride_providers() {
   local role="$1"
   local catalog=(
@@ -356,7 +366,7 @@ freeride_providers() {
     "cerebras|https://api.cerebras.ai/v1|BOUCLE_CEREBRAS_API_KEY|gpt-oss-120b|zai-glm-4.7|none"
     "zhipu|https://open.bigmodel.cn/api/paas/v4|BOUCLE_ZHIPU_API_KEY|glm-4.5-flash|glm-4.7-flash|thinking"
     "cloudflare|https://api.cloudflare.com/client/v4/accounts/__CF_ACCOUNT__/ai/v1|BOUCLE_CLOUDFLARE_API_KEY|@cf/meta/llama-3.3-70b-instruct-fp8-fast|@cf/zai-org/glm-4.7-flash|none"
-    "huggingface|https://router.huggingface.co/v1|BOUCLE_HUGGINGFACE_API_KEY|deepseek-ai/DeepSeek-V4-Flash|moonshotai/Kimi-K2.6|none"
+    "huggingface|https://router.huggingface.co/v1|BOUCLE_HUGGINGFACE_API_KEY|deepseek-ai/DeepSeek-V4.1-Flash|moonshotai/Kimi-K2.6|none"
     "mistral|https://api.mistral.ai/v1|BOUCLE_MISTRAL_API_KEY|devstral-latest|magistral-medium-latest|none"
   )
   local entry

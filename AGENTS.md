@@ -19,12 +19,17 @@ and [CONTEXT.md](CONTEXT.md).
 
 ## Agent roles
 
-| Agent   | Model                       | Steps | Temp | Role                                                                                                                |
-| ------- | ---------------------------- | ----- | ---- | ------------------------------------------------------------------------------------------------------------------- |
-| triage  | ollama-cloud/glm-5.3-flash  | 200   | 0.3  | Analyzes issue, posts structured comment (TL;DR + Diagram + Analysis + one `## Criteria` section: acceptance, must-haves, non-goals + Questions + one collapsed `## Metadata` section: impacts, impacted files, size S/M/L, validation, disposition) |
-| worker  | ollama-cloud/deepseek-v4.1-flash   | 100   | —    | Implements on branch `boucle/<iid>-<slug>`, reads `state.md`, uses codebase-memory-mcp, conventional commit          |
-| reviewer| ollama-cloud/deepseek-v4.1-flash   | 35    | 0.2  | Adversarial review against preview URL, SHA-anchored verdict                                                       |
-| e2e     | ollama-cloud/glm-5.3-flash   | 30    | —    | Verifies on production URL, SHA-anchored verdict                                                                    |
+The agent files in `.jcode/agents/<role>.md` are the config of record — this
+table mirrors their frontmatter, it does not define it. `bin/jc` reads `model`,
+`temperature` and `reasoning_effort` from the frontmatter at invocation time.
+When they disagree, the frontmatter wins and this table is the bug.
+
+| Agent   | Model                            | Steps | Temp | Effort | Role                                                                                                                |
+| ------- | -------------------------------- | ----- | ---- | ------ | ------------------------------------------------------------------------------------------------------------------- |
+| triage  | ollama-cloud/glm-5.3-flash       | 300   | 0.5  | high   | Analyzes issue, posts structured comment (TL;DR + Diagram + Analysis + one `## Criteria` section: acceptance, must-haves, non-goals + Questions + one collapsed `## Metadata` section: impacts, impacted files, size S/M/L, validation, disposition) |
+| worker  | ollama-cloud/deepseek-v4.1-flash | 100   | —    | max    | Implements on branch `boucle/<iid>-<slug>`, reads `state.md`, uses codebase-memory-mcp, conventional commit          |
+| reviewer| ollama-cloud/deepseek-v4.1-flash | 35    | 0.2  | max    | Adversarial review against preview URL, SHA-anchored verdict                                                       |
+| e2e     | ollama-cloud/glm-5.3-flash       | 30    | —    | off    | Verifies on production URL, SHA-anchored verdict                                                                    |
 
 See [LOOP.md](LOOP.md) for the pipeline and state machine details.
 
