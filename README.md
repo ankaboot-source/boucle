@@ -276,7 +276,6 @@ allowance divided by the per-feature cost — not serialized.
 | Plan | Price | Config | $/feature | Features/month |
 | --- | ---: | --- | ---: | ---: |
 | Ollama Max | $100 | **default (GLM-5.3-Flash + DeepSeek-V4.1-Flash)** | ~$0.46–0.84¹ | **~119–217**¹ |
-| Ollama Max | $100 | previous default (GLM-5.2 + DeepSeek V4 Flash 0731) | $0.80 | ~125 |
 | Ollama Max | $100 | full DeepSeek | $0.24 | ~416 |
 | Ollama Max | $100 | Kimi K3 triage + DeepSeek | $1.22 | ~82 |
 | Claude Code Max 20× | $200 | Opus 5 + Sonnet 5 | $15.00 | ~13 |

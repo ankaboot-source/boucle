@@ -51,6 +51,49 @@ DeepSeek-V4.1-Flash output price increase lands on the other 6. The win, if
 there is one, has to come from quality or from off-peak scheduling — not from
 the sticker price.
 
+### Monthly capacity on Ollama Max ($100)
+
+The README carries only the current default. The previous-default row lives
+here, as the measured baseline the estimate is scaled from:
+
+| Config | $/feature | Features/month |
+| --- | ---: | ---: |
+| Current default (GLM-5.3-Flash + DeepSeek-V4.1-Flash) | ~$0.46–0.84 (estimated) | ~119–217 |
+| Previous default (GLM-5.2 + DeepSeek V4 Flash 0731) | $0.80 (measured) | ~125 |
+| full DeepSeek | $0.24 | ~416 |
+| Kimi K3 triage + DeepSeek | $1.22 | ~82 |
+
+## Where the models can be bought (2026-09)
+
+boucle is provider-agnostic: `BOUCLE_LLM_BASE_URL` + `BOUCLE_LLM_API_KEY`
+point it at any OpenAI-compatible endpoint, and `BOUCLE_MODEL_<ROLE>` names
+the model per role. Four routes to the same models, billed four different
+ways:
+
+| Route | Billing | Allowance | Carries boucle's defaults? |
+| --- | --- | --- | --- |
+| [Ollama Cloud](https://ollama.com/pricing) | subscription | Pro $20/mo = $60/mo of credits at each model's published per-token rate; 3 concurrent models | yes — both `glm-5.3-flash` and `deepseek-v4.1-flash` |
+| [OpenCode Zen](https://opencode.ai/zen) | prepaid balance, pay-per-token; **no monthly plan** | none — you spend what you top up; auto-reload $20 when the balance drops below $5 | curated catalogue, own model list; carries free routes (a free DeepSeek V4 Flash among them) alongside paid ones from $0 to $180 per 1M output |
+| [OpenCode Go](https://opencode.ai/go) | subscription | $10/mo, one tier only; usage capped at $12/5h, $30/week, **$60/month** | own catalogue — check the model list before assuming a role's model is in it |
+| [Alibaba Token Plan](https://www.alibabacloud.com/en/campaign/ai-landing-page-token) | subscription, credit-denominated | Lite ¥39/mo (≈ $6) = 2,500 credits per rolling 7 days; 1–2 concurrent agents | Qwen family only — no GLM, no DeepSeek |
+
+Two things to take from that table before any price comparison.
+
+**Alibaba's allowance cannot be converted into features.** Credits are
+consumed "dynamically" by model, token count, thinking mode and tool calls,
+and no credit-to-token rate is published for any bundled model. A
+features-per-month figure for this plan would be invented, so none is given
+here. Its Lite tier also caps at 1–2 concurrent agents, below boucle's
+default `BOUCLE_MAX_PARALLEL_ISSUES=5` — a structural limit that holds
+whatever the credits turn out to be worth.
+
+**OpenCode Zen is a gateway, not a plan.** It has no monthly fee to compare,
+so it belongs in the per-token tables above rather than in the plan table
+below. Its free routes are the interesting part for a loop on a zero budget,
+with the usual caveats of a free tier: the free route is a different model
+generation from the paid default, and rate limits and data terms are the
+provider's to change.
+
 ### What a re-measure needs
 
 To rebuild the tables below on the new pair, three inputs are required and
@@ -130,9 +173,38 @@ Cost ratios grounded in these published totals (same benchmark suite):
 
 ## Monthly plan comparison
 
+### Base plans, head to head
+
+The cheapest tier each provider sells, which is what a loop starts on.
+Features/month applies boucle's estimated ~$0.46–0.84 per feature to the
+plan's allowance; it is only meaningful where the allowance is published in
+dollars.
+
+| | Ollama Cloud Pro | OpenCode Go | Alibaba Token Plan Lite | Claude Pro |
+| --- | --- | --- | --- | --- |
+| Price | $20/mo | **$10/mo** | ¥39/mo (≈ $6) | $20/mo |
+| Allowance | $60/mo of credits, metered at published per-token rates | $60/mo, sub-capped $12 per 5h and $30 per week | 2,500 credits per rolling 7 days | not published as a dollar or token figure |
+| Concurrency | 3 models | not published | 1–2 agents | not published |
+| Features/month | ~71–130 | ~71–130 on the monthly cap — see below | **not computable** | **not computable** |
+| Runs boucle's defaults | yes | own catalogue, check per model | no (Qwen only) | no (Claude only) |
+
+**OpenCode Go buys the same $60 monthly ceiling as Ollama Pro for half the
+price.** That is the one clean comparison in the table, and on the monthly
+number alone Go wins. The sub-caps are what decide it in practice: $12 per
+5 hours is the binding constraint for a loop running 5 issues in parallel,
+where Ollama Pro's limit is 3 concurrent models rather than a rolling spend
+window. Which one bites first depends on how bursty the queue is, and that
+is measurable from `health.jsonl` rather than from either pricing page.
+
+**Claude Pro stays unusable for an autonomous loop**, for the same reason as
+before: at ~$15 per feature on Opus 5 + Sonnet 5, a $20 tier is under two
+features a month even if its unpublished allowance were spent entirely on
+the loop.
+
+### Recommended tiers
+
 | | boucle (Ollama) | Claude Code |
 | --- | --- | --- |
-| Cheapest usable plan | **Pro — $20/mo** | Pro — $20/mo (usage too low for an autonomous loop) |
 | Recommended plan | **Max — $100/mo** (continuous agents, 10 concurrent) | **Max 20× — $200/mo** (20× Pro usage) |
 | Capacity model | session limits reset every 5h, weekly every 7d; compute-weighted | usage limits, 5× or 20× Pro |
 | Concurrency | Pro: 3 models · Max: 10 models | (not published) |
@@ -142,7 +214,11 @@ Cost ratios grounded in these published totals (same benchmark suite):
 Source: [Ollama pricing](https://ollama.com/pricing),
 [Claude pricing](https://claude.com/pricing),
 [Anthropic support — Max plan](https://support.claude.com/en/articles/11049741-what-is-the-max-plan)
-(Max 5× = $100/mo, Max 20× = $200/mo).
+(Max 5× = $100/mo, Max 20× = $200/mo),
+[OpenCode Go](https://opencode.ai/go), [OpenCode Zen](https://opencode.ai/zen),
+[Alibaba AI Token Plan](https://www.alibabacloud.com/en/campaign/ai-landing-page-token).
+Plan terms were read from published pages, not exercised against the
+endpoints — none of these hosts is reachable from this repo's CI sandbox.
 
 ## Configurations compared
 
