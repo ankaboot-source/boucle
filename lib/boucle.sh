@@ -597,9 +597,15 @@ boucle_health_record() {
   # this transcript" identically, and the second is a broken sensor reporting
   # a finding. See skills_evidence() in bin/jc.
   local skills_evidence="${14:-}"
+  # WHICH lessons the prompt carried (args 15-16), the companion of the skills
+  # field. Prefixed ids: e<N> engine, l<N> this repository's own. The source
+  # says what a short or empty list is evidence of — "matched", "default"
+  # (nothing matched, critical set substituted), "withheld" (experiment none
+  # arm) or "unbuilt" (the run exited before the prompt reached that stage).
+  local lessons="${15:-}" lessons_source="${16:-}"
   local file="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
   mkdir -p "$(dirname "$file")" 2> /dev/null || true
-  local ts skills_json
+  local ts skills_json lessons_json
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   # Comma-separated in, JSON array out. No jq dependency: this runs on every
   # agent invocation and must never be the thing that breaks the loop.
@@ -612,9 +618,19 @@ boucle_health_record() {
       | paste -sd, - 2> /dev/null || true)]"
     [ "$skills_json" = "[]" ] || [ -n "$skills_json" ] || skills_json="[]"
   fi
-  printf '{"timestamp":"%s","role":"%s","iteration":%s,"exit_code":%s,"prompt_chars":%s,"tokens":"%s","cost_usd":"%s","model":"%s","provider":"%s","skills":%s,"skills_evidence":"%s","arm":"%s","setup_fail":"%s","swarm_spawns":%s}\n' \
+  lessons_json="[]"
+  if [ -n "$lessons" ]; then
+    lessons_json="[$(printf '%s' "$lessons" | tr ',' '\n' \
+      | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+      | grep -v '^$' \
+      | sed 's/.*/"&"/' \
+      | paste -sd, - 2> /dev/null || true)]"
+    [ -n "$lessons_json" ] || lessons_json="[]"
+  fi
+  printf '{"timestamp":"%s","role":"%s","iteration":%s,"exit_code":%s,"prompt_chars":%s,"tokens":"%s","cost_usd":"%s","model":"%s","provider":"%s","skills":%s,"skills_evidence":"%s","arm":"%s","setup_fail":"%s","swarm_spawns":%s,"lessons":%s,"lessons_source":"%s"}\n' \
     "$ts" "$role" "$iteration" "$exit_code" "$prompt_chars" "${tokens:-n/a}" "${cost:-n/a}" "$model" "$provider" \
     "$skills_json" "$skills_evidence" "${arm:-full}" "$setup_fail" "$swarm" \
+    "$lessons_json" "$lessons_source" \
     >> "$file" 2> /dev/null || true
   boucle_metrics_sync_health "$iid" || true
 }
@@ -952,12 +968,16 @@ boucle_metrics_row() {
     '
     ([.[] | select(has("iteration")) | .iteration] | map(select(type == "number"))) as $iters
     | ([.[] | select(has("skills")) | .skills[]] | unique) as $skills
+    | ([.[] | select(has("lessons")) | .lessons[]] | unique) as $lessons
     | ([.[] | select(has("arm")) | .arm] | map(select(. != null and . != "")) | last // "full") as $arm
     | ([.[] | select(has("setup_fail")) | .setup_fail] | map(select(. != null and . != ""))) as $setup
     | ([.[] | select(has("outcome"))]) as $outcomes
     | (($iters | max) // 0) as $last_iter
     | {
-        schema: 1,
+        # 2 adds lessons / lessons_n / runs_lessons_*: WHICH lessons the
+        # prompts carried, the companion of the skills fields. Additive —
+        # every schema-1 key keeps its name and meaning.
+        schema: 2,
         timestamp: $ts,
         project: $project,
         issue: $iid,
@@ -976,6 +996,20 @@ boucle_metrics_row() {
         # here is a broken sensor, not a finding about agent behaviour.
         runs_skills_unparsed: ([.[] | select(.skills_evidence == "unparsed")] | length),
         runs_skills_not_invoked: ([.[] | select(.skills_evidence == "not-invoked")] | length),
+        # The union of the lesson ids carried by the prompts of this issue,
+        # e<N> from the engine file and l<N> from the repository. This is what
+        # makes the selection of a lesson countable across issues: one never
+        # appears here is dead weight, and one that appears on every issue is
+        # not being retrieved, it is being paid for on every run.
+        lessons: $lessons,
+        lessons_n: ($lessons | length),
+        # How much to trust the two above, the same distinction skills_evidence
+        # draws. A default run carries the critical set because NOTHING matched
+        # the issue, and a withheld one carries nothing by experimental design;
+        # counting either as a selection would read the retrieval as working.
+        runs_lessons_default: ([.[] | select(.lessons_source == "default")] | length),
+        runs_lessons_withheld: ([.[] | select(.lessons_source == "withheld")] | length),
+        runs_lessons_unbuilt: ([.[] | select(.lessons_source == "unbuilt")] | length),
         setup_failures: ($setup | length),
         setup_failure_families: ($setup | unique),
         human_spec: $spec,

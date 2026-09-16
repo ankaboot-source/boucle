@@ -799,3 +799,143 @@ EOF
   assert_success
   assert_output --partial "boucle:human"
 }
+
+# ── Lesson injection (the other half of "what the run was given") ─────
+#
+# Boucle measured the SIZE of its prompt and never the effect of its
+# contents. select_lessons is a keyword grep over a 158k file capped at 80
+# lines, and nothing recorded what came back — so no lesson could be shown
+# to be dead weight, and none to be paid for on every run.
+
+lessons_fn() {
+  awk '/^record_lessons_injected\(\) \{/,/^}/' "$REPO/bin/jc" > "$1"
+}
+
+@test "lessons: injected ids are recorded with their source file" {
+  TMPF=$(mktemp); lessons_fn "$TMPF"
+  run bash -c "STATE_DIR='$TMP/s'; . '$TMPF';
+    record_lessons_injected matched '4:
+  title: A
+12:
+  title: B
+' '3:
+  title: C
+'; cat '$TMP/s/.lessons-injected'"
+  assert_success
+  assert_line --index 0 "matched"
+  assert_line --index 1 "e4,e12,l3"
+  rm -f "$TMPF"
+}
+
+@test "lessons: the two sources stay distinguishable" {
+  # The same number in the engine file and in a repository file is two
+  # unrelated entries. An unprefixed list would silently merge them.
+  TMPF=$(mktemp); lessons_fn "$TMPF"
+  run bash -c "STATE_DIR='$TMP/s'; . '$TMPF';
+    record_lessons_injected matched '7:
+  title: engine
+' '7:
+  title: local
+'; sed -n 2p '$TMP/s/.lessons-injected'"
+  assert_output "e7,l7"
+  rm -f "$TMPF"
+}
+
+@test "lessons: no match records the source, not just an empty list" {
+  # 'default' means nothing matched and the critical set was substituted.
+  # Counting that as a selection would read the retrieval as working.
+  TMPF=$(mktemp); lessons_fn "$TMPF"
+  run bash -c "STATE_DIR='$TMP/s'; . '$TMPF';
+    record_lessons_injected default '1:
+  title: post early
+' ''; cat '$TMP/s/.lessons-injected'"
+  assert_line --index 0 "default"
+  assert_line --index 1 "e1"
+  rm -f "$TMPF"
+}
+
+@test "lessons: recording never fails the run" {
+  # Measurement must not be what stops a loop. An unwritable state dir is a
+  # missing row, not an exit code.
+  TMPF=$(mktemp); lessons_fn "$TMPF"
+  run bash -c "STATE_DIR='/proc/nonexistent/s'; . '$TMPF';
+    record_lessons_injected matched '4:
+  title: A
+' ''; echo rc=\$?"
+  assert_success
+  assert_output --partial "rc=0"
+  rm -f "$TMPF"
+}
+
+@test "lessons: the health row carries them as JSON" {
+  lib
+  run bash -c ". '$REPO/lib/boucle.sh' 2>/dev/null;
+    boucle_metrics_sync_health() { :; };
+    BOUCLE_WORKSPACE='$TMP' boucle_health_record 7 worker 1 0 100 10 n/a m p '' full '' 0 parsed 'e4,l3' matched;
+    jq -c '[.lessons, .lessons_source]' < '$TMP/.boucle-state/7/health.jsonl'"
+  assert_output '[["e4","l3"],"matched"]'
+}
+
+@test "row: lessons are the union over the issue's runs" {
+  lib
+  cat > "$TMP/.boucle-state/7/health.jsonl" <<'FIX'
+{"timestamp":"2026-08-24T10:00:00Z","role":"worker","iteration":1,"exit_code":0,"prompt_chars":100,"skills":[],"arm":"full","setup_fail":"","lessons":["e4","e7"],"lessons_source":"matched"}
+{"timestamp":"2026-08-24T10:10:00Z","role":"worker","iteration":2,"exit_code":0,"prompt_chars":100,"skills":[],"arm":"full","setup_fail":"","lessons":["e7","l3"],"lessons_source":"default"}
+FIX
+  run bash -c "cd '$REPO' && . lib/boucle.sh 2>/dev/null;
+    forge_issue_notes() { echo '[]'; }; forge_mr_lookup_by_branch() { echo ''; }; forge_mr_notes() { echo '[]'; };
+    BOUCLE_WORKSPACE='$TMP' boucle_metrics_row 7 done | jq -c '[.lessons, .lessons_n, .runs_lessons_default]'"
+  assert_output '[["e4","e7","l3"],3,1]'
+}
+
+@test "row: a withheld arm is not counted as a selection" {
+  lib
+  cat > "$TMP/.boucle-state/7/health.jsonl" <<'FIX'
+{"timestamp":"2026-08-24T10:00:00Z","role":"worker","iteration":1,"exit_code":0,"prompt_chars":100,"skills":[],"arm":"none","setup_fail":"","lessons":[],"lessons_source":"withheld"}
+FIX
+  run bash -c "cd '$REPO' && . lib/boucle.sh 2>/dev/null;
+    forge_issue_notes() { echo '[]'; }; forge_mr_lookup_by_branch() { echo ''; }; forge_mr_notes() { echo '[]'; };
+    BOUCLE_WORKSPACE='$TMP' boucle_metrics_row 7 done | jq -c '[.lessons_n, .runs_lessons_withheld]'"
+  assert_output '[0,1]'
+}
+
+@test "stats: --per-lesson counts the issues each lesson reached" {
+  printf '%s\n' \
+    '{"schema":2,"issue":"1","terminal":"done","arm":"full","iterations":2,"skills":[],"skills_n":0,"lessons":["e4","e7"],"lessons_n":2,"setup_failures":0,"human_spec":0,"human_delivery":0}' \
+    '{"schema":2,"issue":"2","terminal":"done","arm":"full","iterations":4,"skills":[],"skills_n":0,"lessons":["e7"],"lessons_n":1,"setup_failures":0,"human_spec":0,"human_delivery":0}' \
+    > "$TMP/m.jsonl"
+  run "$REPO/bin/skills-stats" --file "$TMP/m.jsonl" --per-lesson
+  assert_success
+  assert_output --partial "Per lesson"
+  assert_line --regexp '^  e7 +2 +2'
+  assert_line --regexp '^  e4 +1 +1'
+}
+
+@test "stats: --per-lesson names the lessons no prompt ever carried" {
+  # The actionable half: an entry selected by nothing is dead weight in a
+  # file every agent is told to treat as mandatory.
+  printf '%s\n' \
+    '{"schema":2,"issue":"1","terminal":"done","arm":"full","iterations":2,"skills":[],"skills_n":0,"lessons":["e1"],"lessons_n":1,"setup_failures":0,"human_spec":0,"human_delivery":0}' \
+    > "$TMP/m.jsonl"
+  run "$REPO/bin/skills-stats" --file "$TMP/m.jsonl" --per-lesson
+  assert_success
+  assert_output --partial "Never selected"
+  refute_line --regexp '^  e1 e'
+}
+
+@test "stats: an empty group prints n/a, never a fabricated 0.00" {
+  # A lesson or skill seen only on escalated issues has no uncensored
+  # iteration count. printf rejected the 'n/a' the aggregation emits, which
+  # printed an error next to a 0.00 that was not a measurement.
+  printf '%s\n' \
+    '{"schema":2,"issue":"1","terminal":"human","arm":"full","iterations":5,"skills":["zz"],"skills_n":1,"lessons":["e4"],"lessons_n":1,"setup_failures":0,"human_spec":0,"human_delivery":0}' \
+    > "$TMP/m.jsonl"
+  run "$REPO/bin/skills-stats" --file "$TMP/m.jsonl" --per-lesson --per-skill
+  assert_success
+  refute_output --partial "invalid number"
+  # The per-row figure, not the summary table above it (where 0.00 is a real
+  # measurement).
+  refute_line --regexp '^  (zz|e4) .*0\.00'
+  assert_line --regexp '^  e4 +1 +0 +n/a'
+  assert_line --regexp '^  zz +1 +0 +n/a' 
+}

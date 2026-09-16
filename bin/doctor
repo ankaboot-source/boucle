@@ -177,9 +177,11 @@ run_config_audit() {
   local skills_dir="${BOUCLE_HOME}/.jcode/skills"
   if [ -d "$skills_dir" ]; then
     local total=0 no_trigger=0 no_verify=0 name_mismatch=0 unreachable=0
-    local reachable_names=""
+    local no_description=0
+    local reachable_names="" index_lines=""
     if [ -x "${BOUCLE_HOME}/bin/skills-index" ]; then
       reachable_names=$("${BOUCLE_HOME}/bin/skills-index" --names 2> /dev/null || echo "")
+      index_lines=$("${BOUCLE_HOME}/bin/skills-index" 2> /dev/null || echo "")
     fi
     local skill_md dir declared
     for skill_md in "$skills_dir"/*/SKILL.md; do
@@ -192,6 +194,12 @@ run_config_audit() {
       grep -qiE '^#+ *when to use' "$skill_md" || no_trigger=$((no_trigger + 1))
       grep -qiE '^#+ *verification' "$skill_md" || no_verify=$((no_verify + 1))
       echo "$reachable_names" | grep -qx "$dir" || unreachable=$((unreachable + 1))
+      # Named in the index is not the same as ADVERTISED in it. The index
+      # publishes "- <dir>: <description>", and the description is the only
+      # trigger condition an agent reads before choosing a skill. An entry
+      # that degrades to a bare "- <dir>" is counted reachable by the check
+      # above while carrying nothing to choose it on.
+      echo "$index_lines" | grep -qE "^- ${dir}: .+" || no_description=$((no_description + 1))
     done
 
     if [ "$unreachable" -gt 0 ]; then
@@ -199,6 +207,10 @@ run_config_audit() {
         "They ship and are re-synced but no agent can load them. Check bin/skills-index."
     else
       pass "all $total skills are reachable via the generated index"
+    fi
+    if [ "$no_description" -gt 0 ]; then
+      audit_degraded "$no_description of $total skills are advertised with no description" \
+        "The index publishes their name and nothing else, so an agent has no trigger condition to choose them on. Usually a YAML block scalar (description: |) or a SKILL.md with no frontmatter at all."
     fi
     if [ "$name_mismatch" -gt 0 ]; then
       audit_degraded "$name_mismatch skill(s) declare a frontmatter name that differs from their directory" \
