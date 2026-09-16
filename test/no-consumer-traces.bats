@@ -48,7 +48,7 @@ setup() {
 # Hosts the engine may legitimately name: forges it supports, placeholder
 # domains, its own site, deploy targets and LLM providers it ships defaults
 # for. Anything else in engine code is somebody's infrastructure.
-ALLOWED_HOSTS='^(github\.com|githubusercontent\.com|gitlab\.com|gitlab\.io|docs\.gitlab\.com|about\.gitlab\.com|example\.com|example\.org|boucle\.dev|pages\.dev|github\.io|cloudflare\.com|ollama\.com|openrouter\.ai|groq\.com|nvidia\.com|mistral\.ai|huggingface\.co|cerebras\.ai|z\.ai|npmjs\.org|npmjs\.com|nodejs\.org|docker\.io|docker\.com|w3\.org|gnu\.org|shadcn\.com|config\.com|schema\.org|json\.org|claude\.ai|claude\.com|anthropic\.com|telegram\.org|youtube\.com|artificialanalysis\.ai)$'
+ALLOWED_HOSTS='^(github\.com|githubusercontent\.com|gitlab\.com|gitlab\.io|docs\.gitlab\.com|about\.gitlab\.com|example\.com|example\.org|boucle\.dev|pages\.dev|github\.io|cloudflare\.com|ollama\.com|openrouter\.ai|groq\.com|nvidia\.com|mistral\.ai|huggingface\.co|cerebras\.ai|z\.ai|npmjs\.org|npmjs\.com|nodejs\.org|docker\.io|docker\.com|w3\.org|gnu\.org|shadcn\.com|config\.com|schema\.org|json\.org|claude\.ai|claude\.com|anthropic\.com|telegram\.org|youtube\.com|artificialanalysis\.ai|opencode\.ai|alibabacloud\.com)$'
 
 # engine_files — the engine's own surface, excluding vendored skills.
 # engine_files — the engine's executable + CI surface and its charter docs.
