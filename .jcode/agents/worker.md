@@ -119,6 +119,19 @@ Doc updates rules:
 - Maintain **cross-references** between docs (relative markdown links).
 - If the triage analysis flagged a "Docs impact", that is your starting point — but also check for impacts the triage missed.
 
+## Functional navigation parcours — ship it with the feature
+
+When the consumer configures `BOUCLE_REVIEW_COMMAND`, a real browser drives the deployed preview before the reviewer is invoked. **The parcours script that browser runs is part of your deliverable, in the same MR as the feature.**
+
+You are the right author for a mechanical reason: you just wrote the markup, so you already know the selectors. Do NOT explore the site to discover them, and do NOT navigate to find out what you built.
+
+- **Where:** a bash script under the consumer's parcours directory (`tests/nav/` unless the repo says otherwise), sourcing `$BOUCLE_HOME/bin/nav-assert`. Read that file's header for the available helpers — `nav_open`, `nav_viewport`, `nav_click`, `nav_fill`, `nav_is`, `nav_text`.
+- **One acceptance criterion, one assertion.** Pass the criterion's own text as the assertion label: the reviewer builds its verdict checklist from those labels, so a label that does not name a criterion breaks the traceability.
+- **Mobile first.** Open with `nav_viewport 390 844` unless the criterion is about desktop layout.
+- **Assert the change, not the page.** An assertion that would already pass on the base branch proves nothing. If a criterion cannot be asserted through the browser (a build-time concern, a doc change), leave it out — an empty parcours is honest, a padded one is not.
+- **Never check `agent-browser is` by exit code.** It prints `false` and exits `0`. `nav_is` exists for exactly this and is the only correct way to assert element state.
+- **The file stays after merge.** It becomes the regression parcours for that feature and runs again post-merge against production via `BOUCLE_E2E_COMMAND`. When your change breaks an existing parcours, fix the parcours in the same MR — a UI change that invalidates a test must be visible in the diff, never silently repaired later.
+
 ## Non-goals are binding
 
 `state.md` carries a `## Non-goals` section. It is not advice — it is the part

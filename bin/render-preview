@@ -21,11 +21,8 @@
 #   - each produced path is printed on stdout, one per line
 #   - one viewport failing must not lose the others; exit 1 only if all failed
 #
-# Browser resolution order (first hit wins):
-#   1. $AGENT_BROWSER_EXECUTABLE_PATH  — set by the agents image
-#   2. $BOUCLE_CHROME                  — per-consumer override
-#   3. chromium / chromium-browser / google-chrome / google-chrome-stable
-#   4. nothing found → `agent-browser install` (needs network; last resort)
+# CLI and browser resolution live in bin/lib/agent-browser.sh — shared with
+# bin/nav-assert, which needs the same ladder. Documented there, once.
 set -eu
 
 DEFAULT_VIEWPORTS='390x844,1440x900'
@@ -48,55 +45,11 @@ case "$INPUT" in
     ;;
 esac
 
-# ── agent-browser ──────────────────────────────────────────────────────
-# Baked into the agents image; the /tmp install is the fallback for runners
-# that start from a bare node image.
-if command -v agent-browser > /dev/null 2>&1; then
-  AB="agent-browser"
-elif [ -x /tmp/node_modules/.bin/agent-browser ]; then
-  AB="/tmp/node_modules/.bin/agent-browser"
-elif npm install --prefix /tmp agent-browser > /dev/null 2>&1; then
-  AB="/tmp/node_modules/.bin/agent-browser"
-else
-  echo "render-preview: agent-browser unavailable (not installed, npm install failed)" >&2
-  exit 1
-fi
-
-# ── browser executable ─────────────────────────────────────────────────
-if [ -n "${AGENT_BROWSER_EXECUTABLE_PATH:-}" ]; then
-  : # already exported, agent-browser picks it up
-elif [ -n "${BOUCLE_CHROME:-}" ]; then
-  AGENT_BROWSER_EXECUTABLE_PATH="$BOUCLE_CHROME"
-  export AGENT_BROWSER_EXECUTABLE_PATH
-else
-  for candidate in chromium chromium-browser google-chrome google-chrome-stable; do
-    if command -v "$candidate" > /dev/null 2>&1; then
-      AGENT_BROWSER_EXECUTABLE_PATH="$(command -v "$candidate")"
-      export AGENT_BROWSER_EXECUTABLE_PATH
-      break
-    fi
-  done
-fi
-
-if [ -z "${AGENT_BROWSER_EXECUTABLE_PATH:-}" ]; then
-  echo "render-preview: no system browser found — falling back to 'agent-browser install'" >&2
-  if ! "$AB" install > /dev/null 2>&1; then
-    echo "render-preview: agent-browser install failed and no browser is present" >&2
-    exit 1
-  fi
-fi
-
-# CI containers run as root without a usable sandbox, and /dev/shm is small.
-AGENT_BROWSER_ARGS="${AGENT_BROWSER_ARGS:---no-sandbox,--disable-dev-shm-usage}"
-export AGENT_BROWSER_ARGS
-
-# file:// navigation needs this. Note it must be the environment variable, not
-# the documented `--allow-file-access` CLI flag: passing the flag leaves the
-# page on about:blank and yields a blank PNG with a zero exit code (verified on
-# 0.27.0 and 0.34.0, and against agent-browser main at 021d925 where the flag
-# does reach Chrome's argv only through this variable).
-AGENT_BROWSER_ALLOW_FILE_ACCESS=1
-export AGENT_BROWSER_ALLOW_FILE_ACCESS
+# ── agent-browser + browser ────────────────────────────────────────────
+_RP_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=bin/lib/agent-browser.sh
+. "$_RP_DIR/lib/agent-browser.sh"
+boucle_agent_browser_setup render-preview || exit 1
 
 # ── target URL ─────────────────────────────────────────────────────────
 case "$INPUT" in
