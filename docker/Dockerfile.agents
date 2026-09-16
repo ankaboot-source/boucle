@@ -11,10 +11,18 @@
 #   - node 22 (base image)          — build/deploy/preview jobs
 #   - python3 (stdlib only)         — ui-ux-pro-max search.py (worker design skill)
 #   - curl, jq, git, ca-certificates
+#   - make + g++                    — node-gyp (npm ci), and `make check`
+#   - procps + time                 — bin/jc peak-RSS accounting
 #   - glab 1.118.0                  — GitLab CLI (API calls)
 #   - jcode v0.84.0                 — agent runtime (Rust binary, replaces opencode/pi)
 #   - codebase-memory-mcp           — knowledge-graph MCP server
 #   - mermaid + jsdom               — bin/check-mermaid (diagram syntax gate)
+#
+# The glab and jcode pins MUST match JCODE_VER / GLAB_VER in .gitlab-ci.yml's
+# before_script, and mermaid/jsdom MUST match bin/check-mermaid's defaults.
+# Those guards reinstall on a version mismatch, so a stale pin here does not
+# break the job — it silently re-downloads the binary on EVERY run and the
+# image stops paying for itself. test/runner-toolchain.bats fails on drift.
 #
 # NOTE: lib/boucle.sh is sourced from ${CI_PROJECT_DIR} at job runtime,
 # it is NOT baked into the image (it ships with each consumer repo).
@@ -22,6 +30,17 @@
 FROM node:22-slim
 
 # apt: curl, jq, git, python3 (stdlib only — ui-ux-pro-max search.py)
+#      build-essential subset (make, g++) — the default BOUCLE_BUILD_CMD is
+#      `npm ci && npm run build`, and debian:bookworm-slim ships NO compiler
+#      and no make (it carries gcc-12-base, which is runtime files only). Any
+#      dependency with a node-gyp step failed with `gyp ERR! ... make: not
+#      found`. `make` is also a hard prerequisite of bin/check-bootstrap.sh,
+#      which cannot install it itself: there is no sudo in this image, so its
+#      ensure_tool fallback exits 1 and takes the whole check job with it.
+#      procps (pgrep) + time (/usr/bin/time) — bin/jc measures the agent's
+#      peak RSS through one or the other. Both were absent, so every run
+#      reported "unavailable" and the memory series was structurally empty.
+#      unzip — bin/forge/github.sh unpacks artifact archives with it.
 #      chromium — the distribution's own build, used by bin/render-preview for
 #      the triage preview and the worker's screenshots. Baking it in is what
 #      lets those steps download nothing at job time; the previous
@@ -37,6 +56,11 @@ RUN apt-get update \
         git \
         jq \
         python3 \
+        make \
+        g++ \
+        procps \
+        time \
+        unzip \
         chromium \
         fonts-dejavu-core \
         fonts-liberation2 \
@@ -44,23 +68,41 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # glab — GitLab CLI
+# Keep in sync with GLAB_VER in .gitlab-ci.yml's before_script: that guard
+# reinstalls glab whenever the installed version differs, so a stale pin here
+# means every job re-downloads it and the bake buys nothing.
 ARG GLAB_VERSION=1.118.0
-RUN curl -fsSL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_amd64.tar.gz" -o /tmp/glab.tar.gz \
-    && tar -xzf /tmp/glab.tar.gz -C /tmp \
-    && cp /tmp/bin/glab /usr/local/bin/glab \
-    && chmod +x /usr/local/bin/glab \
-    && rm -rf /tmp/glab.tar.gz /tmp/bin
+RUN mkdir -p /tmp/glab \
+    && curl -fsSL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_amd64.tar.gz" -o /tmp/glab.tar.gz \
+    && tar -xzf /tmp/glab.tar.gz -C /tmp/glab \
+    && install -m 0755 /tmp/glab/bin/glab /usr/local/bin/glab \
+    && rm -rf /tmp/glab.tar.gz /tmp/glab \
+    && GLAB_NO_UPDATE_NOTIFIER=true glab version
 
 # jcode — agent runtime (standalone Rust binary, no node dependency)
+# Keep in sync with JCODE_VER in .gitlab-ci.yml's before_script and in
+# .github/workflows/boucle.yml: that guard compares `jcode --version` to the
+# pin and reinstalls on a mismatch, so a stale pin here is a re-download on
+# every single job.
+# The version check runs with the same three env vars bin/jc exports: v0.84.0
+# phones home and prints a telemetry banner on first run, and an image build
+# is not the place to do either.
 ARG JCODE_VERSION=v0.84.0
-RUN curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VERSION}/jcode-linux-x86_64.tar.gz" -o /tmp/jcode.tar.gz \
-    && tar -xzf /tmp/jcode.tar.gz -C /tmp \
-    && mv /tmp/jcode-linux-x86_64.bin /usr/local/bin/jcode \
-    && chmod +x /usr/local/bin/jcode \
-    && rm -f /tmp/jcode.tar.gz
+RUN mkdir -p /tmp/jcode \
+    && curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VERSION}/jcode-linux-x86_64.tar.gz" -o /tmp/jcode.tar.gz \
+    && tar -xzf /tmp/jcode.tar.gz -C /tmp/jcode \
+    && install -m 0755 /tmp/jcode/jcode-linux-x86_64.bin /usr/local/bin/jcode \
+    && rm -rf /tmp/jcode.tar.gz /tmp/jcode \
+    && JCODE_NO_AUTO_UPDATE=1 JCODE_NO_UPDATE=1 JCODE_NO_TELEMETRY=1 jcode --version
 
-# codebase-memory-mcp — knowledge-graph MCP server (installer copies a static binary)
-RUN curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh | bash \
+# codebase-memory-mcp — knowledge-graph MCP server (static binary).
+# `--dir` is not optional: the installer defaults to $HOME/.local/bin, i.e.
+# /root/.local/bin at build time, which is NOT on this image's PATH. It only
+# ever resolved because the GitLab before_script prepends $HOME/.local/bin AND
+# the job happens to run as root — a non-root runner, or a `USER node` here,
+# would have lost it silently.
+RUN curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh \
+    | bash -s -- --dir=/usr/local/bin \
     || echo "codebase-memory-mcp install failed (non-fatal, before_script retries)"
 
 # Fail the build here, not at job time, if the browser is unusable. Debian
@@ -94,6 +136,20 @@ RUN npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
 ARG MERMAID_VERSION=12.0.0
 ARG JSDOM_VERSION=30.0.1
 RUN npm install -g "mermaid@${MERMAID_VERSION}" "jsdom@${JSDOM_VERSION}"
+
+# Every tool a job expects from this image, asserted once. The failure this
+# prevents is not a missing package — it is a job that runs for ten minutes
+# and dies on `make: not found` in a log that never names the image.
+RUN set -eu; \
+    for t in node npm git jq curl python3 make g++ tar xz pgrep unzip \
+             chromium agent-browser glab jcode; do \
+      command -v "$t" > /dev/null 2>&1 || { echo "MISSING: $t" >&2; exit 1; }; \
+    done; \
+    [ -x /usr/bin/time ] || { echo "MISSING: /usr/bin/time" >&2; exit 1; }; \
+    for m in mermaid jsdom; do \
+      [ -d "$(npm root -g)/$m" ] || { echo "MISSING: npm global $m" >&2; exit 1; }; \
+    done; \
+    echo "toolchain ok"
 
 # default env for all boucle jobs
 ENV PATH="/usr/local/bin:${PATH}" \

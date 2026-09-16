@@ -19,6 +19,18 @@
 #   BOUCLE_BOT_USERNAME   — bot username (default "up-bot")
 #   BOUCLE_TRIGGER_TOKEN  — pipeline trigger token
 
+# ── Contract helpers ─────────────────────────────────────────────────────
+# This backend calls forge_merge_pages, which lives in common.sh. The normal
+# entry point (forge_init) sources common.sh first, but bin/doctor and the
+# bats suite source a backend directly — and a missing helper here does not
+# raise, it makes every paginated call return NOTHING, which the callers'
+# `|| echo "[]"` then dresses up as an empty list. Load it if it is absent.
+# Sourcing common.sh does not re-enter this file: it only DEFINES forge_init.
+if ! declare -F forge_merge_pages > /dev/null 2>&1; then
+  # shellcheck disable=SC1091
+  . "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
+fi
+
 # ── Issue operations ─────────────────────────────────────────────────────
 
 forge_issue_get() {
@@ -43,8 +55,14 @@ forge_issue_notes() {
   # many bot comments (triage + validation + status), so pagination is
   # mandatory to return ALL notes (the original inline calls used
   # per_page=100 + --paginate).
-  glab api --hostname "$BOUCLE_FORGE_HOST" --paginate \
-    "/projects/$BOUCLE_PROJECT_ID/issues/$iid/notes?per_page=100" 2> /dev/null || echo "[]"
+  # forge_merge_pages: --paginate emits one array PER PAGE. Without the
+  # merge every jq filter over this output runs once per page — see the
+  # contract note in common.sh.
+  local out
+  out=$(glab api --hostname "$BOUCLE_FORGE_HOST" --paginate \
+    "/projects/$BOUCLE_PROJECT_ID/issues/$iid/notes?per_page=100" 2> /dev/null \
+    | forge_merge_pages)
+  if [ -n "$out" ]; then printf '%s\n' "$out"; else echo "[]"; fi
 }
 
 forge_issue_labels_get() {
@@ -231,8 +249,12 @@ forge_mr_lookup_by_branch() {
       return 0
     fi
     # No exact match — list MRs in the requested state and filter by prefix.
+    # forge_merge_pages before jq: `first` over a paginated stream returns
+    # the first match ON EACH PAGE, so a two-page list printed two iids and
+    # the caller captured both as one string.
     glab api --hostname "$BOUCLE_FORGE_HOST" --paginate \
       "/projects/$BOUCLE_PROJECT_ID/merge_requests?state=$state&per_page=100" 2> /dev/null \
+      | forge_merge_pages \
       | jq -r --arg prefix "$branch" '[.[] | select(.source_branch | startswith($prefix))] | first | .iid // empty' 2> /dev/null || true
     return 0
   fi
@@ -362,9 +384,12 @@ forge_mr_note() {
 
 forge_mr_notes() {
   local mr_iid="$1"
-  # --paginate: see forge_issue_notes.
-  glab api --hostname "$BOUCLE_FORGE_HOST" --paginate \
-    "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/notes?per_page=100" 2> /dev/null || echo "[]"
+  # --paginate + forge_merge_pages: see forge_issue_notes.
+  local out
+  out=$(glab api --hostname "$BOUCLE_FORGE_HOST" --paginate \
+    "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/notes?per_page=100" 2> /dev/null \
+    | forge_merge_pages)
+  if [ -n "$out" ]; then printf '%s\n' "$out"; else echo "[]"; fi
 }
 
 forge_mr_create() {
