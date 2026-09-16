@@ -56,11 +56,37 @@ fi
 [ -d "$SKILLS_DIR" ] || exit 0
 
 # Read one frontmatter key from a SKILL.md.
+#
+# YAML puts a long value on the lines AFTER the key, in two shapes this used
+# to read as empty or as punctuation:
+#
+#   description: |          -> published the literal "|" as the description
+#     the real text
+#
+#   description:            -> published nothing at all
+#     the real text
+#
+# Both shipped in the catalogue: a 900-char description reduced to one pipe,
+# and another to a bare name. A skill advertised with no trigger condition is
+# the exact failure this index was written to fix — the agent cannot choose
+# what it cannot read — so the parser has to follow the value off its line.
 frontmatter() {
   awk -v key="$2" '
     NR == 1 && $0 == "---" { inside = 1; next }
     inside && $0 == "---" { exit }
-    inside {
+    !inside { next }
+    # Inside a block/continuation value: every deeper-indented line belongs
+    # to it, and the first line back at column 0 ends it.
+    collecting {
+      if ($0 ~ /^[[:space:]]/) {
+        line = $0
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+        if (line != "") val = (val == "" ? line : val " " line)
+        next
+      }
+      exit
+    }
+    {
       idx = index($0, ":")
       if (idx == 0) next
       k = substr($0, 1, idx - 1)
@@ -68,8 +94,14 @@ frontmatter() {
       gsub(/^[ \t]+|[ \t]+$/, "", k)
       gsub(/^[ \t]+|[ \t]+$/, "", v)
       gsub(/^"|"$/, "", v)
-      if (k == key) { print v; exit }
+      if (k != key) next
+      # A block scalar (| or >, with any chomping/indent indicator) or an
+      # empty value means the content is on the following indented lines.
+      if (v == "" || v ~ /^[|>][0-9]*[-+]?$/) { collecting = 1; val = ""; next }
+      print v
+      exit
     }
+    END { if (collecting && val != "") print val }
   ' "$1" 2> /dev/null || true
 }
 

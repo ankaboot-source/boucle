@@ -27,6 +27,9 @@
 # Metrics reported per group, chosen for information per issue rather than
 # for how good they look on a slide:
 #
+#   --per-lesson      which lesson ids the prompts actually carried, and
+#                     which live engine lessons were never selected at all.
+#
 #   iterations        mean worker iterations. CENSORED for escalated issues
 #                     (they took "at least N"), so escalated and completed
 #                     issues are reported separately and never averaged
@@ -50,6 +53,7 @@ set -uo pipefail
 
 MODE="observed"
 PER_SKILL=0
+PER_LESSON=0
 AS_JSON=0
 FILE=""
 BRANCH="${BOUCLE_METRICS_BRANCH:-boucle/metrics}"
@@ -67,6 +71,10 @@ while [ $# -gt 0 ]; do
       ;;
     --per-skill)
       PER_SKILL=1
+      shift
+      ;;
+    --per-lesson)
+      PER_LESSON=1
       shift
       ;;
     --json)
@@ -164,7 +172,15 @@ if [ "$AS_JSON" = "1" ]; then
 fi
 
 fmt() { # fmt <value> <suffix>
-  if [ "$1" = "null" ]; then echo "n/a"; else printf '%.2f%s' "$1" "${2:-}"; fi
+  # The jq blocks below emit "n/a" for an empty group (a skill or lesson seen
+  # only on issues that escalated has no uncensored iteration count). Reading
+  # only "null" here made printf reject it on stderr and print 0.00 — an error
+  # beside a fabricated number, in a reader whose whole point is not
+  # fabricating numbers.
+  case "$1" in
+    null | n/a | "") echo "n/a" ;;
+    *) printf '%.2f%s' "$1" "${2:-}" ;;
+  esac
 }
 
 echo "boucle skills-stats — $TOTAL issue(s), grouped by ${MODE}"
@@ -225,6 +241,61 @@ if [ "$PER_SKILL" = "1" ]; then
     | while IFS=$'\t' read -r sk n d it; do
       printf '  %-34s %6s %8s %11s\n' "$sk" "$n" "$d" "$(fmt "$it")"
     done
+fi
+
+# ── Per lesson ────────────────────────────────────────────────────────
+# The prompt carries lessons by keyword grep over a file that only grows, and
+# nothing said which ones came back. Two rows here are decisions:
+#
+#   a lesson in NO issue     shipped, re-synced on every update, selected by
+#                            nothing — dead weight in a file the agent is told
+#                            to treat as mandatory
+#   a lesson in EVERY issue  not being retrieved, being re-paid per run. It
+#                            belongs in the system prompt, not in a grep
+#
+# ids are prefixed: e<N> engine, l<N> this repository. The same number in the
+# two files is two unrelated entries.
+if [ "$PER_LESSON" = "1" ]; then
+  echo
+  echo "Per lesson (issues whose prompt carried it):"
+  printf '  %-12s %6s %8s %11s\n' LESSON ISSUES DONE ITER\(done\)
+  printf '%s\n' "$ROWS" | jq -s -r '
+    map(select(type == "object" and has("issue")))
+    | [.[] | . as $r | (.lessons // [])[] | {lesson: ., row: $r}]
+    | group_by(.lesson)
+    | map({lesson: .[0].lesson, issues: length,
+           done: ([.[] | select(.row.terminal == "done")] | length),
+           iter: (([.[] | select(.row.terminal == "done") | .row.iterations // 0]) as $v
+                  | if ($v | length) > 0 then (($v | add) / ($v | length)) else null end)})
+    | sort_by(-.issues)
+    | .[] | [.lesson, .issues, .done, (.iter // "n/a")] | @tsv' 2> /dev/null \
+    | while IFS=$'\t' read -r ls n d it; do
+      printf '  %-12s %6s %8s %11s\n' "$ls" "$n" "$d" "$(fmt "$it")"
+    done
+
+  # Never selected. Pruned and merged entries are excluded: they are absent
+  # on purpose, and listing them would bury the ones that are not.
+  lessons_file="${BOUCLE_HOME:-$(cd "$(dirname "$0")/.." && pwd)}/LESSONS.yml"
+  if [ -f "$lessons_file" ]; then
+    all_ids=$(awk '
+      /^[0-9]+:/ { if (id != "" && !skip) print "e" id; id = $0; sub(/:.*/, "", id); skip = 0; next }
+      /pruned:[[:space:]]*true|merged_into:/ { skip = 1 }
+      END { if (id != "" && !skip) print "e" id }
+    ' "$lessons_file" 2> /dev/null | sort -u)
+    seen=$(printf '%s\n' "$ROWS" | jq -s -r '
+      [.[] | select(type == "object") | (.lessons // [])[]] | unique | .[]' 2> /dev/null | sort -u)
+    never=$(comm -23 <(printf '%s\n' "$all_ids") <(printf '%s\n' "$seen") | paste -sd' ' - 2> /dev/null || true)
+    never_n=$(printf '%s' "$never" | wc -w | tr -d ' ')
+    echo
+    if [ "${never_n:-0}" -gt 0 ]; then
+      echo "Never selected ($never_n engine lessons, excluding pruned/merged):"
+      printf '  %s\n' "$never"
+      echo "  Each is injected into no prompt. Either the keywords never match"
+      echo "  the issues this project files, or the entry has outlived its bug."
+    else
+      echo "Every live engine lesson has been selected at least once."
+    fi
+  fi
 fi
 
 echo

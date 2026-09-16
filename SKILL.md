@@ -1,3 +1,14 @@
+---
+name: boucle
+description: |
+  The boucle protocol — the labels, markers, state machine and handoff rules a
+  boucle loop speaks. Use when interacting with a boucle loop on any consumer
+  repository: reading or writing boucle:* labels, emitting or parsing
+  <!-- boucle:* --> markers, posting a SHA-anchored verdict, driving an issue
+  through triage/worker/reviewer/e2e, or answering "what is this loop waiting
+  on". Runtime-agnostic and forge-agnostic (GitLab and GitHub).
+---
+
 # SKILL.md — Boucle protocol
 
 > **Source of truth for the boucle protocol.** This file is the behavioral

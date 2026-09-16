@@ -1103,6 +1103,45 @@ select_default_lessons() {
   ' "$file" 2> /dev/null | head -40 || true
 }
 
+# record_lessons_injected <source> <engine-block> <local-block>
+#
+# WHICH lessons this prompt carries, written where the health record can read
+# it. Boucle measures the SIZE of its prompt (prompt_chars, the trim ladder)
+# and never the effect of its contents: select_lessons is a keyword grep over
+# a 158k file capped at 80 lines, and nothing recorded what came back. An
+# entry that is never selected is dead weight; one selected on every issue
+# belongs in the system prompt rather than in a retrieval pass; and neither is
+# visible without this. health.jsonl is already the join table between what a
+# run was given and how it went — this adds the other half of "was given".
+#
+# A file, not a global: build_prompt runs inside $(...) — a subshell — and is
+# re-run by the budget ladder, so an exported variable would never reach the
+# health record and the last build is the one that shipped.
+#
+# Prefixes keep the two sources apart in one flat list: e<N> is an engine
+# lesson, l<N> one of this repository's own. The same number in the two files
+# is two unrelated entries (select_default_lessons says so), so an unprefixed
+# list would silently merge them.
+#
+# The SOURCE is what an empty list is evidence OF, the same distinction
+# skills_evidence draws: "withheld" (the experiment's none arm), "default"
+# (nothing matched, the critical set was substituted) and "matched" are three
+# different runs that an empty or short list alone cannot tell apart.
+record_lessons_injected() {
+  local source="$1" engine_block="$2" local_block="$3"
+  local ids
+  ids=$(
+    {
+      [ -n "$engine_block" ] && printf '%s\n' "$engine_block" | sed -n 's/^\([0-9][0-9]*\):.*/e\1/p'
+      [ -n "$local_block" ] && printf '%s\n' "$local_block" | sed -n 's/^\([0-9][0-9]*\):.*/l\1/p'
+      true
+    } | paste -sd, - 2> /dev/null || true
+  )
+  # Fail-open everywhere: measurement must never be what stops a run.
+  mkdir -p "$STATE_DIR" 2> /dev/null || true
+  printf '%s\n%s\n' "$source" "$ids" > "$STATE_DIR/.lessons-injected" 2> /dev/null || true
+}
+
 build_prompt() {
   local role="$1"
   local prompt=""
@@ -1575,9 +1614,13 @@ Apply the four-point admission test from AGENTS.md. If no candidate passes, emit
       local_block=$(select_lessons "$local_lessons" "$keywords" 40)
       # Nothing matched anywhere: fall back to the engine's critical set, so a
       # run is never left with no operating principles at all.
+      local lessons_source="matched"
       if [ -z "$engine_block" ] && [ -z "$local_block" ]; then
         engine_block=$(select_default_lessons "$engine_lessons")
+        lessons_source="default"
       fi
+      [ "$arm" = "none" ] && lessons_source="withheld"
+      record_lessons_injected "$lessons_source" "$engine_block" "$local_block"
 
       if [ -n "$engine_block" ] || [ -n "$local_block" ]; then
         prompt="${prompt}
@@ -1887,11 +1930,24 @@ emit_health_record() {
   if [ -z "$evidence" ] && type skills_evidence > /dev/null 2>&1; then
     evidence=$(skills_evidence "$AGENT_LOG" "$skills" 2> /dev/null || echo "")
   fi
+  # Which lessons the prompt carried, written by record_lessons_injected
+  # during the build. Absent means the build never reached the lesson stage
+  # (an early exit, or a role that is not given lessons at all) — recorded as
+  # "unbuilt" rather than as an empty match, which is a different finding.
+  local lessons="" lessons_source="unbuilt"
+  if [ -r "$STATE_DIR/.lessons-injected" ]; then
+    lessons_source=$(sed -n '1p' "$STATE_DIR/.lessons-injected" 2> /dev/null || echo "")
+    lessons=$(sed -n '2p' "$STATE_DIR/.lessons-injected" 2> /dev/null || echo "")
+    [ -n "$lessons_source" ] || lessons_source="unbuilt"
+  fi
+  local lessons_n=0
+  [ -n "$lessons" ] && lessons_n=$(printf '%s' "$lessons" | tr ',' '\n' | grep -c . || echo 0)
+  echo "[boucle:metrics] role=$ROLE iteration=$ITERATION lessons_n=$lessons_n lessons_source=$lessons_source lessons=${lessons:-none}" >&2
   boucle_health_record "$ISSUE" "$ROLE" "$ITERATION" "${AGENT_EXIT:-$rc}" \
     "${prompt_total_chars:-0}" "${h_pt:-}" "${h_cost:-}" \
     "${h_model:-}" "${h_provider:-}" \
     "$skills" "$(boucle_experiment_arm "$ISSUE" 2> /dev/null || echo full)" \
-    "$setup_fail" "$swarm" "$evidence" || true
+    "$setup_fail" "$swarm" "$evidence" "$lessons" "$lessons_source" || true
   return "$rc"
 }
 # ── 7c. Skill usage evidence (#49) ────────────────────────────────────

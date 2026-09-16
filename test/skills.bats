@@ -139,3 +139,104 @@ extract_skills_func() {
   assert_output --partial "When to use"
   assert_output --partial "Verification"
 }
+
+# ── Index descriptions (#50 follow-up) ────────────────────────────────
+#
+# The index is generated, and nothing validated the generator. Three shipped
+# entries reached every agent prompt carrying no trigger condition: two whose
+# description was a YAML block scalar, one whose SKILL.md had no frontmatter.
+
+@test "skills-index: a block-scalar description is published, not its '|'" {
+  T=$(mktemp -d)
+  mkdir -p "$T/effective-ui-design"
+  cat > "$T/effective-ui-design/SKILL.md" << 'SKILL'
+---
+name: effective-ui-design
+description: |
+  Professional UI design guidelines. Use when writing CSS or reviewing UI.
+license: MIT
+---
+SKILL
+  run bin/skills-index --dir "$T"
+  assert_success
+  assert_output --partial "Professional UI design guidelines"
+  refute_output --partial "effective-ui-design: |"
+  rm -rf "$T"
+}
+
+@test "skills-index: an indented continuation description is published" {
+  T=$(mktemp -d)
+  mkdir -p "$T/composition-patterns"
+  cat > "$T/composition-patterns/SKILL.md" << 'SKILL'
+---
+name: composition-patterns
+description:
+  React composition patterns that scale. Use when refactoring components
+  with boolean prop proliferation.
+license: MIT
+---
+SKILL
+  run bin/skills-index --dir "$T"
+  assert_success
+  assert_output --partial "React composition patterns that scale"
+  refute_output --regexp '^- composition-patterns$'
+  rm -rf "$T"
+}
+
+@test "skills-index: a following key is not swallowed into the description" {
+  # The collector stops at the first line back at column 0. Without that,
+  # 'license: MIT' and every later key would land in the advertised text.
+  T=$(mktemp -d)
+  mkdir -p "$T/s"
+  cat > "$T/s/SKILL.md" << 'SKILL'
+---
+name: s
+description: |
+  Only this sentence.
+license: MIT
+metadata:
+  author: someone
+---
+SKILL
+  run bin/skills-index --dir "$T"
+  assert_success
+  assert_output --partial "Only this sentence."
+  refute_output --partial "MIT"
+  refute_output --partial "someone"
+  rm -rf "$T"
+}
+
+@test "skills-index: a plain single-line description still works" {
+  T=$(mktemp -d)
+  mkdir -p "$T/grill-me"
+  printf -- '---\nname: grill-me\ndescription: Sharpen a plan through self-interrogation.\n---\n' \
+    > "$T/grill-me/SKILL.md"
+  run bin/skills-index --dir "$T"
+  assert_success
+  assert_output --partial "Sharpen a plan through self-interrogation."
+  rm -rf "$T"
+}
+
+@test "skills: every shipped skill is advertised with a description" {
+  # The regression gate. A skill published as a bare name gives the agent
+  # nothing to choose it on — the failure this index exists to prevent.
+  run bash -c "bin/skills-index | grep -vE '^- [^:]+: .+' || true"
+  assert_success
+  assert_output ""
+}
+
+@test "skills: the boucle protocol skill carries frontmatter" {
+  # It is a symlink to the root SKILL.md. Without frontmatter there, boucle's
+  # own protocol shipped in the catalogue as a bare name.
+  run head -1 SKILL.md
+  assert_output "---"
+  run bash -c "bin/skills-index | grep -E '^- boucle: .+'"
+  assert_success
+}
+
+@test "doctor: a skill with no description is counted, not passed over" {
+  run grep -q 'no_description=\$((no_description + 1))' bin/doctor
+  assert_success
+  run grep -q 'advertised with no description' bin/doctor
+  assert_success
+}

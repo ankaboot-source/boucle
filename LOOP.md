@@ -692,6 +692,60 @@ too. **The MR gate carries that risk**: if the iteration fails, its code never
 merges and neither does the lesson. The reviewer validates entries against
 the four-point admission test and may require removal.
 
+## Which lessons a prompt carried
+
+Boucle measures the **size** of its prompt with some care — `prompt_chars`,
+the 750/300/120 trim ladder, `BOUCLE_PROMPT_WARN_CHARS` — and never measured
+the **effect of its contents**. `select_lessons` is a keyword grep over a
+158k-character file, capped at 80 lines, and nothing recorded what came back.
+So no lesson could be shown to be dead weight, and none to be re-paid on
+every run.
+
+Each agent run now records the lesson ids its prompt carried, on the channel
+and in the file that already join "what the run was given" to "how it went".
+
+**Prefixed ids, because the numbers collide.** `e12` is engine lesson 12,
+`l3` is lesson 3 from this repository's own `LESSONS.yml`. The two files are
+merged, never overridden, and the same number in each is two unrelated
+entries — an unprefixed list would silently fuse them.
+
+**The source says what an empty list is evidence of.** The same distinction
+`skills_evidence` draws for skills:
+
+| `lessons_source` | What the run was given |
+| --- | --- |
+| `matched` | the keyword selection returned entries |
+| `default` | **nothing matched** — the critical set (#1/#2/#5/#6/#99) was substituted |
+| `withheld` | the `none` arm of `BOUCLE_EXPERIMENT` — no lessons by design |
+| `unbuilt` | the run exited before the prompt reached the lesson stage |
+
+Counting a `default` run as a selection would read the retrieval as working
+on exactly the issues where it found nothing.
+
+**Written to a file, not carried in a variable.** `build_prompt` runs inside
+a command substitution — a subshell — and the prompt-budget ladder re-runs it
+up to four times. An exported variable would never reach the health record,
+and the last build is the one that shipped.
+
+**Where it lands.** `.boucle-state/<issue>/health.jsonl` gains `lessons` (an
+array) and `lessons_source` per run; the per-issue row on the `boucle/metrics`
+branch gains `lessons`, `lessons_n` and `runs_lessons_default` /
+`runs_lessons_withheld` / `runs_lessons_unbuilt`, and its `schema` is **2**.
+Every schema-1 key keeps its name and meaning — the addition is additive.
+Fail-open throughout, like every other measurement here: an unwritable state
+directory is a missing row, never an exit code.
+
+**The reader is `bin/skills-stats --per-lesson`.** It prints each lesson id
+with the number of issues whose prompt carried it, and then the live engine
+lessons that **no** prompt ever carried — pruned and merged entries excluded,
+since those are absent on purpose.
+
+**What it answers.** A lesson that never appears in any row is shipped,
+re-synced on every engine update, and selected by nothing. A lesson that
+appears in every row is not being retrieved — it is being paid for on every
+run, and belongs in the system prompt instead. Neither is visible without
+this, and both are decisions about a file that only grows.
+
 ## Cost accounting
 
 Every agent invocation appends one entry to `.boucle-state/<issue>/cost.json`
