@@ -1,0 +1,256 @@
+#!/usr/bin/env bash
+# shellcheck shell=bash
+# bin/nav-assert — assertion helpers for functional browser navigation checks.
+#
+# SOURCED, not executed. A consumer's parcours script is a bash script that
+# sources this file and then drives the browser:
+#
+#   #!/usr/bin/env bash
+#   source "${BOUCLE_HOME:?}/bin/nav-assert"
+#   nav_viewport 390 844
+#   nav_open "/contact"
+#   nav_is visible "form[name=contact]"  "Le formulaire de contact s'affiche"
+#   nav_fill "#email" "test@example.com"
+#   nav_click "button[type=submit]"
+#   nav_is visible ".confirmation"       "Une confirmation s'affiche"
+#
+# Run against a preview by the reviewer stage (BOUCLE_REVIEW_COMMAND) and
+# against production by the e2e stage (BOUCLE_E2E_COMMAND). Only $BASE
+# changes between the two.
+#
+# ── Why this file exists at all ──────────────────────────────────────────
+# agent-browser's `is` commands are QUERIES, not assertions. Measured on
+# 0.27.0:
+#
+#   is visible <visible element>   → prints "true",  exit 0
+#   is visible <display:none>      → prints "false", exit 0   ← the trap
+#   is visible <absent element>    → prints "✗ Element not found", exit 1
+#   batch --bail "is visible <false>" "..."                    → exit 0
+#
+# `agent-browser is --help` says so plainly: "Checks the state of an element
+# and returns true/false." A parcours built on exit codes alone therefore
+# reports PASS on a broken UI, and `--bail` does not save it. Every assertion
+# here compares stdout to the literal "true" instead.
+#
+# ── Failure model ────────────────────────────────────────────────────────
+# Assertions never abort the script: they record and continue, so one run
+# reports every unmet criterion rather than only the first. An EXIT trap
+# prints the summary and sets the exit status. A parcours that runs ZERO
+# assertions exits non-zero — an empty or short-circuited script must never
+# read as PASS.
+#
+# ── Output contract ──────────────────────────────────────────────────────
+# One line per assertion, machine-greppable, carrying the criterion text so
+# the reviewer's verdict checklist can be built from the failures:
+#
+#   NAV: PASS — <label>
+#   NAV: FAIL — <label> (<reason>)
+#   NAV SUMMARY: <n> passed, <n> failed
+
+# Guard against double-sourcing (a parcours that sources a shared prelude).
+if [ -n "${_NAV_ASSERT_LOADED:-}" ]; then
+  return 0 2> /dev/null || exit 0
+fi
+_NAV_ASSERT_LOADED=1
+
+_NAV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/lib/agent-browser.sh
+. "$_NAV_DIR/lib/agent-browser.sh"
+
+_NAV_PASSED=0
+_NAV_FAILED=0
+# Set when the browser could not be resolved: every subsequent step reports
+# FAIL with that reason instead of dying on an unbound $AB.
+_NAV_BROKEN=""
+
+if [ -z "${BASE:-}" ]; then
+  # The stage exports BASE (preview URL at review, production URL post-merge).
+  # Unset means the parcours was launched outside the loop, or the stage could
+  # not resolve a URL. Report it as a FAIL verdict rather than crashing on an
+  # unbound variable: a parcours that dies before printing a line leaves the
+  # reviewer with no evidence at all.
+  _NAV_BROKEN="BASE is unset — no URL to navigate"
+  AB=""
+elif ! boucle_agent_browser_setup nav-assert; then
+  _NAV_BROKEN="browser unavailable"
+  AB=""
+fi
+
+# Session isolation. Executors are shared between jobs and issues; a session
+# left behind by a previous run would hand this parcours another issue's page
+# (the class of lesson #58 — never a fixed path, never a shared handle).
+_NAV_SESSION="boucle-nav-$$"
+
+# ── internals ────────────────────────────────────────────────────────────
+
+_nav_ab() {
+  [ -n "$_NAV_BROKEN" ] && return 1
+  "$AB" --session "$_NAV_SESSION" "$@"
+}
+
+_nav_pass() {
+  _NAV_PASSED=$((_NAV_PASSED + 1))
+  echo "NAV: PASS — $1"
+}
+
+_nav_fail() {
+  _NAV_FAILED=$((_NAV_FAILED + 1))
+  if [ -n "${2:-}" ]; then
+    echo "NAV: FAIL — $1 ($2)"
+  else
+    echo "NAV: FAIL — $1"
+  fi
+}
+
+# Resolve a path against $BASE. An absolute URL is passed through so a
+# parcours can assert on an external page when it has to.
+_nav_url() {
+  local base="${BASE:-}"
+  case "$1" in
+    http://* | https://*) echo "$1" ;;
+    *) echo "${base%/}/${1#/}" ;;
+  esac
+}
+
+_nav_report() {
+  local total=$((_NAV_PASSED + _NAV_FAILED))
+  # Best-effort cleanup; a leftover session must never change the verdict.
+  [ -z "$_NAV_BROKEN" ] && "$AB" --session "$_NAV_SESSION" close > /dev/null 2>&1
+
+  if [ "$total" -eq 0 ]; then
+    echo "NAV SUMMARY: no assertion ran — treated as FAIL"
+    exit 1
+  fi
+  echo "NAV SUMMARY: ${_NAV_PASSED} passed, ${_NAV_FAILED} failed"
+  [ "$_NAV_FAILED" -eq 0 ] || exit 1
+  exit 0
+}
+trap _nav_report EXIT
+
+# ── navigation (actions) ─────────────────────────────────────────────────
+# Actions DO exit non-zero when the element is missing, so their exit code is
+# trustworthy — unlike `is`. They are still recorded rather than fatal, so a
+# mistyped selector reports one FAIL instead of hiding the rest of the run.
+
+nav_open() {
+  local url label
+  url="$(_nav_url "$1")"
+  label="${2:-Ouvre $url}"
+  if [ -n "$_NAV_BROKEN" ]; then
+    _nav_fail "$label" "$_NAV_BROKEN"
+    return 1
+  fi
+  if _nav_ab open "$url" > /dev/null 2>&1; then
+    _nav_pass "$label"
+  else
+    _nav_fail "$label" "navigation failed"
+    return 1
+  fi
+}
+
+nav_viewport() {
+  # Emulation, not an assertion: it produces no verdict line. boucle's own
+  # default viewport list is mobile-first (BOUCLE_PREVIEW_VIEWPORTS starts at
+  # 390x844); a parcours should open on the phone size unless it says why not.
+  [ -n "$_NAV_BROKEN" ] && return 1
+  _nav_ab set viewport "$1" "$2" > /dev/null 2>&1 || true
+}
+
+nav_click() {
+  local sel label
+  sel="$1"
+  label="${2:-Clique sur $sel}"
+  if [ -n "$_NAV_BROKEN" ]; then
+    _nav_fail "$label" "$_NAV_BROKEN"
+    return 1
+  fi
+  if _nav_ab click "$sel" > /dev/null 2>&1; then
+    _nav_pass "$label"
+  else
+    _nav_fail "$label" "element not found or not clickable"
+    return 1
+  fi
+}
+
+nav_fill() {
+  local sel value label
+  sel="$1"
+  value="$2"
+  label="${3:-Saisit une valeur dans $sel}"
+  if [ -n "$_NAV_BROKEN" ]; then
+    _nav_fail "$label" "$_NAV_BROKEN"
+    return 1
+  fi
+  if _nav_ab fill "$sel" "$value" > /dev/null 2>&1; then
+    _nav_pass "$label"
+  else
+    _nav_fail "$label" "element not found or not fillable"
+    return 1
+  fi
+}
+
+# ── assertions ───────────────────────────────────────────────────────────
+
+# nav_is <visible|enabled|checked> <selector> [label]
+#
+# The whole point of this file: compare stdout to "true". agent-browser
+# returns exit 0 for BOTH "true" and "false" — only an absent element exits
+# non-zero — so an exit-code check would pass on a hidden element.
+nav_is() {
+  local state sel label out
+  state="$1"
+  sel="$2"
+  label="${3:-is $state $sel}"
+
+  if [ -n "$_NAV_BROKEN" ]; then
+    _nav_fail "$label" "$_NAV_BROKEN"
+    return 1
+  fi
+
+  out="$(_nav_ab is "$state" "$sel" 2> /dev/null || true)"
+  out="${out//[$'\t\r\n ']/}"
+
+  if [ "$out" = "true" ]; then
+    _nav_pass "$label"
+    return 0
+  fi
+
+  if [ "$out" = "false" ]; then
+    _nav_fail "$label" "expected $state, got false"
+  else
+    _nav_fail "$label" "element not found"
+  fi
+  return 1
+}
+
+# nav_text <selector> <expected-substring> [label]
+#
+# Content assertion. `get text` prints the element's text and exits non-zero
+# when the element is absent; the substring comparison is ours.
+nav_text() {
+  local sel expected label out
+  sel="$1"
+  expected="$2"
+  label="${3:-\"$expected\" apparaît dans $sel}"
+
+  if [ -n "$_NAV_BROKEN" ]; then
+    _nav_fail "$label" "$_NAV_BROKEN"
+    return 1
+  fi
+
+  if ! out="$(_nav_ab get text "$sel" 2> /dev/null)"; then
+    _nav_fail "$label" "element not found"
+    return 1
+  fi
+
+  case "$out" in
+    *"$expected"*)
+      _nav_pass "$label"
+      return 0
+      ;;
+    *)
+      _nav_fail "$label" "expected to contain \"$expected\""
+      return 1
+      ;;
+  esac
+}

@@ -211,6 +211,62 @@ For any non-static-site repo, set:
 - `BOUCLE_BUILD_CMD` — the consumer's build/verify command, or empty when the
   consumer's CI builds.
 
+### Functional navigation checks (`BOUCLE_REVIEW_COMMAND`)
+
+The reviewer's default verification is `curl` + `grep` against the preview,
+which cannot click, fill a field, or see anything JavaScript renders.
+`BOUCLE_REVIEW_COMMAND` is the reviewer-side analog of `BOUCLE_E2E_COMMAND`:
+a consumer-supplied command run against the deployed preview **before** the
+agent is invoked. Its output is injected into the agent's prompt as evidence
+(alongside `BOUCLE_MR_CHECKS`), never as work the agent redoes.
+
+Two properties are deliberate:
+
+- **Fail-open on the stage** — a crashing or missing check command never
+  blocks the loop. The stage always exits 0.
+- **Fail-closed on the verdict** — the command's exit code reaches the agent,
+  which MUST turn every `NAV: FAIL` line into a blocking `🔴` criterion. A
+  `TIMEOUT`, or a run where no assertion executed, is UNCERTAIN — never PASS.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `BOUCLE_REVIEW_COMMAND` | *(empty)* | Consumer-supplied functional check, run with `$BASE` = `BOUCLE_PREVIEW_URL`. Empty = no functional checks (reviewer behaves as before). Skipped with a log line when no preview URL exists. |
+| `BOUCLE_REVIEW_COMMAND_TIMEOUT` | `600` | Max seconds the command may run. Exceeding it kills the command and reports `TIMEOUT` (exit `124`). |
+| `BOUCLE_AGENT_BROWSER` | *(empty)* | Explicit path to the `agent-browser` CLI, bypassing PATH discovery. Used by the test suite to inject a stub; a consumer rarely needs it. |
+
+The parcours scripts themselves live in the consumer repo and are written by
+the **worker**, in the same MR as the feature — it already knows the selectors
+it just wrote, so nothing has to explore the site. `bin/nav-assert` is the
+helper they source:
+
+```bash
+#!/usr/bin/env bash
+source "${BOUCLE_HOME:?}/bin/nav-assert"
+nav_viewport 390 844
+nav_open "/contact"                       "La page contact s'ouvre"
+nav_is visible "form[name=contact]"       "Le formulaire de contact s'affiche"
+nav_fill "#email" "test@example.com"      "Le champ email accepte une saisie"
+nav_click "button[type=submit]"           "Le bouton envoie le formulaire"
+nav_is visible ".confirmation"            "Une confirmation s'affiche"
+```
+
+```
+BOUCLE_REVIEW_COMMAND="for f in tests/nav/*.sh; do bash \"\$f\" || exit 1; done"
+```
+
+One acceptance criterion, one assertion, the criterion's text as the label —
+the reviewer builds its verdict checklist from those labels. The same scripts
+run again post-merge through `BOUCLE_E2E_COMMAND`; only `$BASE` changes.
+
+**Why `bin/nav-assert` exists rather than calling the CLI directly:**
+`agent-browser`'s `is` commands are queries, not assertions. Measured on
+0.27.0, `is visible` prints `false` and **exits 0** for a `display:none`
+element (only an absent element exits non-zero), and `batch --bail` does not
+stop on it either. A parcours built on exit codes alone reports PASS on a
+broken UI. `nav_is` compares stdout to the literal `true` instead. A parcours
+that runs zero assertions also exits non-zero — an empty script must never
+read as PASS.
+
 ### Command-mode e2e (`BOUCLE_E2E_COMMAND`)
 
 By default e2e probes a live URL (URL-mode). A non-static-site repo has no
@@ -322,6 +378,9 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_EXTERNAL_DEPLOY_WAIT` | `600` | Max seconds to wait for consumer's own CI on merged commit. |
 | `BOUCLE_FILE_GATE` | `true` | Enable the file-impact gate. MR 1: declared marker + `check_file_gate` defers a worker whose issue claims files already claimed by an in-flight issue. MR 2 (deferred): adds a `git merge-tree` safety-net gate. `false` = disabled (fail-open, legacy behavior). |
 | `BOUCLE_REVIEW_CHECKS_WAIT` | `900` | Max seconds to wait for PR check suites in diff mode. |
+| `BOUCLE_REVIEW_COMMAND` | *(empty)* | Functional navigation checks run against the preview before the reviewer agent, with `$BASE` = `BOUCLE_PREVIEW_URL`. Output is injected into the agent's prompt as evidence. Fail-open on the stage, fail-closed on the verdict. See §Functional navigation checks. |
+| `BOUCLE_REVIEW_COMMAND_TIMEOUT` | `600` | Max seconds the functional check command may run; exceeding it reports `TIMEOUT`. |
+| `BOUCLE_AGENT_BROWSER` | *(empty)* | Explicit path to the `agent-browser` CLI, bypassing PATH discovery (used by the test suite to inject a stub). |
 | `BOUCLE_BUILD_CMD` | `npm ci && npm run build` | Build command. |
 | `BOUCLE_BUILD_OUTPUT` | `public` | Build output directory. |
 | `BOUCLE_BUILD_FEEDBACK` | *(empty)* | Build error tail from the previous failed `BOUCLE_BUILD_CMD` run, injected into the next worker iteration's prompt. Auto-managed — do not set manually. |

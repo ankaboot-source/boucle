@@ -109,6 +109,42 @@ boucle_collect_mr_images() {
   return 0
 }
 
+# boucle_review_command_evidence <base-url>
+#
+# Runs BOUCLE_REVIEW_COMMAND with $BASE pointing at the given URL and echoes
+# the evidence block (status + exit code + captured output) on stdout. Progress
+# goes to stderr so it never contaminates the block.
+#
+# ALWAYS returns 0: this is fail-open on the STAGE. A check command that
+# crashes must never block the loop — but its non-zero exit still reaches the
+# agent inside the block, which is fail-closed on the VERDICT (see bin/jc).
+boucle_review_command_evidence() {
+  local base="$1"
+  local nav_log nav_exit nav_timeout nav_status
+  nav_timeout="${BOUCLE_REVIEW_COMMAND_TIMEOUT:-600}"
+  nav_timeout=$(echo "$nav_timeout" | tr -cd '0-9')
+  [ -z "$nav_timeout" ] && nav_timeout=600
+  # Never a fixed path: executors are shared between jobs and issues, and a
+  # leftover file from another run gets read as ours (lesson #58's class).
+  nav_log=$(mktemp)
+  echo "[boucle] Running BOUCLE_REVIEW_COMMAND against $base (timeout ${nav_timeout}s)..." >&2
+  set +e
+  BASE="$base" BOUCLE_HOME="$BOUCLE_HOME" \
+    timeout --kill-after=30s --signal=TERM "$nav_timeout" \
+    bash -c "$BOUCLE_REVIEW_COMMAND" > "$nav_log" 2>&1
+  nav_exit=$?
+  set -e
+  case "$nav_exit" in
+    0) nav_status="PASS" ;;
+    124) nav_status="TIMEOUT" ;;
+    *) nav_status="FAIL" ;;
+  esac
+  echo "[boucle] Functional navigation checks: $nav_status (exit $nav_exit)" >&2
+  printf '%s (exit %s)\n\n%s\n' "$nav_status" "$nav_exit" "$(tail -c 4000 "$nav_log")"
+  rm -f "$nav_log"
+  return 0
+}
+
 boucle_ci_reviewer() {
   # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script
   # under set -eo pipefail. Without pipefail, the var is just empty (which
@@ -316,6 +352,30 @@ boucle_ci_reviewer() {
   fi
 
   export BOUCLE_PREVIEW_URL="$PREVIEW_URL"
+
+  # ── Functional navigation checks (BOUCLE_REVIEW_COMMAND) ─────────
+  # The reviewer-side analog of BOUCLE_E2E_COMMAND: a consumer-supplied
+  # command run against the preview BEFORE the agent, whose output is
+  # injected into the agent's prompt as EVIDENCE (like BOUCLE_MR_CHECKS) —
+  # never as work the agent redoes. Two reasons it works this way:
+  #   - the agent's budget: reviewer.md mandates a posted draft by step 5,
+  #     which a live click-through would burn on its own;
+  #   - determinism: the functional verdict is an exit code, not a grep
+  #     interpreted by a model. `curl | grep` cannot click.
+  #
+  # Fail-open on the STAGE (a broken check command must never block the
+  # loop) and fail-closed on the VERDICT (a non-zero exit reaches the agent
+  # as a blocking criterion — see bin/jc). Same command, same file, runs
+  # again post-merge via BOUCLE_E2E_COMMAND with $BASE pointing at prod.
+  export BOUCLE_REVIEW_EVIDENCE=""
+  if [ -n "${BOUCLE_REVIEW_COMMAND:-}" ]; then
+    if [ -z "$PREVIEW_URL" ]; then
+      echo "[boucle] BOUCLE_REVIEW_COMMAND is set but no preview URL is available — skipping functional checks (nothing to navigate)."
+    else
+      BOUCLE_REVIEW_EVIDENCE=$(boucle_review_command_evidence "$PREVIEW_URL")
+      export BOUCLE_REVIEW_EVIDENCE
+    fi
+  fi
 
   # ── Diff review mode ─────────────────────────────────────────────
   # When BOUCLE_REVIEW_MODE=diff (or no preview URL could be extracted

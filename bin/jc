@@ -1406,6 +1406,15 @@ ${BOUCLE_PREEXISTING_FAILURES}
 ---
 "
       fi
+      if [ -n "${BOUCLE_REVIEW_EVIDENCE:-}" ]; then
+        prompt="${prompt}
+Functional navigation checks (BOUCLE_REVIEW_COMMAND — a real browser drove the deployed preview BEFORE you were invoked; each \`NAV:\` line is a criterion that was actually clicked through, not inferred from HTML):
+---
+${BOUCLE_REVIEW_EVIDENCE}
+---
+Treat these as ESTABLISHED FACTS — do NOT re-verify them with curl, and do NOT spend steps reproducing them. Every \`NAV: FAIL\` line is a BLOCKING criterion: copy it into your verdict as a \`- [ ] 🔴\` item using its label, and the verdict is FAIL. A \`NAV: PASS\` line is a criterion you may mark \`- [x]\` with \"vérifié par navigation fonctionnelle\" as the method. A TIMEOUT, or a summary reading \"no assertion ran\", is NOT a PASS — mark those criteria UNCERTAIN.
+"
+      fi
       if [ -n "${BOUCLE_EVIDENCE_PACK:-}" ]; then
         prompt="${prompt}
 Evidence pack (charter docs at the base branch + diff brief, produced by bin/build-evidence-pack — grade design/architecture/conformance criteria AGAINST these excerpts; apply the dual-delta rule when the MR itself modifies a charter):
