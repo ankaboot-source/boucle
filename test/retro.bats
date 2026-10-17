@@ -15,6 +15,15 @@ setup() {
   load 'test_helper/bats-assert/load'
   REPO="$BATS_TEST_DIRNAME/.."
   TMP=$(mktemp -d)
+  # Hermetic repository identity. This suite also runs in CI, where the forge
+  # exports the REAL identity of the checkout (on the engine's own workflow:
+  # GITHUB_REPOSITORY=ankaboot-source/boucle). `_retro_is_upstream_repo` reads
+  # that before `origin`, so a consumer fixture would silently resolve to the
+  # upstream and invert the assertion — green on a dev machine, red in CI.
+  # Tests that need an identity export it explicitly.
+  unset GITHUB_REPOSITORY GITHUB_SERVER_URL GITHUB_API_URL \
+    CI_PROJECT_ID CI_PROJECT_NAME CI_PROJECT_PATH CI_REPOSITORY_URL \
+    BOUCLE_PROJECT_ID BOUCLE_PROJECT_PATH || true
 }
 
 teardown() {

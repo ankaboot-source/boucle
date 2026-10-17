@@ -12,6 +12,13 @@ setup() {
   load 'test_helper/bats-assert/load'
   REPO="$BATS_TEST_DIRNAME/.."
   TMP=$(mktemp -d)
+  # Hermetic repository identity — see test/retro.bats: in CI the forge exports
+  # the real checkout identity, which `_retro_is_upstream_repo` reads before
+  # `origin`; a consumer fixture would resolve to the upstream and invert the
+  # T2 gating assertions. Tests that need an identity export it explicitly.
+  unset GITHUB_REPOSITORY GITHUB_SERVER_URL GITHUB_API_URL \
+    CI_PROJECT_ID CI_PROJECT_NAME CI_PROJECT_PATH CI_REPOSITORY_URL \
+    BOUCLE_PROJECT_ID BOUCLE_PROJECT_PATH || true
   mkdir -p "$TMP/home/bin" "$TMP/ws"
 
   # The fake bin/jc: records how it was invoked, writes the agent log the
