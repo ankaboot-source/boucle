@@ -1065,6 +1065,33 @@ forge_issue_create_in() {
   printf '%s\n' "$number"
 }
 
+# forge_label_create_in <repo> <token> <name> <color>
+#
+# Idempotent label creation on the upstream (the upstream is always GitHub).
+# The rétro's anti-loop guard depends on boucle:report EXISTING on the
+# upstream — an issue created without it could be triaged there. Best-effort:
+# callers fail-open. Same create-if-absent flow as forge_label_create.
+forge_label_create_in() {
+  local repo="$1" token="$2" name="$3" color="$4"
+  [ -n "$repo" ] && [ -n "$token" ] && [ -n "$name" ] || return 1
+  color="${color#\#}"
+  GH_TOKEN="$token" gh api "/repos/$repo/labels/$name" > /dev/null 2>&1 && return 0
+  GH_TOKEN="$token" gh api -X POST "/repos/$repo/labels" \
+    -f name="$name" -f color="$color" > /dev/null 2>&1
+}
+
+# forge_issue_get_in <repo> <token> <iid>
+# Read one upstream issue, normalizing .body → .description like the generic
+# forge_issue_get (the T2 chain reads .title and .description from it).
+# Returns non-zero on API error.
+forge_issue_get_in() {
+  local repo="$1" token="$2" iid="$3"
+  [ -n "$repo" ] && [ -n "$token" ] && [ -n "$iid" ] || return 1
+  local out
+  out=$(GH_TOKEN="$token" gh api "/repos/$repo/issues/$iid" 2> /dev/null) || return 1
+  printf '%s\n' "$out" | jq -c '. + {description: (.description // .body // "")}' 2> /dev/null || return 1
+}
+
 # forge_issue_note_in <repo> <token> <iid> <body>
 # No stamp_agent_marker: the rétro posts upstream as a CONTRIBUTOR, and the
 # agent marker would identify the comment as boucle-authored. Callers scrub

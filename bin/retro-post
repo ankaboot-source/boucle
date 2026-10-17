@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# bin/retro-post — agent-facing posting helper for the rétro (#139).
+#
+# The retro agent is a CONTRIBUTOR: it creates the local report issue, and it
+# enriches or creates proposals upstream. It MUST NOT call glab/gh/curl
+# directly, because two things have to happen in code for every body:
+#
+#   1. retro_scrub() strips consumer identity from the body (LESSONS.yml
+#      lesson #38) — the prompt is not the authority, this script is;
+#   2. BOUCLE_RETRO_DRY_RUN makes the whole run write-free, including this
+#      path (a dry run must not steal the window by recording a run either —
+#      the stage handles that side).
+#
+# bin/forge-note is the precedent for agent-facing posting CLIs. The logic
+# lives in lib/boucle-ci/retro.sh (retro_post_*) so it is unit-testable.
+#
+# Usage:
+#   bin/retro-post report --title <t> --message-file <f>
+#   bin/retro-post enrich <upstream_iid> --message-file <f>
+#   bin/retro-post create --title <t> --message-file <f>
+#   bin/retro-post pr --title <t> --head <branch> --base <base> --message-file <f>
+#   bin/retro-post body --message-file <f>          # scrub only, print
+#
+# --message, --message-file and --message-stdin are interchangeable.
+#
+# Output (stdout): report=<iid> | created=<iid> | enriched=<iid> | pr=<iid>.
+# Dry-run: logs "[retro] dry-run: skip <what>" and prints no id.
+
+set -euo pipefail
+
+BOUCLE_HOME="${BOUCLE_HOME:-$(cd "$(dirname "$0")/.." && pwd)}"
+export BOUCLE_HOME
+
+# The active backend serves the CONSUMER repo (the local report issue). The
+# upstream (*_in) helpers live in github.sh and are loaded on demand by
+# _retro_upstream, so a GitLab consumer can still post upstream.
+# shellcheck source=/dev/null
+source "$BOUCLE_HOME/bin/forge/common.sh"
+forge_init
+
+# shellcheck source=/dev/null
+source "$BOUCLE_HOME/lib/boucle.sh"
+# shellcheck source=/dev/null
+source "$BOUCLE_HOME/lib/boucle-ci/retro.sh"
+
+CMD="${1:-}"
+if [ -z "$CMD" ]; then
+  echo "usage: bin/retro-post <report|enrich|create|pr|body> [args]" >&2
+  exit 1
+fi
+shift || true
+
+TITLE=""
+IID=""
+HEAD=""
+BASE=""
+MESSAGE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --title)
+      TITLE="${2:?--title requires a value}"
+      shift 2
+      ;;
+    --message)
+      MESSAGE="${2:?--message requires a value}"
+      shift 2
+      ;;
+    --message-file)
+      MESSAGE=$(cat "${2:?--message-file requires a path}")
+      shift 2
+      ;;
+    --message-stdin)
+      MESSAGE=$(cat)
+      shift
+      ;;
+    --head)
+      HEAD="${2:?--head requires a value}"
+      shift 2
+      ;;
+    --base)
+      BASE="${2:?--base requires a value}"
+      shift 2
+      ;;
+    *)
+      if [ -z "$IID" ]; then
+        IID="$1"
+        shift
+      else
+        echo "Unknown argument: $1" >&2
+        exit 1
+      fi
+      ;;
+  esac
+done
+
+if [ "$CMD" != "body" ] && [ -z "$MESSAGE" ]; then
+  echo "ERROR: no body provided. Use --message, --message-file, or --message-stdin." >&2
+  exit 1
+fi
+
+case "$CMD" in
+  body)
+    printf '%s' "$MESSAGE" | retro_scrub
+    ;;
+  report)
+    retro_post_report "$TITLE" "$MESSAGE"
+    ;;
+  create)
+    retro_post_create "$TITLE" "$MESSAGE"
+    ;;
+  enrich)
+    retro_post_enrich "$IID" "$MESSAGE"
+    ;;
+  pr)
+    retro_post_pr "$TITLE" "$HEAD" "$BASE" "$MESSAGE"
+    ;;
+  *)
+    echo "Unknown retro-post command: $CMD (expected: report|enrich|create|pr|body)" >&2
+    exit 1
+    ;;
+esac

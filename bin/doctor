@@ -122,10 +122,22 @@ run_config_audit() {
   # skipped cleanly — fail-open, never a blocking failure, never a WARN on
   # every sweep. But a consumer who left the default on probably wanted the
   # flywheel, and nothing else would ever tell them it is inert. Advisory.
+  #
+  # Resolve the token through the SAME helper the loop uses: on the engine
+  # (dogfood), BOUCLE_TOKEN doubles as the upstream token when the repo IS
+  # the upstream — a second PAT is not needed there, and an advisory would be
+  # wrong. On a GitLab consumer the fallback never applies (BOUCLE_TOKEN is a
+  # GitLab token).
   case "$(printf '%s' "${BOUCLE_RETRO_ENABLED:-true}" | tr '[:upper:]' '[:lower:]')" in
     false | 0 | no | off) ;;
     *)
-      if [ -z "${BOUCLE_UPSTREAM_TOKEN:-}" ]; then
+      local retro_token=""
+      if type retro_upstream_token > /dev/null 2>&1; then
+        retro_token=$(retro_upstream_token 2> /dev/null || echo "")
+      else
+        retro_token="${BOUCLE_UPSTREAM_TOKEN:-}"
+      fi
+      if [ -z "$retro_token" ]; then
         audit_advisory "BOUCLE_RETRO_ENABLED=true without BOUCLE_UPSTREAM_TOKEN" \
           "Rétro participation is skipped (fail-open): no anonymized proposal reaches the upstream engine. Set a GitHub PAT with public_repo scope at $vars_url, or set BOUCLE_RETRO_ENABLED=false."
       fi
@@ -288,6 +300,12 @@ run_config_audit() {
 }
 
 if [ "$AUDIT_MODE" -eq 1 ]; then
+  # Load the shared helpers so the rétro advisory resolves the upstream token
+  # through the SAME helper the loop uses (BOUCLE_UPSTREAM_TOKEN, else
+  # BOUCLE_TOKEN when the repo IS the upstream). Fail-open: an old install
+  # without lib/ still audits, with the advisory falling back to the raw var.
+  # shellcheck source=/dev/null
+  . "${BOUCLE_HOME:-.}/lib/boucle.sh" 2> /dev/null || true
   run_config_audit
   exit $?
 fi

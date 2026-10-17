@@ -2950,24 +2950,14 @@ _retro_repo_from_remote() {
   printf '%s\n' "${cleaned%.git}"
 }
 
-# retro_contribute_enabled
+# _retro_is_upstream_repo
 #
-# T2: may this repo open a PR on the upstream, with the consumer's identity?
-#
-#   explicit true / 1 / yes / on   → yes
-#   explicit false / 0 / no / off  → no
-#   auto (default), unset, typo    → yes ONLY when the current repo IS the
-#     upstream (BOUCLE_UPSTREAM_REPO). Every identity signal available is
-#     compared: GITHUB_REPOSITORY, BOUCLE_PROJECT_PATH, BOUCLE_PROJECT_ID
-#     (GitLab ids are numeric and simply never match the upstream slug) and
-#     the origin remote URL. A consumer therefore never contributes by
-#     default, and an explicit CI variable overrides either way.
-retro_contribute_enabled() {
-  retro_enabled || return 1
-  case "$(printf '%s' "${BOUCLE_RETRO_CONTRIBUTE:-auto}" | tr '[:upper:]' '[:lower:]')" in
-    true | 1 | yes | on) return 0 ;;
-    false | 0 | no | off) return 1 ;;
-  esac
+# True when the current repository IS BOUCLE_UPSTREAM_REPO. Every identity
+# signal available is compared: GITHUB_REPOSITORY, BOUCLE_PROJECT_PATH,
+# BOUCLE_PROJECT_ID (GitLab ids are numeric and simply never match the
+# upstream slug) and the origin remote URL. ONE definition of "self", shared
+# by the T2 auto-detection and the self-targeting token fallback below.
+_retro_is_upstream_repo() {
   local upstream="${BOUCLE_UPSTREAM_REPO:-ankaboot-source/boucle}"
   local candidate slug
   for candidate in \
@@ -2987,15 +2977,58 @@ retro_contribute_enabled() {
   return 1
 }
 
+# retro_contribute_enabled
+#
+# T2: may this repo open a PR on the upstream, with the consumer's identity?
+#
+#   explicit true / 1 / yes / on   → yes
+#   explicit false / 0 / no / off  → no
+#   auto (default), unset, typo    → yes ONLY when the current repo IS the
+#     upstream (BOUCLE_UPSTREAM_REPO) — see _retro_is_upstream_repo. A
+#     consumer therefore never contributes by default, and an explicit CI
+#     variable overrides either way.
+retro_contribute_enabled() {
+  retro_enabled || return 1
+  case "$(printf '%s' "${BOUCLE_RETRO_CONTRIBUTE:-auto}" | tr '[:upper:]' '[:lower:]')" in
+    true | 1 | yes | on) return 0 ;;
+    false | 0 | no | off) return 1 ;;
+  esac
+  _retro_is_upstream_repo
+}
+
+# retro_upstream_token
+#
+# The token the rétro posts upstream with. BOUCLE_UPSTREAM_TOKEN always wins.
+#
+# Fallback — DELIBERATELY narrow: when the current repo IS the upstream repo
+# AND the forge is GitHub, BOUCLE_TOKEN is used. The engine (dogfood, T2
+# auto=true) would otherwise need a second PAT for its OWN repository, and a
+# self-targeting PAT is exactly what a human contributor to their own repo
+# uses. A consumer is unaffected: its BOUCLE_TOKEN is scoped to its own repo
+# and _retro_is_upstream_repo is false there, so the token is never even
+# considered. On GitLab the fallback NEVER applies — BOUCLE_TOKEN is a GitLab
+# token, not a GitHub credential.
+retro_upstream_token() {
+  if [ -n "${BOUCLE_UPSTREAM_TOKEN:-}" ]; then
+    printf '%s\n' "$BOUCLE_UPSTREAM_TOKEN"
+    return 0
+  fi
+  [ "${BOUCLE_FORGE:-}" = "github" ] || return 1
+  _retro_is_upstream_repo || return 1
+  [ -n "${BOUCLE_TOKEN:-}" ] || return 1
+  printf '%s\n' "$BOUCLE_TOKEN"
+}
+
 # retro_upstream_ready
 #
-# Can this run actually reach the upstream? Enabled AND a non-empty token.
+# Can this run actually reach the upstream? Enabled AND a non-empty token
+# (retro_upstream_token, so the engine's self-targeting fallback counts).
 # Absence is not an error: the rétro is skipped cleanly (fail-open), and
 # `bin/doctor --audit` is where the consumer is told about it — an advisory,
 # never a WARN on every sweep.
 retro_upstream_ready() {
   retro_enabled || return 1
-  [ -n "${BOUCLE_UPSTREAM_TOKEN:-}" ]
+  [ -n "$(retro_upstream_token 2> /dev/null)" ]
 }
 
 # retro_dry_run

@@ -173,14 +173,16 @@ EOF
   assert_success
 }
 
-@test "retro: upstream readiness needs an enabled retro AND a non-empty token" {
+@test "retro: upstream readiness needs an enabled retro AND a resolvable token" {
   lib
-  unset BOUCLE_RETRO_ENABLED BOUCLE_UPSTREAM_TOKEN || true
-  run retro_upstream_ready
-  assert_failure
-
-  export BOUCLE_UPSTREAM_TOKEN=
-  run retro_upstream_ready
+  unset BOUCLE_RETRO_ENABLED BOUCLE_UPSTREAM_TOKEN BOUCLE_TOKEN BOUCLE_FORGE \
+    BOUCLE_PROJECT_ID BOUCLE_PROJECT_PATH GITHUB_REPOSITORY || true
+  # A scratch checkout (no upstream origin) so the self-targeting fallback
+  # cannot accidentally apply from the engine repo's own origin.
+  SCRATCH="$TMP/no-token"
+  mkdir -p "$SCRATCH"
+  git init -q "$SCRATCH"
+  run run_in_scratch "$SCRATCH" retro_upstream_ready
   assert_failure
 
   export BOUCLE_UPSTREAM_TOKEN=ghp_fake
@@ -189,6 +191,46 @@ EOF
 
   export BOUCLE_RETRO_ENABLED=false
   run retro_upstream_ready
+  assert_failure
+}
+
+@test "retro token: the explicit BOUCLE_UPSTREAM_TOKEN wins everywhere" {
+  lib
+  unset BOUCLE_FORGE BOUCLE_TOKEN || true
+  export BOUCLE_UPSTREAM_TOKEN=ghp_explicit BOUCLE_UPSTREAM_REPO=ankaboot-source/boucle
+  run retro_upstream_token
+  assert_success
+  assert_output "ghp_explicit"
+}
+
+@test "retro token: self-targeting fallback — BOUCLE_TOKEN when the repo IS the upstream, on GitHub" {
+  lib
+  unset BOUCLE_UPSTREAM_TOKEN || true
+  export BOUCLE_FORGE=github BOUCLE_TOKEN=ghp_self
+  export BOUCLE_UPSTREAM_REPO=ankaboot-source/boucle GITHUB_REPOSITORY=ankaboot-source/boucle
+  run retro_upstream_token
+  assert_success
+  assert_output "ghp_self"
+}
+
+@test "retro token: no fallback for a consumer, whatever GitHub token it carries" {
+  lib
+  unset BOUCLE_UPSTREAM_TOKEN GITHUB_REPOSITORY BOUCLE_PROJECT_PATH BOUCLE_PROJECT_ID || true
+  export BOUCLE_FORGE=github BOUCLE_TOKEN=ghp_consumer BOUCLE_UPSTREAM_REPO=ankaboot-source/boucle
+  SCRATCH="$TMP/consumer-token"
+  mkdir -p "$SCRATCH"
+  git init -q "$SCRATCH"
+  git -C "$SCRATCH" remote add origin https://framagit.org/asso/site.git
+  run run_in_scratch "$SCRATCH" retro_upstream_token
+  assert_failure
+}
+
+@test "retro token: NEVER the GitLab token — a GitLab credential is not a GitHub one" {
+  lib
+  unset BOUCLE_UPSTREAM_TOKEN || true
+  export BOUCLE_FORGE=gitlab BOUCLE_TOKEN=glpat_gitlab
+  export BOUCLE_UPSTREAM_REPO=ankaboot-source/boucle GITHUB_REPOSITORY=ankaboot-source/boucle
+  run retro_upstream_token
   assert_failure
 }
 
