@@ -417,6 +417,20 @@ EOF
   [ "$guard_line" -lt "$triage_line" ]
 }
 
+@test "dispatch: the rétro guard runs before the bot-assignment triage route (N4)" {
+  # A boucle:retro report must be a noop even when the bot was just
+  # assigned: the assignment branch is an entry route that precedes label
+  # routing, so a guard below it would let the loop adopt its own report.
+  guard_line=$(grep -n 'Rétro artefact guard' "$REPO/lib/boucle-ci/dispatch.sh" | head -1 | cut -d: -f1)
+  bot_line=$(grep -n 'BOT_JUST_ASSIGNED" = "true"' "$REPO/lib/boucle-ci/dispatch.sh" | head -1 | cut -d: -f1)
+  [ -n "$guard_line" ] && [ -n "$bot_line" ]
+  [ "$guard_line" -lt "$bot_line" ]
+  # The guard itself exits through dispatch_noop for the label.
+  block=$(awk '/Rétro artefact guard/,/^  fi$/' "$REPO/lib/boucle-ci/dispatch.sh")
+  echo "$block" | grep -q 'dispatch_retro_artifact'
+  echo "$block" | grep -q 'dispatch_noop'
+}
+
 # ── upstream forge helpers ─────────────────────────────────────────────
 
 @test "github: forge_issue_list_in prints number-tab-title lines and excludes PRs" {

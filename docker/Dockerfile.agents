@@ -14,6 +14,7 @@
 #   - make + g++                    — node-gyp (npm ci), and `make check`
 #   - procps + time                 — bin/jc peak-RSS accounting
 #   - glab 1.118.0                  — GitLab CLI (API calls)
+#   - gh 2.89.0                     — GitHub CLI (rétro upstream posts, B4)
 #   - jcode v0.84.0                 — agent runtime (Rust binary, replaces opencode/pi)
 #   - codebase-memory-mcp           — knowledge-graph MCP server
 #   - mermaid + jsdom               — bin/check-mermaid (diagram syntax gate)
@@ -79,6 +80,20 @@ RUN mkdir -p /tmp/glab \
     && rm -rf /tmp/glab.tar.gz /tmp/glab \
     && GLAB_NO_UPDATE_NOTIFIER=true glab version
 
+# gh — GitHub CLI (B4). The rétro's upstream posts and its digest's
+# upstream-candidate list go through the GitHub forge helpers even on a
+# GitLab consumer — the upstream is ALWAYS GitHub. Keep in sync with GH_VER
+# in .gitlab-ci.yml's before_script (that guard reinstalls on mismatch, and
+# the before_script install is offline-safe: gh is fail-open for every
+# GitLab-native job).
+ARG GH_VERSION=2.89.0
+RUN mkdir -p /tmp/gh \
+    && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -o /tmp/gh.tar.gz \
+    && tar -xzf /tmp/gh.tar.gz -C /tmp/gh \
+    && install -m 0755 "/tmp/gh/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh \
+    && rm -rf /tmp/gh.tar.gz /tmp/gh \
+    && gh --version
+
 # jcode — agent runtime (standalone Rust binary, no node dependency)
 # Keep in sync with JCODE_VER in .gitlab-ci.yml's before_script and in
 # .github/workflows/boucle.yml: that guard compares `jcode --version` to the
@@ -142,7 +157,7 @@ RUN npm install -g "mermaid@${MERMAID_VERSION}" "jsdom@${JSDOM_VERSION}"
 # and dies on `make: not found` in a log that never names the image.
 RUN set -eu; \
     for t in node npm git jq curl python3 make g++ tar xz pgrep unzip \
-             chromium agent-browser glab jcode; do \
+             chromium agent-browser glab gh jcode; do \
       command -v "$t" > /dev/null 2>&1 || { echo "MISSING: $t" >&2; exit 1; }; \
     done; \
     [ -x /usr/bin/time ] || { echo "MISSING: /usr/bin/time" >&2; exit 1; }; \

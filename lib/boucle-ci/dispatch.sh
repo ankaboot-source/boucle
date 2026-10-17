@@ -926,6 +926,17 @@ boucle_ci_dispatch() {
   fi
   echo "dispatch: labels for #$IID: $LABELS"
 
+  # ── Rétro artefact guard (#139, N4) ─────────────────────────────────
+  # boucle:retro / boucle:report are boucle's own artefacts, never work.
+  # This sits ABOVE every entry route — the bot-assignment triage path, the
+  # label routing and the unlabeled-open route — because all three would
+  # otherwise adopt the loop's own report: the retro job creates it with the
+  # label, but a label edit, a comment or a re-add can land it on any route.
+  if dispatch_retro_artifact "$LABELS"; then
+    echo "Issue #$IID carries boucle:retro or boucle:report — boucle's own rétro artefact, never dispatched."
+    dispatch_noop
+  fi
+
   # Resolve: issue opened, body edited in triage/needs-info/todo, or author reply on needs-info
   ACTION=$(jq -r '.object_attributes.action // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true
 
@@ -988,17 +999,6 @@ boucle_ci_dispatch() {
   # would triage the board and the loop would start working on itself.
   if echo "$LABELS" | tr ',' '\n' | grep -qx "boucle:board"; then
     echo "Issue #$IID is the boucle status board — never dispatched."
-    dispatch_noop
-  fi
-
-  # ── Rétro artefact guard (#139) ─────────────────────────────────────
-  # mirrors the board guard above, and MUST stay before the label routing
-  # and the unlabeled-open route below: a boucle:retro report is created by
-  # the retro job with the label already set, but a label edit, a comment or
-  # a removal/re-add can send the event down the open path, where triage
-  # would adopt the loop's own report.
-  if dispatch_retro_artifact "$LABELS"; then
-    echo "Issue #$IID carries boucle:retro or boucle:report — boucle's own rétro artefact, never dispatched."
     dispatch_noop
   fi
 

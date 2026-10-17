@@ -344,6 +344,31 @@ default:
       fi
       unset _GLAB_INSTALLED
 
+      # ── gh CLI (GitHub) ────────────────────────────────────────────
+      # The rétro's upstream posts (bin/retro-post → the *_in GitHub
+      # helpers) and the digest's upstream-candidate list use the GitHub
+      # CLI even on a GitLab consumer: the upstream is ALWAYS GitHub. No
+      # other GitLab job needs gh, so the install is OFFLINE-SAFE — a
+      # failed download warns once and the loop stays GitLab-native.
+      GH_VER="2.89.0"
+      _GH_INSTALLED="$(gh --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)"
+      if [ -z "$_GH_INSTALLED" ] || [ "$_GH_INSTALLED" != "$GH_VER" ]; then
+        echo "Installing gh v${GH_VER} (was: ${_GH_INSTALLED:-MISSING})..."
+        mkdir -p "$HOME/.local/bin"
+        GH_TMP="/tmp/gh-${CI_JOB_ID:-local}"
+        if curl -sL "https://github.com/cli/cli/releases/download/v${GH_VER}/gh_${GH_VER}_linux_amd64.tar.gz" -o "$GH_TMP.tar.gz" \
+          && mkdir -p "$GH_TMP" \
+          && tar xzf "$GH_TMP.tar.gz" -C "$GH_TMP"; then
+          cp "$GH_TMP/gh_${GH_VER}_linux_amd64/bin/gh" "$HOME/.local/bin/gh" 2>/dev/null \
+            || cp "$GH_TMP/bin/gh" "$HOME/.local/bin/gh" 2>/dev/null || true
+          chmod +x "$HOME/.local/bin/gh" 2>/dev/null || true
+        else
+          echo "[boucle] WARN: could not install gh — the rétro's upstream posts are skipped (fail-open)"
+        fi
+        rm -rf "$GH_TMP" "$GH_TMP.tar.gz"
+      fi
+      unset _GH_INSTALLED
+
       # ── Locate the boucle engine ───────────────────────────────────
       # Consumers install boucle as a git submodule at .boucle/ — engine
       # files (bin/, lib/, .jcode/) resolve via $BOUCLE_HOME. The boucle
@@ -531,6 +556,7 @@ default:
       _probe make           "npm ci native modules (node-gyp), make check"
       _probe git            "every forge operation"
       _probe jq             "every state read"
+      _probe gh             "the rétro's upstream posts (fail-open, GitLab jobs stay native)"
       # mermaid + jsdom are npm globals, not binaries — bin/check-mermaid
       # exits 3 (treated as PASS) when they are absent, so a missing pair
       # silently disables the diagram gate rather than failing it.
