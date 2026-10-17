@@ -138,6 +138,13 @@ run_config_audit() {
       "If you are not in UTC, the quiet window applies at the wrong hours. Set an IANA name, e.g. Europe/Paris."
   fi
 
+  # Bot-PR auto-merge opt-in (#138) — worth knowing what the loop
+  # will merge without a human.
+  if [ "${BOUCLE_AUTOMERGE_ENABLED:-false}" = "true" ]; then
+    audit_advisory "BOUCLE_AUTOMERGE_ENABLED=true" \
+      "boucle auto-merges dependency-bot PRs (patch/minor, plus security at any version) and chore(boucle): sync MRs once checks are green. Worker MRs stay human-gated (LESSONS #85)."
+  fi
+
   # preview review mode with the renderer disabled.
   if [ "${BOUCLE_REVIEW_MODE:-preview}" = "preview" ] && [ "${BOUCLE_PREVIEW_DISABLE:-false}" = "true" ]; then
     audit_advisory "BOUCLE_PREVIEW_DISABLE=true with BOUCLE_REVIEW_MODE=preview" \

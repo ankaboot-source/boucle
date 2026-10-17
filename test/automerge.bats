@@ -250,3 +250,17 @@ automerge_funcs() {
   printf '%s\n' "$region" | grep -q 'group: boucle-merge'
   printf '%s\n' "$region" | grep -qF "inputs.BOUCLE_ROLE == 'automerge'"
 }
+
+@test "audit: automerge opt-in is worth knowing (advisory present)" {
+  run grep -q 'BOUCLE_AUTOMERGE_ENABLED' bin/doctor
+  assert_success
+  run grep -qF 'audit_advisory "BOUCLE_AUTOMERGE_ENABLED=true"' bin/doctor
+  assert_success
+}
+
+@test "docs: LOOP.md documents the policy and the variables" {
+  run grep -q '## Bot-PR auto-merge' LOOP.md
+  assert_success
+  run grep -q 'BOUCLE_AUTOMERGE_BOTS' LOOP.md
+  assert_success
+}
