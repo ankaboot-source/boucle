@@ -368,6 +368,28 @@ forge_mr_lookup_by_branch() {
   fi
 }
 
+forge_mr_list() {
+  # List open PRs, normalized to the shape consumed by the automerge sweep
+  # (lib/boucle.sh boucle_bot_pr_sweep):
+  #   [{ iid, author, title, labels (CSV), draft, source_branch, head_sha, body }]
+  # --paginate: grouped-bot seasons can briefly exceed 100 open PRs.
+  local out
+  # Capture FIRST — jq exits 0 on empty input, so a bare `... | jq || echo`
+  # would swallow an _gh_api failure and return nothing instead of "[]".
+  out=$(_gh_api "/repos/$BOUCLE_PROJECT_ID/pulls?state=open&per_page=100" 2> /dev/null \
+    | jq -c 'map({
+        iid: .number,
+        author: (.user.login // ""),
+        title: (.title // ""),
+        labels: ((.labels // []) | map(.name // "") | join(",")),
+        draft: (.draft // false),
+        source_branch: (.head.ref // ""),
+        head_sha: (.head.sha // ""),
+        body: (.body // "")
+      })' 2> /dev/null) || true
+  printf '%s\n' "${out:-[]}"
+}
+
 forge_mr_merge_status() {
   local mr_iid="$1"
   # GitHub's mergeable_state: "clean" means mergeable with all checks green,

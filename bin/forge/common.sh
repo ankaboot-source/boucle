@@ -289,6 +289,12 @@ forge_reaction_canonical() {
 # forge_mr_update <mr_iid> <title> <description>
 #   Update MR/PR title and description. Returns 0 on success.
 #
+# forge_mr_list — list open PRs/MRs, unified normalized shape (both backends):
+#   [{ iid, author, title, labels (CSV), draft (bool), source_branch, head_sha, body }]
+# Consumer: the automerge sweep (lib/boucle.sh boucle_bot_pr_sweep). Authoring
+# and bump-kind filters run client-side (boucle_bot_pr_eligible), keep this
+# primitive forge-agnostic and cheap (one listing call).
+#
 # forge_mr_merge <mr_iid>
 #   Merge a MR/PR. Polls for mergeable status if needed (up to 10 min).
 #   Echoes the merge commit SHA on stdout on success (may be empty if the

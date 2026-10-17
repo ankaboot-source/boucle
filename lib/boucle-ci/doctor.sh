@@ -29,6 +29,12 @@ boucle_ci_doctor() {
   # maybe_unblock_dependents) — single source of truth in lib/boucle-ci/gates.sh.
   source "$BOUCLE_HOME/lib/boucle-ci/gates.sh" 2> /dev/null || true
 
+  # ── Bot-PR auto-merge (#138) ───────────────────────────────────────────
+  # MUST run on EVERY doctor pass: a bot PR moves no issue label, so the
+  # board fingerprint just below cannot wake it. Cost when disabled (the
+  # default): one variable check, zero API calls.
+  boucle_bot_pr_sweep || true
+
   # ── Adaptive cadence (#38) ─────────────────────────────────────────────
   # The doctor runs on a fixed schedule and always performs the full sweep.
   # On an idle repository that is a runner provisioned to confirm nothing

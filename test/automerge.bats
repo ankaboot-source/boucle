@@ -1,0 +1,461 @@
+#!/usr/bin/env bats
+# Bot-PR auto-merge (#138): forge_mr_list primitive + eligibility sweep tests.
+
+setup() {
+  load 'test_helper/bats-support/load'
+  load 'test_helper/bats-assert/load'
+}
+
+@test "forge_mr_list (github): extracts the unified shape from open pulls" {
+  TMPF=$(mktemp)
+  awk -v fn="forge_mr_list" '$0 ~ "^"fn"\\(\\) \\{" {p=1} p {print} p && /^}/ {exit}' bin/forge/github.sh > "$TMPF"
+  run bash -c "
+    _gh_api() { echo '[{\"number\":10,\"user\":{\"login\":\"dependabot[bot]\"},\"title\":\"Bump actions/checkout from 4.1.0 to 4.1.2\",\"labels\":[{\"name\":\"dependencies\"}],\"draft\":false,\"head\":{\"ref\":\"dependabot/github_actions/actions/checkout-4.1.2\",\"sha\":\"abc123\"},\"body\":\"Bump note\"}]'; }
+    source '$TMPF'
+    forge_mr_list | jq -r '[.[0].iid, .[0].author, .[0].labels, .[0].draft, .[0].head_sha] | @tsv'
+  "
+  assert_success
+  assert_line '10	dependabot[bot]	dependencies	false	abc123'
+  rm -f "$TMPF"
+}
+
+@test "forge_mr_list (github): echoes [] when the API call fails" {
+  TMPF=$(mktemp)
+  awk -v fn="forge_mr_list" '$0 ~ "^"fn"\\(\\) \\{" {p=1} p {print} p && /^}/ {exit}' bin/forge/github.sh > "$TMPF"
+  run bash -c "
+    _gh_api() { return 1; }
+    source '$TMPF'
+    forge_mr_list
+  "
+  assert_output '[]'
+  rm -f "$TMPF"
+}
+
+@test "forge_mr_list (gitlab): extracts the unified shape from opened MRs" {
+  TMPF=$(mktemp)
+  awk -v fn="forge_mr_list" '$0 ~ "^"fn"\\(\\) \\{" {p=1} p {print} p && /^}/ {exit}' bin/forge/gitlab.sh > "$TMPF"
+  run bash -c "
+    glab() { echo '[{\"iid\":7,\"author\":{\"username\":\"dependabot[bot]\"},\"title\":\"Bump pillow (security advisories)\",\"labels\":[\"dependencies\"],\"draft\":false,\"source_branch\":\"dependabot/security/pillow\",\"sha\":\"def456\",\"description\":\"Security advisory update\"}]'; }
+    forge_merge_pages() { cat; }
+    source '$TMPF'
+    forge_mr_list | jq -r '[.[0].iid, .[0].author, .[0].labels, .[0].head_sha] | @tsv'
+  "
+  assert_success
+  assert_line '7	dependabot[bot]	dependencies	def456'
+  rm -f "$TMPF"
+}
+
+lib_funcs() {
+  local out="${!#}" f
+  for f in "$@"; do
+    [ "$f" = "$out" ] && continue
+    awk -v fn="$f" '$0 ~ "^"fn"\\(\\) \\{" {p=1} p {print} p && /^}/ {exit}' lib/boucle.sh
+  done > "$out"
+}
+
+@test "semver: version normalization handles bare ints, v-prefix, partial" {
+  TMPF=$(mktemp); lib_funcs boucle_semver_version "$TMPF"
+  run bash -c "source '$TMPF'; boucle_semver_version '4'; boucle_semver_version 'v4.1.0'; boucle_semver_version '4.1'; boucle_semver_version '4.1.2'"
+  assert_output '4 0 0
+4 1 0
+4 1 0
+4 1 2'
+  run bash -c "source '$TMPF'; boucle_semver_version 'abc'"
+  assert_failure
+  rm -f "$TMPF"
+}
+
+@test "semver: gate classifies major, backward moves fail-closed" {
+  TMPF=$(mktemp); lib_funcs boucle_semver_version boucle_semver_gate "$TMPF"
+  run bash -c "source '$TMPF'; boucle_semver_gate '4.1.0' '4.1.2'"; assert_output "patch"
+  run bash -c "source '$TMPF'; boucle_semver_gate '4.1.0' '4.2.0'"; assert_output "minor"
+  run bash -c "source '$TMPF'; boucle_semver_gate '4' '5'"; assert_output "major"
+  run bash -c "source '$TMPF'; boucle_semver_gate '4.2.0' '4.1.0'"; assert_failure
+  run bash -c "source '$TMPF'; boucle_semver_gate 'x' '4.1.0'"; assert_failure
+  rm -f "$TMPF"
+}
+
+@test "security: title, label or branch signals, any wins" {
+  TMPF=$(mktemp); lib_funcs boucle_pr_is_security "$TMPF"
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump pillow (security advisories)' '' ''"; assert_success
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump x' 'dependencies,security' ''"; assert_success
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump x' 'vulnerability' ''"; assert_success
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump x' '' 'dependabot/security/pillow'"; assert_success
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump x' 'dependencies' 'renovate/eslint-9.x'"; assert_failure
+  rm -f "$TMPF"
+}
+
+@test "security: anchored signals — package-name collisions stay for a human" {
+  TMPF=$(mktemp); lib_funcs boucle_pr_is_security boucle_semver_version boucle_semver_gate boucle_title_semver_gate boucle_bump_gate "$TMPF"
+  # A package merely NAMED *security* is not a security update: the bump
+  # must still pass the semver gate (5.1.0 -> 6.0.0 = major -> a human).
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump spring-security-core from 5.1.0 to 6.0.0' '' ''"; assert_failure
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump spring-security-core from 5.1.0 to 6.0.0' '' 'renovate/spring-security-6.x'"; assert_failure
+  run bash -c "source '$TMPF'; boucle_bump_gate 'Bump spring-security-core from 5.1.0 to 6.0.0' '' 'dependabot/maven/org.springframework.security/spring-security-core-6.0.0' ''"; assert_failure
+  # Real security shapes still auto-merge at ANY version.
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump pillow from 1.0 to 2.0 (security advisories)' '' ''"; assert_success
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump x (CVE-2024-1234)' '' ''"; assert_success
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump x' '' 'dependabot/security/pillow'"; assert_success
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump x' '' 'renovate/vulnerability-lodash'"; assert_success
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump x' '' 'GHSA-1234-5678-9abc'"; assert_success
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump x' 'security' 'renovate/x'"; assert_success
+  rm -f "$TMPF"
+}
+
+@test "title gate: dependabot from-to versions; grouped PRs fail-closed" {
+  TMPF=$(mktemp); lib_funcs boucle_semver_version boucle_semver_gate boucle_title_semver_gate "$TMPF"
+  run bash -c "source '$TMPF'; boucle_title_semver_gate 'Bump actions/checkout from 4.1.0 to 4.1.2'"; assert_output "patch"
+  run bash -c "source '$TMPF'; boucle_title_semver_gate 'Bump pillow from 7.2 to 9.0'"; assert_output "major"
+  run bash -c "source '$TMPF'; boucle_title_semver_gate 'Bump the npm group with 2 updates'; "; assert_failure
+  rm -f "$TMPF"
+}
+
+@test "bump gate: renovate body table + branch group fast-paths" {
+  TMPF=$(mktemp)
+  lib_funcs boucle_pr_is_security boucle_semver_version boucle_semver_gate boucle_title_semver_gate boucle_bump_gate "$TMPF"
+  RENOVATE_BODY='This PR contains the following updates:
+
+| Package | Type | Update | Change |
+| --- | --- | --- | --- |
+| eslint | devDependencies | major | [`8.57.0` → `9.14.0`] |'
+  run bash -c "source '$TMPF'; boucle_bump_gate 'chore(deps): update eslint to v9.14.0' '' 'renovate/eslint-9.x' '$RENOVATE_BODY'"; assert_failure
+  MINOR_BODY='This PR contains the following updates:
+
+| Package | Type | Update | Change |
+| --- | --- | --- | --- |
+| eslint | devDependencies | minor | [`8.57.0` → `8.58.1`] |'
+  run bash -c "source '$TMPF'; boucle_bump_gate 'chore(deps): update eslint to v8.58.1' '' 'renovate/eslint-8.x' '$MINOR_BODY'"; assert_output "minor"
+  run bash -c "source '$TMPF'; boucle_bump_gate 'chore(deps): update digest' '' 'renovate/actions-checkout-digest' ''"; assert_output "patch"
+  run bash -c "source '$TMPF'; boucle_bump_gate 'Bump the npm group with 2 updates' 'dependencies' 'dependabot/npm_and_yarn/group' ''"; assert_failure
+  rm -f "$TMPF"
+}
+
+@test "checks green: fail-closed on empty, all-success only when settled" {
+  TMPF=$(mktemp); lib_funcs boucle_checks_green "$TMPF"
+  run bash -c "source '$TMPF'; boucle_checks_green ''"; assert_failure
+  run bash -c "source '$TMPF'; boucle_checks_green '[]'"; assert_failure
+  run bash -c "source '$TMPF'; boucle_checks_green '[{\"name\":\"check\",\"status\":\"completed\",\"conclusion\":\"success\"}]'"; assert_success
+  run bash -c "source '$TMPF'; boucle_checks_green '[{\"name\":\"check\",\"status\":\"in_progress\",\"conclusion\":null}]'"; assert_failure
+  run bash -c "source '$TMPF'; boucle_checks_green '[{\"name\":\"check\",\"status\":\"completed\",\"conclusion\":\"failure\"}]'"; assert_failure
+  rm -f "$TMPF"
+}
+
+@test "checks green: skipped check-runs are neutral (GitHub event-gated jobs)" {
+  TMPF=$(mktemp); lib_funcs boucle_checks_green "$TMPF"
+  run bash -c "source '$TMPF'; boucle_checks_green '[{\"name\":\"a\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"b\",\"status\":\"completed\",\"conclusion\":\"skipped\"}]'"; assert_success
+  run bash -c "source '$TMPF'; boucle_checks_green '[{\"name\":\"a\",\"status\":\"completed\",\"conclusion\":\"skipped\"},{\"name\":\"b\",\"status\":\"completed\",\"conclusion\":\"failure\"}]'"; assert_failure
+  run bash -c "source '$TMPF'; boucle_checks_green '[{\"name\":\"a\",\"status\":\"completed\",\"conclusion\":\"skipped\"},{\"name\":\"b\",\"status\":\"completed\",\"conclusion\":\"skipped\"}]'"; assert_success
+  rm -f "$TMPF"
+}
+
+@test "eligible: sync titles bypass the bot list; boucle/* and drafts excluded" {
+  TMPF=$(mktemp)
+  lib_funcs boucle_pr_is_security boucle_semver_version boucle_semver_gate boucle_title_semver_gate boucle_bump_gate boucle_bot_pr_eligible "$TMPF"
+  run bash -c "source '$TMPF'; boucle_bot_pr_eligible 'chore(boucle): update engine to v1.2.3' 'bot' '' false 'boucle-update/main' ''"; assert_output "sync"
+  run bash -c "source '$TMPF'; boucle_bot_pr_eligible 'Bump actions/checkout from 4.1.0 to 4.1.2' 'dependabot[bot]' 'dependencies' false 'dependabot/github_actions/actions/checkout-4.1.2' ''"; assert_output "patch"
+  run bash -c "source '$TMPF'; boucle_bot_pr_eligible 'Bump x from 4 to 5' 'dependabot[bot]' '' false 'dependabot/github_actions/x-5' ''"; assert_failure
+  run bash -c "source '$TMPF'; boucle_bot_pr_eligible 'Bump x from 1.0 to 1.1' 'somehuman' '' false 'patch/human' ''"; assert_failure
+  run bash -c "source '$TMPF'; boucle_bot_pr_eligible 'Bump x from 1.0 to 1.1' 'dependabot[bot]' '' true 'dependabot/x' ''"; assert_failure
+  run bash -c "source '$TMPF'; boucle_bot_pr_eligible 'feat: my feature' 'worker-bot' '' false 'boucle/123-slug' ''"; assert_failure
+  run bash -c "source '$TMPF'; BOUCLE_AUTOMERGE_BOTS='renovate[bot]'; boucle_bot_pr_eligible 'Bump x from 1.0 to 1.1' 'dependabot[bot]' '' false 'dependabot/x-1.1' ''"; assert_failure
+  rm -f "$TMPF"
+}
+
+@test "sweep: disabled by default costs nothing" {
+  TMPF=$(mktemp)
+  lib_funcs boucle_bot_pr_sweep boucle_bot_pr_eligible boucle_pr_is_security boucle_semver_version boucle_semver_gate boucle_title_semver_gate boucle_bump_gate "$TMPF"
+  run bash -c "
+    forge_mr_list() { echo 'MUST-NOT-CALL' >&2; exit 1; }
+    chain_to_role() { echo 'MUST-NOT-CALL' >&2; exit 1; }
+    unset BOUCLE_AUTOMERGE_ENABLED
+    source '$TMPF'
+    boucle_bot_pr_sweep
+  "
+  assert_success
+  refute_output --partial 'MUST-NOT-CALL'
+  rm -f "$TMPF"
+}
+
+@test "sweep: chains one automerge role with only eligible PR iids" {
+  TMPF=$(mktemp)
+  lib_funcs boucle_bot_pr_sweep boucle_bot_pr_eligible boucle_pr_is_security boucle_semver_version boucle_semver_gate boucle_title_semver_gate boucle_bump_gate "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_ENABLED=true
+    LIST='[{\"iid\":10,\"author\":\"dependabot[bot]\",\"title\":\"Bump actions/checkout from 4.1.0 to 4.1.2\",\"labels\":\"dependencies\",\"draft\":false,\"source_branch\":\"dependabot/github_actions/actions/checkout-4.1.2\",\"head_sha\":\"a1\",\"body\":\"\"},
+          {\"iid\":11,\"author\":\"dependabot[bot]\",\"title\":\"Bump x from 4 to 5\",\"labels\":\"\",\"draft\":false,\"source_branch\":\"dependabot/x-5\",\"head_sha\":\"a2\",\"body\":\"\"},
+          {\"iid\":12,\"author\":\"dependabot[bot]\",\"title\":\"chore(boucle): update engine to v1.2.3\",\"labels\":\"chore\",\"draft\":false,\"source_branch\":\"boucle-update/x\",\"head_sha\":\"a3\",\"body\":\"\"},
+          {\"iid\":13,\"author\":\"worker-bot\",\"title\":\"feat: my feature\",\"labels\":\"\",\"draft\":false,\"source_branch\":\"boucle/123-slug\",\"head_sha\":\"a4\",\"body\":\"\"}]
+'
+    forge_mr_list() { echo \"\$LIST\"; }
+    forge_mr_merge_status() { echo mergeable; }
+    chain_to_role() { echo \"CHAIN:\$1:\$2:\$3\"; }
+    source '$TMPF'
+    boucle_bot_pr_sweep
+  "
+  assert_success
+  assert_line '  → automerge: PR #10 eligible (patch)'
+  assert_line '  → automerge: PR #12 eligible (sync)'
+  assert_line 'CHAIN:0:automerge:BOUCLE_AUTOMERGE_MR=10,12'
+  rm -f "$TMPF"
+}
+
+@test "sweep: eligible but not-mergeable PRs are skipped, not chained" {
+  TMPF=$(mktemp)
+  lib_funcs boucle_bot_pr_sweep boucle_bot_pr_eligible boucle_pr_is_security boucle_semver_version boucle_semver_gate boucle_title_semver_gate boucle_bump_gate "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_ENABLED=true
+    LIST='[{\"iid\":10,\"author\":\"dependabot[bot]\",\"title\":\"Bump actions/checkout from 4.1.0 to 4.1.2\",\"labels\":\"dependencies\",\"draft\":false,\"source_branch\":\"dependabot/github_actions/actions/checkout-4.1.2\",\"head_sha\":\"a1\",\"body\":\"\"},
+          {\"iid\":12,\"author\":\"dependabot[bot]\",\"title\":\"chore(boucle): update engine to v1.2.3\",\"labels\":\"chore\",\"draft\":false,\"source_branch\":\"boucle-update/x\",\"head_sha\":\"a3\",\"body\":\"\"}]'
+    forge_mr_list() { echo \"\$LIST\"; }
+    forge_mr_merge_status() { case \"\$1\" in 12) echo mergeable ;; *) echo checking ;; esac; }
+    chain_to_role() { echo \"CHAIN:\$1:\$2:\$3\"; }
+    source '$TMPF'
+    boucle_bot_pr_sweep
+  "
+  assert_success
+  assert_line '  → automerge: PR #10 eligible (patch) but not mergeable (status: checking) — left for the next sweep'
+  assert_line '  → automerge: PR #12 eligible (sync)'
+  assert_line 'CHAIN:0:automerge:BOUCLE_AUTOMERGE_MR=12'
+  rm -f "$TMPF"
+}
+
+@test "sweep: nothing eligible chains nothing" {
+  TMPF=$(mktemp)
+  lib_funcs boucle_bot_pr_sweep boucle_bot_pr_eligible boucle_pr_is_security boucle_semver_version boucle_semver_gate boucle_title_semver_gate boucle_bump_gate "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_ENABLED=true
+    LIST='[{\"iid\":11,\"author\":\"dependabot[bot]\",\"title\":\"Bump x from 4 to 5\",\"labels\":\"\",\"draft\":false,\"source_branch\":\"dependabot/x-5\",\"head_sha\":\"a2\",\"body\":\"\"}]'
+    forge_mr_list() { echo \"\$LIST\"; }
+    chain_to_role() { echo 'MUST-NOT-CHAIN' >&2; exit 1; }
+    source '$TMPF'
+    boucle_bot_pr_sweep
+  "
+  assert_success
+  refute_output --partial 'MUST-NOT-CHAIN'
+  rm -f "$TMPF"
+}
+
+automerge_funcs() {
+  awk '/^boucle_ci_automerge\(\) \{/{p=1} p {print} p && /^}$/{exit}' lib/boucle-ci/automerge.sh > "$1"
+}
+
+@test "automerge stage: parses and passes shfmt" {
+  [ -f lib/boucle-ci/automerge.sh ]
+  run bash -n lib/boucle-ci/automerge.sh
+  assert_success
+  run shfmt -d -i 2 -bn -ci -sr lib/boucle-ci/automerge.sh
+  assert_success
+}
+
+@test "automerge stage: merges verified PRs, comments, chains smoke e2e once" {
+  TMPF=$(mktemp); automerge_funcs "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_MR='10,7'
+    forge_mr_get() { case \"\$1\" in 10) echo '{\"merged\":false,\"state\":\"open\",\"source_branch\":\"dependabot/github_actions/x-4\",\"head_sha\":\"a1\",\"head\":{}}' ;; 7) echo '{\"merged\":false,\"state\":\"open\",\"source_branch\":\"renovate/all-patch\",\"sha\":\"b2\"}' ;; esac; }
+    forge_mr_merge_status() { echo mergeable; }
+    forge_mr_check_suites() { echo '[{\"name\":\"check\",\"status\":\"completed\",\"conclusion\":\"success\"}]'; }
+    boucle_checks_green() { return 0; }
+    forge_mr_merge() { echo \"merged-\$1\"; }
+    forge_mr_note() { shift 0; echo \"NOTE:\$*\"; }
+    job_link() { echo \"\"; }
+    chain_to_role() { echo \"CHAIN:\$1:\$2\"; }
+    boucle_is_external_deploy() { return 1; }
+    git() { return 0; }
+    boucle_do_deploy() { echo 'https://smoke.test'; }
+    boucle_resolve_live_url() { echo ''; }
+    source '$TMPF'
+    boucle_ci_automerge
+  "
+  assert_success
+  assert_line 'NOTE:10 🤖 boucle auto-merged this bot PR (merge `merged-10`, checks green, branch `dependabot/github_actions/x-4`, policy: dependency chore — patch/minor or security).'
+  assert_line 'NOTE:7 🤖 boucle auto-merged this bot PR (merge `merged-7`, checks green, branch `renovate/all-patch`, policy: dependency chore — patch/minor or security).'
+  assert_line 'CHAIN::e2e'
+  rm -f "$TMPF"
+}
+
+@test "automerge stage: GitLab merged state and already-merged PRs skip silently" {
+  TMPF=$(mktemp); automerge_funcs "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_MR='24,25'
+    forge_mr_get() { case \"\$1\" in 24) echo '{\"state\":\"merged\"}' ;; 25) echo '{\"merged\":true,\"state\":\"closed\"}' ;; esac; }
+    forge_mr_merge() { echo 'MUST-NOT-MERGE'; }
+    forge_mr_note() { echo 'MUST-NOT-NOTE'; }
+    chain_to_role() { echo 'MUST-NOT-CHAIN'; }
+    source '$TMPF'
+    boucle_ci_automerge
+  "
+  assert_success
+  assert_line 'automerge: PR #24 already merged or closed — skipping'
+  assert_line 'automerge: PR #25 already merged or closed — skipping'
+  refute_output --partial 'MUST-NOT-'
+  rm -f "$TMPF"
+}
+
+@test "automerge stage: failure paths skip without merge, note or e2e" {
+  TMPF=$(mktemp); automerge_funcs "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_MR='20,22,23'
+    forge_mr_get() {
+      case \"\$1\" in
+        20) echo '{\"merged\":false,\"state\":\"open\",\"source_branch\":\"dependabot/x-1\",\"head_sha\":\"h20\"}' ;;
+        22) echo '{\"merged\":false,\"state\":\"open\",\"source_branch\":\"dependabot/z-1\",\"head_sha\":\"h22\"}' ;;
+        23) echo '{\"merged\":false,\"state\":\"open\",\"source_branch\":\"boucle/123-slug\",\"head_sha\":\"h23\"}' ;;
+      esac
+    }
+    forge_mr_merge_status() { case \"\$1\" in 20) echo conflict ;; *) echo mergeable ;; esac; }
+    forge_mr_check_suites() { case \"\$1\" in 22) echo '[{\"name\":\"c\",\"status\":\"completed\",\"conclusion\":\"failure\"}]' ;; *) echo '[]' ;; esac; }
+    boucle_checks_green() { case \"\$1\" in *failure*) return 1 ;; *) return 0 ;; esac; }
+    forge_mr_merge() { echo 'MUST-NOT-MERGE'; }
+    forge_mr_note() { echo 'MUST-NOT-NOTE'; }
+    chain_to_role() { echo 'MUST-NOT-CHAIN'; }
+    source '$TMPF'
+    boucle_ci_automerge
+  "
+  assert_success
+  assert_line 'automerge: PR #20 not mergeable (status: conflict) — left for the next sweep'
+  assert_line 'automerge: PR #22 checks not yet settled or not green — left for the next sweep'
+  assert_line 'automerge: PR #23 is a boucle worker branch — refusing (LESSONS #85)'
+  refute_output --partial 'MUST-NOT-'
+  rm -f "$TMPF"
+}
+
+@test "automerge stage: MWPS empty-sha rc0 schedules a note without chaining e2e" {
+  TMPF=$(mktemp); automerge_funcs "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_MR='30'
+    forge_mr_get() { echo '{\"merged\":false,\"state\":\"opened\",\"source_branch\":\"renovate/all-patch\",\"sha\":\"c3\"}'; }
+    forge_mr_merge_status() { echo mergeable; }
+    forge_mr_check_suites() { echo '[]'; }
+    boucle_checks_green() { return 0; }
+    forge_mr_merge() { return 0; }
+    forge_mr_note() { shift 0; echo \"NOTE:\$*\"; }
+    job_link() { echo ''; }
+    chain_to_role() { echo 'MUST-NOT-CHAIN'; }
+    source '$TMPF'
+    boucle_ci_automerge
+  "
+  assert_success
+  assert_line 'NOTE:30 ⏳ boucle scheduled this bot PR for merge-on-green (MWPS) — the forge merges when CI passes.'
+  assert_line 'automerge: PR #30 scheduled for merge-on-green (MWPS)'
+  refute_output --partial 'MUST-NOT-CHAIN'
+  refute_output --partial 'refused or failed'
+  rm -f "$TMPF"
+}
+
+@test "automerge stage: deploy failure warns and exits 0 without chaining e2e" {
+  TMPF=$(mktemp); automerge_funcs "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_MR='40'
+    forge_mr_get() { echo '{\"merged\":false,\"state\":\"open\",\"source_branch\":\"dependabot/x-2\",\"head_sha\":\"h40\"}'; }
+    forge_mr_merge_status() { echo mergeable; }
+    forge_mr_check_suites() { echo '[]'; }
+    boucle_checks_green() { return 0; }
+    forge_mr_merge() { echo 'merged-40'; }
+    forge_mr_note() { echo \"NOTE:\$1\"; }
+    job_link() { echo ''; }
+    chain_to_role() { echo 'MUST-NOT-CHAIN'; }
+    boucle_is_external_deploy() { return 1; }
+    git() { return 0; }
+    boucle_do_deploy() { return 1; }
+    source '$TMPF'
+    boucle_ci_automerge
+  "
+  assert_success
+  assert_line 'NOTE:40'
+  assert_line 'automerge: WARN: deploy failed after the merges — production reconciles on the next loop deploy.'
+  refute_output --partial 'MUST-NOT-CHAIN'
+  rm -f "$TMPF"
+}
+
+@test "automerge stage: external deploy mode neither deploys nor chains" {
+  TMPF=$(mktemp); automerge_funcs "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_MR='41'
+    forge_mr_get() { echo '{\"merged\":false,\"state\":\"open\",\"source_branch\":\"dependabot/x-3\",\"head_sha\":\"h41\"}'; }
+    forge_mr_merge_status() { echo mergeable; }
+    forge_mr_check_suites() { echo '[]'; }
+    boucle_checks_green() { return 0; }
+    forge_mr_merge() { echo 'merged-41'; }
+    forge_mr_note() { echo \"NOTE:\$1\"; }
+    job_link() { echo ''; }
+    chain_to_role() { echo 'MUST-NOT-CHAIN'; }
+    boucle_is_external_deploy() { return 0; }
+    boucle_do_deploy() { echo 'MUST-NOT-DEPLOY'; }
+    source '$TMPF'
+    boucle_ci_automerge
+  "
+  assert_success
+  assert_line "automerge: external deploy mode — the consumer's own CI deploys the merge."
+  assert_line 'NOTE:41'
+  refute_output --partial 'MUST-NOT-'
+  rm -f "$TMPF"
+}
+
+@test "automerge stage: deploy stderr stays visible (not swallowed)" {
+  TMPF=$(mktemp); automerge_funcs "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_MR='42'
+    forge_mr_get() { echo '{\"merged\":false,\"state\":\"open\",\"source_branch\":\"dependabot/x-4\",\"head_sha\":\"h42\"}'; }
+    forge_mr_merge_status() { echo mergeable; }
+    forge_mr_check_suites() { echo '[]'; }
+    boucle_checks_green() { return 0; }
+    forge_mr_merge() { echo 'merged-42'; }
+    forge_mr_note() { :; }
+    job_link() { echo ''; }
+    chain_to_role() { :; }
+    boucle_is_external_deploy() { return 1; }
+    git() { return 0; }
+    boucle_do_deploy() { echo 'DEPLOY-DIAGNOSTIC' >&2; echo 'https://live.test'; }
+    source '$TMPF'
+    boucle_ci_automerge
+  "
+  assert_success
+  assert_output --partial 'DEPLOY-DIAGNOSTIC'
+  rm -f "$TMPF"
+}
+
+@test "doctor: the bot-PR sweep runs before the fingerprint short-circuit" {
+  entry=$(grep -n 'boucle_bot_pr_sweep || true' lib/boucle-ci/doctor.sh | head -1 | cut -d: -f1)
+  cadence=$(grep -n '# ── Adaptive cadence' lib/boucle-ci/doctor.sh | head -1 | cut -d: -f1)
+  [ -n "$entry" ] && [ -n "$cadence" ] && [ "$entry" -lt "$cadence" ]
+}
+
+@test "gitlab-ci: automerge job is serial and role-gated" {
+  run grep -q '^automerge:' .gitlab-ci.yml
+  assert_success
+  region=$(awk '/^automerge:/{p=1} p {print} p && /^  timeout:/{exit}' .gitlab-ci.yml)
+  printf '%s\n' "$region" | grep -q 'resource_group: boucle-merge'
+  printf '%s\n' "$region" | grep -qF '$BOUCLE_ROLE == "automerge"'
+  printf '%s\n' "$region" | grep -q 'boucle-ci automerge'
+}
+
+@test "workflow: automerge input, env switch and serial job exist" {
+  run grep -q 'BOUCLE_AUTOMERGE_MR:' .github/workflows/boucle.yml
+  assert_success
+  run grep -q "BOUCLE_AUTOMERGE_ENABLED:" .github/workflows/boucle.yml
+  assert_success
+  region=$(awk '/^  automerge:/{p=1} p {print} p && /boucle-ci automerge/{exit}' .github/workflows/boucle.yml)
+  printf '%s\n' "$region" | grep -q 'group: boucle-merge'
+  printf '%s\n' "$region" | grep -qF "inputs.BOUCLE_ROLE == 'automerge'"
+}
+
+@test "workflow: automerge bot allow-list is configurable" {
+  run grep -q 'BOUCLE_AUTOMERGE_BOTS:' .github/workflows/boucle.yml
+  assert_success
+  run grep -qF 'dependabot[bot],renovate[bot],github-actions[bot]' .github/workflows/boucle.yml
+  assert_success
+}
+
+@test "audit: automerge opt-in is worth knowing (advisory present)" {
+  run grep -q 'BOUCLE_AUTOMERGE_ENABLED' bin/doctor
+  assert_success
+  run grep -qF 'audit_advisory "BOUCLE_AUTOMERGE_ENABLED=true"' bin/doctor
+  assert_success
+}
+
+@test "docs: LOOP.md documents the policy and the variables" {
+  run grep -q '## Bot-PR auto-merge' LOOP.md
+  assert_success
+  run grep -q 'BOUCLE_AUTOMERGE_BOTS' LOOP.md
+  assert_success
+}

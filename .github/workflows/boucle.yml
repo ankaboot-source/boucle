@@ -109,6 +109,9 @@ on:
       BOUCLE_CMD_ARGS:
         description: "Args for /boucle command jobs (e.g. role for cmd-log)"
         required: false
+      BOUCLE_AUTOMERGE_MR:
+        description: "Comma-separated list of bot PR numbers to auto-merge"
+        required: false
 
 # ── Environment ────────────────────────────────────────────────────────────────
 env:
@@ -144,6 +147,13 @@ env:
   BOUCLE_BOT_USERNAME: ${{ vars.BOUCLE_BOT_USERNAME || 'up-bot' }}
   BOUCLE_BOT_ID: ${{ vars.BOUCLE_BOT_ID || '' }}
   BOUCLE_RUNS_ON: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
+  # Bot-PR auto-merge (#138): opt-in. The doctor sweep chains the automerge
+  # role for bot PRs passing the policy (checks green, patch/minor or
+  # security); see LOOP.md §Bot-PR auto-merge.
+  BOUCLE_AUTOMERGE_ENABLED: ${{ vars.BOUCLE_AUTOMERGE_ENABLED || 'false' }}
+  # Default is GitHub-login-shaped; GitLab renovate installs usually run
+  # under a different username — override per repo.
+  BOUCLE_AUTOMERGE_BOTS: ${{ vars.BOUCLE_AUTOMERGE_BOTS || 'dependabot[bot],renovate[bot],github-actions[bot]' }}
   BOUCLE_SPEC_PROFILE: ${{ vars.BOUCLE_SPEC_PROFILE || 'strict' }}
   BOUCLE_UPDATE_MODE: ${{ vars.BOUCLE_UPDATE_MODE || 'release' }}
   BOUCLE_MAX_PARALLEL_ISSUES: ${{ vars.BOUCLE_MAX_PARALLEL_ISSUES || '5' }}
@@ -924,6 +934,41 @@ jobs:
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
           [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
           $BOUCLE_HOME/bin/boucle-ci merger
+
+  # ── automerge: merge bot chore PRs (serial) ─────────────────────────────
+  automerge:
+    runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
+    continue-on-error: true  # boucle manages its own retries — exit 1 is normal
+    if: |
+      vars.BOUCLE_ENABLED != 'false'
+      && github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'automerge'
+    timeout-minutes: 15
+    concurrency:
+      group: boucle-merge
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Setup
+        # No jcode: the automerge role runs NO agent — API calls, one
+        # merge, at most one deploy.
+        run: |
+          apt-get update -qq && apt-get install -y -qq curl jq git
+          npm install -g glab 2>/dev/null || true
+      - name: Self-update
+        run: |
+          [ "${BOUCLE_UPDATE_DISABLE:-false}" = "true" ] && exit 0
+          [ -d .boucle/bin ] || exit 0
+          [ "${BOUCLE_PIPELINE_SOURCE:-}" = "push" ] && exit 0
+          bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
+      - name: Automerge
+        env:
+          BOUCLE_AUTOMERGE_MR: ${{ github.event.inputs.BOUCLE_AUTOMERGE_MR }}
+        run: |
+          export BOUCLE_PROJECT_ID="${{ github.repository }}"
+          [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
+          $BOUCLE_HOME/bin/boucle-ci automerge
 
   # ── post-merge: poll deploy, trigger e2e ──────────────────────────────────────
   post-merge:
