@@ -430,6 +430,44 @@ boucle_checks_green() {
   printf '%s' "$suites" | jq -e 'all(.[]; .status == "completed" and .conclusion == "success")' > /dev/null 2>&1
 }
 
+# boucle_bot_pr_sweep — list open bot PRs, gate them against the automerge
+# policy, chain ONE automerge role for every eligible PR (a single job
+# serializes the whole batch under the boucle-merge lock — one runner, not
+# one runner per PR).
+#
+# MUST run on every doctor pass (see the doctor hook): a bot PR moves no
+# issue label, so the board fingerprint cannot wake it. Cost when disabled
+# (the default): one variable check, zero API calls.
+boucle_bot_pr_sweep() {
+  [ "${BOUCLE_AUTOMERGE_ENABLED:-false}" = "true" ] || return 0
+  command -v forge_mr_list > /dev/null 2>&1 || {
+    echo "automerge: forge_mr_list unavailable — skipping sweep"
+    return 0
+  }
+  local list csv="" iid title author labels draft branch body gate
+  list=$(forge_mr_list 2> /dev/null || echo "[]")
+  printf '%s' "$list" | jq -e 'type == "array"' > /dev/null 2>&1 || {
+    echo "automerge: forge_mr_list returned a non-array — skipping sweep"
+    return 0
+  }
+  while IFS=$'\t' read -r iid title author labels draft branch body; do
+    [ -n "$iid" ] || continue
+    if gate=$(boucle_bot_pr_eligible "$title" "$author" "$labels" "$draft" "$branch" "$body"); then
+      csv="${csv:+$csv,}$iid"
+      echo "  → automerge: PR #$iid eligible ($gate)"
+    else
+      echo "  → automerge: PR #$iid not eligible — left for a human"
+    fi
+  done < <(printf '%s' "$list" \
+    | jq -r '.[] | [(.iid | tostring), .title, .author, .labels, (.draft | tostring), .source_branch, .body] | @tsv' 2> /dev/null || true)
+  [ -n "$csv" ] || return 0
+  echo "  → automerge: chaining the automerge role for PR(s) $csv"
+  # BOUCLE_ISSUE=0: a bot PR has NO issue — the role must never touch loop
+  # labels (it doesn't) and the PR iids travel in BOUCLE_AUTOMERGE_MR.
+  chain_to_role "0" "automerge" "BOUCLE_AUTOMERGE_MR=$csv" || true
+  return 0
+}
+
 # ── Status board (#36) ──────────────────────────────────────────────────
 
 # boucle_board_render — the four sections of the board, as markdown.

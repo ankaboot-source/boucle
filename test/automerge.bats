@@ -134,3 +134,56 @@ lib_funcs() {
   run bash -c "source '$TMPF'; BOUCLE_AUTOMERGE_BOTS='renovate[bot]'; boucle_bot_pr_eligible 'Bump x from 1.0 to 1.1' 'dependabot[bot]' '' false 'dependabot/x-1.1' ''"; assert_failure
   rm -f "$TMPF"
 }
+
+@test "sweep: disabled by default costs nothing" {
+  TMPF=$(mktemp)
+  lib_funcs boucle_bot_pr_sweep boucle_bot_pr_eligible boucle_pr_is_security boucle_semver_version boucle_semver_gate boucle_title_semver_gate boucle_bump_gate "$TMPF"
+  run bash -c "
+    forge_mr_list() { echo 'MUST-NOT-CALL' >&2; exit 1; }
+    chain_to_role() { echo 'MUST-NOT-CALL' >&2; exit 1; }
+    unset BOUCLE_AUTOMERGE_ENABLED
+    source '$TMPF'
+    boucle_bot_pr_sweep
+  "
+  assert_success
+  refute_output --partial 'MUST-NOT-CALL'
+  rm -f "$TMPF"
+}
+
+@test "sweep: chains one automerge role with only eligible PR iids" {
+  TMPF=$(mktemp)
+  lib_funcs boucle_bot_pr_sweep boucle_bot_pr_eligible boucle_pr_is_security boucle_semver_version boucle_semver_gate boucle_title_semver_gate boucle_bump_gate "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_ENABLED=true
+    LIST='[{\"iid\":10,\"author\":\"dependabot[bot]\",\"title\":\"Bump actions/checkout from 4.1.0 to 4.1.2\",\"labels\":\"dependencies\",\"draft\":false,\"source_branch\":\"dependabot/github_actions/actions/checkout-4.1.2\",\"head_sha\":\"a1\",\"body\":\"\"},
+          {\"iid\":11,\"author\":\"dependabot[bot]\",\"title\":\"Bump x from 4 to 5\",\"labels\":\"\",\"draft\":false,\"source_branch\":\"dependabot/x-5\",\"head_sha\":\"a2\",\"body\":\"\"},
+          {\"iid\":12,\"author\":\"dependabot[bot]\",\"title\":\"chore(boucle): update engine to v1.2.3\",\"labels\":\"chore\",\"draft\":false,\"source_branch\":\"boucle-update/x\",\"head_sha\":\"a3\",\"body\":\"\"},
+          {\"iid\":13,\"author\":\"worker-bot\",\"title\":\"feat: my feature\",\"labels\":\"\",\"draft\":false,\"source_branch\":\"boucle/123-slug\",\"head_sha\":\"a4\",\"body\":\"\"}]
+'
+    forge_mr_list() { echo \"\$LIST\"; }
+    chain_to_role() { echo \"CHAIN:\$1:\$2:\$3\"; }
+    source '$TMPF'
+    boucle_bot_pr_sweep
+  "
+  assert_success
+  assert_line '  → automerge: PR #10 eligible (patch)'
+  assert_line '  → automerge: PR #12 eligible (sync)'
+  assert_line 'CHAIN:0:automerge:BOUCLE_AUTOMERGE_MR=10,12'
+  rm -f "$TMPF"
+}
+
+@test "sweep: nothing eligible chains nothing" {
+  TMPF=$(mktemp)
+  lib_funcs boucle_bot_pr_sweep boucle_bot_pr_eligible boucle_pr_is_security boucle_semver_version boucle_semver_gate boucle_title_semver_gate boucle_bump_gate "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_ENABLED=true
+    LIST='[{\"iid\":11,\"author\":\"dependabot[bot]\",\"title\":\"Bump x from 4 to 5\",\"labels\":\"\",\"draft\":false,\"source_branch\":\"dependabot/x-5\",\"head_sha\":\"a2\",\"body\":\"\"}]'
+    forge_mr_list() { echo \"\$LIST\"; }
+    chain_to_role() { echo 'MUST-NOT-CHAIN' >&2; exit 1; }
+    source '$TMPF'
+    boucle_bot_pr_sweep
+  "
+  assert_success
+  refute_output --partial 'MUST-NOT-CHAIN'
+  rm -f "$TMPF"
+}
