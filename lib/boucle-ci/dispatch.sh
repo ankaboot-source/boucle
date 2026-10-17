@@ -159,6 +159,24 @@ dispatch_noop() {
   exit 0
 }
 
+# dispatch_retro_artifact <labels_csv>
+#
+# True when the label list carries an issue boucle maintains for itself and
+# must NEVER dispatch: a local rétro report (boucle:retro) or an upstream
+# proposal (boucle:report) — #139, same class as the status board (#36).
+# Their creation and comment webhooks are the loop's own artefacts, not work;
+# without this guard the open-route triages an issue that was unlabeled at
+# open under BOUCLE_ENTRY_MODE=auto, and the label route would re-enter them.
+#
+# Labels arrive as a CSV of NAMES (forge_issue_labels_get normalizes both
+# forges). NEVER hand a raw GitLab payload here: its label OBJECTS would be
+# stringified, not matched (lesson #124) — extract names first, the way the
+# changes.labels.previous readers do.
+dispatch_retro_artifact() {
+  local labels="${1:-}"
+  printf '%s\n' "$labels" | tr ',' '\n' | grep -qxE 'boucle:(retro|report)'
+}
+
 # dispatch_auto_entry_enabled
 #
 # Entry policy: does a NEWLY OPENED issue that carries no boucle: label
@@ -970,6 +988,17 @@ boucle_ci_dispatch() {
   # would triage the board and the loop would start working on itself.
   if echo "$LABELS" | tr ',' '\n' | grep -qx "boucle:board"; then
     echo "Issue #$IID is the boucle status board — never dispatched."
+    dispatch_noop
+  fi
+
+  # ── Rétro artefact guard (#139) ─────────────────────────────────────
+  # mirrors the board guard above, and MUST stay before the label routing
+  # and the unlabeled-open route below: a boucle:retro report is created by
+  # the retro job with the label already set, but a label edit, a comment or
+  # a removal/re-add can send the event down the open path, where triage
+  # would adopt the loop's own report.
+  if dispatch_retro_artifact "$LABELS"; then
+    echo "Issue #$IID carries boucle:retro or boucle:report — boucle's own rétro artefact, never dispatched."
     dispatch_noop
   fi
 

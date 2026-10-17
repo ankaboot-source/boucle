@@ -263,6 +263,30 @@ forge_mr_lookup_by_branch() {
     | jq -r '.[0].iid // empty' 2> /dev/null || true
 }
 
+# forge_mr_count_merged_since <since_iso>
+#
+# Print how many merge requests were MERGED at or after <since_iso>, for the
+# rétro trigger (#139). `updated_after` is the coarse server-side filter
+# (GitLab has no portable merged_after on older instances), then the exact
+# `.merged_at` check runs client-side: an MR merged BEFORE <since> can be
+# updated after it, and counting it would over-trigger.
+#
+# Returns non-zero on API failure. Callers MUST treat that as "cannot answer",
+# never as zero (fail-closed on the trigger).
+forge_mr_count_merged_since() {
+  local since="${1:-}"
+  [ -n "$since" ] || return 1
+  local encoded raw count
+  encoded=$(printf '%s' "$since" | jq -sRr @uri)
+  raw=$(glab api --hostname "$BOUCLE_FORGE_HOST" --paginate \
+    "/projects/$BOUCLE_PROJECT_ID/merge_requests?state=merged&updated_after=$encoded&per_page=100" 2> /dev/null) || return 1
+  count=$(printf '%s\n' "$raw" \
+    | forge_merge_pages \
+    | jq --arg s "$since" '[.[] | select(.merged_at != null) | select((.merged_at | sub("\\.[0-9]+Z$"; "Z")) >= $s)] | length' 2> /dev/null) || return 1
+  case "$count" in '' | *[!0-9]*) return 1 ;; esac
+  printf '%s\n' "$count"
+}
+
 forge_mr_merge_status() {
   local mr_iid="$1"
   glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid" 2> /dev/null \

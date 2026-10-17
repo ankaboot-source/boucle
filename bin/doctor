@@ -118,6 +118,20 @@ run_config_audit() {
     fi
   fi
 
+  # Rétro on (the default) without an upstream token (#139): participation is
+  # skipped cleanly — fail-open, never a blocking failure, never a WARN on
+  # every sweep. But a consumer who left the default on probably wanted the
+  # flywheel, and nothing else would ever tell them it is inert. Advisory.
+  case "$(printf '%s' "${BOUCLE_RETRO_ENABLED:-true}" | tr '[:upper:]' '[:lower:]')" in
+    false | 0 | no | off) ;;
+    *)
+      if [ -z "${BOUCLE_UPSTREAM_TOKEN:-}" ]; then
+        audit_advisory "BOUCLE_RETRO_ENABLED=true without BOUCLE_UPSTREAM_TOKEN" \
+          "Rétro participation is skipped (fail-open): no anonymized proposal reaches the upstream engine. Set a GitHub PAT with public_repo scope at $vars_url, or set BOUCLE_RETRO_ENABLED=false."
+      fi
+      ;;
+  esac
+
   # A relaxed re-trigger fires while the job is still running.
   local staleness="${BOUCLE_STALENESS_THRESHOLD:-2400}"
   case "$staleness" in
@@ -462,7 +476,7 @@ fi
 # ── Agents parse ───────────────────────────────────────────────────────
 # Consumers install the engine as a .boucle/ submodule (BOUCLE_HOME); the
 # boucle repo itself (dogfood) keeps agents at root .jcode/. Check both.
-for role in triage worker reviewer e2e; do
+for role in triage worker reviewer e2e retro retro-impl; do
   if [ -f "$BOUCLE_HOME/.jcode/agents/$role.md" ]; then
     pass "agent $role.md exists"
   else
