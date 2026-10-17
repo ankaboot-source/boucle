@@ -253,6 +253,235 @@ $(boucle_schedule_body "$file")"
   done
 }
 
+# ── Bot-PR auto-merge (#138) ────────────────────────────────────────────
+
+# boucle_semver_version <string> — normalize "5", "v4.1.0", "4.1" to the
+# three integer components, printed "M m p". Empty stdout means unparseable;
+# callers MUST treat that as a gate failure (fail-closed).
+boucle_semver_version() {
+  local v="${1:-}"
+  v="${v#v}"
+  case "$v" in
+    '' | *[!0-9.]*) return 1 ;;
+  esac
+  local -a parts
+  IFS='.' read -ra parts <<< "$v"
+  case "${#parts[@]}" in
+    0 | 4) return 1 ;;
+  esac
+  local p
+  for p in "${parts[@]}"; do
+    case "$p" in
+      '' | *[!0-9]*) return 1 ;;
+    esac
+  done
+  printf '%s %s %s\n' "${parts[0]:-0}" "${parts[1]:-0}" "${parts[2]:-0}"
+}
+
+# boucle_semver_gate <from> <to> — print patch|minor|major; exit 1 if either
+# side is unparseable or the move goes BACKWARD (a downgrade is not a routine
+# bump and never automerges).
+boucle_semver_gate() {
+  local -a f t
+  read -ra f <<< "$(boucle_semver_version "$1" || echo "")" || return 1
+  read -ra t <<< "$(boucle_semver_version "$2" || echo "")" || return 1
+  [ "${#f[@]}" -eq 3 ] && [ "${#t[@]}" -eq 3 ] || return 1
+  if [ "${t[0]}" -gt "${f[0]}" ]; then
+    echo "major"
+    return 0
+  fi
+  [ "${t[0]}" -eq "${f[0]}" ] || return 1
+  if [ "${t[1]}" -gt "${f[1]}" ]; then
+    echo "minor"
+    return 0
+  fi
+  [ "${t[1]}" -eq "${f[1]}" ] || return 1
+  echo "patch"
+}
+
+# boucle_pr_is_security <title> <labels> <branch>
+# Security bumps are always auto-mergeable, even as majors (policy #138).
+# Signals are ANCHORED — a package merely NAMED "*-security-*" MUST NOT
+# auto-merge a major (name collisions like spring-security-core 5→6 are not
+# security updates): the dependabot title suffix "(security advisories)" or
+# a CVE/GHSA id, the exact security/vulnerability labels, and the
+# forge-emitted security branch shapes (dependabot/security/*,
+# renovate/vulnerability-*, GHSA-*).
+boucle_pr_is_security() {
+  printf '%s' "$1" | grep -qiE 'security advisories|CVE-|GHSA-' && return 0
+  printf '%s' "$2" | tr ',' '\n' | grep -qiE '^(security|vulnerability)$' && return 0
+  case "$3" in
+    dependabot/security* | renovate/vulnerability* | GHSA-*) return 0 ;;
+  esac
+  return 1
+}
+
+# boucle_title_semver_gate <title> — the dependabot gate. Titles carry both
+# endpoints: "Bump actions/checkout from 4.1.0 to 4.1.2". Grouped dependabot
+# PRs ("Bump the npm group with 2 updates") carry NO versions → exit 1
+# (fail-closed: they go to a human; documented in LOOP.md).
+boucle_title_semver_gate() {
+  local title="$1" from="" to="" val
+  local -a toks
+  read -ra toks <<< "$title"
+  local n="${#toks[@]}" i
+  for ((i = 0; i < n; i++)); do
+    case "${toks[$i]}" in
+      [Ff]rom | [Tt]o)
+        [ $((i + 1)) -lt "$n" ] || continue
+        val="${toks[$((i + 1))]}"
+        val="${val%,}"
+        val="${val%;}"
+        case "${toks[$i],,}" in
+          from) from="$val" ;;
+          to) to="$val" ;;
+        esac
+        ;;
+    esac
+  done
+  [ -n "$from" ] && [ -n "$to" ] || return 1
+  boucle_semver_gate "$from" "$to"
+}
+
+# boucle_bump_gate <title> <labels> <branch> <body> — the single bump-kind
+# gate. Prints security|minor|patch, or exits 1 (major / unknown → a human).
+#
+# Fail-closed throughout:
+#   1. security → always mergeable (title/label/branch signals).
+#   2. dependabot title endpoints ("from A to B") → semver gate.
+#   3. renovate branch group fast-paths (digest = patch; all-patch /
+#      all-minor-patch / lock-file-maintenance / pin-dependencies = within
+#      their declared range) → accept. Per-dependency <M>.x branches are
+#      AMBIGUOUS (a major bump reuses the same name shape), so they decide
+#      on the renovate body table instead: any "| major |" row rejects,
+#      a "| minor |"/"| patch |" row accepts.
+#   4. anything else → reject.
+boucle_bump_gate() {
+  local title="$1" labels="$2" branch="$3" body="$4"
+  if boucle_pr_is_security "$title" "$labels" "$branch"; then
+    echo "security"
+    return 0
+  fi
+  local gate
+  if gate=$(boucle_title_semver_gate "$title"); then
+    case "$gate" in
+      patch | minor)
+        echo "$gate"
+        return 0
+        ;;
+      *) return 1 ;;
+    esac
+  fi
+  case "$branch" in
+    *-digest | *all-patch*)
+      echo "patch"
+      return 0
+      ;;
+    *all-minor-patch* | *lock-file-maintenance* | *pin-dependencies*)
+      echo "minor"
+      return 0
+      ;;
+  esac
+  if printf '%s' "$branch" | grep -q '^renovate/' \
+    && printf '%s' "$body" | grep -qF 'This PR contains the following updates:'; then
+    if printf '%s' "$body" | grep -qF '| major |'; then
+      return 1
+    fi
+    if printf '%s' "$body" | grep -qF '| minor |' || printf '%s' "$body" | grep -qF '| patch |'; then
+      echo "minor"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+# boucle_bot_pr_eligible <title> <author> <labels> <draft> <branch> <body>
+# Prints the gate (sync|security|minor|patch) when eligible; exit 1 otherwise.
+#
+# NEVER in scope: boucle worker MRs (source branches boucle/*) — LESSONS #85
+# (a bot verdict is not a human approval; loop MRs stay human-gated). The
+# chore(boucle): sync title bypasses the bot list BY DESIGN: bin/update MRs
+# are mechanical engine syncs whose commits are engine-generated, and their
+# title prefix is itself a contract `bin/check-boucle-sync` enforces.
+boucle_bot_pr_eligible() {
+  local title="$1" author="$2" labels="$3" draft="$4" branch="$5" body="$6"
+  [ "$draft" = "false" ] || return 1
+  case "$branch" in
+    boucle/*) return 1 ;;
+  esac
+  case "$title" in
+    chore\(boucle\)\:*)
+      echo "sync"
+      return 0
+      ;;
+  esac
+  local bots="${BOUCLE_AUTOMERGE_BOTS:-dependabot[bot],renovate[bot],github-actions[bot]}"
+  printf '%s' "$bots" | tr ',' '\n' | grep -qixF "$author" || return 1
+  boucle_bump_gate "$title" "$labels" "$branch" "$body"
+}
+
+# boucle_checks_green <suites_json> — exit 0 iff NON-EMPTY and every check
+# is settled (status completed) with conclusion success — or skipped, which
+# GitHub reports for event-gated jobs on PR heads and treats as neutral in
+# its own merge semantics. Fail-closed on empty: a repo with NO CI on bot
+# PRs never automerges — merging unverified dependency code silently is the
+# failure mode this gate exists to prevent.
+boucle_checks_green() {
+  local suites="$1"
+  [ -n "$suites" ] || return 1
+  command -v jq > /dev/null 2>&1 || return 1
+  [ "$(printf '%s' "$suites" | jq -r 'type' 2> /dev/null)" = "array" ] || return 1
+  [ "$(printf '%s' "$suites" | jq -r 'length' 2> /dev/null)" -gt 0 ] || return 1
+  printf '%s' "$suites" | jq -e 'all(.[]; .status == "completed" and (.conclusion == "success" or .conclusion == "skipped"))' > /dev/null 2>&1
+}
+
+# boucle_bot_pr_sweep — list open bot PRs, gate them against the automerge
+# policy, probe mergeability, and chain ONE automerge role for every ELIGIBLE
+# AND MERGEABLE PR (a single job serializes the whole batch under the
+# boucle-merge lock — one runner, not one runner per PR). Probing here kills
+# the doomed-job churn: without it a red/conflict/blocked PR would chain an
+# automerge job every 10 minutes forever, each one a no-op.
+#
+# MUST run on every doctor pass (see the doctor hook): a bot PR moves no
+# issue label, so the board fingerprint cannot wake it. Cost when disabled
+# (the default): one variable check, zero API calls.
+boucle_bot_pr_sweep() {
+  [ "${BOUCLE_AUTOMERGE_ENABLED:-false}" = "true" ] || return 0
+  command -v forge_mr_list > /dev/null 2>&1 || {
+    echo "automerge: forge_mr_list unavailable — skipping sweep"
+    return 0
+  }
+  local list csv="" iid title author labels draft branch body gate status
+  list=$(forge_mr_list 2> /dev/null || echo "[]")
+  printf '%s' "$list" | jq -e 'type == "array"' > /dev/null 2>&1 || {
+    echo "automerge: forge_mr_list returned a non-array — skipping sweep"
+    return 0
+  }
+  while IFS=$'\t' read -r iid title author labels draft branch body; do
+    [ -n "$iid" ] || continue
+    if gate=$(boucle_bot_pr_eligible "$title" "$author" "$labels" "$draft" "$branch" "$body"); then
+      # Probe mergeability BEFORE chaining (the stage re-checks — the sweep
+      # may be minutes old). Anything but "mergeable" stays for the next pass.
+      status=$(forge_mr_merge_status "$iid" 2> /dev/null || echo "unknown")
+      if [ "$status" = "mergeable" ]; then
+        csv="${csv:+$csv,}$iid"
+        echo "  → automerge: PR #$iid eligible ($gate)"
+      else
+        echo "  → automerge: PR #$iid eligible ($gate) but not mergeable (status: $status) — left for the next sweep"
+      fi
+    else
+      echo "  → automerge: PR #$iid not eligible — left for a human"
+    fi
+  done < <(printf '%s' "$list" \
+    | jq -r '.[] | [(.iid | tostring), .title, .author, .labels, (.draft | tostring), .source_branch, .body] | @tsv' 2> /dev/null || true)
+  [ -n "$csv" ] || return 0
+  echo "  → automerge: chaining the automerge role for PR(s) $csv"
+  # BOUCLE_ISSUE=0: a bot PR has NO issue — the role must never touch loop
+  # labels (it doesn't) and the PR iids travel in BOUCLE_AUTOMERGE_MR.
+  chain_to_role "0" "automerge" "BOUCLE_AUTOMERGE_MR=$csv" || true
+  return 0
+}
+
 # ── Status board (#36) ──────────────────────────────────────────────────
 
 # boucle_board_render — the four sections of the board, as markdown.

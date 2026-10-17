@@ -392,6 +392,8 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_MAX_ITERATIONS` | `5` | Max worker re-runs per issue before escalation. |
 | `BOUCLE_STALENESS_THRESHOLD` | `2400` | Seconds before a stuck issue is re-triggered (must exceed max job timeout, 30 min). |
 | `BOUCLE_SCHEDULES_ENABLED` | `false` | Opt-in: create issues from `.boucle/schedules/*.md` when their cron is due. |
+| `BOUCLE_AUTOMERGE_ENABLED` | `false` | Bot-PR auto-merge master switch: merge dependency-bot PRs (patch/minor) + security bumps at ANY version + `chore(boucle):` sync MRs, once their checks are green. Opt-in. See §Bot-PR auto-merge. |
+| `BOUCLE_AUTOMERGE_BOTS` | `dependabot[bot],renovate[bot],github-actions[bot]` | Comma-separated allow-list of PR authors eligible for auto-merge (exact, case-insensitive). |
 | `BOUCLE_BOARD_ENABLED` | `true` | Maintain a pinned status-board issue answering "what is waiting on me?". |
 | `BOUCLE_RETRO_ENABLED` | `true` | T1 — participate in the self-improvement flywheel: the doctor MAY chain the retro job, which analyses past loops and proposes anonymized findings upstream, at the consumer's own LLM credits. `false` opts out: no retro job, no post, no blocking advisory. A missing `BOUCLE_UPSTREAM_TOKEN` skips the retro cleanly and surfaces as an **advisory** in `bin/doctor --audit`, never a warning on every sweep. See §Auto-improvement — the retro. |
 | `BOUCLE_RETRO_CONTRIBUTE` | `auto` | T2 — propose the implementation PR directly: `auto` resolves to true only when the current repository **is** the upstream (`origin` vs `BOUCLE_UPSTREAM_REPO`), false everywhere else; `true`/`false` force it. A consumer always posts issues and comments only. |
@@ -549,6 +551,74 @@ nothing about it is special-cased downstream. See
   `BOUCLE_MAX_PARALLEL_ISSUES` like any other.
 - **A malformed template is skipped with a warning**, never fatal, and never
   blocks the other templates.
+
+## Bot-PR auto-merge
+
+Boucle's state machine ignores non-`boucle/*` PRs, so dependency-bot PRs
+(dependabot, renovate) sit and wait for a human. Opt in with
+`BOUCLE_AUTOMERGE_ENABLED=true` and the doctor sweep (every doctor pass —
+BEFORE the board-fingerprint short-circuit, because a bot PR moves no issue
+label) lists open PRs via `forge_mr_list` and chains ONE dedicated
+`automerge` role for every PR passing the policy. The role runs under the
+`boucle-merge` lock on both forges (serial merges, LESSONS #8/#10/#42),
+re-verifies each PR, squash-merges via `forge_mr_merge` (which refuses
+`unstable`/`dirty`), deletes the branch, posts an audit comment on the PR,
+and in self-deploy mode deploys the merged default-branch head and chains a
+smoke e2e (BOUCLE_ISSUE empty → URL smoke test).
+
+The default allow-list (`dependabot[bot],renovate[bot],github-actions[bot]`) is
+GitHub-login-shaped; a GitLab renovate install usually runs under a different
+username — override `BOUCLE_AUTOMERGE_BOTS` per repo.
+
+```mermaid
+flowchart TD
+  A[Doctor pass every 10 min] --> B{BOUCLE_AUTOMERGE_ENABLED?}
+  B -- "no (default)" --> Z[exit 0, zero API calls]
+  B -- yes --> C["forge_mr_list (open PRs)"]
+  C --> D{boucle_bot_pr_eligible}
+  D -- "eligible (patch/minor/security/sync)" --> E["chain automerge role (lock boucle-merge)"]
+  D -- "anything else" --> A
+  E --> F["re-verify: mergeable + checks green"]
+  F --> G["forge_mr_merge (squash, refuses unstable/dirty)"]
+  G --> H["audit comment on the PR"]
+  H --> I["self mode: deploy merged HEAD + smoke e2e"]
+```
+
+**The policy is fail-closed.** A PR is eligible only if ALL hold:
+
+1. Non-draft, source branch NOT `boucle/*` (worker MRs stay human-gated —
+   LESSONS #85), author in `BOUCLE_AUTOMERGE_BOTS` exact match, OR title
+   starts with `chore(boucle):` (the `bin/update` engine-sync MRs).
+2. Check suites exist, are ALL settled, and ALL concluded `success` — a
+   `skipped` check-run is neutral (GitHub reports event-gated jobs that way
+   on PR heads and treats them as neutral in its own merge semantics). A repo
+   with no CI on bot PRs never automerges (empty checks → skip).
+3. Mergeability is `mergeable` — never `conflict`, `dirty`, `blocked`. The
+   sweep probes this before chaining, so a red/conflict/blocked PR does not
+   spawn a doomed automerge job on every pass.
+4. The bump is: a **security** update — title `(security advisories)` or a
+   `CVE-`/`GHSA-` id, exact `security`/`vulnerability` labels, or a forge
+   security branch (`dependabot/security*`, `renovate/vulnerability*`,
+   `GHSA-*`) — at any version; OR semver **patch/minor** computed from the
+   dependabot title endpoints ("from A to B"); OR a renovate branch with
+   self-declared range (`-digest` = patch,
+   `all-patch`/`all-minor-patch`/`lock-file-maintenance`/`pin-dependencies`),
+   confirmed by the renovate body table when the branch is a per-dependency
+   `<M>.x` (any `| major |` row rejects).
+
+**Known fail-closed gaps** (a human merges these):
+
+- Grouped dependabot PRs whose title carries no versions ("Bump the npm
+  group with 2 updates").
+- Renovate PRs with neither a recognizable group-branch shape nor a
+  parseable body table.
+- PRs whose checks are still running (the sweep skips; the next pass, at
+  most 10 minutes later, picks them up).
+- GitLab < 16 (no `detailed_merge_status`) stays skipped — fail-closed (the
+  legacy `merge_status` vocabulary is not normalized for automerge).
+
+Re-running is idempotent: a PR closed between sweep and job is skipped
+(exit 0), and a merged PR simply disappears from the next list.
 
 ## Status board
 

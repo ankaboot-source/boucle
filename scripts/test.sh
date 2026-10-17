@@ -10,15 +10,17 @@ cd "$(dirname "$0")/.."
 for _v in $(env | grep -oE '^BOUCLE_[A-Z0-9_]+'); do
   unset "$_v"
 done
-# Git-hook context guard: this script runs as the pre-push hook, and git exports
-# its own context to hooks (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_PREFIX,
-# plus the alternate-object/quarantine and push-option vars). Inherited by the
-# suite, they redirect every fixture repo's git call at THIS repository instead
-# of the temp repo the test built: the fixture commits fail, the real index gets
-# polluted with staged fixtures, and dozens of tests report phantom failures.
-# Unset them so the suite always runs against its own fixtures.
-for _v in GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX \
-  GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_QUARANTINE_PATH; do
+# Hermeticity guard, part 2 (#140/#142): scrub ambient git repo context. Under
+# `git push`'s pre-push hook, git exports GIT_DIR — an ABSOLUTE gitdir path
+# in a linked worktree — to the hook and every child process. Fixtures that
+# build throwaway repos (`git -C "$TMP_REPO" init/add/commit`) then hit the
+# REAL repository instead of the throwaway: the checked-out branch advances
+# with fixture commits and the worktree is left corrupted. Ambient GIT_*
+# must never leak into the suite. The quarantine and push-option vars ride the
+# same hook context — same class, same scrub.
+for _v in GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR \
+  GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PREFIX \
+  GIT_QUARANTINE_PATH; do
   unset "$_v"
 done
 for _v in $(env | grep -oE '^GIT_PUSH_OPTION_[A-Z0-9_]+'); do

@@ -301,6 +301,27 @@ forge_mr_count_merged_since() {
   printf '%s\n' "$count"
 }
 
+forge_mr_list() {
+  # List open MRs, normalized to the shape consumed by the automerge sweep
+  # (see bin/forge/github.sh forge_mr_list for the contract).
+  # forge_merge_pages: --paginate emits one array PER PAGE — merge before jq.
+  local out
+  out=$(glab api --hostname "$BOUCLE_FORGE_HOST" --paginate \
+    "/projects/$BOUCLE_PROJECT_ID/merge_requests?state=opened&per_page=100" 2> /dev/null \
+    | forge_merge_pages \
+    | jq -c 'map({
+        iid: .iid,
+        author: (.author.username // ""),
+        title: (.title // ""),
+        labels: ((.labels // []) | join(",")),
+        draft: (.draft // false),
+        source_branch: (.source_branch // ""),
+        head_sha: (.sha // ""),
+        body: (.description // "")
+      })' 2> /dev/null)
+  if [ -n "$out" ]; then printf '%s\n' "$out"; else echo "[]"; fi
+}
+
 forge_mr_merge_status() {
   local mr_iid="$1"
   glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid" 2> /dev/null \

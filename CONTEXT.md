@@ -59,6 +59,7 @@ shaped the design.
   (`retro_scrub`); consumers never implement locally — their only local trace
   is the per-run report issue (label `boucle:retro`). See [LOOP.md](LOOP.md)
   §Auto-improvement (`BOUCLE_RETRO_*` variables).
+- **Bot-PR auto-merge** — opt-in (`BOUCLE_AUTOMERGE_ENABLED=true`; default off): the doctor sweep merges dependency-bot PRs (dependabot, renovate) once their checks are green — patch/minor bumps, security bumps at any version, and `chore(boucle):` engine-sync MRs. Fail-closed policy; worker MRs stay human-gated (LESSONS #85). See [LOOP.md](LOOP.md) §Bot-PR auto-merge.
 
 ## 3. Target audience
 
