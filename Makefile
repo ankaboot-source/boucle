@@ -69,9 +69,16 @@ fix:
 # self-mode test flips into external mode and fails. Scrub all BOUCLE_* vars
 # before the suite so results never depend on the host (fixes both the GitHub
 # workflow and the GitLab check job, which share this target).
+# Git-hook context guard: the same scrub applies to git's own hook exports
+# (GIT_DIR & co) — see scripts/test.sh. This target is the documented mirror of
+# that script, and `make check` can itself be invoked from a hook or a wrapper.
 test:
 	@command -v $(BATS) >/dev/null 2>&1 || { echo "ERROR: bats not installed (brew install bats-core)"; exit 1; }
-	@for _v in $$(env | grep -oE '^BOUCLE_[A-Z0-9_]+'); do unset $$_v; done; $(BATS) --formatter tap test/
+	@for _v in $$(env | grep -oE '^BOUCLE_[A-Z0-9_]+'); do unset $$_v; done; \
+	for _v in GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX \
+	GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_QUARANTINE_PATH; do unset $$_v; done; \
+	for _v in $$(env | grep -oE '^GIT_PUSH_OPTION_[A-Z0-9_]+'); do unset $$_v; done; \
+	$(BATS) --formatter tap test/
 
 # Install pre-commit hooks (prek preferred, falls back to pre-commit).
 install-hooks:
