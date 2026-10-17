@@ -151,6 +151,9 @@ env:
   # role for bot PRs passing the policy (checks green, patch/minor or
   # security); see LOOP.md §Bot-PR auto-merge.
   BOUCLE_AUTOMERGE_ENABLED: ${{ vars.BOUCLE_AUTOMERGE_ENABLED || 'false' }}
+  # Default is GitHub-login-shaped; GitLab renovate installs usually run
+  # under a different username — override per repo.
+  BOUCLE_AUTOMERGE_BOTS: ${{ vars.BOUCLE_AUTOMERGE_BOTS || 'dependabot[bot],renovate[bot],github-actions[bot]' }}
   BOUCLE_SPEC_PROFILE: ${{ vars.BOUCLE_SPEC_PROFILE || 'strict' }}
   BOUCLE_UPDATE_MODE: ${{ vars.BOUCLE_UPDATE_MODE || 'release' }}
   BOUCLE_MAX_PARALLEL_ISSUES: ${{ vars.BOUCLE_MAX_PARALLEL_ISSUES || '5' }}

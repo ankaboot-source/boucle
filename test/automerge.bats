@@ -439,6 +439,13 @@ automerge_funcs() {
   printf '%s\n' "$region" | grep -qF "inputs.BOUCLE_ROLE == 'automerge'"
 }
 
+@test "workflow: automerge bot allow-list is configurable" {
+  run grep -q 'BOUCLE_AUTOMERGE_BOTS:' .github/workflows/boucle.yml
+  assert_success
+  run grep -qF 'dependabot[bot],renovate[bot],github-actions[bot]' .github/workflows/boucle.yml
+  assert_success
+}
+
 @test "audit: automerge opt-in is worth knowing (advisory present)" {
   run grep -q 'BOUCLE_AUTOMERGE_ENABLED' bin/doctor
   assert_success

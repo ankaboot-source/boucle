@@ -555,6 +555,10 @@ re-verifies each PR, squash-merges via `forge_mr_merge` (which refuses
 and in self-deploy mode deploys the merged default-branch head and chains a
 smoke e2e (BOUCLE_ISSUE empty → URL smoke test).
 
+The default allow-list (`dependabot[bot],renovate[bot],github-actions[bot]`) is
+GitHub-login-shaped; a GitLab renovate install usually runs under a different
+username — override `BOUCLE_AUTOMERGE_BOTS` per repo.
+
 ```mermaid
 flowchart TD
   A[Doctor pass every 10 min] --> B{BOUCLE_AUTOMERGE_ENABLED?}
@@ -574,16 +578,22 @@ flowchart TD
 1. Non-draft, source branch NOT `boucle/*` (worker MRs stay human-gated —
    LESSONS #85), author in `BOUCLE_AUTOMERGE_BOTS` exact match, OR title
    starts with `chore(boucle):` (the `bin/update` engine-sync MRs).
-2. Check suites exist, are ALL settled, and ALL concluded `success`. A repo
+2. Check suites exist, are ALL settled, and ALL concluded `success` — a
+   `skipped` check-run is neutral (GitHub reports event-gated jobs that way
+   on PR heads and treats them as neutral in its own merge semantics). A repo
    with no CI on bot PRs never automerges (empty checks → skip).
-3. Mergeability is `mergeable` — never `conflict`, `dirty`, `blocked`.
-4. The bump is: a **security** update (title "(security advisories)", a
-   `security`/`vulnerability` label, or a security-ish branch name) — at any
-   version; OR semver **patch/minor** computed from the dependabot title
-   endpoints ("from A to B"); OR a renovate branch with self-declared range
-   (`-digest` = patch, `all-patch`/`all-minor-patch`/`lock-file-maintenance`
-   /`pin-dependencies`), confirmed by the renovate body table when the
-   branch is a per-dependency `<M>.x` (any `| major |` row rejects).
+3. Mergeability is `mergeable` — never `conflict`, `dirty`, `blocked`. The
+   sweep probes this before chaining, so a red/conflict/blocked PR does not
+   spawn a doomed automerge job on every pass.
+4. The bump is: a **security** update — title `(security advisories)` or a
+   `CVE-`/`GHSA-` id, exact `security`/`vulnerability` labels, or a forge
+   security branch (`dependabot/security*`, `renovate/vulnerability*`,
+   `GHSA-*`) — at any version; OR semver **patch/minor** computed from the
+   dependabot title endpoints ("from A to B"); OR a renovate branch with
+   self-declared range (`-digest` = patch,
+   `all-patch`/`all-minor-patch`/`lock-file-maintenance`/`pin-dependencies`),
+   confirmed by the renovate body table when the branch is a per-dependency
+   `<M>.x` (any `| major |` row rejects).
 
 **Known fail-closed gaps** (a human merges these):
 
@@ -593,6 +603,8 @@ flowchart TD
   parseable body table.
 - PRs whose checks are still running (the sweep skips; the next pass, at
   most 10 minutes later, picks them up).
+- GitLab < 16 (no `detailed_merge_status`) stays skipped — fail-closed (the
+  legacy `merge_status` vocabulary is not normalized for automerge).
 
 Re-running is idempotent: a PR closed between sweep and job is skipped
 (exit 0), and a merged PR simply disappears from the next list.
