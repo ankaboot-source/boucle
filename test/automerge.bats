@@ -273,6 +273,147 @@ automerge_funcs() {
   rm -f "$TMPF"
 }
 
+@test "automerge stage: GitLab merged state and already-merged PRs skip silently" {
+  TMPF=$(mktemp); automerge_funcs "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_MR='24,25'
+    forge_mr_get() { case \"\$1\" in 24) echo '{\"state\":\"merged\"}' ;; 25) echo '{\"merged\":true,\"state\":\"closed\"}' ;; esac; }
+    forge_mr_merge() { echo 'MUST-NOT-MERGE'; }
+    forge_mr_note() { echo 'MUST-NOT-NOTE'; }
+    chain_to_role() { echo 'MUST-NOT-CHAIN'; }
+    source '$TMPF'
+    boucle_ci_automerge
+  "
+  assert_success
+  assert_line 'automerge: PR #24 already merged or closed — skipping'
+  assert_line 'automerge: PR #25 already merged or closed — skipping'
+  refute_output --partial 'MUST-NOT-'
+  rm -f "$TMPF"
+}
+
+@test "automerge stage: failure paths skip without merge, note or e2e" {
+  TMPF=$(mktemp); automerge_funcs "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_MR='20,22,23'
+    forge_mr_get() {
+      case \"\$1\" in
+        20) echo '{\"merged\":false,\"state\":\"open\",\"source_branch\":\"dependabot/x-1\",\"head_sha\":\"h20\"}' ;;
+        22) echo '{\"merged\":false,\"state\":\"open\",\"source_branch\":\"dependabot/z-1\",\"head_sha\":\"h22\"}' ;;
+        23) echo '{\"merged\":false,\"state\":\"open\",\"source_branch\":\"boucle/123-slug\",\"head_sha\":\"h23\"}' ;;
+      esac
+    }
+    forge_mr_merge_status() { case \"\$1\" in 20) echo conflict ;; *) echo mergeable ;; esac; }
+    forge_mr_check_suites() { case \"\$1\" in 22) echo '[{\"name\":\"c\",\"status\":\"completed\",\"conclusion\":\"failure\"}]' ;; *) echo '[]' ;; esac; }
+    boucle_checks_green() { case \"\$1\" in *failure*) return 1 ;; *) return 0 ;; esac; }
+    forge_mr_merge() { echo 'MUST-NOT-MERGE'; }
+    forge_mr_note() { echo 'MUST-NOT-NOTE'; }
+    chain_to_role() { echo 'MUST-NOT-CHAIN'; }
+    source '$TMPF'
+    boucle_ci_automerge
+  "
+  assert_success
+  assert_line 'automerge: PR #20 not mergeable (status: conflict) — left for the next sweep'
+  assert_line 'automerge: PR #22 checks not yet settled or not green — left for the next sweep'
+  assert_line 'automerge: PR #23 is a boucle worker branch — refusing (LESSONS #85)'
+  refute_output --partial 'MUST-NOT-'
+  rm -f "$TMPF"
+}
+
+@test "automerge stage: MWPS empty-sha rc0 schedules a note without chaining e2e" {
+  TMPF=$(mktemp); automerge_funcs "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_MR='30'
+    forge_mr_get() { echo '{\"merged\":false,\"state\":\"opened\",\"source_branch\":\"renovate/all-patch\",\"sha\":\"c3\"}'; }
+    forge_mr_merge_status() { echo mergeable; }
+    forge_mr_check_suites() { echo '[]'; }
+    boucle_checks_green() { return 0; }
+    forge_mr_merge() { return 0; }
+    forge_mr_note() { shift 0; echo \"NOTE:\$*\"; }
+    job_link() { echo ''; }
+    chain_to_role() { echo 'MUST-NOT-CHAIN'; }
+    source '$TMPF'
+    boucle_ci_automerge
+  "
+  assert_success
+  assert_line 'NOTE:30 ⏳ boucle scheduled this bot PR for merge-on-green (MWPS) — the forge merges when CI passes.'
+  assert_line 'automerge: PR #30 scheduled for merge-on-green (MWPS)'
+  refute_output --partial 'MUST-NOT-CHAIN'
+  refute_output --partial 'refused or failed'
+  rm -f "$TMPF"
+}
+
+@test "automerge stage: deploy failure warns and exits 0 without chaining e2e" {
+  TMPF=$(mktemp); automerge_funcs "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_MR='40'
+    forge_mr_get() { echo '{\"merged\":false,\"state\":\"open\",\"source_branch\":\"dependabot/x-2\",\"head_sha\":\"h40\"}'; }
+    forge_mr_merge_status() { echo mergeable; }
+    forge_mr_check_suites() { echo '[]'; }
+    boucle_checks_green() { return 0; }
+    forge_mr_merge() { echo 'merged-40'; }
+    forge_mr_note() { echo \"NOTE:\$1\"; }
+    job_link() { echo ''; }
+    chain_to_role() { echo 'MUST-NOT-CHAIN'; }
+    boucle_is_external_deploy() { return 1; }
+    git() { return 0; }
+    boucle_do_deploy() { return 1; }
+    source '$TMPF'
+    boucle_ci_automerge
+  "
+  assert_success
+  assert_line 'NOTE:40'
+  assert_line 'automerge: WARN: deploy failed after the merges — production reconciles on the next loop deploy.'
+  refute_output --partial 'MUST-NOT-CHAIN'
+  rm -f "$TMPF"
+}
+
+@test "automerge stage: external deploy mode neither deploys nor chains" {
+  TMPF=$(mktemp); automerge_funcs "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_MR='41'
+    forge_mr_get() { echo '{\"merged\":false,\"state\":\"open\",\"source_branch\":\"dependabot/x-3\",\"head_sha\":\"h41\"}'; }
+    forge_mr_merge_status() { echo mergeable; }
+    forge_mr_check_suites() { echo '[]'; }
+    boucle_checks_green() { return 0; }
+    forge_mr_merge() { echo 'merged-41'; }
+    forge_mr_note() { echo \"NOTE:\$1\"; }
+    job_link() { echo ''; }
+    chain_to_role() { echo 'MUST-NOT-CHAIN'; }
+    boucle_is_external_deploy() { return 0; }
+    boucle_do_deploy() { echo 'MUST-NOT-DEPLOY'; }
+    source '$TMPF'
+    boucle_ci_automerge
+  "
+  assert_success
+  assert_line "automerge: external deploy mode — the consumer's own CI deploys the merge."
+  assert_line 'NOTE:41'
+  refute_output --partial 'MUST-NOT-'
+  rm -f "$TMPF"
+}
+
+@test "automerge stage: deploy stderr stays visible (not swallowed)" {
+  TMPF=$(mktemp); automerge_funcs "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_MR='42'
+    forge_mr_get() { echo '{\"merged\":false,\"state\":\"open\",\"source_branch\":\"dependabot/x-4\",\"head_sha\":\"h42\"}'; }
+    forge_mr_merge_status() { echo mergeable; }
+    forge_mr_check_suites() { echo '[]'; }
+    boucle_checks_green() { return 0; }
+    forge_mr_merge() { echo 'merged-42'; }
+    forge_mr_note() { :; }
+    job_link() { echo ''; }
+    chain_to_role() { :; }
+    boucle_is_external_deploy() { return 1; }
+    git() { return 0; }
+    boucle_do_deploy() { echo 'DEPLOY-DIAGNOSTIC' >&2; echo 'https://live.test'; }
+    source '$TMPF'
+    boucle_ci_automerge
+  "
+  assert_success
+  assert_output --partial 'DEPLOY-DIAGNOSTIC'
+  rm -f "$TMPF"
+}
+
 @test "doctor: the bot-PR sweep runs before the fingerprint short-circuit" {
   entry=$(grep -n 'boucle_bot_pr_sweep || true' lib/boucle-ci/doctor.sh | head -1 | cut -d: -f1)
   cadence=$(grep -n '# ── Adaptive cadence' lib/boucle-ci/doctor.sh | head -1 | cut -d: -f1)
