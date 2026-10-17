@@ -363,27 +363,65 @@ EOF
     export BOUCLE_UPSTREAM_TOKEN=tok BOUCLE_UPSTREAM_REPO=owner/upstream
     forge_label_create() { :; }
     forge_label_create_in() { :; }
-    forge_issue_create() { printf '%s' \"\$2\" > '$TMP/local-body.txt'; echo 7; }
-    forge_issue_create_in() { echo \"CREATE-BODY:\$4\" >&2; echo 42; }
+    forge_issue_create() { printf '%s' \"\$1\" > '$TMP/local-title.txt'; printf '%s' \"\$2\" > '$TMP/local-body.txt'; echo 7; }
+    forge_issue_create_in() { echo \"CREATE-TITLE:\$3\" >&2; echo \"CREATE-BODY:\$4\" >&2; echo 42; }
     forge_issue_note_in() { echo \"NOTE-BODY:\$4\" >&2; return 0; }
-    forge_pr_create_in() { echo \"PR-BODY:\$6\" >&2; echo 9; }
-    retro_post_report title 'body CONSUMER'
-    retro_post_create title 'body CONSUMER'
+    forge_pr_create_in() { echo \"PR-TITLE:\$3|HEAD:\$4|BASE:\$5\" >&2; echo \"PR-BODY:\$6\" >&2; echo 9; }
+    retro_post_report 'title CONSUMER' 'body CONSUMER'
+    retro_post_create 'title CONSUMER' 'body CONSUMER'
     retro_post_enrich 5 'body CONSUMER'
-    retro_post_pr title retro/slug main 'body CONSUMER'
+    retro_post_pr 'title CONSUMER' retro/slug main 'body CONSUMER'
   "
   assert_success
-  assert_output --partial "report=7"
-  assert_output --partial "created=42"
-  assert_output --partial "enriched=5"
-  assert_output --partial "pr=9"
+  assert_output --partial "[retro-post] report=7"
+  assert_output --partial "[retro-post] created=42"
+  assert_output --partial "[retro-post] enriched=5"
+  assert_output --partial "[retro-post] pr=9"
+  assert_output --partial "CREATE-TITLE:title [consumer]"
   assert_output --partial "CREATE-BODY:body [consumer]"
   assert_output --partial "NOTE-BODY:body [consumer]"
+  assert_output --partial "PR-TITLE:title [consumer]|HEAD:retro/slug|BASE:main"
   assert_output --partial "PR-BODY:body [consumer]"
   refute_output --partial "CONSUMER"
-  # The local report body is scrubbed too (captured by the stub).
+  # The local report title AND body are scrubbed too (captured by the stub).
+  run cat "$TMP/local-title.txt"
+  assert_output "title [consumer]"
   run cat "$TMP/local-body.txt"
   assert_output "body [consumer]"
+}
+
+@test "post helpers: a title carrying a live-URL host is scrubbed (B3)" {
+  run bash -c "
+    set -euo pipefail
+    source '$REPO/lib/boucle.sh' 2> /dev/null || true
+    source '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null || true
+    export BOUCLE_LIVE_URL='https://site-urgence.pages.dev'
+    SCRATCH='$TMP/live';
+    mkdir -p \"\$SCRATCH\"
+    cd \"\$SCRATCH\"
+    export BOUCLE_UPSTREAM_TOKEN=tok BOUCLE_UPSTREAM_REPO=owner/upstream
+    forge_label_create_in() { :; }
+    forge_issue_create_in() { echo \"CREATE-TITLE:\$3\" >&2; echo 42; }
+    retro_post_create 'failure on site-urgence.pages.dev' 'body'
+  "
+  assert_success
+  assert_output --partial "CREATE-TITLE:failure on [consumer-host]"
+}
+
+@test "post helpers: a head branch that is not a branch name is rejected (B3)" {
+  run bash -c "
+    set -euo pipefail
+    source '$REPO/lib/boucle.sh' 2> /dev/null || true
+    source '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null || true
+    retro_scrub() { cat; }
+    retro_dry_run() { return 1; }
+    export BOUCLE_UPSTREAM_TOKEN=tok BOUCLE_UPSTREAM_REPO=owner/upstream
+    forge_pr_create_in() { echo FORGE-PR; }
+    retro_post_pr title 'bad head!' main body
+  "
+  assert_failure
+  assert_output --partial "invalid head branch"
+  refute_output --partial "FORGE-PR"
 }
 
 @test "post helpers: a missing upstream token fails loud, never posts" {
@@ -419,6 +457,66 @@ EOF
   "
   assert_success
   assert_output "[retro-post] created=99"
+}
+
+# ── Helpers: renumber map + value counting (N2/S3) ─────────────────────
+
+@test "renumber map: deterministic #1..#N in order of first appearance (S3)" {
+  run bash -c "source '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null || true; printf '4242\n777\n4242\n999\n' | _retro_renumber_map"
+  assert_success
+  assert_output "$(printf '4242\t#1\n777\t#2\n999\t#3')"
+}
+
+@test "count_values: a no-match grep does not append a second zero (N2)" {
+  # grep -c prints 0 AND exits 1; `|| echo 0` produced "0\n0" and the
+  # record's jq --argjson refused it.
+  run bash -c "source '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null || true; _retro_count_values '101,102'"
+  assert_output "2"
+  run bash -c "source '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null || true; _retro_count_values ''"
+  assert_output "0"
+  run bash -c "source '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null || true; _retro_count_values none"
+  assert_output "0"
+}
+
+@test "digest: consumer IIDs are renumbered — no raw issue number survives (S3)" {
+  REMOTE="$TMP/remote.git"
+  WORK="$TMP/digest-work"
+  git init -q --bare "$REMOTE"
+  git init -q "$WORK"
+  git -C "$WORK" remote add origin "$REMOTE"
+  git -C "$WORK" -c user.email=a@b -c user.name=a commit -q --allow-empty -m init
+  git -C "$WORK" push -q origin HEAD:main
+  git -C "$WORK" checkout -q --orphan boucle/metrics
+  mkdir -p "$WORK/raw"
+  printf '%s\n' \
+    '{"schema":2,"timestamp":"2026-10-01T10:00:00Z","issue":"4242","terminal":"done"}' \
+    '{"schema":2,"timestamp":"2026-10-02T10:00:00Z","issue":"777","terminal":"human"}' \
+    > "$WORK/metrics.jsonl"
+  printf '%s\n' '{"timestamp":"2026-10-01T09:00:00Z","role":"worker","iteration":1,"outcome":"committed"}' > "$WORK/raw/4242.jsonl"
+  printf '%s\n' '{"timestamp":"2026-10-02T09:00:00Z","role":"worker","iteration":1,"outcome":"build-fail"}' > "$WORK/raw/777.jsonl"
+  git -C "$WORK" add -A
+  git -C "$WORK" -c user.email=a@b -c user.name=a commit -q -m metrics
+  git -C "$WORK" push -q origin boucle/metrics
+
+  run bash -c "
+    set -euo pipefail
+    unset GITHUB_REPOSITORY BOUCLE_PROJECT_ID BOUCLE_PROJECT_PATH || true
+    export BOUCLE_WORKSPACE='$WORK' BOUCLE_HOME='$REPO'
+    source '$REPO/lib/boucle.sh' 2> /dev/null || true
+    source '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null || true
+    cd '$WORK'
+    forge_issue_list_all() { echo '[{\"iid\":999,\"title\":\"Closed leak\",\"closed_at\":\"2026-10-03T00:00:00Z\"}]'; }
+    retro_upstream_ready() { return 1; }
+    _retro_build_digest '$TMP/digest.md' '2026-09-15T00:00:00Z'
+  "
+  assert_success
+  run cat "$TMP/digest.md"
+  refute_output --partial "4242"
+  refute_output --partial "777"
+  refute_output --partial "999"
+  assert_output --partial '"issue":"#1"'
+  assert_output --partial '"issue":"#2"'
+  assert_output --partial "- #3 Closed leak"
 }
 
 # ── Doctor advisory: the engine's self-targeting token ──────────────────

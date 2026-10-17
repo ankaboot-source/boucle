@@ -72,3 +72,36 @@ setup() {
   assert_success
   refute_output --partial "glab must not run"
 }
+
+@test "gitlab forge_mr_count_merged_since compares epochs, not strings (S7)" {
+  # GitLab can return an offset form (+02:00 / -05:00) and a fractional
+  # second. A lexicographic compare turns "08:00-05:00" (13:00Z, AFTER the
+  # 09:30Z window start) into an undercount; the epoch compare counts it.
+  run bash -c '
+    BOUCLE_PROJECT_ID="126561"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
+    glab() {
+      printf "[{\"iid\":1,\"merged_at\":\"2026-10-17T08:00:00-05:00\"},{\"iid\":2,\"merged_at\":\"2026-10-17T09:00:00.500Z\"}]\n"
+    }
+    source bin/forge/common.sh
+    source bin/forge/gitlab.sh
+    forge_mr_count_merged_since "2026-10-17T09:30:00Z"
+  '
+  assert_success
+  assert_output "1"
+}
+
+@test "gitlab forge_mr_count_merged_since: a fractional second still parses" {
+  run bash -c '
+    BOUCLE_PROJECT_ID="126561"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
+    glab() {
+      printf "[{\"iid\":1,\"merged_at\":\"2026-10-17T09:30:00.500Z\"}]\n"
+    }
+    source bin/forge/common.sh
+    source bin/forge/gitlab.sh
+    forge_mr_count_merged_since "2026-10-17T09:30:00Z"
+  '
+  assert_success
+  assert_output "1"
+}

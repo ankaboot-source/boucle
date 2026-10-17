@@ -3077,13 +3077,28 @@ retro_scrub() {
   pairs="$tmp/pairs"
   : > "$pairs"
 
+  # N1: when the repo IS the upstream, the repo's own identity IS the
+  # upstream's identity — rewriting "ankaboot-source/boucle" into [consumer]
+  # in a dogfood post would mangle the very references it must carry.
+  # Non-repo identity (usernames, e-mails, branch prefixes, live URLs) is
+  # still scrubbed; only values equal to the upstream slug are exempt.
+  local upstream_slug="${BOUCLE_UPSTREAM_REPO:-ankaboot-source/boucle}"
+  local exempt_self=0
+  if _retro_is_upstream_repo; then
+    exempt_self=1
+  fi
+
   # Project identity. Only through these loops, so the minimum-length rule
   # and the tag choice stay in one place.
   local v
   for v in \
     "${CI_PROJECT_ID:-}" "${CI_PROJECT_NAME:-}" "${CI_PROJECT_PATH:-}" \
     "${BOUCLE_PROJECT_ID:-}"; do
-    [ -n "$v" ] && [ "${#v}" -ge 3 ] && printf '%s\t[consumer]\n' "$v" >> "$pairs"
+    [ -n "$v" ] || continue
+    if [ "$exempt_self" = 1 ] && [ "$v" = "$upstream_slug" ]; then
+      continue
+    fi
+    [ "${#v}" -ge 3 ] && printf '%s\t[consumer]\n' "$v" >> "$pairs"
   done
 
   # Usernames.
@@ -3107,21 +3122,41 @@ retro_scrub() {
       && printf '%s\t[host]\n' "$v" >> "$pairs"
   done
 
+  # Live / deploy URLs (S4): the deployed site's host is as identifying as
+  # the forge host. Strip the scheme and keep the bare host.
+  for v in "${BOUCLE_LIVE_URL:-}" "${CI_PAGES_URL:-}"; do
+    [ -n "$v" ] || continue
+    v="${v#https://}"
+    v="${v#http://}"
+    v="${v%%/*}"
+    v="${v##*@}"
+    v="${v%%:*}"
+    [ -n "$v" ] && [ "${#v}" -ge 3 ] && [ "$v" != "$upstream_host" ] \
+      && printf '%s\t[consumer-host]\n' "$v" >> "$pairs"
+  done
+
   # The origin remote: its host and path are the two most reliable consumer
-  # identity strings in a checkout.
+  # identity strings in a checkout. Exempted when the repo IS the upstream
+  # (N1) — the origin then names the upstream itself.
   local origin origin_host origin_path
   origin=$(git remote get-url origin 2> /dev/null || echo "")
   if [ -n "$origin" ]; then
-    origin_host=$(_retro_remote_host "$origin")
-    origin_path=$(_retro_remote_path "$origin")
-    [ -n "$origin_host" ] && [ "$origin_host" != "$upstream_host" ] \
-      && printf '%s\t[host]\n' "$origin_host" >> "$pairs"
-    if [ -n "$origin_path" ]; then
-      # Both the .git-suffixed URL and its stripped form appear in logs.
-      printf '%s\t[consumer]\n' "$origin_path" >> "$pairs"
-      case "$origin_path" in
-        *.git) printf '%s\t[consumer]\n' "${origin_path%.git}" >> "$pairs" ;;
-      esac
+    local origin_slug
+    origin_slug=$(_retro_repo_from_remote "$origin")
+    if [ "$exempt_self" = 1 ] && [ "$origin_slug" = "$upstream_slug" ]; then
+      : # the repo IS the upstream — its own name is legitimate upstream data
+    else
+      origin_host=$(_retro_remote_host "$origin")
+      origin_path=$(_retro_remote_path "$origin")
+      [ -n "$origin_host" ] && [ "$origin_host" != "$upstream_host" ] \
+        && printf '%s\t[host]\n' "$origin_host" >> "$pairs"
+      if [ -n "$origin_path" ]; then
+        # Both the .git-suffixed URL and its stripped form appear in logs.
+        printf '%s\t[consumer]\n' "$origin_path" >> "$pairs"
+        case "$origin_path" in
+          *.git) printf '%s\t[consumer]\n' "${origin_path%.git}" >> "$pairs" ;;
+        esac
+      fi
     fi
   fi
 

@@ -111,6 +111,57 @@ EOF
   [ "$first" = "[consumer] and [consumer] again" ]
 }
 
+@test "scrub: live/deploy URL hosts are anonymized (S4)" {
+  lib
+  export BOUCLE_LIVE_URL=https://site-urgence.pages.dev
+  export CI_PAGES_URL=https://asso.gitlab.io
+  SCRATCH="$TMP/live-urls"
+  mkdir -p "$SCRATCH"
+  printf 'live at https://site-urgence.pages.dev/accueil and https://asso.gitlab.io/site\n' > "$TMP/live.txt"
+
+  run run_in_scratch "$SCRATCH" retro_scrub < "$TMP/live.txt"
+  assert_success
+  refute_output --partial "site-urgence.pages.dev"
+  refute_output --partial "asso.gitlab.io"
+  assert_output --partial "[consumer-host]"
+}
+
+@test "scrub: the engine's own identity survives when the repo IS the upstream (N1)" {
+  # The upstream slug is legitimate content in a dogfood post; rewriting it
+  # into [consumer] would mangle exactly the references the proposal needs.
+  lib
+  export BOUCLE_UPSTREAM_REPO=ankaboot-source/boucle
+  export GITHUB_REPOSITORY=ankaboot-source/boucle
+  export BOUCLE_PROJECT_ID=ankaboot-source/boucle
+  export BOUCLE_PROJECT_PATH=ankaboot-source/boucle
+  SCRATCH="$TMP/self-upstream"
+  mkdir -p "$SCRATCH"
+  git init -q "$SCRATCH"
+  git -C "$SCRATCH" remote add origin git@github.com:ankaboot-source/boucle.git
+  printf 'the repo ankaboot-source/boucle filed boucle/N- work\n' > "$TMP/self.txt"
+
+  run run_in_scratch "$SCRATCH" retro_scrub < "$TMP/self.txt"
+  assert_success
+  assert_output "the repo ankaboot-source/boucle filed boucle/N- work"
+}
+
+@test "scrub: a NON-upstream repo keeps its own identity pair (N1 contrast)" {
+  # The exemption is scoped to self==upstream, never to the slug globally.
+  lib
+  unset GITHUB_REPOSITORY BOUCLE_PROJECT_ID BOUCLE_PROJECT_PATH || true
+  export BOUCLE_UPSTREAM_REPO=ankaboot-source/boucle
+  SCRATCH="$TMP/self-consumer"
+  mkdir -p "$SCRATCH"
+  git init -q "$SCRATCH"
+  git -C "$SCRATCH" remote add origin git@github.com:someone/consumer.git
+  printf 'the repo someone/consumer filed work\n' > "$TMP/consumer.txt"
+
+  run run_in_scratch "$SCRATCH" retro_scrub < "$TMP/consumer.txt"
+  assert_success
+  refute_output --partial "someone/consumer"
+  assert_output --partial "[consumer]"
+}
+
 # ── toggles ─────────────────────────────────────────────────────────────
 
 @test "retro: ON by default, and only an explicitly falsy value disables it" {

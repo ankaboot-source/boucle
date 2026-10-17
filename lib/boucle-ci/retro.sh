@@ -83,8 +83,11 @@ retro_post_report() {
     echo "ERROR: retro_post_report needs a title" >&2
     return 1
   fi
-  local scrubbed
+  # The TITLE is agent free-text too — scrub it like the body (B3). The
+  # digest carries consumer issue titles, so a title is a real leak surface.
+  local scrubbed scrubbed_title
   scrubbed=$(printf '%s' "$body" | retro_scrub)
+  scrubbed_title=$(printf '%s' "$title" | retro_scrub)
   if retro_dry_run; then
     echo "[retro] dry-run: skip local report issue"
     return 0
@@ -93,7 +96,7 @@ retro_post_report() {
   # best-effort — bin/setup provisions it on fresh installs).
   forge_label_create "boucle:retro" "#5319E7" > /dev/null 2>&1 || true
   local iid
-  iid=$(forge_issue_create "$title" "$scrubbed" "boucle:retro" 2> /dev/null) || iid=""
+  iid=$(forge_issue_create "$scrubbed_title" "$scrubbed" "boucle:retro" 2> /dev/null) || iid=""
   if [ -z "$iid" ]; then
     echo "ERROR: could not create the local report issue" >&2
     return 1
@@ -110,8 +113,9 @@ retro_post_create() {
     echo "ERROR: retro_post_create needs a title" >&2
     return 1
   fi
-  local scrubbed
+  local scrubbed scrubbed_title
   scrubbed=$(printf '%s' "$body" | retro_scrub)
+  scrubbed_title=$(printf '%s' "$title" | retro_scrub)
   if retro_dry_run; then
     echo "[retro] dry-run: skip upstream proposal issue"
     return 0
@@ -125,7 +129,7 @@ retro_post_create() {
     "boucle:report" "#1D76DB" > /dev/null 2>&1 || true
   local iid
   iid=$(_retro_upstream forge_issue_create_in "$RETRO_UPSTREAM_REPO" "$RETRO_UPSTREAM_TOKEN" \
-    "$title" "$scrubbed" "boucle:report") || iid=""
+    "$scrubbed_title" "$scrubbed" "boucle:report") || iid=""
   if [ -z "$iid" ]; then
     echo "ERROR: could not create the upstream proposal issue" >&2
     return 1
@@ -165,8 +169,23 @@ retro_post_pr() {
     echo "ERROR: retro_post_pr needs a title, a head branch and a base branch" >&2
     return 1
   fi
-  local scrubbed
+  # head/base are not free text — validate the branch charset instead of
+  # scrubbing them (a branch name is structural; a scrub would corrupt it).
+  case "$head" in
+    *[!A-Za-z0-9._/-]*)
+      echo "ERROR: invalid head branch name '$head'" >&2
+      return 1
+      ;;
+  esac
+  case "$base" in
+    *[!A-Za-z0-9._/-]*)
+      echo "ERROR: invalid base branch name '$base'" >&2
+      return 1
+      ;;
+  esac
+  local scrubbed scrubbed_title
   scrubbed=$(printf '%s' "$body" | retro_scrub)
+  scrubbed_title=$(printf '%s' "$title" | retro_scrub)
   if retro_dry_run; then
     echo "[retro] dry-run: skip upstream pull request"
     return 0
@@ -174,7 +193,7 @@ retro_post_pr() {
   _retro_upstream_creds "the upstream pull request" || return 1
   local iid
   iid=$(_retro_upstream forge_pr_create_in "$RETRO_UPSTREAM_REPO" "$RETRO_UPSTREAM_TOKEN" \
-    "$title" "$head" "$base" "$scrubbed") || iid=""
+    "$scrubbed_title" "$head" "$base" "$scrubbed") || iid=""
   if [ -z "$iid" ]; then
     echo "ERROR: could not open the upstream pull request" >&2
     return 1
@@ -198,6 +217,14 @@ retro_post_pr() {
 # metrics rows carry the terminal state.
 #
 # Returns non-zero only when nothing could be assembled at all.
+# _retro_renumber_map — stdin: one consumer IID per line, in order of first
+# appearance; stdout: "<old>\t#<new>" lines. Deterministic per window. The
+# digest must never carry a raw consumer issue number (S3): the renumbering
+# is the code-enforced part, retro_scrub cannot know which integers are IIDs.
+_retro_renumber_map() {
+  awk 'NF && !seen[$0]++ { printf "%s\t#%d\n", $0, ++n }'
+}
+
 _retro_build_digest() {
   local out="$1" since="$2"
   local tmp
@@ -293,15 +320,35 @@ _retro_build_digest() {
   fi
 
   # ── Closed issues in the window (titles only) ────────────────────────
-  local closed_block=""
+  local closed_block="" closed_items="[]"
   local closed_json
   closed_json=$(forge_issue_list_all closed 2> /dev/null || echo "[]")
-  closed_block=$(printf '%s' "$closed_json" | jq -r --arg since "$since" --argjson max "$_RETRO_MAX_CLOSED" '
+  closed_items=$(printf '%s' "$closed_json" | jq -c --arg since "$since" --argjson max "$_RETRO_MAX_CLOSED" '
     [.[] | select((.pull_request // null) == null)
-     | {iid: (.iid // .number), title: (.title // ""), closed: (.closed_at // "")}
+     | {iid: ((.iid // .number) | tostring), title: (.title // ""), closed: (.closed_at // "")}
      | select(.closed >= $since)]
-    | sort_by(.closed) | reverse | .[0:$max]
-    | .[] | "- #\(.iid) \(.title)"' 2> /dev/null || echo "")
+    | sort_by(.closed) | reverse | .[0:$max]' 2> /dev/null || echo "[]")
+
+  # ── Anonymise consumer IIDs (S3) ─────────────────────────────────────
+  # Renumber #1..#N in order of first appearance (per-issue rows
+  # oldest→newest, then closed issues newest→oldest). Deterministic, and the
+  # digest can no longer claim an anonymisation it does not perform.
+  local map_tsv map_json
+  map_tsv=$(
+    {
+      jq -r '.issue // empty' "$tmp/rows.jsonl" 2> /dev/null || true
+      printf '%s' "$closed_items" | jq -r '.[].iid // empty' 2> /dev/null || true
+    } | _retro_renumber_map
+  )
+  map_json=$(printf '%s' "$map_tsv" | jq -Rn '[inputs | split("\t")] | map({key: .[0], value: .[1]}) | from_entries' 2> /dev/null || echo "{}")
+  : > "$tmp/rows.out.jsonl"
+  if [ -s "$tmp/rows.jsonl" ]; then
+    jq -c --argjson map "$map_json" '.issue = ($map[.issue] // .issue)' \
+      "$tmp/rows.jsonl" > "$tmp/rows.out.jsonl" 2> /dev/null \
+      || cp "$tmp/rows.jsonl" "$tmp/rows.out.jsonl" 2> /dev/null || true
+  fi
+  closed_block=$(printf '%s' "$closed_items" | jq -r --argjson map "$map_json" \
+    '.[] | "- \($map[.iid] // "#\(.iid)") \(.title)"' 2> /dev/null || echo "")
 
   # ── Recent lesson titles ──────────────────────────────────────────────
   local lessons_block="" lessons_file=""
@@ -334,12 +381,12 @@ _retro_build_digest() {
     echo "# Rétro window digest"
     echo
     echo "Window: $since → $until"
-    echo "Data source: $BOUCLE_METRICS_BRANCH (fetched: $have_metrics; $(wc -l < "$tmp/rows.jsonl" 2> /dev/null | tr -d ' ') issue rows, bounded to $_RETRO_MAX_ISSUES)"
+    echo "Data source: $BOUCLE_METRICS_BRANCH (fetched: $have_metrics; $(wc -l < "$tmp/rows.out.jsonl" 2> /dev/null | tr -d ' ') issue rows, bounded to $_RETRO_MAX_ISSUES)"
     echo "Anonymisation: every consumer identifier is ALREADY replaced by retro_scrub — [consumer], [host], [user], [email], boucle/N-. Do not try to de-anonymise; the generics are the data."
     echo
     echo "## Per-issue rows (oldest → newest)"
     if [ -s "$tmp/rows.jsonl" ]; then
-      cat "$tmp/rows.jsonl"
+      cat "$tmp/rows.out.jsonl"
     else
       echo "(none — no metrics data in this window)"
     fi
@@ -376,7 +423,7 @@ _retro_build_digest() {
     echo "- terminal: done | human (from the metrics row); unknown when no metrics row exists."
     echo "- verdicts: reviewer/e2e outcomes. escalations: the non-verdict outcome signals (build-fail, no-changes, not-mergeable, ...)."
     echo "- tokens / cost_usd: null when no run reported a number — never a fake zero."
-    echo "- issue numbers and branch prefixes are anonymised by the scrub; a 'N' in a branch is not an IID."
+    echo "- issue numbers are renumbered per window (#1..#N in order of first appearance); branch prefixes are anonymized by the scrub."
   } | retro_scrub > "$out" 2> /dev/null || return 1
   [ -s "$out" ] || return 1
 
@@ -401,11 +448,18 @@ _retro_summary_values() {
 }
 
 # _retro_count_values <csv>
-# Count non-"none" values in a comma-separated list.
+# Count non-"none" values in a comma-separated list. `grep -c` prints 0 AND
+# exits 1 when nothing matches, so `|| echo 0` would append a SECOND zero and
+# the captured value becomes "0\n0" — which jq --argjson then refuses.
 _retro_count_values() {
   case "${1:-}" in
     '' | none) echo 0 ;;
-    *) printf '%s' "$1" | tr ',' '\n' | grep -c . 2> /dev/null || echo 0 ;;
+    *)
+      local n
+      n=$(printf '%s' "$1" | tr ',' '\n' | grep -c . 2> /dev/null || true)
+      case "$n" in '' | *[!0-9]*) n=0 ;; esac
+      echo "$n"
+      ;;
   esac
 }
 
