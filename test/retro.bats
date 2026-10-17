@@ -1,13 +1,13 @@
 #!/usr/bin/env bats
 # shellcheck disable=SC2154 # BATS_TEST_DIRNAME is set by bats at runtime
-# Rétro — dogfood self-improvement (#139): toggles, deterministic
+# Retro — dogfood self-improvement (#139): toggles, deterministic
 # anonymisation, trigger state, upstream helpers and the dispatch guard.
 #
 # The point of these tests is the CONTRACT, not the happy path:
 #   * an anonymiser that leaks one identifier leaks them all — assert NONE survive;
 #   * the trigger must fail CLOSED when a forge API is flaky (no spam) and
 #     still fire on the days backstop (no stall);
-#   * a rétro report must never be dispatched, including via the
+#   * a retro report must never be dispatched, including via the
 #     unlabeled-open route.
 
 setup() {
@@ -84,7 +84,7 @@ EOF
 }
 
 @test "scrub: the upstream forge host is exempt (github.com is a legitimate reference)" {
-  # Blanket-replacing github.com would rewrite every upstream link the rétro
+  # Blanket-replacing github.com would rewrite every upstream link the retro
   # is supposed to file. The origin remote is absent here, so only the
   # host-exemption rule is under test.
   lib
@@ -397,7 +397,7 @@ EOF
 
 # ── dispatch guard ─────────────────────────────────────────────────────
 
-@test "dispatch: boucle:retro and boucle:report are recognised as rétro artefacts (#139)" {
+@test "dispatch: boucle:retro and boucle:report are recognised as retro artefacts (#139)" {
   # shellcheck source=/dev/null
   . "$REPO/lib/boucle-ci/dispatch.sh"
   run dispatch_retro_artifact "boucle:todo,boucle:retro"
@@ -410,23 +410,23 @@ EOF
   assert_failure
 }
 
-@test "dispatch: the rétro guard sits before the unlabeled-open route (#139)" {
-  guard_line=$(grep -n 'Rétro artefact guard' "$REPO/lib/boucle-ci/dispatch.sh" | head -1 | cut -d: -f1)
+@test "dispatch: the retro guard sits before the unlabeled-open route (#139)" {
+  guard_line=$(grep -n 'Retro artefact guard' "$REPO/lib/boucle-ci/dispatch.sh" | head -1 | cut -d: -f1)
   triage_line=$(grep -n 'grep -q "boucle:triage"' "$REPO/lib/boucle-ci/dispatch.sh" | tail -1 | cut -d: -f1)
   [ -n "$guard_line" ] && [ -n "$triage_line" ]
   [ "$guard_line" -lt "$triage_line" ]
 }
 
-@test "dispatch: the rétro guard runs before the bot-assignment triage route (N4)" {
+@test "dispatch: the retro guard runs before the bot-assignment triage route (N4)" {
   # A boucle:retro report must be a noop even when the bot was just
   # assigned: the assignment branch is an entry route that precedes label
   # routing, so a guard below it would let the loop adopt its own report.
-  guard_line=$(grep -n 'Rétro artefact guard' "$REPO/lib/boucle-ci/dispatch.sh" | head -1 | cut -d: -f1)
+  guard_line=$(grep -n 'Retro artefact guard' "$REPO/lib/boucle-ci/dispatch.sh" | head -1 | cut -d: -f1)
   bot_line=$(grep -n 'BOT_JUST_ASSIGNED" = "true"' "$REPO/lib/boucle-ci/dispatch.sh" | head -1 | cut -d: -f1)
   [ -n "$guard_line" ] && [ -n "$bot_line" ]
   [ "$guard_line" -lt "$bot_line" ]
   # The guard itself exits through dispatch_noop for the label.
-  block=$(awk '/Rétro artefact guard/,/^  fi$/' "$REPO/lib/boucle-ci/dispatch.sh")
+  block=$(awk '/Retro artefact guard/,/^  fi$/' "$REPO/lib/boucle-ci/dispatch.sh")
   echo "$block" | grep -q 'dispatch_retro_artifact'
   echo "$block" | grep -q 'dispatch_noop'
 }

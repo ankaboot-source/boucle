@@ -2870,11 +2870,11 @@ has_llm_config() {
   return 1
 }
 
-# ── Rétro — dogfood self-improvement (#139) ──────────────────────────────
+# ── Retro — dogfood self-improvement (#139) ──────────────────────────────
 #
 # boucle measures every loop (health.jsonl, the metrics branch, escalation
 # diagnostics) and learns from none of it beyond the local LESSONS.yml. The
-# rétro is the missing return path: a bounded analyst role reads a WINDOW of
+# retro is the missing return path: a bounded analyst role reads a WINDOW of
 # past runs and proposes improvements UPSTREAM (BOUCLE_UPSTREAM_REPO), while
 # consumers keep their identity out of the contribution entirely.
 #
@@ -2892,7 +2892,7 @@ BOUCLE_RETRO_FILE="${BOUCLE_RETRO_FILE:-retros.jsonl}"
 
 # retro_enabled
 #
-# Is the rétro on? Default yes; opt OUT with BOUCLE_RETRO_ENABLED=false (also
+# Is the retro on? Default yes; opt OUT with BOUCLE_RETRO_ENABLED=false (also
 # accepts 0/no/off, any case). Deliberately opt-out and deliberately not
 # `= "true"`: only an explicitly falsy value disables, so a consumer who sets
 # =1 to be helpful does not silently get the opposite of what they asked for.
@@ -2998,7 +2998,7 @@ retro_contribute_enabled() {
 
 # retro_upstream_token
 #
-# The token the rétro posts upstream with. BOUCLE_UPSTREAM_TOKEN always wins.
+# The token the retro posts upstream with. BOUCLE_UPSTREAM_TOKEN always wins.
 #
 # Fallback — DELIBERATELY narrow: when the current repo IS the upstream repo
 # AND the forge is GitHub, BOUCLE_TOKEN is used. The engine (dogfood, T2
@@ -3023,7 +3023,7 @@ retro_upstream_token() {
 #
 # Can this run actually reach the upstream? Enabled AND a non-empty token
 # (retro_upstream_token, so the engine's self-targeting fallback counts).
-# Absence is not an error: the rétro is skipped cleanly (fail-open), and
+# Absence is not an error: the retro is skipped cleanly (fail-open), and
 # `bin/doctor --audit` is where the consumer is told about it — an advisory,
 # never a WARN on every sweep.
 retro_upstream_ready() {
@@ -3044,7 +3044,7 @@ retro_dry_run() {
 
 # retro_force
 #
-# Operator escape hatch: run the rétro NOW even when the merged-PR / days
+# Operator escape hatch: run the retro NOW even when the merged-PR / days
 # window has not elapsed. The stage skips its threshold re-check when this is
 # set; the DOCTOR's chain condition never reads it, so FORCE can never make
 # the periodic trigger fire early — it only lets an explicitly dispatched
@@ -3221,7 +3221,7 @@ retro_scrub() {
 # retro_last_run_read
 #
 # Print the timestamp field of the LAST line of retros.jsonl on the metrics
-# branch, or nothing when no rétro has ever recorded a run. Mirrors
+# branch, or nothing when no retro has ever recorded a run. Mirrors
 # boucle_metrics_hydrate_health's plumbing: fetch through the working repo's
 # own remote (a scratch clone inherits none of the checkout's credentials).
 #
@@ -3252,7 +3252,7 @@ retro_last_run_read() {
 # dedup, push retries — but deliberately does NOT gate on
 # BOUCLE_METRICS_ENABLED: that toggle scopes ANALYTICS publication, while
 # this file is dedup STATE. Gate it and every sweep looks like a first run,
-# so the rétro fires continuously — the opposite of what the toggle asks.
+# so the retro fires continuously — the opposite of what the toggle asks.
 #
 # Returns non-zero when the record is not on the branch so the caller can say
 # so; the caller MUST still fail-open (a lost record costs one duplicate
@@ -3281,20 +3281,20 @@ retro_record_run() {
 
 # retro_threshold_reached
 #
-# Is a rétro due? True when:
+# Is a retro due? True when:
 #
 #   * no run was ever recorded (first run), or
 #   * the last run is at least BOUCLE_RETRO_EVERY_DAYS old (backstop — no API
-#     needed, so an inactive repo and a flaky forge still get their rétro), or
+#     needed, so an inactive repo and a flaky forge still get their retro), or
 #   * at least BOUCLE_RETRO_EVERY_MERGES PRs/MRs were merged since the last
 #     run (forge_mr_count_merged_since, the backend's job).
 #
 # Fail-CLOSED on the count path: an unreachable API returns false, never a
 # guessed true — a flaky API must not spam retros. The days backstop is
 # checked first and needs no API, so a permanent API failure still yields one
-# rétro per window, never zero.
+# retro per window, never zero.
 #
-# Callers combine this with retro_upstream_ready (a rétro with no token is
+# Callers combine this with retro_upstream_ready (a retro with no token is
 # skipped cleanly) and re-check the log inside the job's resource group.
 retro_threshold_reached() {
   retro_enabled || return 1

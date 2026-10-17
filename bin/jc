@@ -466,11 +466,11 @@ agent_posted_note() {
   #   - direct glab/gh note API calls (triage/reviewer/e2e),
   #   - boucle markers (triage, verdict, draft, retro) in the log text — a
   #     drafted-but-unposted comment still counts as agent activity;
-  #   - the rétro's posting path: [retro-post] helper lines, its pinned
+  #   - the retro's posting path: [retro-post] helper lines, its pinned
   #     summary tail, and the stage's result line. Without these a fully
-  #     successful rétro run (its glab/gh calls live inside bin/retro-post,
+  #     successful retro run (its glab/gh calls live inside bin/retro-post,
   #     invisible to the transcript) exits 3 here and retros.jsonl never
-  #     records a run — the doctor then re-chains a rétro on every sweep.
+  #     records a run — the doctor then re-chains a retro on every sweep.
   grep -qiE '\[forge-note\]|\[retro-post\]|\[boucle:retro\] summary:|\[retro\] result:|(glab|gh) (issue (note|comment)|mr note|api .* -X POST|api .*/notes|api .*/comments)|<!-- boucle:(triage|verdict|draft|retro)' "$log"
 }
 
@@ -1574,7 +1574,7 @@ Apply the four-point admission test from AGENTS.md. If no candidate passes, emit
       prompt="Verify issue #${ISSUE} on the live URL \$BOUCLE_LIVE_URL. Post your verdict with the boucle:verdict marker."
       ;;
     retro)
-      # The rétro analyst never handles a consumer issue: its input is a
+      # The retro analyst never handles a consumer issue: its input is a
       # pre-anonymised WINDOW digest written by the CI stage to
       # $BOUCLE_RETRO_DIGEST. retro_scrub ran on it BEFORE this prompt was
       # assembled, so the model never sees consumer identifiers — and the
@@ -1601,7 +1601,7 @@ No digest was provided (BOUCLE_RETRO_DIGEST unset or unreadable). State that the
     retro-impl)
       # The bounded contributor: it works ONLY inside the upstream clone it
       # was given, on the S/M proposal handed to it. The proposal text was
-      # composed by the rétro role from already-scrubbed data.
+      # composed by the retro role from already-scrubbed data.
       local retro_proposal="${BOUCLE_RETRO_PROPOSAL:-}"
       prompt="Implement the upstream proposal below. You are a bounded contributor: work ONLY inside the upstream clone workspace you were given, commit with the conventional \`feat(retro): ...\` message, push the prepared branch, and open the PR with \`\"\$BOUCLE_HOME/bin/retro-post\" pr\` (the helper scrubs the body and enforces dry-run — NEVER call forge_pr_create_in, gh or curl directly), referencing the upstream issue."
       if [ -n "$retro_proposal" ]; then

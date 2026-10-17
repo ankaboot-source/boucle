@@ -157,7 +157,7 @@ PY
   assert_success
 }
 
-# ── gh: the GitLab pipeline needs it for the rétro's upstream posts (B4) ─
+# ── gh: the GitLab pipeline needs it for the retro's upstream posts (B4) ─
 
 @test "gh: Dockerfile pin matches the GitLab before_script" {
   local docker_pin gitlab_pin
@@ -170,7 +170,7 @@ PY
 }
 
 @test "gh: the GitLab before_script installs it, offline-safe" {
-  # GitLab runners carry glab but never gh; without it the rétro's upstream
+  # GitLab runners carry glab but never gh; without it the retro's upstream
   # posts and its digest candidate list are silently inert (fail-open). The
   # install must not be able to kill a GitLab-native job: a failed download
   # warns once.

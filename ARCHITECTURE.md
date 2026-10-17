@@ -39,7 +39,7 @@ flowchart TD
     M --> E["🤖 E2E<br/>Verifies production<br/>✅ pass or ❌ fail"]
     E -->|✅ pass| D["✅ Feature validated end-to-end"]
     E -->|❌ fail| W
-    L["🤖 Rétro<br/>Doctor-triggered self-improvement<br/>Anonymized upstream proposals"]
+    L["🤖 Retro<br/>Doctor-triggered self-improvement<br/>Anonymized upstream proposals"]
     L -.-> T
     L -.-> W
     L -.-> R
@@ -48,7 +48,7 @@ flowchart TD
 
 The loop runs asynchronously on CI. The `doctor` job (a scheduled
 self-healing sweep) runs automatically — there is nothing to run by hand — and
-it owns the **rétro** trigger: the doctor-chained analysis that proposes
+it owns the **retro** trigger: the doctor-chained analysis that proposes
 anonymized improvements upstream (§7).
 
 ## 2. Code structure
@@ -359,10 +359,10 @@ re-exits with it: `triage` declares `needs: [dispatch]` without `optional`,
 so dispatch's hard failure is the signal that skips triage, and swallowing it
 would run triage on every no-op webhook.
 
-### Self-improvement (rétro)
+### Self-improvement (retro)
 
-The doctor also owns the **rétro trigger**. When merged PRs since the last
-rétro reach `BOUCLE_RETRO_EVERY_MERGES` (default 10) or the last rétro is
+The doctor also owns the **retro trigger**. When merged PRs since the last
+retro reach `BOUCLE_RETRO_EVERY_MERGES` (default 10) or the last retro is
 older than `BOUCLE_RETRO_EVERY_DAYS` (default 2), it chains a separate `retro`
 job (`resource_group: boucle-retro`). The counters come from the forge API and
 `retros.jsonl` on the `boucle/metrics` branch — **zero runner state**, the
@@ -379,12 +379,12 @@ contributor; the PR NEVER enters the state machine on its own — standard human
 review applies.
 
 The consumer-visible trace is one local report issue per run (label
-`boucle:retro`, never dispatched, mirror of `boucle:board`); the next rétro
-closes the previous report. Fail-open throughout: a failing rétro never breaks
+`boucle:retro`, never dispatched, mirror of `boucle:board`); the next retro
+closes the previous report. Fail-open throughout: a failing retro never breaks
 the loop, and a missing `BOUCLE_UPSTREAM_TOKEN` skips it cleanly, with
 `bin/doctor --audit` reporting an advisory rather than warning on every sweep.
-See [LOOP.md](LOOP.md) §"Auto-amélioration — la rétro" for the configuration
-and the output taxonomy, and [AGENTS.md](AGENTS.md) §"Rétro
+See [LOOP.md](LOOP.md) §"Auto-improvement — the retro" for the configuration
+and the output taxonomy, and [AGENTS.md](AGENTS.md) §"Retro
 (self-improvement)" for the operating principles.
 
 ## 8. Self-update

@@ -393,14 +393,14 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_STALENESS_THRESHOLD` | `2400` | Seconds before a stuck issue is re-triggered (must exceed max job timeout, 30 min). |
 | `BOUCLE_SCHEDULES_ENABLED` | `false` | Opt-in: create issues from `.boucle/schedules/*.md` when their cron is due. |
 | `BOUCLE_BOARD_ENABLED` | `true` | Maintain a pinned status-board issue answering "what is waiting on me?". |
-| `BOUCLE_RETRO_ENABLED` | `true` | T1 — participate in the self-improvement flywheel: the doctor MAY chain the rétro job, which analyses past loops and proposes anonymized findings upstream, at the consumer's own LLM credits. `false` opts out: no retro job, no post, no blocking advisory. A missing `BOUCLE_UPSTREAM_TOKEN` skips the rétro cleanly and surfaces as an **advisory** in `bin/doctor --audit`, never a warning on every sweep. See §Auto-amélioration — la rétro. |
+| `BOUCLE_RETRO_ENABLED` | `true` | T1 — participate in the self-improvement flywheel: the doctor MAY chain the retro job, which analyses past loops and proposes anonymized findings upstream, at the consumer's own LLM credits. `false` opts out: no retro job, no post, no blocking advisory. A missing `BOUCLE_UPSTREAM_TOKEN` skips the retro cleanly and surfaces as an **advisory** in `bin/doctor --audit`, never a warning on every sweep. See §Auto-improvement — the retro. |
 | `BOUCLE_RETRO_CONTRIBUTE` | `auto` | T2 — propose the implementation PR directly: `auto` resolves to true only when the current repository **is** the upstream (`origin` vs `BOUCLE_UPSTREAM_REPO`), false everywhere else; `true`/`false` force it. A consumer always posts issues and comments only. |
-| `BOUCLE_RETRO_EVERY_MERGES` | `10` | Merged-PR threshold since the last rétro. |
-| `BOUCLE_RETRO_EVERY_DAYS` | `2` | Temporal backstop so an inactive repository still gets a rétro (≈ 300 sweeps at the 10-minute doctor cadence). |
-| `BOUCLE_UPSTREAM_REPO` | `ankaboot-source/boucle` | Target repository for the rétro's upstream proposals. |
-| `BOUCLE_UPSTREAM_TOKEN` | *(unset, secret)* | GitHub PAT (`public_repo` scope) used to post upstream. Set as a **masked** variable; never defaulted. Unset → the rétro is skipped cleanly + `bin/doctor --audit` advisory. On the upstream repo itself (dogfood), the rétro falls back to its own GitHub `BOUCLE_TOKEN` — no second token needed; a GitLab `BOUCLE_TOKEN` is NEVER reused (GitLab credential). |
+| `BOUCLE_RETRO_EVERY_MERGES` | `10` | Merged-PR threshold since the last retro. |
+| `BOUCLE_RETRO_EVERY_DAYS` | `2` | Temporal backstop so an inactive repository still gets a retro (≈ 300 sweeps at the 10-minute doctor cadence). |
+| `BOUCLE_UPSTREAM_REPO` | `ankaboot-source/boucle` | Target repository for the retro's upstream proposals. |
+| `BOUCLE_UPSTREAM_TOKEN` | *(unset, secret)* | GitHub PAT (`public_repo` scope) used to post upstream. Set as a **masked** variable; never defaulted. Unset → the retro is skipped cleanly + `bin/doctor --audit` advisory. On the upstream repo itself (dogfood), the retro falls back to its own GitHub `BOUCLE_TOKEN` — no second token needed; a GitLab `BOUCLE_TOKEN` is NEVER reused (GitLab credential). |
 | `BOUCLE_MODEL_RETRO` / `BOUCLE_MODEL_RETRO_IMPL` | `glm-5.3-flash` / worker model | Per-role model overrides (the existing `BOUCLE_MODEL_<ROLE>` pattern in `bin/jc`); `retro-impl` defaults to the worker model. |
-| `BOUCLE_RETRO_DRY_RUN` | `false` | Analyse and log without posting anything (consumer tests). The run **still records** a `retros.jsonl` row (`dry_run: true`), so the cadence advances — otherwise every sweep would look like a first run and the doctor would chain a 30-step rétro after each one. Only the anti-accumulation close and T2 are skipped. |
+| `BOUCLE_RETRO_DRY_RUN` | `false` | Analyse and log without posting anything (consumer tests). The run **still records** a `retros.jsonl` row (`dry_run: true`), so the cadence advances — otherwise every sweep would look like a first run and the doctor would chain a 30-step retro after each one. Only the anti-accumulation close and T2 are skipped. |
 | `BOUCLE_RETRO_FORCE` | `false` | Operator escape hatch: a manually dispatched `retro` job skips the threshold re-check and runs NOW. The doctor NEVER reads it — FORCE can never make the periodic trigger fire early. Enabled/dry-run guards still apply. |
 | `BOUCLE_DOCTOR_ADAPTIVE` | `true` | Skip the full sweep when the board has not moved since the last check. |
 | `BOUCLE_DOCTOR_BACKSTOP` | `21600` | Seconds after which a full sweep runs regardless of the fingerprint (6 h). |
@@ -576,11 +576,11 @@ a write) and on **every doctor sweep** (backstop). The transition-driven
 refresh is webhook-reliable; the doctor sweep catches any refresh that failed
 silently. An unchanged body produces zero writes in both paths.
 
-## Auto-amélioration — la rétro
+## Auto-improvement — the retro
 
 Boucle measures every loop — `health.jsonl`, the `boucle/metrics` branch,
 structured escalation diagnostics, lessons — but none of it climbed back to
-the engine. The **rétro** closes that flywheel (#54 item 8): a fifth bounded
+the engine. The **retro** closes that flywheel (#54 item 8): a fifth bounded
 role, chained by the doctor, which analyses the failures, successes, limits
 and the gap between what an issue asked for and what actually shipped, then
 acts **upstream only** (`BOUCLE_UPSTREAM_REPO`, default
@@ -599,12 +599,12 @@ opens directly, as a human contributor would.
 
 ### Trigger: doctor-chained, zero runner state
 
-The doctor checks at every sweep: merged PRs since the last rétro ≥
-`BOUCLE_RETRO_EVERY_MERGES` (default `10`) **OR** the last rétro is older than
+The doctor checks at every sweep: merged PRs since the last retro ≥
+`BOUCLE_RETRO_EVERY_MERGES` (default `10`) **OR** the last retro is older than
 `BOUCLE_RETRO_EVERY_DAYS` (default `2`, ≈ 300 sweeps at the 10-minute
 cadence). When either holds, it chains a separate `retro` job
 (`resource_group: boucle-retro`, the doctor job's own pattern). The counters
-come from the forge API plus `retros.jsonl` — one line per rétro (timestamp,
+come from the forge API plus `retros.jsonl` — one line per retro (timestamp,
 window, findings) on the `boucle/metrics` branch — so there is **zero runner
 state**: a re-sweep re-checks the same thresholds and the `resource_group`
 serializes the runs (idempotence). A dry run records too (`dry_run: true`), so
@@ -614,7 +614,7 @@ chain condition never reads it, so the periodic trigger cannot fire early.
 
 ### Outputs
 
-What a doctor sweep decides — fire the rétro, act upstream, or stay silent:
+What a doctor sweep decides — fire the retro, act upstream, or stay silent:
 
 ```mermaid
 flowchart TD
@@ -651,13 +651,13 @@ instructions (anti prompt-injection).
 One report issue per run, label `boucle:retro` — window analysed, findings,
 links to the upstream posts, anonymization note. The dispatcher NEVER routes it
 (mirror of `boucle:board`; indispensable in mono-user mode, where the unlabeled
-open-route would triage it). The next rétro **closes the previous report**
+open-route would triage it). The next retro **closes the previous report**
 (anti-accumulation).
 
 ### Fail-open invariants
 
-- A failing rétro NEVER breaks the loop: every write is fail-open.
-- Missing `BOUCLE_UPSTREAM_TOKEN` → the rétro is skipped cleanly and
+- A failing retro NEVER breaks the loop: every write is fail-open.
+- Missing `BOUCLE_UPSTREAM_TOKEN` → the retro is skipped cleanly and
   `bin/doctor --audit` reports an **advisory** — never a warning on every
   sweep.
 - `BOUCLE_RETRO_ENABLED=false` → no retro job, no post, no blocking advisory.

@@ -33,11 +33,11 @@ shaped the design.
 > separation is stable. Until then, new classes of bugs are discovered on
 > real consumers; the 73 lessons in LESSONS.yml catalog the forward-looking operating principles.
 > **The upstream flywheel (#54 item 8) is now real instead of pending:** the
-> doctor-triggered rétro role analyses a consumer's own loops and proposes
+> doctor-triggered retro role analyses a consumer's own loops and proposes
 > anonymized findings upstream; on the engine repo itself, T2 resolves to true
 > (`BOUCLE_RETRO_CONTRIBUTE=auto` on the upstream), so its proposals arrive as
-> human-reviewed contribution PRs — see [LOOP.md](LOOP.md) §"Auto-amélioration
-> — la rétro".
+> human-reviewed contribution PRs — see [LOOP.md](LOOP.md)
+> §"Auto-improvement — the retro".
 
 ## 2. Features
 
@@ -49,7 +49,7 @@ shaped the design.
   match production reality. A doc that drifts from the system it describes
   is treated as a bug.
 - **Do-Not-Disturb mode** — an **opt-in** quiet window (disabled by default; `BOUCLE_DND_ENABLED=true`, default 22:00–07:00) during which the spec-validation gate is auto-validated, letting the loop run autonomously up to the MR without contacting the human. Preserves the human's quality of life; MR approval stays human-gated (in mono-user mode via a 👍 emoji on the reviewer's PASS comment on the PR — native self-approval is unreliable when the author is the bot). Autonomy must be explicit: opt-in globally, or per issue via the `boucle:autonomous` label. See [LOOP.md](LOOP.md) §Do-Not-Disturb (`BOUCLE_DND_*` variables).
-- **Self-improvement flywheel (rétro)** — a doctor-triggered bounded role
+- **Self-improvement flywheel (retro)** — a doctor-triggered bounded role
   analyses past loops (failures, successes, limits, need-vs-delivered gap) and
   proposes anonymized findings **upstream only** (`ankaboot-source/boucle`):
   enrich a similar `boucle:report` issue, or create one with a proposed
@@ -58,7 +58,7 @@ shaped the design.
   human-reviewed contribution PR. Anonymization is enforced by code
   (`retro_scrub`); consumers never implement locally — their only local trace
   is the per-run report issue (label `boucle:retro`). See [LOOP.md](LOOP.md)
-  §Auto-amélioration (`BOUCLE_RETRO_*` variables).
+  §Auto-improvement (`BOUCLE_RETRO_*` variables).
 
 ## 3. Target audience
 

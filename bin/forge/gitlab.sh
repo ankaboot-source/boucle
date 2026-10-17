@@ -266,7 +266,7 @@ forge_mr_lookup_by_branch() {
 # forge_mr_count_merged_since <since_iso>
 #
 # Print how many merge requests were MERGED at or after <since_iso>, for the
-# rétro trigger (#139). `updated_after` is the coarse server-side filter
+# retro trigger (#139). `updated_after` is the coarse server-side filter
 # (GitLab has no portable merged_after on older instances), then the exact
 # `.merged_at` check runs client-side: an MR merged BEFORE <since> can be
 # updated after it, and counting it would over-trigger.

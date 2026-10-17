@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bin/retro-post — agent-facing posting helper for the rétro (#139).
+# bin/retro-post — agent-facing posting helper for the retro (#139).
 #
 # The retro agent is a CONTRIBUTOR: it creates the local report issue, and it
 # enriches or creates proposals upstream. It MUST NOT call glab/gh/curl

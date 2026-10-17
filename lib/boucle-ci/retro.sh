@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 # shellcheck disable=SC2154,SC1091,SC2250
-# lib/boucle-ci/retro.sh — rétro stage (#139).
+# lib/boucle-ci/retro.sh — retro stage (#139).
 #
-# The rétro is boucle's return path to itself: a periodic, bounded analysis of
+# The retro is boucle's return path to itself: a periodic, bounded analysis of
 # the loops it already measured (health.jsonl rows on the metrics branch, the
 # terminal state of every issue, the lessons) that proposes improvements
 # UPSTREAM — anonymised, as a contributor, never as an automatic merge.
@@ -19,7 +19,7 @@
 #      parse, record, anti-accumulation, optional T2 contribution chain.
 #   3. THE DOCTOR HOOK (boucle_retro_doctor_chain) — the periodic trigger.
 #
-# Exit semantics: a rétro failure must NEVER block the next loop run, so every
+# Exit semantics: a retro failure must NEVER block the next loop run, so every
 # step is fail-open (log + exit 0) — EXCEPT the agent invocation itself, whose
 # exit 3 (silent failure) / 4 (provider down) is bin/jc's own contract and is
 # propagated so the job is visibly red.
@@ -73,7 +73,7 @@ _retro_upstream_creds() {
 
 # retro_post_report <title> <body>
 #
-# Create the LOCAL rétro report issue (label boucle:retro — the dispatch guard
+# Create the LOCAL retro report issue (label boucle:retro — the dispatch guard
 # skips it). Prints "report=<iid>". The body is scrubbed: even the local
 # report may later be quoted upstream, and the agent must never handle an
 # unsanitized string in the first place.
@@ -378,7 +378,7 @@ _retro_build_digest() {
 
   # ── Assemble + scrub ──────────────────────────────────────────────────
   {
-    echo "# Rétro window digest"
+    echo "# Retro window digest"
     echo
     echo "Window: $since → $until"
     echo "Data source: $BOUCLE_METRICS_BRANCH (fetched: $have_metrics; $(wc -l < "$tmp/rows.out.jsonl" 2> /dev/null | tr -d ' ') issue rows, bounded to $_RETRO_MAX_ISSUES)"
@@ -623,7 +623,7 @@ $(printf '%s' "$body" | retro_scrub)"
   export BOUCLE_RETRO_PROPOSAL="$proposal"
 
   echo "[retro] T2: implementing #$iid as retro/$slug (bounded contributor)"
-  # bin/jc TRUNCATES the per-run agent log. Preserve the rétro transcript
+  # bin/jc TRUNCATES the per-run agent log. Preserve the retro transcript
   # before the contributor run overwrites it — both must reach the artifacts.
   cp "$BOUCLE_WORKSPACE/.boucle-state/agent-output.log" \
     "$BOUCLE_WORKSPACE/.boucle-state/retro-agent-output.log" 2> /dev/null || true
@@ -650,7 +650,7 @@ boucle_retro_doctor_chain() {
   retro_enabled || return 0
   retro_upstream_ready || return 0
   retro_threshold_reached || return 0
-  echo "  → rétro due — chaining the retro stage"
+  echo "  → retro due — chaining the retro stage"
   chain_to_role "retro" "retro"
 }
 
@@ -746,7 +746,7 @@ boucle_ci_retro() {
   # The trigger state is recorded in BOTH modes. A dry run advances the
   # cadence deliberately (dry_run:true): its posts are no-ops, and without a
   # record the empty retros.jsonl would read as "first run" on every sweep,
-  # so the doctor would chain a 30-step rétro after each one. Only the
+  # so the doctor would chain a 30-step retro after each one. Only the
   # anti-accumulation close and T2 are skipped in dry-run.
   _retro_record "$since" "${report:-}" "$created" "$enriched" "${implementable:-}" "$dry" || true
   if [ "$dry" = "yes" ]; then

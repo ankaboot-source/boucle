@@ -14,7 +14,7 @@
 #   - make + g++                    — node-gyp (npm ci), and `make check`
 #   - procps + time                 — bin/jc peak-RSS accounting
 #   - glab 1.118.0                  — GitLab CLI (API calls)
-#   - gh 2.89.0                     — GitHub CLI (rétro upstream posts, B4)
+#   - gh 2.89.0                     — GitHub CLI (retro upstream posts, B4)
 #   - jcode v0.84.0                 — agent runtime (Rust binary, replaces opencode/pi)
 #   - codebase-memory-mcp           — knowledge-graph MCP server
 #   - mermaid + jsdom               — bin/check-mermaid (diagram syntax gate)
@@ -80,7 +80,7 @@ RUN mkdir -p /tmp/glab \
     && rm -rf /tmp/glab.tar.gz /tmp/glab \
     && GLAB_NO_UPDATE_NOTIFIER=true glab version
 
-# gh — GitHub CLI (B4). The rétro's upstream posts and its digest's
+# gh — GitHub CLI (B4). The retro's upstream posts and its digest's
 # upstream-candidate list go through the GitHub forge helpers even on a
 # GitLab consumer — the upstream is ALWAYS GitHub. Keep in sync with GH_VER
 # in .gitlab-ci.yml's before_script (that guard reinstalls on mismatch, and

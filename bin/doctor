@@ -118,7 +118,7 @@ run_config_audit() {
     fi
   fi
 
-  # Rétro on (the default) without an upstream token (#139): participation is
+  # Retro on (the default) without an upstream token (#139): participation is
   # skipped cleanly — fail-open, never a blocking failure, never a WARN on
   # every sweep. But a consumer who left the default on probably wanted the
   # flywheel, and nothing else would ever tell them it is inert. Advisory.
@@ -139,7 +139,7 @@ run_config_audit() {
       fi
       if [ -z "$retro_token" ]; then
         audit_advisory "BOUCLE_RETRO_ENABLED=true without BOUCLE_UPSTREAM_TOKEN" \
-          "Rétro participation is skipped (fail-open): no anonymized proposal reaches the upstream engine. Set a GitHub PAT with public_repo scope at $vars_url, or set BOUCLE_RETRO_ENABLED=false."
+          "Retro participation is skipped (fail-open): no anonymized proposal reaches the upstream engine. Set a GitHub PAT with public_repo scope at $vars_url, or set BOUCLE_RETRO_ENABLED=false."
       fi
       ;;
   esac
@@ -300,7 +300,7 @@ run_config_audit() {
 }
 
 if [ "$AUDIT_MODE" -eq 1 ]; then
-  # Load the shared helpers so the rétro advisory resolves the upstream token
+  # Load the shared helpers so the retro advisory resolves the upstream token
   # through the SAME helper the loop uses (BOUCLE_UPSTREAM_TOKEN, else
   # BOUCLE_TOKEN when the repo IS the upstream). Fail-open: an old install
   # without lib/ still audits, with the advisory falling back to the raw var.

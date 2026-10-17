@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # shellcheck disable=SC2154 # BATS_TEST_DIRNAME is set by bats at runtime
-# Rétro stage + doctor hook + posting helpers (#139).
+# Retro stage + doctor hook + posting helpers (#139).
 #
 # The stage is the orchestration layer: it must be idempotent (threshold
 # re-check), write-free in dry-run, fail-open on every unexpected error, and
@@ -159,7 +159,7 @@ EOF
   run cat "$TMP/capture"
   assert_output --partial "JC:retro"
   # The record advances the cadence; without it every sweep looks like a
-  # first run and the doctor re-chains a 30-step rétro each time.
+  # first run and the doctor re-chains a 30-step retro each time.
   assert_output --partial "RECORD:"
   assert_output --partial '"dry_run":true'
   refute_output --partial "CLOSE:"
@@ -219,7 +219,7 @@ EOF
 
 # ── T2 workspace lifecycle (B2) + transcript preservation (N3) ─────────
 
-@test "T2: the tokenized workspace is cleaned on exit and the rétro transcript is preserved" {
+@test "T2: the tokenized workspace is cleaned on exit and the retro transcript is preserved" {
   mkdir -p "$TMP/ws/.boucle-state"
   printf 'RETRO-TRANSCRIPT\n' > "$TMP/ws/.boucle-state/agent-output.log"
   mkdir -p "$TMP/home/bin"
@@ -265,7 +265,7 @@ EOF
   assert_success
 }
 
-@test "artifacts: the depth-1 rétro logs are explicitly listed on both forges (N6)" {
+@test "artifacts: the depth-1 retro logs are explicitly listed on both forges (N6)" {
   run grep -Fq '.boucle-state/retro-agent-output.log' "$REPO/.gitlab-ci.yml"
   assert_success
   run grep -Fq '.boucle-state/agent-output.log' "$REPO/.gitlab-ci.yml"
@@ -291,7 +291,7 @@ EOF
     boucle_retro_doctor_chain
   "
   assert_success
-  assert_output --partial "rétro due"
+  assert_output --partial "retro due"
   assert_output --partial "CHAIN:retro:retro"
 }
 

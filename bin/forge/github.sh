@@ -1033,15 +1033,15 @@ forge_job_artifact() {
   rm -rf "$tmpdir"
 }
 
-# ── Rétro: upstream variants + merged-PR count (#139) ────────────────────
+# ── Retro: upstream variants + merged-PR count (#139) ────────────────────
 
-# The rétro posts upstream with BOUCLE_UPSTREAM_REPO + BOUCLE_UPSTREAM_TOKEN,
+# The retro posts upstream with BOUCLE_UPSTREAM_REPO + BOUCLE_UPSTREAM_TOKEN,
 # which is a DIFFERENT repository and a DIFFERENT token from the consumer's
 # own (BOUCLE_PROJECT_ID / BOUCLE_TOKEN). Every generic forge_* function
 # reads the consumer globals, so these four take the target repo and token as
 # explicit arguments and never read BOUCLE_PROJECT_ID / BOUCLE_TOKEN.
 #
-# Each returns non-zero on API error. That is the contract the rétro needs:
+# Each returns non-zero on API error. That is the contract the retro needs:
 # the caller degrades fail-open (issue + plan stays, no upstream post) and
 # must be able to tell "the API refused" from "posted, empty output".
 
@@ -1068,7 +1068,7 @@ forge_issue_create_in() {
 # forge_label_create_in <repo> <token> <name> <color>
 #
 # Idempotent label creation on the upstream (the upstream is always GitHub).
-# The rétro's anti-loop guard depends on boucle:report EXISTING on the
+# The retro's anti-loop guard depends on boucle:report EXISTING on the
 # upstream — an issue created without it could be triaged there. Best-effort:
 # callers fail-open. Same create-if-absent flow as forge_label_create.
 forge_label_create_in() {
@@ -1093,7 +1093,7 @@ forge_issue_get_in() {
 }
 
 # forge_issue_note_in <repo> <token> <iid> <body>
-# No stamp_agent_marker: the rétro posts upstream as a CONTRIBUTOR, and the
+# No stamp_agent_marker: the retro posts upstream as a CONTRIBUTOR, and the
 # agent marker would identify the comment as boucle-authored. Callers scrub
 # the body with retro_scrub BEFORE calling this.
 forge_issue_note_in() {
@@ -1139,7 +1139,7 @@ forge_pr_create_in() {
 # forge_mr_count_merged_since <since_iso>
 #
 # Print how many pull requests were merged on or after <since_iso>, for the
-# rétro trigger. Day granularity on purpose: the GitHub search API only
+# retro trigger. Day granularity on purpose: the GitHub search API only
 # filters merged PRs by date (`merged:>=YYYY-MM-DD`), so a PR merged later the
 # same day can be counted in two windows — a rate-limited retro cannot spam,
 # and the extra window is the safe direction.

@@ -242,7 +242,7 @@ variables:
   paths:
     - .boucle/**/agent-output.log
     - .boucle-state/**/agent-output.log
-    # The rétro stage runs with no BOUCLE_ISSUE, so its transcripts sit at
+    # The retro stage runs with no BOUCLE_ISSUE, so its transcripts sit at
     # DEPTH 1 (.boucle-state/agent-output.log for the analysis run, and the
     # preserved retro-agent-output.log once T2 chains the contributor).
     # `**/` does not reliably match a zero-directory path — list them.
@@ -345,7 +345,7 @@ default:
       unset _GLAB_INSTALLED
 
       # ── gh CLI (GitHub) ────────────────────────────────────────────
-      # The rétro's upstream posts (bin/retro-post → the *_in GitHub
+      # The retro's upstream posts (bin/retro-post → the *_in GitHub
       # helpers) and the digest's upstream-candidate list use the GitHub
       # CLI even on a GitLab consumer: the upstream is ALWAYS GitHub. No
       # other GitLab job needs gh, so the install is OFFLINE-SAFE — a
@@ -363,7 +363,7 @@ default:
             || cp "$GH_TMP/bin/gh" "$HOME/.local/bin/gh" 2>/dev/null || true
           chmod +x "$HOME/.local/bin/gh" 2>/dev/null || true
         else
-          echo "[boucle] WARN: could not install gh — the rétro's upstream posts are skipped (fail-open)"
+          echo "[boucle] WARN: could not install gh — the retro's upstream posts are skipped (fail-open)"
         fi
         rm -rf "$GH_TMP" "$GH_TMP.tar.gz"
       fi
@@ -556,7 +556,7 @@ default:
       _probe make           "npm ci native modules (node-gyp), make check"
       _probe git            "every forge operation"
       _probe jq             "every state read"
-      _probe gh             "the rétro's upstream posts (fail-open, GitLab jobs stay native)"
+      _probe gh             "the retro's upstream posts (fail-open, GitLab jobs stay native)"
       # mermaid + jsdom are npm globals, not binaries — bin/check-mermaid
       # exits 3 (treated as PASS) when they are absent, so a missing pair
       # silently disables the diagram gate rather than failing it.

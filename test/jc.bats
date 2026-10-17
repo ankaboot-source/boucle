@@ -731,12 +731,12 @@ NEEDS-SPLIT" > "$LOG"
   rm -f "$LOG" "$TMPF"
 }
 
-# ── Rétro posting path (B1 regression) ──────────────────────────────
-# A successful rétro run leaves ONLY [retro-post] lines and its pinned
+# ── Retro posting path (B1 regression) ──────────────────────────────
+# A successful retro run leaves ONLY [retro-post] lines and its pinned
 # summary in the transcript: the real glab/gh call lives inside
 # bin/retro-post, invisible to the log. Without these patterns the
 # empty-output guard exits 3 on a fully successful run, the trigger state
-# never records, and the doctor re-chains a rétro on every sweep.
+# never records, and the doctor re-chains a retro on every sweep.
 
 @test "agent_posted_note: [retro-post] helper output is detected (regression: false exit 3)" {
   LOG=$(mktemp)
@@ -754,7 +754,7 @@ EOF
   rm -f "$LOG" "$TMPF"
 }
 
-@test "agent_posted_note: the pinned rétro summary line alone is detected" {
+@test "agent_posted_note: the pinned retro summary line alone is detected" {
   LOG=$(mktemp)
   echo "[boucle:retro] summary: created=none enriched=none report=7 implementable=none" > "$LOG"
   TMPF=$(mktemp)
@@ -774,9 +774,9 @@ EOF
   rm -f "$LOG" "$TMPF"
 }
 
-@test "agent_posted_note: a rétro log with no post artifacts IS a silent failure" {
+@test "agent_posted_note: a retro log with no post artifacts IS a silent failure" {
   # The negative half: analysis prose alone is not a post. If this ever
-  # passes, a rétro that never posted anything records a run.
+  # passes, a retro that never posted anything records a run.
   LOG=$(mktemp)
   cat > "$LOG" << 'EOF'
 > retro · glm-5.3-flash
@@ -1285,7 +1285,7 @@ extract_scrub() {
 }
 
 @test "scrub: the upstream token value never survives in the log" {
-  # BOUCLE_UPSTREAM_TOKEN is a second GitHub PAT; the rétro passes it to
+  # BOUCLE_UPSTREAM_TOKEN is a second GitHub PAT; the retro passes it to
   # bin/retro-post and a failed git push can echo the remote config.
   TMPF=$(mktemp); LOG=$(mktemp)
   extract_scrub "$TMPF"
