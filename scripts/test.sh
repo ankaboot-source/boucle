@@ -24,4 +24,14 @@ done
 for _v in $(env | grep -oE '^GIT_PUSH_OPTION_[A-Z0-9_]+'); do
   unset "$_v"
 done
+# Forge-identity guard: CI exports the identity of the checkout itself
+# (GITHUB_REPOSITORY on Actions, CI_PROJECT_* on GitLab). A test asserting
+# "this repository is a consumer, not the upstream" then inverts in CI while
+# staying green on a dev machine where those vars are unset. Scrub the ambient
+# identity so results never depend on the host — the same rationale as the
+# BOUCLE_* scrub above. Tests that need an identity export it explicitly.
+for _v in GITHUB_REPOSITORY GITHUB_SERVER_URL GITHUB_API_URL \
+  CI_PROJECT_ID CI_PROJECT_NAME CI_PROJECT_PATH CI_REPOSITORY_URL; do
+  unset "$_v"
+done
 exec bats --formatter tap test/
