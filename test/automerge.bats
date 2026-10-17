@@ -231,3 +231,22 @@ automerge_funcs() {
   cadence=$(grep -n '# ── Adaptive cadence' lib/boucle-ci/doctor.sh | head -1 | cut -d: -f1)
   [ -n "$entry" ] && [ -n "$cadence" ] && [ "$entry" -lt "$cadence" ]
 }
+
+@test "gitlab-ci: automerge job is serial and role-gated" {
+  run grep -q '^automerge:' .gitlab-ci.yml
+  assert_success
+  region=$(awk '/^automerge:/{p=1} p {print} p && /^  timeout:/{exit}' .gitlab-ci.yml)
+  printf '%s\n' "$region" | grep -q 'resource_group: boucle-merge'
+  printf '%s\n' "$region" | grep -qF '$BOUCLE_ROLE == "automerge"'
+  printf '%s\n' "$region" | grep -q 'boucle-ci automerge'
+}
+
+@test "workflow: automerge input, env switch and serial job exist" {
+  run grep -q 'BOUCLE_AUTOMERGE_MR:' .github/workflows/boucle.yml
+  assert_success
+  run grep -q "BOUCLE_AUTOMERGE_ENABLED:" .github/workflows/boucle.yml
+  assert_success
+  region=$(awk '/^  automerge:/{p=1} p {print} p && /boucle-ci automerge/{exit}' .github/workflows/boucle.yml)
+  printf '%s\n' "$region" | grep -q 'group: boucle-merge'
+  printf '%s\n' "$region" | grep -qF "inputs.BOUCLE_ROLE == 'automerge'"
+}

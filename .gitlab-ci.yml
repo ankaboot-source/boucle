@@ -844,6 +844,29 @@ merger:
     - boucle-ci merger
   timeout: 10m
 
+# ── automerge: merge bot "chore" PRs (serial) ──────────────────────────
+# Chained by the doctor sweep (boucle_bot_pr_sweep) for bot PRs that pass
+# the BOUCLE_AUTOMERGE policy (checks green, patch/minor or security).
+# Deliberately in the boucle-merge resource_group: serial merge — lesson
+# #8/#10/#42. BOUCLE_ISSUE arrives as "0": a bot PR has no issue and NO
+# loop label is ever touched (worker MRs are out of scope, LESSONS #85).
+automerge:
+  stage: merge
+  # Loop-critical control-plane job: API calls + at most one deploy. Run on
+  # ANY available runner (tags: []) — never queued behind a data runner.
+  tags: []
+  resource_group: boucle-merge
+  needs:
+    - job: dispatch
+      optional: true
+  rules:
+    - if: $BOUCLE_ENABLED != "true"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "automerge"
+  script:
+    - boucle-ci automerge
+  timeout: 15m
+
 # ── Post-merge (deploy-wait + e2e trigger, unlocked) ───────────────────
 # Triggered by the merger (after an approved merge) OR by catchup (after a
 # direct human merge) OR by the doctor (recovering a stuck issue whose MR was
