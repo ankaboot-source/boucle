@@ -937,7 +937,8 @@ jobs:
     runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
     continue-on-error: true  # boucle manages its own retries — exit 1 is normal
     if: |
-      github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'automerge'
+      vars.BOUCLE_ENABLED != 'false'
+      && github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'automerge'
     timeout-minutes: 15
     concurrency:
       group: boucle-merge
