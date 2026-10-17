@@ -225,3 +225,9 @@ automerge_funcs() {
   assert_line 'CHAIN::e2e'
   rm -f "$TMPF"
 }
+
+@test "doctor: the bot-PR sweep runs before the fingerprint short-circuit" {
+  entry=$(grep -n 'boucle_bot_pr_sweep || true' lib/boucle-ci/doctor.sh | head -1 | cut -d: -f1)
+  cadence=$(grep -n '# ── Adaptive cadence' lib/boucle-ci/doctor.sh | head -1 | cut -d: -f1)
+  [ -n "$entry" ] && [ -n "$cadence" ] && [ "$entry" -lt "$cadence" ]
+}
