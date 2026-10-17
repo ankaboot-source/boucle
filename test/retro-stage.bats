@@ -83,8 +83,24 @@ stage() {
 @test "stage: BOUCLE_ENABLED other than true skips without invoking the agent" {
   run stage "export BOUCLE_ENABLED=false"
   assert_success
-  assert_output --partial "BOUCLE_ENABLED is not 'true'"
+  assert_output --partial "retro stage disabled"
   [ ! -e "$TMP/capture" ]
+}
+
+@test "stage: an absent or empty BOUCLE_ENABLED (GitHub env reality) does not disable — the agent runs" {
+  # GitHub's workflow env block does not export BOUCLE_ENABLED: the repo
+  # Variable only reaches the job `if:` gate, so by the time a shell runs the
+  # variable is absent. The stage relies on that gate.
+  run stage "unset BOUCLE_ENABLED"
+  assert_success
+  run cat "$TMP/capture"
+  assert_output --partial "JC-ROLE:retro"
+
+  rm -f "$TMP/capture"
+  run stage "export BOUCLE_ENABLED="
+  assert_success
+  run cat "$TMP/capture"
+  assert_output --partial "JC-ROLE:retro"
 }
 
 @test "stage: retro disabled by toggle skips without invoking the agent" {
@@ -309,6 +325,9 @@ EOF
   assert_success
   refute_output --partial "CHAIN:"
 
+  # An absent or empty BOUCLE_ENABLED is the GitHub env reality: the workflow
+  # env block never exports it, only the job `if:` gate reads it. The hook
+  # must still chain (the job gate has already handled the opt-out).
   run bash -c "
     set -euo pipefail
     source '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null || true
@@ -320,7 +339,7 @@ EOF
     boucle_retro_doctor_chain
   "
   assert_success
-  refute_output --partial "CHAIN:"
+  assert_output --partial "CHAIN:retro:retro"
 }
 
 @test "doctor hook: quiet without a usable token, even when due" {

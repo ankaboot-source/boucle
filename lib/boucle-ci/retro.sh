@@ -646,7 +646,11 @@ $(printf '%s' "$body" | retro_scrub)"
 # variables: the retro job needs no BOUCLE_ISSUE, and a non-numeric value
 # cannot collide with a real issue.
 boucle_retro_doctor_chain() {
-  [ "${BOUCLE_ENABLED:-}" = "true" ] || return 0
+  # Absent or empty BOUCLE_ENABLED must NOT disable here: on GitHub the
+  # workflow's env block does not export it (repo Variables only reach job
+  # `if:` gates), so this hook runs with the engine's default-on state —
+  # explicit non-true values are the operator's opt-out.
+  case "${BOUCLE_ENABLED:-}" in true | "") ;; *) return 0 ;; esac
   retro_enabled || return 0
   retro_upstream_ready || return 0
   retro_threshold_reached || return 0
@@ -658,10 +662,17 @@ boucle_retro_doctor_chain() {
 
 boucle_ci_retro() {
   # ── Guards ─────────────────────────────────────────────────────────────
-  if [ "${BOUCLE_ENABLED:-}" != "true" ]; then
-    echo "[retro] BOUCLE_ENABLED is not 'true' — retro stage disabled" >&2
-    exit 0
-  fi
+  # BOUCLE_ENABLED absent/empty does NOT disable: on GitHub the env block
+  # does not export it (repo Variables reach only the job `if:` gates), and
+  # the CI-level gating already handles the disabled case. An explicit
+  # non-true value is the operator's opt-out.
+  case "${BOUCLE_ENABLED:-}" in
+    true | "") ;;
+    *)
+      echo "[retro] BOUCLE_ENABLED='${BOUCLE_ENABLED}' — retro stage disabled" >&2
+      exit 0
+      ;;
+  esac
   if ! retro_enabled; then
     echo "[retro] BOUCLE_RETRO_ENABLED=${BOUCLE_RETRO_ENABLED:-} — retro disabled" >&2
     exit 0
