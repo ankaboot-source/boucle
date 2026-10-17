@@ -187,3 +187,41 @@ lib_funcs() {
   refute_output --partial 'MUST-NOT-CHAIN'
   rm -f "$TMPF"
 }
+
+automerge_funcs() {
+  awk '/^boucle_ci_automerge\(\) \{/{p=1} p {print} p && /^}$/{exit}' lib/boucle-ci/automerge.sh > "$1"
+}
+
+@test "automerge stage: parses and passes shfmt" {
+  [ -f lib/boucle-ci/automerge.sh ]
+  run bash -n lib/boucle-ci/automerge.sh
+  assert_success
+  run shfmt -d -i 2 -bn -ci -sr lib/boucle-ci/automerge.sh
+  assert_success
+}
+
+@test "automerge stage: merges verified PRs, comments, chains smoke e2e once" {
+  TMPF=$(mktemp); automerge_funcs "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_MR='10,7'
+    forge_mr_get() { case \"\$1\" in 10) echo '{\"merged\":false,\"state\":\"open\",\"source_branch\":\"dependabot/github_actions/x-4\",\"head_sha\":\"a1\",\"head\":{}}' ;; 7) echo '{\"merged\":false,\"state\":\"open\",\"source_branch\":\"renovate/all-patch\",\"sha\":\"b2\"}' ;; esac; }
+    forge_mr_merge_status() { echo mergeable; }
+    forge_mr_check_suites() { echo '[{\"name\":\"check\",\"status\":\"completed\",\"conclusion\":\"success\"}]'; }
+    boucle_checks_green() { return 0; }
+    forge_mr_merge() { echo \"merged-\$1\"; }
+    forge_mr_note() { shift 0; echo \"NOTE:\$*\"; }
+    job_link() { echo \"\"; }
+    chain_to_role() { echo \"CHAIN:\$1:\$2\"; }
+    boucle_is_external_deploy() { return 1; }
+    git() { return 0; }
+    boucle_do_deploy() { echo 'https://smoke.test'; }
+    boucle_resolve_live_url() { echo ''; }
+    source '$TMPF'
+    boucle_ci_automerge
+  "
+  assert_success
+  assert_line 'NOTE:10 🤖 boucle auto-merged this bot PR (merge `merged-10`, checks green, branch `dependabot/github_actions/x-4`, policy: dependency chore — patch/minor or security).'
+  assert_line 'NOTE:7 🤖 boucle auto-merged this bot PR (merge `merged-7`, checks green, branch `renovate/all-patch`, policy: dependency chore — patch/minor or security).'
+  assert_line 'CHAIN::e2e'
+  rm -f "$TMPF"
+}
