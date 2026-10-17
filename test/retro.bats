@@ -399,6 +399,12 @@ EOF
   # name must sanitise it to BOUCLE_MODEL_RETRO_IMPL.
   run grep -Fq "tr '[:lower:]-' '[:upper:]_'" "$REPO/bin/jc"
   assert_success
+  # The retro-impl invocation prompt must point at the scrubbing helper, not
+  # the raw forge function (dry-run and scrub are enforced only in the helper).
+  run grep -Fq 'bin/retro-post\" pr' "$REPO/bin/jc"
+  assert_success
+  run grep -Fq 'open the PR with forge_pr_create_in' "$REPO/bin/jc"
+  assert_failure
 }
 
 @test "wiring: doctor checks both agent files and advises on a token-less retro" {

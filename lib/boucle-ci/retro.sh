@@ -98,7 +98,7 @@ retro_post_report() {
     echo "ERROR: could not create the local report issue" >&2
     return 1
   fi
-  echo "report=$iid"
+  echo "[retro-post] report=$iid"
 }
 
 # retro_post_create <title> <body>
@@ -130,7 +130,7 @@ retro_post_create() {
     echo "ERROR: could not create the upstream proposal issue" >&2
     return 1
   fi
-  echo "created=$iid"
+  echo "[retro-post] created=$iid"
 }
 
 # retro_post_enrich <upstream_iid> <body>
@@ -154,7 +154,7 @@ retro_post_enrich() {
     echo "ERROR: could not comment on upstream issue #$iid" >&2
     return 1
   fi
-  echo "enriched=$iid"
+  echo "[retro-post] enriched=$iid"
 }
 
 # retro_post_pr <title> <head> <base> <body>
@@ -179,7 +179,7 @@ retro_post_pr() {
     echo "ERROR: could not open the upstream pull request" >&2
     return 1
   fi
-  echo "pr=$iid"
+  echo "[retro-post] pr=$iid"
 }
 
 # ── Digest (pre-anonymisation build) ──────────────────────────────────────

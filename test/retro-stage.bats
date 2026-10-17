@@ -358,7 +358,7 @@ EOF
     retro_post_create title body
   "
   assert_success
-  assert_output "created=99"
+  assert_output "[retro-post] created=99"
 }
 
 # ── Doctor advisory: the engine's self-targeting token ──────────────────

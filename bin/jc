@@ -462,11 +462,16 @@ is_agent_looping() {
 agent_posted_note() {
   local log="$1"
   [ -s "$log" ] || return 1
-  # The forge-note script outputs "[forge-note]" on success. Also
-  # match direct glab/gh note API calls and boucle markers (triage,
-  # verdict, draft, retro) in the log text — a drafted-but-unposted comment
-  # still counts as agent activity worth preserving.
-  grep -qiE '\[forge-note\]|(glab|gh) (issue (note|comment)|mr note|api .* -X POST|api .*/notes|api .*/comments)|<!-- boucle:(triage|verdict|draft|retro)' "$log"
+  # The forge-note script outputs "[forge-note]" on success. Also match:
+  #   - direct glab/gh note API calls (triage/reviewer/e2e),
+  #   - boucle markers (triage, verdict, draft, retro) in the log text — a
+  #     drafted-but-unposted comment still counts as agent activity;
+  #   - the rétro's posting path: [retro-post] helper lines, its pinned
+  #     summary tail, and the stage's result line. Without these a fully
+  #     successful rétro run (its glab/gh calls live inside bin/retro-post,
+  #     invisible to the transcript) exits 3 here and retros.jsonl never
+  #     records a run — the doctor then re-chains a rétro on every sweep.
+  grep -qiE '\[forge-note\]|\[retro-post\]|\[boucle:retro\] summary:|\[retro\] result:|(glab|gh) (issue (note|comment)|mr note|api .* -X POST|api .*/notes|api .*/comments)|<!-- boucle:(triage|verdict|draft|retro)' "$log"
 }
 
 # ── Generate jcode config from env vars (no runner-host config file) ──
@@ -1598,7 +1603,7 @@ No digest was provided (BOUCLE_RETRO_DIGEST unset or unreadable). State that the
       # was given, on the S/M proposal handed to it. The proposal text was
       # composed by the rétro role from already-scrubbed data.
       local retro_proposal="${BOUCLE_RETRO_PROPOSAL:-}"
-      prompt="Implement the upstream proposal below. You are a bounded contributor: work ONLY inside the upstream clone workspace you were given, commit with the conventional \`feat(retro): ...\` message, push the prepared branch, and open the PR with forge_pr_create_in referencing the upstream issue."
+      prompt="Implement the upstream proposal below. You are a bounded contributor: work ONLY inside the upstream clone workspace you were given, commit with the conventional \`feat(retro): ...\` message, push the prepared branch, and open the PR with \`\"\$BOUCLE_HOME/bin/retro-post\" pr\` (the helper scrubs the body and enforces dry-run — NEVER call forge_pr_create_in, gh or curl directly), referencing the upstream issue."
       if [ -n "$retro_proposal" ]; then
         prompt="${prompt}
 
@@ -2475,7 +2480,7 @@ scrub_agent_log() {
       return out s
     }
     BEGIN {
-      n = split("BOUCLE_LLM_API_KEY BOUCLE_FALLBACK_API_KEY BOUCLE_TOKEN BOUCLE_BOT_TOKEN BOUCLE_SCRUB_CF CLOUDFLARE_API_TOKEN BOUCLE_GROQ_API_KEY BOUCLE_NVIDIA_API_KEY BOUCLE_CEREBRAS_API_KEY BOUCLE_ZHIPU_API_KEY BOUCLE_CLOUDFLARE_API_KEY BOUCLE_HUGGINGFACE_API_KEY BOUCLE_MISTRAL_API_KEY", names, " ")
+      n = split("BOUCLE_LLM_API_KEY BOUCLE_FALLBACK_API_KEY BOUCLE_TOKEN BOUCLE_BOT_TOKEN BOUCLE_UPSTREAM_TOKEN BOUCLE_SCRUB_CF CLOUDFLARE_API_TOKEN BOUCLE_GROQ_API_KEY BOUCLE_NVIDIA_API_KEY BOUCLE_CEREBRAS_API_KEY BOUCLE_ZHIPU_API_KEY BOUCLE_CLOUDFLARE_API_KEY BOUCLE_HUGGINGFACE_API_KEY BOUCLE_MISTRAL_API_KEY", names, " ")
     }
     {
       line = $0
@@ -2486,9 +2491,14 @@ scrub_agent_log() {
       # Token shapes that may arrive from anywhere (a forge CLI trace, a
       # provider error body). Prefix-anchored so ordinary words survive.
       gsub(/gh[pousr]_[A-Za-z0-9]+/, "[REDACTED:github-token]", line)
+      # Fine-grained PATs: github_pat_<...> is NOT matched by gh[pousr]_.
+      gsub(/github_pat_[A-Za-z0-9_]+/, "[REDACTED:github-pat]", line)
       gsub(/glpat-[A-Za-z0-9_-]+/, "[REDACTED:gitlab-pat]", line)
       gsub(/sk-[A-Za-z0-9._-]+/, "[REDACTED:api-key]", line)
       gsub(/[Bb]earer +[A-Za-z0-9._-]+/, "Bearer [REDACTED]", line)
+      # The T2 clone persists its push credential as an extraheader, which a
+      # git trace can echo back as a Basic base64 blob.
+      gsub(/[Aa]uthorization: [Bb]asic +[A-Za-z0-9+\/=]+/, "Authorization: Basic [REDACTED]", line)
       print line
     }
   ' "$log" > "${log}.scrubbed" 2> /dev/null \
