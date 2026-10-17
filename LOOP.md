@@ -730,6 +730,11 @@ open-route would triage it). The next retro **closes the previous report**
 - Missing `BOUCLE_UPSTREAM_TOKEN` → the retro is skipped cleanly and
   `bin/doctor --audit` reports an **advisory** — never a warning on every
   sweep.
+- No jcode-resolvable LLM config (neither the `BOUCLE_LLM_BASE_URL` +
+  `BOUCLE_LLM_API_KEY` pair, nor any freeride provider key, nor a
+  pre-installed `~/.jcode/config.toml`) → the doctor does NOT chain and the
+  stage exits 0 with a skip line; `bin/doctor --audit` reports **one
+  advisory**. The retro NEVER runs as a red job per sweep.
 - `BOUCLE_RETRO_ENABLED=false` → no retro job, no post, no blocking advisory.
 - `BOUCLE_RETRO_DRY_RUN=true` → analysis and logs only, no post (consumer
   tests); the run record still advances the cadence.
