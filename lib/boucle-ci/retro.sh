@@ -467,7 +467,7 @@ _retro_count_values() {
 # Append the run record to retros.jsonl on the metrics branch. This log is
 # the trigger's only state; a failure is logged and swallowed.
 _retro_record() {
-  local since="$1" report="$2" created="$3" enriched="$4" implementable="$5"
+  local since="$1" report="$2" created="$3" enriched="$4" implementable="$5" dry="${6:-no}"
   local created_n enriched_n
   created_n=$(_retro_count_values "$created")
   enriched_n=$(_retro_count_values "$enriched")
@@ -477,11 +477,12 @@ _retro_record() {
     --arg window "$since" \
     --arg report "$report" \
     --arg implementable "$implementable" \
+    --arg dry "$dry" \
     --argjson created "$created_n" \
     --argjson enriched "$enriched_n" \
     '{schema: 1, timestamp: $ts, window: $window, created: $created,
       enriched: $enriched, report: $report, implementable: $implementable,
-      dry_run: false}' 2> /dev/null) || return 1
+      dry_run: ($dry == "yes")}' 2> /dev/null) || return 1
   if retro_record_run "$line"; then
     echo "[retro] recorded the run on $BOUCLE_METRICS_BRANCH:$BOUCLE_RETRO_FILE"
   else
@@ -675,8 +676,12 @@ boucle_ci_retro() {
   # Idempotence against the doctor's stale pre-check: the doctor may chain
   # this stage moments after a previous retro recorded its run. The
   # resource_group boucle-retro serializes the jobs; this re-check makes the
-  # later one a no-op.
-  if ! retro_threshold_reached; then
+  # later one a no-op. BOUCLE_RETRO_FORCE is the operator escape hatch: a
+  # manually dispatched job proceeds even before the window elapses. The
+  # doctor NEVER reads FORCE, so it cannot make the periodic trigger fire.
+  if retro_force; then
+    echo "[retro] BOUCLE_RETRO_FORCE=true — threshold re-check skipped (operator-triggered run)" >&2
+  elif ! retro_threshold_reached; then
     echo "[retro] threshold not reached — nothing to do" >&2
     exit 0
   fi
@@ -738,12 +743,17 @@ boucle_ci_retro() {
   implementable=$(_retro_summary_values "$agent_log" implementable | head -1)
 
   # ── Bookkeeping (all fail-open) ──────────────────────────────────────────
+  # The trigger state is recorded in BOTH modes. A dry run advances the
+  # cadence deliberately (dry_run:true): its posts are no-ops, and without a
+  # record the empty retros.jsonl would read as "first run" on every sweep,
+  # so the doctor would chain a 30-step rétro after each one. Only the
+  # anti-accumulation close and T2 are skipped in dry-run.
+  _retro_record "$since" "${report:-}" "$created" "$enriched" "${implementable:-}" "$dry" || true
   if [ "$dry" = "yes" ]; then
-    echo "[retro] dry-run: skip retros.jsonl record"
+    echo "[retro] dry-run: recorded the run (dry_run=true — the cadence advances; no post was made)"
     echo "[retro] dry-run: skip closing the previous report"
     echo "[retro] dry-run: skip T2 contribution"
   else
-    _retro_record "$since" "${report:-}" "$created" "$enriched" "${implementable:-}" || true
     _retro_close_previous_reports "${report:-}" || true
     case "$implementable" in
       '' | none)

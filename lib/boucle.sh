@@ -3042,6 +3042,20 @@ retro_dry_run() {
   esac
 }
 
+# retro_force
+#
+# Operator escape hatch: run the rétro NOW even when the merged-PR / days
+# window has not elapsed. The stage skips its threshold re-check when this is
+# set; the DOCTOR's chain condition never reads it, so FORCE can never make
+# the periodic trigger fire early — it only lets an explicitly dispatched
+# retro job proceed. Default false; explicit true spellings only.
+retro_force() {
+  case "$(printf '%s' "${BOUCLE_RETRO_FORCE:-false}" | tr '[:upper:]' '[:lower:]')" in
+    true | 1 | yes | on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # retro_scrub — stdin → stdout deterministic anonymiser.
 #
 # Replace the consumer's identity strings with generics before the data

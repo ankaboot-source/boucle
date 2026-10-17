@@ -309,6 +309,21 @@ EOF
   done
 }
 
+@test "retro: FORCE is OFF by default and only explicit true spellings enable it (S5)" {
+  lib
+  unset BOUCLE_RETRO_FORCE || true
+  run retro_force
+  assert_failure
+  for v in true TRUE 1 yes on; do
+    BOUCLE_RETRO_FORCE="$v" run retro_force
+    assert_success
+  done
+  for v in false 0 no off banana; do
+    BOUCLE_RETRO_FORCE="$v" run retro_force
+    assert_failure
+  done
+}
+
 # ── trigger ────────────────────────────────────────────────────────────
 
 @test "retro threshold: a repo that never ran a retro is due" {

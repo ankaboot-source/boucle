@@ -148,19 +148,31 @@ EOF
 
 # ── Dry-run ─────────────────────────────────────────────────────────────
 
-@test "stage: dry-run invokes the agent but writes nothing (no record, no close, no T2)" {
+@test "stage: dry-run posts nothing but advances the cadence with a dry_run record (S5)" {
   run stage "export BOUCLE_RETRO_DRY_RUN=true BOUCLE_MOCK_JC_SUMMARY='[boucle:retro] summary: created=none enriched=none report=none implementable=none'"
   assert_success
   assert_output --partial "dry-run: analysis only"
-  assert_output --partial "dry-run: skip retros.jsonl record"
+  assert_output --partial "dry-run: recorded the run"
   assert_output --partial "dry-run: skip closing the previous report"
   assert_output --partial "dry-run: skip T2 contribution"
 
   run cat "$TMP/capture"
   assert_output --partial "JC:retro"
-  refute_output --partial "RECORD:"
+  # The record advances the cadence; without it every sweep looks like a
+  # first run and the doctor re-chains a 30-step rétro each time.
+  assert_output --partial "RECORD:"
+  assert_output --partial '"dry_run":true'
   refute_output --partial "CLOSE:"
   refute_output --partial "T2:"
+}
+
+@test "stage: BOUCLE_RETRO_FORCE skips the threshold re-check (S5)" {
+  run stage "export BOUCLE_RETRO_FORCE=true BOUCLE_MOCK_JC_SUMMARY='[boucle:retro] summary: created=none enriched=none report=7 implementable=none'; retro_threshold_reached() { return 1; }"
+  assert_success
+  assert_output --partial "BOUCLE_RETRO_FORCE=true"
+  assert_output --partial "threshold re-check skipped"
+  run cat "$TMP/capture"
+  assert_output --partial "JC:retro"
 }
 
 # ── Fail-open / exit semantics ───────────────────────────────────────────
@@ -319,6 +331,21 @@ EOF
     retro_enabled() { return 0; }
     retro_upstream_ready() { return 1; }
     retro_threshold_reached() { return 0; }
+    chain_to_role() { echo \"CHAIN:\$1:\$2\"; }
+    boucle_retro_doctor_chain
+  "
+  assert_success
+  refute_output --partial "CHAIN:"
+}
+
+@test "doctor hook: BOUCLE_RETRO_FORCE can never make the periodic trigger fire (S5)" {
+  run bash -c "
+    set -euo pipefail
+    source '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null || true
+    BOUCLE_ENABLED=true BOUCLE_RETRO_FORCE=true
+    retro_enabled() { return 0; }
+    retro_upstream_ready() { return 0; }
+    retro_threshold_reached() { return 1; }
     chain_to_role() { echo \"CHAIN:\$1:\$2\"; }
     boucle_retro_doctor_chain
   "
