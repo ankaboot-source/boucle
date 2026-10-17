@@ -36,6 +36,7 @@ setup() {
   awk -v fn="forge_mr_list" '$0 ~ "^"fn"\\(\\) \\{" {p=1} p {print} p && /^}/ {exit}' bin/forge/gitlab.sh > "$TMPF"
   run bash -c "
     glab() { echo '[{\"iid\":7,\"author\":{\"username\":\"dependabot[bot]\"},\"title\":\"Bump pillow (security advisories)\",\"labels\":[\"dependencies\"],\"draft\":false,\"source_branch\":\"dependabot/security/pillow\",\"sha\":\"def456\",\"description\":\"Security advisory update\"}]'; }
+    forge_merge_pages() { cat; }
     source '$TMPF'
     forge_mr_list | jq -r '[.[0].iid, .[0].author, .[0].labels, .[0].head_sha] | @tsv'
   "
