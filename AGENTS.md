@@ -30,8 +30,8 @@ When they disagree, the frontmatter wins and this table is the bug.
 | worker     | ollama-cloud/deepseek-v4.1-flash | 100   | —    | max    | Implements on branch `boucle/<iid>-<slug>`, reads `state.md`, uses codebase-memory-mcp, conventional commit          |
 | reviewer   | ollama-cloud/deepseek-v4.1-flash | 35    | 0.2  | max    | Adversarial review against preview URL, SHA-anchored verdict                                                       |
 | e2e        | ollama-cloud/glm-5.3-flash       | 30    | —    | off    | Verifies on production URL, SHA-anchored verdict                                                                    |
-| retro      | ollama-cloud/glm-5.2             | 30    | 0.3  | —      | Retrospective analyst: window analysis, anonymized upstream proposals                                               |
-| retro-impl | ollama-cloud/deepseek-v4.1-flash | 60    | —    | —      | Bounded upstream contributor: implements S/M proposals as human-reviewed PRs                                        |
+| retro      | ollama-cloud/glm-5.3-flash       | 30    | 0.3  | high   | Retrospective analyst: window analysis, anonymized upstream proposals                                               |
+| retro-impl | ollama-cloud/deepseek-v4.1-flash | 60    | —    | max    | Bounded upstream contributor: implements S/M proposals as human-reviewed PRs                                        |
 
 See [LOOP.md](LOOP.md) for the pipeline and state machine details.
 

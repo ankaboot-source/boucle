@@ -369,7 +369,7 @@ EOF
   SCRATCH="$TMP/consumer"
   mkdir -p "$SCRATCH"
   git init -q "$SCRATCH"
-  git -C "$SCRATCH" remote add origin https://framagit.org/asso/site.git
+  git -C "$SCRATCH" remote add origin https://gitlab.example.com/asso/site.git
   cd "$SCRATCH" || return 1
   run env -i PATH="$PATH" HOME="$HOME" BOUCLE_LLM_API_KEY=k BOUCLE_FORGE=github BOUCLE_TOKEN=ghp_consumer BOUCLE_PROJECT_ID=someone/consumer bash "$REPO/bin/doctor" --audit
   assert_success

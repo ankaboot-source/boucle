@@ -398,8 +398,8 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_RETRO_EVERY_MERGES` | `10` | Merged-PR threshold since the last rétro. |
 | `BOUCLE_RETRO_EVERY_DAYS` | `2` | Temporal backstop so an inactive repository still gets a rétro (≈ 300 sweeps at the 10-minute doctor cadence). |
 | `BOUCLE_UPSTREAM_REPO` | `ankaboot-source/boucle` | Target repository for the rétro's upstream proposals. |
-| `BOUCLE_UPSTREAM_TOKEN` | *(unset, secret)* | GitHub PAT (`public_repo` scope) used to post upstream. Set as a **masked** variable; never defaulted. Unset → the rétro is skipped cleanly + `bin/doctor --audit` advisory. |
-| `BOUCLE_MODEL_RETRO` / `BOUCLE_MODEL_RETRO_IMPL` | `glm-5.2` / worker model | Per-role model overrides (the existing `BOUCLE_MODEL_<ROLE>` pattern in `bin/jc`); `retro-impl` defaults to the worker model. |
+| `BOUCLE_UPSTREAM_TOKEN` | *(unset, secret)* | GitHub PAT (`public_repo` scope) used to post upstream. Set as a **masked** variable; never defaulted. Unset → the rétro is skipped cleanly + `bin/doctor --audit` advisory. On the upstream repo itself (dogfood), the rétro falls back to its own GitHub `BOUCLE_TOKEN` — no second token needed; a GitLab `BOUCLE_TOKEN` is NEVER reused (GitLab credential). |
+| `BOUCLE_MODEL_RETRO` / `BOUCLE_MODEL_RETRO_IMPL` | `glm-5.3-flash` / worker model | Per-role model overrides (the existing `BOUCLE_MODEL_<ROLE>` pattern in `bin/jc`); `retro-impl` defaults to the worker model. |
 | `BOUCLE_RETRO_DRY_RUN` | `false` | Analyse and log without posting anything (consumer tests). |
 | `BOUCLE_DOCTOR_ADAPTIVE` | `true` | Skip the full sweep when the board has not moved since the last check. |
 | `BOUCLE_DOCTOR_BACKSTOP` | `21600` | Seconds after which a full sweep runs regardless of the fingerprint (6 h). |
@@ -417,6 +417,8 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_FALLBACK_MODEL_WORKER` | `deepseek-v4.1-flash` | |
 | `BOUCLE_FALLBACK_MODEL_REVIEWER` | `glm-5.3-flash` | |
 | `BOUCLE_FALLBACK_MODEL_E2E` | `deepseek-v4.1-flash` | |
+| `BOUCLE_FALLBACK_MODEL_RETRO` | `glm-5.3-flash` | |
+| `BOUCLE_FALLBACK_MODEL_RETRO_IMPL` | `deepseek-v4.1-flash` | |
 | `BOUCLE_PROVIDER_PROFILE` | `boucle` | jcode provider profile name. |
 | `BOUCLE_IMAGE_MAX_BYTES` | `10485760` | Max bytes per attachment (10 MiB). |
 | `BOUCLE_IMAGE_TOTAL_MAX_BYTES` | `52428800` | Max total bytes per issue (50 MiB). |

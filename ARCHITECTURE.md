@@ -55,7 +55,7 @@ anonymized improvements upstream (§7).
 
 ```
 .
-├── .gitlab-ci.yml            # GitLab pipeline (12 jobs, thin wrappers)
+├── .gitlab-ci.yml            # GitLab pipeline (12 loop jobs, 14 thin wrappers)
 ├── .github/workflows/boucle.yml  # GitHub Actions equivalent
 ├── .jcode/                   # Agent runtime config (prompts, skills, workflow)
 │   ├── agents/               # 6 role prompts: triage.md, worker.md, reviewer.md, e2e.md, retro.md, retro-impl.md
@@ -82,10 +82,10 @@ anonymized improvements upstream (§7).
 ├── lib/                      # shared shell libraries
 │   ├── boucle.sh             # set_boucle_label, chain_to_role, resolve_reporter_id, ...
 │   ├── boucle-ci.sh          # shared CI stage bootstrap (sources forge + boucle.sh)
-│   └── boucle-ci/            # 11 stage scripts (forge-agnostic job logic)
+│   └── boucle-ci/            # 12 stage scripts (forge-agnostic job logic)
 │       ├── dispatch.sh  triage.sh  worker.sh  reviewer.sh
 │       ├── merger.sh    catchup.sh post-merge.sh deploy.sh
-│       ├── doctor.sh    e2e.sh     check.sh
+│       ├── doctor.sh    e2e.sh     check.sh    retro.sh
 ├── docker/Dockerfile.agents  # jcode + codebase-memory-mcp baked image
 ├── docs/superpowers/         # design plans + specs (self-update, merge-catchup, ...)
 └── SKILL.md                  # symlink → .jcode/skills/boucle/SKILL.md (the protocol)
@@ -96,7 +96,7 @@ anonymized improvements upstream (§7).
 | `bin/` | Executable surface: install, update, harness, forge adapters, helpers | `jc`, `setup`, `update`, `forge/*.sh` |
 | `lib/` | Shared shell libraries: state machine, CI stage logic | `boucle.sh`, `boucle-ci.sh`, `boucle-ci/*.sh` |
 | `.jcode/` | Agent runtime config: role prompts, vendored skills, protocol | `agents/*.md`, `skills/boucle/SKILL.md` |
-| `.gitlab-ci.yml` | GitLab pipeline definition (thin wrappers over `lib/boucle-ci/*.sh`) | 12 jobs |
+| `.gitlab-ci.yml` | GitLab pipeline definition (thin wrappers over `lib/boucle-ci/*.sh`) | 12 loop jobs |
 | `.github/workflows/boucle.yml` | GitHub Actions equivalent | same stage functions |
 | `docker/` | Pre-baked agent image (jcode + codebase-memory-mcp) | `Dockerfile.agents` |
 
@@ -142,7 +142,7 @@ The same loop runs on both forges: GitLab is the reference implementation
 
 ## 4. CI pipeline
 
-The pipeline is defined in `.gitlab-ci.yml` (12 jobs) and mirrored in
+The pipeline is defined in `.gitlab-ci.yml` (12 loop jobs) and mirrored in
 `.github/workflows/boucle.yml`. Each job is a **thin wrapper** that sources
 `lib/boucle-ci.sh` (which sources the forge backend + `lib/boucle.sh`) and
 calls the corresponding `boucle_ci_<stage>` function from `lib/boucle-ci/`.

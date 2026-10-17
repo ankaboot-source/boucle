@@ -49,13 +49,13 @@ run_in_scratch() {
   export BOUCLE_PROJECT_ID=424242
   export BOUCLE_BOT_USERNAME=loop-bot
   export GITLAB_USER_LOGIN=alice
-  export BOUCLE_FORGE_HOST=framagit.org
+  export BOUCLE_FORGE_HOST=gitlab.example.com
   SCRATCH="$TMP/consumer"
   mkdir -p "$SCRATCH"
   git init -q "$SCRATCH"
-  git -C "$SCRATCH" remote add origin https://framagit.org/asso/site-urgence.git
+  git -C "$SCRATCH" remote add origin https://gitlab.example.com/asso/site-urgence.git
   cat > "$TMP/input.txt" << 'EOF'
-project asso/site-urgence (id 424242, name site-urgence) on framagit.org
+project asso/site-urgence (id 424242, name site-urgence) on gitlab.example.com
 user alice asked loop-bot to fix branch boucle/139-fix-thing
 mail: alice@example.org
 upstream: https://github.com/ankaboot-source/boucle/issues/139
@@ -128,7 +128,7 @@ EOF
   SCRATCH="$TMP/consumer-auto"
   mkdir -p "$SCRATCH"
   git init -q "$SCRATCH"
-  git -C "$SCRATCH" remote add origin https://framagit.org/asso/site.git
+  git -C "$SCRATCH" remote add origin https://gitlab.example.com/asso/site.git
   export GITHUB_REPOSITORY=someone/consumer
   run run_in_scratch "$SCRATCH" retro_contribute_enabled
   assert_failure
@@ -164,7 +164,7 @@ EOF
   SCRATCH="$TMP/consumer2"
   mkdir -p "$SCRATCH"
   git init -q "$SCRATCH"
-  git -C "$SCRATCH" remote add origin https://framagit.org/asso/site.git
+  git -C "$SCRATCH" remote add origin https://gitlab.example.com/asso/site.git
   run run_in_scratch "$SCRATCH" retro_contribute_enabled
   assert_failure
 
@@ -220,7 +220,7 @@ EOF
   SCRATCH="$TMP/consumer-token"
   mkdir -p "$SCRATCH"
   git init -q "$SCRATCH"
-  git -C "$SCRATCH" remote add origin https://framagit.org/asso/site.git
+  git -C "$SCRATCH" remote add origin https://gitlab.example.com/asso/site.git
   run run_in_scratch "$SCRATCH" retro_upstream_token
   assert_failure
 }
