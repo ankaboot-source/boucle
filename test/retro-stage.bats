@@ -586,3 +586,64 @@ EOF
   assert_success
   assert_output --partial "BOUCLE_RETRO_ENABLED=true without BOUCLE_UPSTREAM_TOKEN"
 }
+
+@test "digest: metrics coverage quantifies the rows the window is missing" {
+  # The reported window's shape: 33 closed issues, 3 metrics rows, nothing
+  # anywhere saying which 30 were missing — so an empty verdicts array read as
+  # "the gates never ran" when the truth was "30 runs emitted no measurement
+  # at all". The digest must state the gap, name the issues it can (renumbered,
+  # S3), and flag what each surviving row could not measure.
+  REMOTE="$TMP/remote-coverage.git"
+  WORK="$TMP/digest-coverage"
+  git init -q --bare "$REMOTE"
+  git init -q "$WORK"
+  git -C "$WORK" remote add origin "$REMOTE"
+  git -C "$WORK" -c user.email=a@b -c user.name=a commit -q --allow-empty -m init
+  git -C "$WORK" push -q origin HEAD:main
+  git -C "$WORK" checkout -q --orphan boucle/metrics
+  mkdir -p "$WORK/raw"
+  printf '%s\n' \
+    '{"schema":3,"timestamp":"2026-10-01T10:00:00Z","issue":"4242","terminal":"done","coverage":"complete","telemetry_gap":[]}' \
+    '{"schema":3,"timestamp":"2026-10-02T10:00:00Z","issue":"7771","terminal":"done","coverage":"partial","telemetry_gap":["verdict_missing","cost_unavailable"]}' \
+    '{"schema":3,"timestamp":"2026-10-03T10:00:00Z","issue":"9990","terminal":"human","coverage":"no-data","telemetry_gap":["no_health_data"],"iterations":null}' \
+    > "$WORK/metrics.jsonl"
+  printf '%s\n' \
+    '{"timestamp":"2026-10-01T09:00:00Z","role":"worker","iteration":1,"tokens":"10","cost_usd":"0.5","model":"m","skills":[],"setup_fail":""}' \
+    '{"timestamp":"2026-10-01T09:30:00Z","role":"reviewer","outcome":"PASS","detail":"iteration 1"}' \
+    > "$WORK/raw/4242.jsonl"
+  printf '%s\n' \
+    '{"timestamp":"2026-10-02T09:00:00Z","role":"worker","iteration":1,"tokens":"n/a","cost_usd":"n/a","model":"","skills":[],"setup_fail":""}' \
+    > "$WORK/raw/7771.jsonl"
+  git -C "$WORK" add -A
+  git -C "$WORK" -c user.email=a@b -c user.name=a commit -q -m metrics
+  git -C "$WORK" push -q origin boucle/metrics
+
+  # Six closed issues in the window: three with a metrics row (one of them a
+  # coverage row), three with none at all.
+  run bash -c "
+    set -euo pipefail
+    unset GITHUB_REPOSITORY BOUCLE_PROJECT_ID BOUCLE_PROJECT_PATH || true
+    export BOUCLE_WORKSPACE='$WORK' BOUCLE_HOME='$REPO'
+    source '$REPO/lib/boucle.sh' 2> /dev/null || true
+    source '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null || true
+    cd '$WORK'
+    forge_issue_list_all() { echo '[{\"iid\":6003,\"title\":\"Newest\",\"closed_at\":\"2026-10-06T00:00:00Z\"},{\"iid\":6002,\"title\":\"Then\",\"closed_at\":\"2026-10-05T00:00:00Z\"},{\"iid\":6001,\"title\":\"Older\",\"closed_at\":\"2026-10-04T00:00:00Z\"},{\"iid\":9990,\"title\":\"Unmeasured\",\"closed_at\":\"2026-10-03T00:00:00Z\"},{\"iid\":7771,\"title\":\"Partial\",\"closed_at\":\"2026-10-02T00:00:00Z\"},{\"iid\":4242,\"title\":\"Measured\",\"closed_at\":\"2026-10-01T00:00:00Z\"}]'; }
+    retro_upstream_ready() { return 1; }
+    _retro_build_digest '$TMP/digest-coverage.md' '2026-09-15T00:00:00Z'
+  "
+  assert_success
+  run cat "$TMP/digest-coverage.md"
+  # Two usable rows out of six closed issues, the newest unmeasured ones named.
+  assert_output --partial "metrics_coverage: 2/6"
+  assert_output --partial "without a row: #3 #4 #5 #6"
+  assert_output --partial "coverage rows: 1"
+  # What each surviving row could not measure.
+  assert_output --partial '"gaps":["model_unavailable","tokens_unavailable","cost_unavailable","verdict_missing"]'
+  assert_output --partial '"gaps":[]'
+  assert_output --partial '"issues_with_verdicts":1'
+  # The coverage line names renumbered issues only — never a consumer IID (S3).
+  refute_output --partial "4242"
+  refute_output --partial "7771"
+  refute_output --partial "9990"
+  refute_output --partial "6001"
+}

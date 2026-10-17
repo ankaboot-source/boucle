@@ -1164,6 +1164,20 @@ boucle_human_touches() {
 # nobody aggregates. verdicts carries the reviewer/e2e outcomes for the same
 # reason: they are what distinguishes a first-pass success from a recovery.
 #
+# EVERY documented field is present in the row, ALWAYS — a value when the runs
+# reported one, an explicit null (with the reason in telemetry_gap) when they
+# did not. A key that is simply absent cannot be told apart from a key the
+# reader does not know about, and a reader that takes the absence for a zero
+# invents a measurement: rows shipped without cost_usd at all, so every cost
+# aggregate over the metrics branch reported null and the retro could not tell
+# "no pricing configured" from "the field was never written". The reason
+# vocabulary is shared with the digest's per-row gaps (LOOP.md):
+#   no_runs | model_unavailable | tokens_unavailable | cost_unavailable |
+#   verdict_missing — a run happened and no gate outcome was recorded: an
+#   empty verdicts array after a completed run IS a gap, not a pass.
+# `coverage` summarises them: complete | partial (| no-data, written by
+# boucle_metrics_gap_row when there is no health log to summarise at all).
+#
 # Print ONE JSON object summarising the whole issue. <terminal> is the state
 # the issue ended in: done | human.
 #
@@ -1201,12 +1215,35 @@ boucle_metrics_row() {
     | ([.[] | select(has("arm")) | .arm] | map(select(. != null and . != "")) | last // "full") as $arm
     | ([.[] | select(has("setup_fail")) | .setup_fail] | map(select(. != null and . != ""))) as $setup
     | ([.[] | select(has("outcome"))]) as $outcomes
+    | ([.[] | select(has("iteration"))] | length) as $runs
+    | ([.[] | select(.model != null and .model != "") | .model] | unique) as $models
+    # Numeric values only, from a number OR a numeric string: the health writer
+    # records an unreported value as the string "n/a" (#119), so summing with
+    # `tonumber?` keeps the real figures and drops the placeholder. `add` over
+    # an empty stream is null — "not measured" — never a fabricated 0. A
+    # `type == "number"` filter alone matched NOTHING (every value in the health
+    # log is a string there), which is how a row ended up with tokens:null
+    # beside a raw log that held millions of them.
+    | ([.[] | select(has("tokens")) | (.tokens | tonumber? // empty)] | add) as $tokens
+    | ([.[] | select(has("cost_usd")) | (.cost_usd | tonumber? // empty)] | add) as $cost
+    | ([$outcomes[] | select(.role == "reviewer" or .role == "e2e") | .outcome]) as $verdicts
     | (($iters | max) // 0) as $last_iter
+    | [
+        (if $runs == 0 then "no_runs" else empty end),
+        (if ($models | length) == 0 then "model_unavailable" else empty end),
+        (if $tokens == null then "tokens_unavailable" else empty end),
+        (if $cost == null then "cost_unavailable" else empty end),
+        (if ($verdicts | length) == 0 and $runs > 0 then "verdict_missing" else empty end)
+      ] as $gap
     | {
         # 2 adds lessons / lessons_n / runs_lessons_*: WHICH lessons the
         # prompts carried, the companion of the skills fields. Additive —
         # every schema-1 key keeps its name and meaning.
-        schema: 2,
+        # 3 adds cost_usd, coverage and telemetry_gap: the row states what it
+        # could NOT measure instead of leaving the reader to infer it from an
+        # absent key. Additive too — schema-1 and schema-2 keys keep their
+        # names and meaning.
+        schema: 3,
         timestamp: $ts,
         project: $project,
         issue: $iid,
@@ -1215,7 +1252,7 @@ boucle_metrics_row() {
         iterations: $last_iter,
         iterations_censored: ($terminal != "done"),
         max_iterations: $max_iter,
-        runs: ([.[] | select(has("iteration"))] | length),
+        runs: $runs,
         skills: $skills,
         skills_n: ($skills | length),
         # How much to trust skills / skills_n above. runs_skills_unparsed > 0
@@ -1245,7 +1282,7 @@ boucle_metrics_row() {
         human_delivery: $delivery,
         build_fails: ([$outcomes[] | select(.outcome == "build-fail")] | length),
         no_changes: ([$outcomes[] | select(.outcome == "no-changes")] | length),
-        verdicts: ([$outcomes[] | select(.role == "reviewer" or .role == "e2e") | .outcome]),
+        verdicts: $verdicts,
         prompt_chars_max: ([.[] | select(has("prompt_chars")) | .prompt_chars
                             | numbers] | max // 0),
         swarm_spawns: ([.[] | select(has("swarm_spawns")) | .swarm_spawns
@@ -1257,9 +1294,82 @@ boucle_metrics_row() {
         # published tokens:0 while transcripts held the real figures). Keep
         # the absence honest: sum only numeric values; if NO run carried a
         # number, publish null ("not measured") instead of a fake zero.
-        tokens: ([.[] | select(has("tokens")) | .tokens
-                  | select(type == "number")] | add)
+        tokens: $tokens,
+        # The same sum for dollars: null when NO run carried a numeric cost.
+        # Two different facts produce that null and telemetry_gap is what
+        # tells them apart — cost_unavailable (no BOUCLE_PRICING_JSON, or the
+        # provider reported no usage) is not the same finding as a field that
+        # was never written at all.
+        cost_usd: $cost,
+        coverage: (if ($gap | length) == 0 then "complete" else "partial" end),
+        telemetry_gap: $gap
       }' "$health" 2> /dev/null || true
+}
+
+# boucle_metrics_gap_row <iid> <terminal> [reason]
+#
+# Print the row a terminal transition publishes when there is NO health log to
+# summarise — a coverage row, not a measurement.
+#
+# Emission is MANDATORY: an issue that reaches done/human is a run the loop
+# finished, and a run that leaves no row is a blind spot nobody can even
+# count. The first implementation returned nothing in that case ("no health
+# data for issue #N — nothing to publish"), which is how a window of 33 closed
+# issues came to hold 3 metrics rows with the other 30 missing and nothing
+# anywhere saying so.
+#
+# What makes this honest rather than a fabricated zero: every measurement is an
+# explicit null, the arrays are empty, and `coverage: "no-data"` plus
+# `telemetry_gap: ["no_health_data"]` says why. Readers that average rows MUST
+# skip it (bin/skills-stats does), and the retro digest counts it as a gap
+# rather than as a row.
+boucle_metrics_gap_row() {
+  local iid="${1:-}" terminal="${2:-unknown}" reason="${3:-no_health_data}"
+  [ -n "$iid" ] || return 0
+  command -v jq > /dev/null 2>&1 || return 0
+  local max_iter="${BOUCLE_MAX_ITERATIONS:-5}"
+  case "$max_iter" in '' | *[!0-9]*) max_iter=5 ;; esac
+  jq -n -c \
+    --arg iid "$iid" \
+    --arg terminal "$terminal" \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg project "${BOUCLE_PROJECT_ID:-}" \
+    --arg reason "$reason" \
+    --argjson max_iter "$max_iter" \
+    '{
+       schema: 3,
+       timestamp: $ts,
+       project: $project,
+       issue: $iid,
+       terminal: $terminal,
+       arm: "unknown",
+       coverage: "no-data",
+       iterations: null,
+       iterations_censored: null,
+       max_iterations: $max_iter,
+       runs: null,
+       skills: [],
+       skills_n: 0,
+       runs_skills_unparsed: 0,
+       runs_skills_not_invoked: 0,
+       lessons: [],
+       lessons_n: 0,
+       runs_lessons_default: 0,
+       runs_lessons_withheld: 0,
+       runs_lessons_unbuilt: 0,
+       setup_failures: null,
+       setup_failure_families: [],
+       human_spec: null,
+       human_delivery: null,
+       build_fails: null,
+       no_changes: null,
+       verdicts: [],
+       prompt_chars_max: null,
+       swarm_spawns: null,
+       tokens: null,
+       cost_usd: null,
+       telemetry_gap: [$reason]
+     }' 2> /dev/null || true
 }
 
 # boucle_metrics_publish <iid> <terminal>
@@ -1288,8 +1398,19 @@ boucle_metrics_publish() {
   local row
   row=$(boucle_metrics_row "$iid" "$terminal" 2> /dev/null || echo "")
   if [ -z "$row" ] || [ "$row" = "null" ]; then
-    echo "[boucle:metrics] no health data for issue #$iid — nothing to publish" >&2
-    return 0
+    # Emission is MANDATORY: no health log does NOT mean no row. The terminal
+    # transition is the one moment the loop knows an issue finished, and a run
+    # that leaves no row is a blind spot nobody downstream can even count —
+    # a two-month window held 33 closed issues and 3 metrics rows, with
+    # nothing anywhere saying which 30 were missing. The row is written with
+    # explicit nulls and the reason (coverage: no-data), so it reads as "this
+    # run was not measured" rather than as a measurement of zero.
+    row=$(boucle_metrics_gap_row "$iid" "$terminal" "no_health_data" 2> /dev/null || echo "")
+    if [ -z "$row" ] || [ "$row" = "null" ]; then
+      echo "[boucle:metrics] no health data for issue #$iid and no usable jq — nothing to publish" >&2
+      return 0
+    fi
+    echo "[boucle:metrics] no health data for issue #$iid — publishing a coverage row (coverage=no-data, gap=no_health_data) so the run is counted, not silenced" >&2
   fi
 
   local rowfile

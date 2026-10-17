@@ -1174,3 +1174,13 @@
   - 'DO probe the image-only tools in the before_script by name, and say what each one breaks. A shell executor otherwise prints a clean Environment block and dies hundreds of lines later on a binary nobody looked for.'
   - 'DO test the pins for equality across every file that carries them (Dockerfile ARG, both CI files, the script defaults). A bump applied in one place only is the failure mode, and it is invisible by construction.'
   - 'DO read the base image''s real package manifest rather than reasoning about it. debuerreotype publishes `bookworm/slim/rootfs.manifest`; it answers "is make in there?" in one fetch.'
+123:
+  title: A measurement that omits what it could not measure reads as a measurement of zero
+  ❌:
+  - 'DO NOT write a metrics or report row with a field ABSENT when its value is unknown. An absent key cannot be told apart from a key the reader does not know about, and the next consumer to coerce it (`// 0`, an average, a sum) invents a number the loop never measured. Observed on a consumer: the per-issue row shipped without `cost_usd` at all, and its token sum filtered on `type == "number"` while every value in the health log is a STRING — a window with millions of measured tokens published `tokens: null` and every aggregate over the branch read null.'
+  - 'DO NOT let a run end with no row. The emission step returned "nothing to publish" whenever it could not find the working table, so a two-month window held a handful of rows for dozens of completed issues with nothing anywhere saying which ones were missing. A silent omission in the measurement is indistinguishable from a loop that did no work.'
+  - 'DO NOT flag only the fields whose absence you happened to think of. An empty verdicts array covered two different facts — the gate ran and recorded no outcome, or the gate never ran — and every aggregate read both as a pass.'
+  ✅:
+  - 'DO emit every documented field ALWAYS: the value when one was measured, an explicit null plus a reason when none was (`telemetry_gap`: `cost_unavailable`, `tokens_unavailable`, `model_unavailable`, `no_runs`, `verdict_missing`, `no_health_data`). Never a fabricated zero, never an absent key.'
+  - 'DO publish a coverage row when there is nothing to summarise — identity and terminal state, every measurement null, one marker saying so (`coverage: no-data`) — so the run stays countable. Readers that average MUST skip it by that marker, never by `// 0`.'
+  - 'DO reconcile coverage where the numbers are read: compare the rows a window produced against the work that window closed, print the ratio, and name the ids that have no row. A gap the reader has to infer is a gap the reader will get wrong.'

@@ -31,6 +31,10 @@ _RETRO_FIRST_WINDOW_DAYS=60
 _RETRO_MAX_ISSUES=40
 _RETRO_MAX_CLOSED=30
 _RETRO_MAX_LESSONS=10
+# How many of the issues the window could not measure are NAMED in the
+# metrics_coverage line. The count is always exact; the names are bounded so
+# the line stays one line.
+_RETRO_MAX_MISSING_IDS=8
 
 # ── Post helpers (agent-facing) ───────────────────────────────────────────
 
@@ -261,7 +265,12 @@ _retro_build_digest() {
   fi
 
   # Tag every raw line with its issue (the file name carries it, the lines do
-  # not) and jq-assemble one row per issue.
+  # not) and jq-assemble one row per issue. Each row also carries `gaps`: what
+  # it could NOT measure, in the same vocabulary as the row's telemetry_gap on
+  # the metrics branch. Without it the reader cannot tell an empty `verdicts`
+  # array (no gate outcome recorded — the gates are invisible) from a `cost_usd`
+  # null (no pricing configured — the money is unknown), and both read as
+  # findings about the loop when neither is one.
   : > "$tmp/raw.jsonl"
   local iid
   while IFS= read -r iid; do
@@ -277,18 +286,35 @@ _retro_build_digest() {
       group_by(.issue)
       | map(
           (.[0].issue) as $iid
+          | ([.[] | select(.iteration != null)] | length) as $runs
+          | ([.[] | select(.model != null and .model != "") | .model] | unique) as $models
+          | ([.[] | select(.role == "reviewer" or .role == "e2e")
+              | select(.outcome != null) | .outcome] | unique) as $verdicts
+          # `tonumber?` takes a number or a numeric string and drops the
+          # "n/a" the health writer records for a value nobody reported.
+          | ([.[] | select(has("tokens")) | (.tokens | tonumber? // empty)] | add) as $tokens
+          | ([.[] | select(has("cost_usd")) | (.cost_usd | tonumber? // empty)] | add) as $cost
+          | (($m | map(select(.issue == $iid)) | last | .terminal) // "unknown") as $terminal
+          | [
+              (if $runs == 0 then "no_runs" else empty end),
+              (if ($models | length) == 0 then "model_unavailable" else empty end),
+              (if $tokens == null then "tokens_unavailable" else empty end),
+              (if $cost == null then "cost_unavailable" else empty end),
+              (if ($verdicts | length) == 0 and $runs > 0 then "verdict_missing" else empty end),
+              (if $terminal == "unknown" then "terminal_unknown" else empty end)
+            ] as $gaps
           | {
               issue: $iid,
-              runs: ([.[] | select(.iteration != null)] | length),
+              runs: $runs,
               iterations: ([.[] | select(.iteration != null) | .iteration] | max // 0),
-              terminal: (($m | map(select(.issue == $iid)) | last | .terminal) // "unknown"),
-              models: ([.[] | select(.model != null and .model != "") | .model] | unique),
-              verdicts: ([.[] | select(.role == "reviewer" or .role == "e2e")
-                          | select(.outcome != null) | .outcome] | unique),
+              terminal: $terminal,
+              models: $models,
+              verdicts: $verdicts,
               outcomes: ([.[] | select(.outcome != null) | .outcome] | unique),
               setup_failures: ([.[] | select(.setup_fail != null and .setup_fail != "")] | length),
-              tokens: ([.[] | select(.tokens != null) | (.tokens | tonumber? // empty)] | add),
-              cost_usd: ([.[] | select(.cost_usd != null) | (.cost_usd | tonumber? // empty)] | add),
+              tokens: $tokens,
+              cost_usd: $cost,
+              gaps: $gaps,
               first_ts: ([.[] | .timestamp // empty] | min),
               last_ts: ([.[] | .timestamp // empty] | max)
             }
@@ -314,20 +340,32 @@ _retro_build_digest() {
           | group_by(.) | map({key: .[0], value: length}) | from_entries),
         setup_failures: (map(.setup_failures) | add // 0),
         tokens: (map(.tokens) | add),
-        cost_usd: (map(.cost_usd) | add)
+        cost_usd: (map(.cost_usd) | add),
+        # The window-level version of what the per-row gaps say, because an
+        # aggregate hides exactly this: `verdicts: {}` alone cannot tell "no
+        # gate ever ran" from "no gate outcome was ever recorded".
+        issues_with_verdicts: (map(select((.verdicts // []) | length > 0)) | length),
+        rows_with_gaps: (map(select((.gaps // []) | length > 0)) | length),
+        gap_counts: (map(.gaps // []) | add // [] | group_by(.)
+                     | map({key: .[0], value: length}) | from_entries)
       }' "$tmp/rows.jsonl" > "$tmp/aggregates.json" 2> /dev/null \
       || : > "$tmp/aggregates.json"
   fi
 
   # ── Closed issues in the window (titles only) ────────────────────────
-  local closed_block="" closed_items="[]"
+  # closed_window keeps the WHOLE window; closed_items is the bounded slice
+  # the digest prints. The coverage reconciliation below needs the full
+  # denominator — a ratio computed against a truncated one would report a gap
+  # that is an artefact of the bound.
+  local closed_block="" closed_items="[]" closed_window="[]"
   local closed_json
   closed_json=$(forge_issue_list_all closed 2> /dev/null || echo "[]")
-  closed_items=$(printf '%s' "$closed_json" | jq -c --arg since "$since" --argjson max "$_RETRO_MAX_CLOSED" '
+  closed_window=$(printf '%s' "$closed_json" | jq -c --arg since "$since" '
     [.[] | select((.pull_request // null) == null)
      | {iid: ((.iid // .number) | tostring), title: (.title // ""), closed: (.closed_at // "")}
      | select(.closed >= $since)]
-    | sort_by(.closed) | reverse | .[0:$max]' 2> /dev/null || echo "[]")
+    | sort_by(.closed) | reverse' 2> /dev/null || echo "[]")
+  closed_items=$(printf '%s' "$closed_window" | jq -c --argjson max "$_RETRO_MAX_CLOSED" '.[0:$max]' 2> /dev/null || echo "[]")
 
   # ── Anonymise consumer IIDs (S3) ─────────────────────────────────────
   # Renumber #1..#N in order of first appearance (per-issue rows
@@ -337,10 +375,57 @@ _retro_build_digest() {
   map_tsv=$(
     {
       jq -r '.issue // empty' "$tmp/rows.jsonl" 2> /dev/null || true
-      printf '%s' "$closed_items" | jq -r '.[].iid // empty' 2> /dev/null || true
+      printf '%s' "$closed_window" | jq -r '.[].iid // empty' 2> /dev/null || true
     } | _retro_renumber_map
   )
   map_json=$(printf '%s' "$map_tsv" | jq -Rn '[inputs | split("\t")] | map({key: .[0], value: .[1]}) | from_entries' 2> /dev/null || echo "{}")
+  # ── Metrics coverage reconciliation ──────────────────────────────────
+  # Coverage is the digest's own blind spot, quantified instead of inferred.
+  # A window holding 3 rows for 33 closed issues reads as "the gates never
+  # ran" when the honest reading is "30 runs emitted no measurement at all":
+  # the question the retro must answer ("did review run?") was unanswerable
+  # for lack of ROWS, not for lack of verdicts. `usable` excludes the coverage
+  # rows a terminal transition writes when it has no health log (coverage:
+  # no-data) — those ARE the gap, counting them as rows would report full
+  # coverage of a window that measured nothing.
+  local coverage_line="" closed_ids="[]"
+  closed_ids=$(printf '%s' "$closed_window" | jq -c '[.[].iid]' 2> /dev/null || echo "[]")
+  coverage_line=$(jq -n -r \
+    --arg since "$since" \
+    --arg fetched "$have_metrics" \
+    --argjson map "$map_json" \
+    --argjson named_max "$_RETRO_MAX_MISSING_IDS" \
+    --argjson closed "$closed_ids" \
+    --slurpfile m "$tmp/metrics.jsonl" '
+    ($m | map(select((.timestamp // "") >= $since))) as $window
+    | ($window | map(select(((.telemetry_gap // []) | index("no_health_data")) == null)
+                     | (.issue | tostring))) as $usable
+    | ($window | map(select(((.telemetry_gap // []) | index("no_health_data")) != null))
+       | length) as $nodata
+    # Dedupe WITHOUT `unique`, which sorts: the closed list is newest-first and
+    # the named gaps must keep that order, or the reader has to re-sort them to
+    # find the recent ones.
+    | (reduce $closed[] as $i ([]; if index($i) then . else . + [$i] end)) as $c
+    | ($c | map(select(. as $i | ($usable | index($i)) != null))) as $covered
+    | ($c | map(select(. as $i | ($usable | index($i)) == null))) as $missing
+    # Only RENUMBERED ids are ever printed: an unmapped integer is a consumer
+    # IID and the digest must never carry one (S3).
+    | ($missing | map($map[.]) | map(select(. != null))) as $named
+    | "metrics_coverage: \($covered | length)/\($c | length)"
+      + " (usable metrics rows / closed issues in the window; without a row: "
+      + (if ($missing | length) == 0 then "none"
+         elif ($named | length) == 0 then "\($missing | length) (unmapped, omitted)"
+         else (($named[0:$named_max] | join(" "))
+               + (if ($missing | length) > $named_max
+                  then " (+\(($missing | length) - $named_max) more)" else "" end))
+         end)
+      + (if $nodata > 0 then "; coverage rows: \($nodata)" else "" end)
+      + (if $fetched == "yes" then ")" else "; metrics branch NOT fetched)" end)' \
+    2> /dev/null || echo "")
+  if [ -z "$coverage_line" ]; then
+    coverage_line="metrics_coverage: unavailable (the reconciliation could not be computed — treat EVERY number below as an undercount)"
+  fi
+
   : > "$tmp/rows.out.jsonl"
   if [ -s "$tmp/rows.jsonl" ]; then
     jq -c --argjson map "$map_json" '.issue = ($map[.issue] // .issue)' \
@@ -382,6 +467,7 @@ _retro_build_digest() {
     echo
     echo "Window: $since → $until"
     echo "Data source: $BOUCLE_METRICS_BRANCH (fetched: $have_metrics; $(wc -l < "$tmp/rows.out.jsonl" 2> /dev/null | tr -d ' ') issue rows, bounded to $_RETRO_MAX_ISSUES)"
+    echo "$coverage_line"
     echo "Anonymisation: every consumer identifier is ALREADY replaced by retro_scrub — [consumer], [host], [user], [email], boucle/N-. Do not try to de-anonymise; the generics are the data."
     echo
     echo "## Per-issue rows (oldest → newest)"
@@ -422,7 +508,9 @@ _retro_build_digest() {
     echo "## Legend"
     echo "- terminal: done | human (from the metrics row); unknown when no metrics row exists."
     echo "- verdicts: reviewer/e2e outcomes. escalations: the non-verdict outcome signals (build-fail, no-changes, not-mergeable, ...)."
-    echo "- tokens / cost_usd: null when no run reported a number — never a fake zero."
+    echo "- gaps (per row): what that row could NOT measure — no_runs, model_unavailable, tokens_unavailable, cost_unavailable, verdict_missing, terminal_unknown. An empty verdicts array with runs > 0 IS a gap: the gates either did not run or their outcome was lost, and neither is a pass."
+    echo "- metrics_coverage: usable metrics rows / closed issues in the window. A closed issue with no row is delivery this digest cannot see at all — report the gap, never read the absence as a zero."
+    echo "- tokens / cost_usd: null when no run reported a number — never a fake zero; gaps names which fields are missing and why."
     echo "- issue numbers are renumbered per window (#1..#N in order of first appearance); branch prefixes are anonymized by the scrub."
   } | retro_scrub > "$out" 2> /dev/null || return 1
   [ -s "$out" ] || return 1
