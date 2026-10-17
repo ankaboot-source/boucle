@@ -301,14 +301,17 @@ boucle_semver_gate() {
 
 # boucle_pr_is_security <title> <labels> <branch>
 # Security bumps are always auto-mergeable, even as majors (policy #138).
-# Three independent signals, ANY one wins: the dependabot title suffixed
-# "(security advisories)", a security/vulnerability label, and security-ish
-# source-branch names (dependabot/security-*, renovate GHSA branches).
+# Signals are ANCHORED — a package merely NAMED "*-security-*" MUST NOT
+# auto-merge a major (name collisions like spring-security-core 5→6 are not
+# security updates): the dependabot title suffix "(security advisories)" or
+# a CVE/GHSA id, the exact security/vulnerability labels, and the
+# forge-emitted security branch shapes (dependabot/security/*,
+# renovate/vulnerability-*, GHSA-*).
 boucle_pr_is_security() {
-  printf '%s' "$1" | grep -qi 'security' && return 0
+  printf '%s' "$1" | grep -qiE 'security advisories|CVE-|GHSA-' && return 0
   printf '%s' "$2" | tr ',' '\n' | grep -qiE '^(security|vulnerability)$' && return 0
   case "$3" in
-    *security* | *vulnerability* | *GHSA*) return 0 ;;
+    dependabot/security* | renovate/vulnerability* | GHSA-*) return 0 ;;
   esac
   return 1
 }
@@ -418,22 +421,26 @@ boucle_bot_pr_eligible() {
 }
 
 # boucle_checks_green <suites_json> — exit 0 iff NON-EMPTY and every check
-# is settled (status completed) with conclusion success. Fail-closed on
-# empty: a repo with NO CI on bot PRs never automerges — merging unverified
-# dependency code silently is the failure mode this gate exists to prevent.
+# is settled (status completed) with conclusion success — or skipped, which
+# GitHub reports for event-gated jobs on PR heads and treats as neutral in
+# its own merge semantics. Fail-closed on empty: a repo with NO CI on bot
+# PRs never automerges — merging unverified dependency code silently is the
+# failure mode this gate exists to prevent.
 boucle_checks_green() {
   local suites="$1"
   [ -n "$suites" ] || return 1
   command -v jq > /dev/null 2>&1 || return 1
   [ "$(printf '%s' "$suites" | jq -r 'type' 2> /dev/null)" = "array" ] || return 1
   [ "$(printf '%s' "$suites" | jq -r 'length' 2> /dev/null)" -gt 0 ] || return 1
-  printf '%s' "$suites" | jq -e 'all(.[]; .status == "completed" and .conclusion == "success")' > /dev/null 2>&1
+  printf '%s' "$suites" | jq -e 'all(.[]; .status == "completed" and (.conclusion == "success" or .conclusion == "skipped"))' > /dev/null 2>&1
 }
 
 # boucle_bot_pr_sweep — list open bot PRs, gate them against the automerge
-# policy, chain ONE automerge role for every eligible PR (a single job
-# serializes the whole batch under the boucle-merge lock — one runner, not
-# one runner per PR).
+# policy, probe mergeability, and chain ONE automerge role for every ELIGIBLE
+# AND MERGEABLE PR (a single job serializes the whole batch under the
+# boucle-merge lock — one runner, not one runner per PR). Probing here kills
+# the doomed-job churn: without it a red/conflict/blocked PR would chain an
+# automerge job every 10 minutes forever, each one a no-op.
 #
 # MUST run on every doctor pass (see the doctor hook): a bot PR moves no
 # issue label, so the board fingerprint cannot wake it. Cost when disabled
@@ -444,7 +451,7 @@ boucle_bot_pr_sweep() {
     echo "automerge: forge_mr_list unavailable — skipping sweep"
     return 0
   }
-  local list csv="" iid title author labels draft branch body gate
+  local list csv="" iid title author labels draft branch body gate status
   list=$(forge_mr_list 2> /dev/null || echo "[]")
   printf '%s' "$list" | jq -e 'type == "array"' > /dev/null 2>&1 || {
     echo "automerge: forge_mr_list returned a non-array — skipping sweep"
@@ -453,8 +460,15 @@ boucle_bot_pr_sweep() {
   while IFS=$'\t' read -r iid title author labels draft branch body; do
     [ -n "$iid" ] || continue
     if gate=$(boucle_bot_pr_eligible "$title" "$author" "$labels" "$draft" "$branch" "$body"); then
-      csv="${csv:+$csv,}$iid"
-      echo "  → automerge: PR #$iid eligible ($gate)"
+      # Probe mergeability BEFORE chaining (the stage re-checks — the sweep
+      # may be minutes old). Anything but "mergeable" stays for the next pass.
+      status=$(forge_mr_merge_status "$iid" 2> /dev/null || echo "unknown")
+      if [ "$status" = "mergeable" ]; then
+        csv="${csv:+$csv,}$iid"
+        echo "  → automerge: PR #$iid eligible ($gate)"
+      else
+        echo "  → automerge: PR #$iid eligible ($gate) but not mergeable (status: $status) — left for the next sweep"
+      fi
     else
       echo "  → automerge: PR #$iid not eligible — left for a human"
     fi

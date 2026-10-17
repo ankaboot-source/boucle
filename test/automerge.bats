@@ -85,6 +85,23 @@ lib_funcs() {
   rm -f "$TMPF"
 }
 
+@test "security: anchored signals — package-name collisions stay for a human" {
+  TMPF=$(mktemp); lib_funcs boucle_pr_is_security boucle_semver_version boucle_semver_gate boucle_title_semver_gate boucle_bump_gate "$TMPF"
+  # A package merely NAMED *security* is not a security update: the bump
+  # must still pass the semver gate (5.1.0 -> 6.0.0 = major -> a human).
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump spring-security-core from 5.1.0 to 6.0.0' '' ''"; assert_failure
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump spring-security-core from 5.1.0 to 6.0.0' '' 'renovate/spring-security-6.x'"; assert_failure
+  run bash -c "source '$TMPF'; boucle_bump_gate 'Bump spring-security-core from 5.1.0 to 6.0.0' '' 'dependabot/maven/org.springframework.security/spring-security-core-6.0.0' ''"; assert_failure
+  # Real security shapes still auto-merge at ANY version.
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump pillow from 1.0 to 2.0 (security advisories)' '' ''"; assert_success
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump x (CVE-2024-1234)' '' ''"; assert_success
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump x' '' 'dependabot/security/pillow'"; assert_success
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump x' '' 'renovate/vulnerability-lodash'"; assert_success
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump x' '' 'GHSA-1234-5678-9abc'"; assert_success
+  run bash -c "source '$TMPF'; boucle_pr_is_security 'Bump x' 'security' 'renovate/x'"; assert_success
+  rm -f "$TMPF"
+}
+
 @test "title gate: dependabot from-to versions; grouped PRs fail-closed" {
   TMPF=$(mktemp); lib_funcs boucle_semver_version boucle_semver_gate boucle_title_semver_gate "$TMPF"
   run bash -c "source '$TMPF'; boucle_title_semver_gate 'Bump actions/checkout from 4.1.0 to 4.1.2'"; assert_output "patch"
@@ -120,6 +137,14 @@ lib_funcs() {
   run bash -c "source '$TMPF'; boucle_checks_green '[{\"name\":\"check\",\"status\":\"completed\",\"conclusion\":\"success\"}]'"; assert_success
   run bash -c "source '$TMPF'; boucle_checks_green '[{\"name\":\"check\",\"status\":\"in_progress\",\"conclusion\":null}]'"; assert_failure
   run bash -c "source '$TMPF'; boucle_checks_green '[{\"name\":\"check\",\"status\":\"completed\",\"conclusion\":\"failure\"}]'"; assert_failure
+  rm -f "$TMPF"
+}
+
+@test "checks green: skipped check-runs are neutral (GitHub event-gated jobs)" {
+  TMPF=$(mktemp); lib_funcs boucle_checks_green "$TMPF"
+  run bash -c "source '$TMPF'; boucle_checks_green '[{\"name\":\"a\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"b\",\"status\":\"completed\",\"conclusion\":\"skipped\"}]'"; assert_success
+  run bash -c "source '$TMPF'; boucle_checks_green '[{\"name\":\"a\",\"status\":\"completed\",\"conclusion\":\"skipped\"},{\"name\":\"b\",\"status\":\"completed\",\"conclusion\":\"failure\"}]'"; assert_failure
+  run bash -c "source '$TMPF'; boucle_checks_green '[{\"name\":\"a\",\"status\":\"completed\",\"conclusion\":\"skipped\"},{\"name\":\"b\",\"status\":\"completed\",\"conclusion\":\"skipped\"}]'"; assert_success
   rm -f "$TMPF"
 }
 
@@ -162,6 +187,7 @@ lib_funcs() {
           {\"iid\":13,\"author\":\"worker-bot\",\"title\":\"feat: my feature\",\"labels\":\"\",\"draft\":false,\"source_branch\":\"boucle/123-slug\",\"head_sha\":\"a4\",\"body\":\"\"}]
 '
     forge_mr_list() { echo \"\$LIST\"; }
+    forge_mr_merge_status() { echo mergeable; }
     chain_to_role() { echo \"CHAIN:\$1:\$2:\$3\"; }
     source '$TMPF'
     boucle_bot_pr_sweep
@@ -170,6 +196,26 @@ lib_funcs() {
   assert_line '  → automerge: PR #10 eligible (patch)'
   assert_line '  → automerge: PR #12 eligible (sync)'
   assert_line 'CHAIN:0:automerge:BOUCLE_AUTOMERGE_MR=10,12'
+  rm -f "$TMPF"
+}
+
+@test "sweep: eligible but not-mergeable PRs are skipped, not chained" {
+  TMPF=$(mktemp)
+  lib_funcs boucle_bot_pr_sweep boucle_bot_pr_eligible boucle_pr_is_security boucle_semver_version boucle_semver_gate boucle_title_semver_gate boucle_bump_gate "$TMPF"
+  run bash -c "
+    BOUCLE_AUTOMERGE_ENABLED=true
+    LIST='[{\"iid\":10,\"author\":\"dependabot[bot]\",\"title\":\"Bump actions/checkout from 4.1.0 to 4.1.2\",\"labels\":\"dependencies\",\"draft\":false,\"source_branch\":\"dependabot/github_actions/actions/checkout-4.1.2\",\"head_sha\":\"a1\",\"body\":\"\"},
+          {\"iid\":12,\"author\":\"dependabot[bot]\",\"title\":\"chore(boucle): update engine to v1.2.3\",\"labels\":\"chore\",\"draft\":false,\"source_branch\":\"boucle-update/x\",\"head_sha\":\"a3\",\"body\":\"\"}]'
+    forge_mr_list() { echo \"\$LIST\"; }
+    forge_mr_merge_status() { case \"\$1\" in 12) echo mergeable ;; *) echo checking ;; esac; }
+    chain_to_role() { echo \"CHAIN:\$1:\$2:\$3\"; }
+    source '$TMPF'
+    boucle_bot_pr_sweep
+  "
+  assert_success
+  assert_line '  → automerge: PR #10 eligible (patch) but not mergeable (status: checking) — left for the next sweep'
+  assert_line '  → automerge: PR #12 eligible (sync)'
+  assert_line 'CHAIN:0:automerge:BOUCLE_AUTOMERGE_MR=12'
   rm -f "$TMPF"
 }
 
