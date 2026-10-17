@@ -205,6 +205,66 @@ EOF
   refute_output --partial "T2:"
 }
 
+# ── T2 workspace lifecycle (B2) + transcript preservation (N3) ─────────
+
+@test "T2: the tokenized workspace is cleaned on exit and the rétro transcript is preserved" {
+  mkdir -p "$TMP/ws/.boucle-state"
+  printf 'RETRO-TRANSCRIPT\n' > "$TMP/ws/.boucle-state/agent-output.log"
+  mkdir -p "$TMP/home/bin"
+  cat > "$TMP/home/bin/jc" << 'EOF'
+#!/usr/bin/env bash
+printf 'IMPL-TRANSCRIPT\n' > "$BOUCLE_WORKSPACE/.boucle-state/agent-output.log"
+echo "JC:$*"
+EOF
+  chmod +x "$TMP/home/bin/jc"
+
+  run bash -c "
+    set -euo pipefail
+    export BOUCLE_HOME='$TMP/home' BOUCLE_WORKSPACE='$TMP/ws'
+    export BOUCLE_UPSTREAM_REPO=owner/upstream BOUCLE_UPSTREAM_TOKEN=tok
+    source '$REPO/lib/boucle.sh' 2> /dev/null || true
+    source '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null || true
+    retro_contribute_enabled() { return 0; }
+    _retro_upstream() { echo '{\"title\":\"Fix the thing\",\"description\":\"do it\"}'; }
+    _retro_prepare_workspace() {
+      mkdir -p '$TMP/ws/.boucle-state/retro-workspace'
+      echo '$TMP/ws/.boucle-state/retro-workspace'
+    }
+    _retro_t2_chain 42
+  "
+  assert_success
+  assert_output --partial "T2: implementing #42"
+  # B2: the cleanup target survives the command substitution — before the
+  # fix, _RETRO_T2_WORKSPACE was set in the subshell and this dir stayed.
+  [ ! -e "$TMP/ws/.boucle-state/retro-workspace" ]
+  # N3: both transcripts survive bin/jc truncating the per-run log.
+  run cat "$TMP/ws/.boucle-state/retro-agent-output.log"
+  assert_output --partial "RETRO-TRANSCRIPT"
+  run cat "$TMP/ws/.boucle-state/agent-output.log"
+  assert_output --partial "IMPL-TRANSCRIPT"
+}
+
+@test "T2: the cleanup trap covers the 45m job's TERM and INT, not only EXIT" {
+  run grep -Fq "trap '_retro_t2_cleanup' EXIT" "$REPO/lib/boucle-ci/retro.sh"
+  assert_success
+  run grep -Fq "trap '_retro_t2_cleanup; exit 143' TERM" "$REPO/lib/boucle-ci/retro.sh"
+  assert_success
+  run grep -Fq "trap '_retro_t2_cleanup; exit 130' INT" "$REPO/lib/boucle-ci/retro.sh"
+  assert_success
+}
+
+@test "artifacts: the depth-1 rétro logs are explicitly listed on both forges (N6)" {
+  run grep -Fq '.boucle-state/retro-agent-output.log' "$REPO/.gitlab-ci.yml"
+  assert_success
+  run grep -Fq '.boucle-state/agent-output.log' "$REPO/.gitlab-ci.yml"
+  assert_success
+  # Exactly one GitHub job carries them — the retro job's upload.
+  run grep -Fc '.boucle-state/retro-agent-output.log' "$REPO/.github/workflows/boucle.yml"
+  assert_output "1"
+  run grep -Fq '.boucle-state/agent-output.log' "$REPO/.github/workflows/boucle.yml"
+  assert_success
+}
+
 # ── Doctor hook ─────────────────────────────────────────────────────────
 
 @test "doctor hook: chains the retro stage when the threshold is reached" {

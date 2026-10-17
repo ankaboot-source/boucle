@@ -1561,6 +1561,8 @@ jobs:
           path: |
             .boucle/**/agent-output.log
             .boucle-state/**/agent-output.log
+            .boucle-state/agent-output.log
+            .boucle-state/retro-agent-output.log
             .boucle-state/**/session/
             .boucle-state/**/health.jsonl
             .boucle-state/**/cost.json

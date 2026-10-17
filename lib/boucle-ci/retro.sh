@@ -497,7 +497,8 @@ _retro_prepare_workspace() {
   git -C "$ws" config user.name "${BOUCLE_BOT_NAME:-boucle}" 2> /dev/null || true
   git -C "$ws" config user.email "${BOUCLE_BOT_EMAIL:-boucle@localhost}" 2> /dev/null || true
   git -C "$ws" checkout -q -b "retro/${slug}" 2> /dev/null || return 1
-  _RETRO_T2_WORKSPACE="$ws"
+  # NOTE: _RETRO_T2_WORKSPACE is set by the CALLER from the captured output —
+  # an assignment here dies in the command substitution's subshell.
   printf '%s\n' "$ws"
 }
 
@@ -539,7 +540,15 @@ _retro_t2_chain() {
     echo "[retro] WARN: could not prepare the upstream workspace — T2 skipped (issue+plan remains)" >&2
     return 0
   fi
+  # Set the cleanup target in the PARENT shell: the value printed by
+  # _retro_prepare_workspace came through a command substitution, so an
+  # assignment made inside that subshell never reaches the trap below.
+  _RETRO_T2_WORKSPACE="$ws"
   trap '_retro_t2_cleanup' EXIT
+  # A job timeout kills with TERM (45m); the trap must cover it so the
+  # extraheader-bearing .git/config never outlives the run.
+  trap '_retro_t2_cleanup; exit 143' TERM
+  trap '_retro_t2_cleanup; exit 130' INT
 
   local base
   base=$(git -C "$ws" symbolic-ref --short refs/remotes/origin/HEAD 2> /dev/null | sed 's|^origin/||' || echo "")
@@ -559,6 +568,10 @@ $(printf '%s' "$body" | retro_scrub)"
   export BOUCLE_RETRO_PROPOSAL="$proposal"
 
   echo "[retro] T2: implementing #$iid as retro/$slug (bounded contributor)"
+  # bin/jc TRUNCATES the per-run agent log. Preserve the rétro transcript
+  # before the contributor run overwrites it — both must reach the artifacts.
+  cp "$BOUCLE_WORKSPACE/.boucle-state/agent-output.log" \
+    "$BOUCLE_WORKSPACE/.boucle-state/retro-agent-output.log" 2> /dev/null || true
   export BOUCLE_ROLE=retro-impl
   local rc=0
   "$BOUCLE_HOME/bin/jc" retro-impl || rc=$?

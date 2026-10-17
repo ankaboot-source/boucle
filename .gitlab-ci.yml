@@ -242,6 +242,12 @@ variables:
   paths:
     - .boucle/**/agent-output.log
     - .boucle-state/**/agent-output.log
+    # The rétro stage runs with no BOUCLE_ISSUE, so its transcripts sit at
+    # DEPTH 1 (.boucle-state/agent-output.log for the analysis run, and the
+    # preserved retro-agent-output.log once T2 chains the contributor).
+    # `**/` does not reliably match a zero-directory path — list them.
+    - .boucle-state/agent-output.log
+    - .boucle-state/retro-agent-output.log
     # jcode session files for interactive takeover (#54 item 2). bin/jc copies
     # the worker's session here so a human can resume it locally.
     - .boucle-state/**/session/
