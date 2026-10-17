@@ -263,6 +263,23 @@ forge_mr_lookup_by_branch() {
     | jq -r '.[0].iid // empty' 2> /dev/null || true
 }
 
+forge_mr_list() {
+  # List open MRs, normalized to the shape consumed by the automerge sweep
+  # (see bin/forge/github.sh forge_mr_list for the contract).
+  glab api --hostname "$BOUCLE_FORGE_HOST" --paginate \
+    "/projects/$BOUCLE_PROJECT_ID/merge_requests?state=opened&per_page=100" 2> /dev/null \
+    | jq -c 'map({
+        iid: .iid,
+        author: (.author.username // ""),
+        title: (.title // ""),
+        labels: ((.labels // []) | join(",")),
+        draft: (.draft // false),
+        source_branch: (.source_branch // ""),
+        head_sha: (.sha // ""),
+        body: (.description // "")
+      })' 2> /dev/null || echo "[]"
+}
+
 forge_mr_merge_status() {
   local mr_iid="$1"
   glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid" 2> /dev/null \
