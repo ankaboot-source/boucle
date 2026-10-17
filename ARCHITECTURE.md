@@ -39,7 +39,7 @@ flowchart TD
     M --> E["🤖 E2E<br/>Verifies production<br/>✅ pass or ❌ fail"]
     E -->|✅ pass| D["✅ Feature validated end-to-end"]
     E -->|❌ fail| W
-    L["🤖 Self-improvement<br/>Lessons learned from each loop"]
+    L["🤖 Rétro<br/>Doctor-triggered self-improvement<br/>Anonymized upstream proposals"]
     L -.-> T
     L -.-> W
     L -.-> R
@@ -47,7 +47,9 @@ flowchart TD
 ```
 
 The loop runs asynchronously on CI. The `doctor` job (a scheduled
-self-healing sweep) runs automatically — there is nothing to run by hand.
+self-healing sweep) runs automatically — there is nothing to run by hand — and
+it owns the **rétro** trigger: the doctor-chained analysis that proposes
+anonymized improvements upstream (§7).
 
 ## 2. Code structure
 
@@ -56,7 +58,7 @@ self-healing sweep) runs automatically — there is nothing to run by hand.
 ├── .gitlab-ci.yml            # GitLab pipeline (12 jobs, thin wrappers)
 ├── .github/workflows/boucle.yml  # GitHub Actions equivalent
 ├── .jcode/                   # Agent runtime config (prompts, skills, workflow)
-│   ├── agents/               # 4 role prompts: triage.md, worker.md, reviewer.md, e2e.md
+│   ├── agents/               # 6 role prompts: triage.md, worker.md, reviewer.md, e2e.md, retro.md, retro-impl.md
 │   ├── skills/               # ~60 vendored skills + boucle/SKILL.md (the protocol)
 │   └── UPSTREAM-FIX-WORKFLOW.md  # upstream-first bug-fix constraint
 ├── bin/                      # CLI scripts (the engine's executable surface)
@@ -356,6 +358,34 @@ On GitLab the `dispatch` script captures the stage's exit code, sweeps, then
 re-exits with it: `triage` declares `needs: [dispatch]` without `optional`,
 so dispatch's hard failure is the signal that skips triage, and swallowing it
 would run triage on every no-op webhook.
+
+### Self-improvement (rétro)
+
+The doctor also owns the **rétro trigger**. When merged PRs since the last
+rétro reach `BOUCLE_RETRO_EVERY_MERGES` (default 10) or the last rétro is
+older than `BOUCLE_RETRO_EVERY_DAYS` (default 2), it chains a separate `retro`
+job (`resource_group: boucle-retro`). The counters come from the forge API and
+`retros.jsonl` on the `boucle/metrics` branch — **zero runner state**, the
+same principle as schedule dedup.
+
+The `retro` role analyses the window and acts **upstream only**
+(`BOUCLE_UPSTREAM_REPO`): it enriches a similar `boucle:report` issue with an
+anonymized case, creates one with a proposed plan, or stays silent. Every
+input to the agent and every posted body passes through `retro_scrub` first —
+anonymization is enforced by code, not by prompt (lesson #38). On the upstream
+repo itself, T2 (`BOUCLE_RETRO_CONTRIBUTE`, `auto`) additionally chains the
+bounded `retro-impl` role, which opens a `retro/<slug>` PR like a human
+contributor; the PR NEVER enters the state machine on its own — standard human
+review applies.
+
+The consumer-visible trace is one local report issue per run (label
+`boucle:retro`, never dispatched, mirror of `boucle:board`); the next rétro
+closes the previous report. Fail-open throughout: a failing rétro never breaks
+the loop, and a missing `BOUCLE_UPSTREAM_TOKEN` skips it cleanly, with
+`bin/doctor --audit` reporting an advisory rather than warning on every sweep.
+See [LOOP.md](LOOP.md) §"Auto-amélioration — la rétro" for the configuration
+and the output taxonomy, and [AGENTS.md](AGENTS.md) §"Rétro
+(self-improvement)" for the operating principles.
 
 ## 8. Self-update
 

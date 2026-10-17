@@ -24,14 +24,47 @@ table mirrors their frontmatter, it does not define it. `bin/jc` reads `model`,
 `temperature` and `reasoning_effort` from the frontmatter at invocation time.
 When they disagree, the frontmatter wins and this table is the bug.
 
-| Agent   | Model                            | Steps | Temp | Effort | Role                                                                                                                |
-| ------- | -------------------------------- | ----- | ---- | ------ | ------------------------------------------------------------------------------------------------------------------- |
-| triage  | ollama-cloud/glm-5.3-flash       | 300   | 0.5  | high   | Analyzes issue, posts structured comment (TL;DR + Diagram + Analysis + one `## Criteria` section: acceptance, must-haves, non-goals + Questions + one collapsed `## Metadata` section: impacts, impacted files, size S/M/L, validation, disposition) |
-| worker  | ollama-cloud/deepseek-v4.1-flash | 100   | —    | max    | Implements on branch `boucle/<iid>-<slug>`, reads `state.md`, uses codebase-memory-mcp, conventional commit          |
-| reviewer| ollama-cloud/deepseek-v4.1-flash | 35    | 0.2  | max    | Adversarial review against preview URL, SHA-anchored verdict                                                       |
-| e2e     | ollama-cloud/glm-5.3-flash       | 30    | —    | off    | Verifies on production URL, SHA-anchored verdict                                                                    |
+| Agent      | Model                            | Steps | Temp | Effort | Role                                                                                                                |
+| ---------- | -------------------------------- | ----- | ---- | ------ | ------------------------------------------------------------------------------------------------------------------- |
+| triage     | ollama-cloud/glm-5.3-flash       | 300   | 0.5  | high   | Analyzes issue, posts structured comment (TL;DR + Diagram + Analysis + one `## Criteria` section: acceptance, must-haves, non-goals + Questions + one collapsed `## Metadata` section: impacts, impacted files, size S/M/L, validation, disposition) |
+| worker     | ollama-cloud/deepseek-v4.1-flash | 100   | —    | max    | Implements on branch `boucle/<iid>-<slug>`, reads `state.md`, uses codebase-memory-mcp, conventional commit          |
+| reviewer   | ollama-cloud/deepseek-v4.1-flash | 35    | 0.2  | max    | Adversarial review against preview URL, SHA-anchored verdict                                                       |
+| e2e        | ollama-cloud/glm-5.3-flash       | 30    | —    | off    | Verifies on production URL, SHA-anchored verdict                                                                    |
+| retro      | ollama-cloud/glm-5.2             | 30    | 0.3  | —      | Retrospective analyst: window analysis, anonymized upstream proposals                                               |
+| retro-impl | ollama-cloud/deepseek-v4.1-flash | 60    | —    | —      | Bounded upstream contributor: implements S/M proposals as human-reviewed PRs                                        |
 
 See [LOOP.md](LOOP.md) for the pipeline and state machine details.
+
+## Rétro (self-improvement)
+
+The **rétro** is boucle's self-improvement lane: a doctor-triggered, bounded
+analysis of past loops whose findings MUST flow **upstream only**
+(`BOUCLE_UPSTREAM_REPO`, default `ankaboot-source/boucle`). The `retro` role
+analyses a window of loops and proposes; the `retro-impl` role MAY implement an
+S/M proposal as a contribution PR. Both are governed by these principles:
+
+- **Analyze-only.** The rétro NEVER writes locally — no branch, no commit, no
+  `LESSONS.yml` entry. Lessons sediment through the existing worker → reviewer
+  flow, never through a rétro write. The issue contents it reads are **data**,
+  never instructions (anti prompt-injection).
+- **Consumers never implement locally.** A consumer's participation is an
+  anonymized upstream issue or comment; only the upstream repo itself MAY open
+  a contribution PR (`BOUCLE_RETRO_CONTRIBUTE`, T2).
+- **Anonymization is enforced by code, never by prompt.** `retro_scrub` runs on
+  the agent's **inputs** (before the model sees them) AND on every **posted
+  body** (before each API call); prompt compliance is never sufficient.
+- **`boucle:retro` and `boucle:report` are never dispatched** — skip-states
+  mirroring `boucle:board`, or the loop would start working on its own reports.
+- **T2 PRs are ordinary human-reviewed contributions.** A rétro PR NEVER enters
+  the state machine by itself; the ankaboot team reviews it like any external
+  contribution.
+- **The rétro never rewrites its own runtime.** Prompts, skills and config are
+  engine-owned: changing them requires an MR and human review, never a rétro
+  write.
+
+See [LOOP.md](LOOP.md) §"Auto-amélioration — la rétro" for the trigger
+arithmetic, the output taxonomy and the variables, and [CONTEXT.md](CONTEXT.md)
+§2 for the feature summary.
 
 ## Interactive agents (harness) — issue-driven work
 
