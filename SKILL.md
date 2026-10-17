@@ -164,6 +164,8 @@ owns both sides — the question is meaningless).
 | `boucle:recurring` | Context tag: issue is part of a recurring bug class (non-blocking, survives transitions) | (rides along) |
 | `boucle:board` | The status-board issue (never dispatched) | — |
 | `boucle:scheduled` | Issue created by a schedule (cron template) | — |
+| `boucle:retro` | The retro's local per-run report issue (never dispatched) | — |
+| `boucle:report` | Upstream retro proposal — anonymized case or plan, created on `BOUCLE_UPSTREAM_REPO` (never dispatched) | — |
 
 **Removed (dead labels, pruned from `bin/setup`):** `boucle:spec-approved`.
 MR approval uses the native forge Approve button (GitLab) or the

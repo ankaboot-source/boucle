@@ -159,6 +159,24 @@ dispatch_noop() {
   exit 0
 }
 
+# dispatch_retro_artifact <labels_csv>
+#
+# True when the label list carries an issue boucle maintains for itself and
+# must NEVER dispatch: a local retro report (boucle:retro) or an upstream
+# proposal (boucle:report) — #139, same class as the status board (#36).
+# Their creation and comment webhooks are the loop's own artefacts, not work;
+# without this guard the open-route triages an issue that was unlabeled at
+# open under BOUCLE_ENTRY_MODE=auto, and the label route would re-enter them.
+#
+# Labels arrive as a CSV of NAMES (forge_issue_labels_get normalizes both
+# forges). NEVER hand a raw GitLab payload here: its label OBJECTS would be
+# stringified, not matched (lesson #124) — extract names first, the way the
+# changes.labels.previous readers do.
+dispatch_retro_artifact() {
+  local labels="${1:-}"
+  printf '%s\n' "$labels" | tr ',' '\n' | grep -qxE 'boucle:(retro|report)'
+}
+
 # dispatch_auto_entry_enabled
 #
 # Entry policy: does a NEWLY OPENED issue that carries no boucle: label
@@ -907,6 +925,17 @@ boucle_ci_dispatch() {
     echo "dispatch: #$IID has no labels — routing depends on the event action (open/opened only)"
   fi
   echo "dispatch: labels for #$IID: $LABELS"
+
+  # ── Retro artefact guard (#139, N4) ─────────────────────────────────
+  # boucle:retro / boucle:report are boucle's own artefacts, never work.
+  # This sits ABOVE every entry route — the bot-assignment triage path, the
+  # label routing and the unlabeled-open route — because all three would
+  # otherwise adopt the loop's own report: the retro job creates it with the
+  # label, but a label edit, a comment or a re-add can land it on any route.
+  if dispatch_retro_artifact "$LABELS"; then
+    echo "Issue #$IID carries boucle:retro or boucle:report — boucle's own retro artefact, never dispatched."
+    dispatch_noop
+  fi
 
   # Resolve: issue opened, body edited in triage/needs-info/todo, or author reply on needs-info
   ACTION=$(jq -r '.object_attributes.action // empty' "$BOUCLE_TRIGGER_PAYLOAD" 2> /dev/null) || true

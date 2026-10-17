@@ -156,3 +156,37 @@ if img is not None:
 PY
   assert_success
 }
+
+# ── gh: the GitLab pipeline needs it for the retro's upstream posts (B4) ─
+
+@test "gh: Dockerfile pin matches the GitLab before_script" {
+  local docker_pin gitlab_pin
+  docker_pin="$(arg_of GH_VERSION)"
+  gitlab_pin="$(sed -n 's/^ *GH_VER="\([^"]*\)".*/\1/p' .gitlab-ci.yml | sort -u)"
+
+  [ -n "$docker_pin" ] || fail "no ARG GH_VERSION in $DOCKERFILE"
+  [ -n "$gitlab_pin" ] || fail "no GH_VER in .gitlab-ci.yml"
+  assert_equal "$docker_pin" "$gitlab_pin"
+}
+
+@test "gh: the GitLab before_script installs it, offline-safe" {
+  # GitLab runners carry glab but never gh; without it the retro's upstream
+  # posts and its digest candidate list are silently inert (fail-open). The
+  # install must not be able to kill a GitLab-native job: a failed download
+  # warns once.
+  run grep -q 'github.com/cli/cli/releases' .gitlab-ci.yml
+  assert_success
+  run grep -q 'could not install gh' .gitlab-ci.yml
+  assert_success
+  run grep -q '_probe gh ' .gitlab-ci.yml
+  assert_success
+}
+
+@test "gh: the agents image ships it and asserts it at build time" {
+  run grep -q '^ARG GH_VERSION=' "$DOCKERFILE"
+  assert_success
+  run grep -q 'gh --version' "$DOCKERFILE"
+  assert_success
+  run grep -q 'chromium agent-browser glab gh jcode' "$DOCKERFILE"
+  assert_success
+}

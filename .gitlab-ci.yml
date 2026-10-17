@@ -139,6 +139,28 @@ variables:
   # runner.
   BOUCLE_DOCTOR_ON_DISPATCH: "auto"
   BOUCLE_DOCTOR_ON_DISPATCH_INTERVAL: "600"
+  # ── Retro: periodic self-improvement sweep (#139) ─────────────────────
+  # The doctor chains a `retro` trigger job (BOUCLE_ROLE=retro) once the
+  # cadence is due — NEVER through a second schedule: a new schedule fires
+  # the doctor twice per sweep and double-runs its recovery passes.
+  #   BOUCLE_RETRO_ENABLED: "true" (default) — "false" opts out entirely
+  #     (no job, no post; fail-open).
+  #   BOUCLE_RETRO_CONTRIBUTE: "auto" (default) — T2: "auto" proposes an
+  #     upstream PR only when this repo IS BOUCLE_UPSTREAM_REPO; "true"/
+  #     "false" force it. Without upstream write access the retro degrades
+  #     fail-open to issue + plan.
+  #   BOUCLE_RETRO_EVERY_MERGES: "10" — merged PRs since the last retro
+  #     before the doctor chains one.
+  #   BOUCLE_RETRO_EVERY_DAYS: "2" — time backstop for inactive repos.
+  #   BOUCLE_UPSTREAM_REPO: "ankaboot-source/boucle" — where reports go.
+  #   BOUCLE_RETRO_DRY_RUN: "false" — "true" = analyze + log, post nothing.
+  # BOUCLE_UPSTREAM_TOKEN: ""  # set as masked+protected CI variable (GitHub PAT, public_repo)
+  BOUCLE_RETRO_ENABLED: "true"
+  BOUCLE_RETRO_CONTRIBUTE: "auto"
+  BOUCLE_RETRO_EVERY_MERGES: "10"
+  BOUCLE_RETRO_EVERY_DAYS: "2"
+  BOUCLE_UPSTREAM_REPO: "ankaboot-source/boucle"
+  BOUCLE_RETRO_DRY_RUN: "false"
   # Disable Chromium visual preview in triage (saves ~120 MiB per triage job).
   # true = skip preview rendering entirely. false = default (mandatory for UI/UX issues via RENDER_REQUEST).
   BOUCLE_PREVIEW_DISABLE: "false"
@@ -220,6 +242,12 @@ variables:
   paths:
     - .boucle/**/agent-output.log
     - .boucle-state/**/agent-output.log
+    # The retro stage runs with no BOUCLE_ISSUE, so its transcripts sit at
+    # DEPTH 1 (.boucle-state/agent-output.log for the analysis run, and the
+    # preserved retro-agent-output.log once T2 chains the contributor).
+    # `**/` does not reliably match a zero-directory path — list them.
+    - .boucle-state/agent-output.log
+    - .boucle-state/retro-agent-output.log
     # jcode session files for interactive takeover (#54 item 2). bin/jc copies
     # the worker's session here so a human can resume it locally.
     - .boucle-state/**/session/
@@ -344,6 +372,31 @@ default:
         rm -rf "$GLAB_TMP" "$GLAB_TMP.tar.gz"
       fi
       unset _GLAB_INSTALLED
+
+      # ── gh CLI (GitHub) ────────────────────────────────────────────
+      # The retro's upstream posts (bin/retro-post → the *_in GitHub
+      # helpers) and the digest's upstream-candidate list use the GitHub
+      # CLI even on a GitLab consumer: the upstream is ALWAYS GitHub. No
+      # other GitLab job needs gh, so the install is OFFLINE-SAFE — a
+      # failed download warns once and the loop stays GitLab-native.
+      GH_VER="2.89.0"
+      _GH_INSTALLED="$(gh --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)"
+      if [ -z "$_GH_INSTALLED" ] || [ "$_GH_INSTALLED" != "$GH_VER" ]; then
+        echo "Installing gh v${GH_VER} (was: ${_GH_INSTALLED:-MISSING})..."
+        mkdir -p "$HOME/.local/bin"
+        GH_TMP="/tmp/gh-${CI_JOB_ID:-local}"
+        if curl -sL "https://github.com/cli/cli/releases/download/v${GH_VER}/gh_${GH_VER}_linux_amd64.tar.gz" -o "$GH_TMP.tar.gz" \
+          && mkdir -p "$GH_TMP" \
+          && tar xzf "$GH_TMP.tar.gz" -C "$GH_TMP"; then
+          cp "$GH_TMP/gh_${GH_VER}_linux_amd64/bin/gh" "$HOME/.local/bin/gh" 2>/dev/null \
+            || cp "$GH_TMP/bin/gh" "$HOME/.local/bin/gh" 2>/dev/null || true
+          chmod +x "$HOME/.local/bin/gh" 2>/dev/null || true
+        else
+          echo "[boucle] WARN: could not install gh — the retro's upstream posts are skipped (fail-open)"
+        fi
+        rm -rf "$GH_TMP" "$GH_TMP.tar.gz"
+      fi
+      unset _GH_INSTALLED
 
       # ── Locate the boucle engine ───────────────────────────────────
       # Consumers install boucle as a git submodule at .boucle/ — engine
@@ -532,6 +585,7 @@ default:
       _probe make           "npm ci native modules (node-gyp), make check"
       _probe git            "every forge operation"
       _probe jq             "every state read"
+      _probe gh             "the retro's upstream posts (fail-open, GitLab jobs stay native)"
       # mermaid + jsdom are npm globals, not binaries — bin/check-mermaid
       # exits 3 (treated as PASS) when they are absent, so a missing pair
       # silently disables the diagram gate rather than failing it.
@@ -1109,6 +1163,41 @@ doctor:
   script:
     - boucle-ci doctor
   timeout: 10m
+
+# ── Retro (doctor-chained self-improvement sweep, #139) ──────────────────
+# Chained by the doctor via chain_to_role (trigger pipeline, BOUCLE_ROLE=retro)
+# once BOUCLE_RETRO_EVERY_MERGES merged PRs or BOUCLE_RETRO_EVERY_DAYS days
+# have elapsed — NEVER on its own schedule: a second cron would fire the
+# doctor twice per sweep and double-run its recovery passes. Analyze-only
+# agent: it proposes anonymized reports upstream; its only local trace is a
+# report issue (label boucle:retro, dispatch-skipped).
+retro:
+  stage: verify
+  # Pin to docker runners — see the note on `triage`: a shell executor
+  # ignores `image:` and this job would run without the agents toolchain.
+  tags: []
+  # Auto-retry transient runner failures (broken/offline runner, OOM, daemon
+  # restart). Same rationale as triage/worker/reviewer/e2e.
+  retry:
+    max: 2
+    when: runner_system_failure
+  artifacts: *agent_artifacts
+  # Serialize retro runs project-wide: the cadence re-check in retros.jsonl
+  # relies on one run at a time, and the retro makes upstream posts.
+  resource_group: boucle-retro
+  needs:
+    - job: dispatch
+      optional: true
+  rules:
+    - if: $BOUCLE_ENABLED != "true"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $BOUCLE_ROLE == "retro"
+  script:
+    - boucle-ci retro
+  # 45m: the analysis agent plus, when T2 resolves true and the proposal is
+  # S/M, a second bounded `retro-impl` invocation (clone upstream, implement,
+  # open the PR).
+  timeout: 45m
 
 # ── build-site: one build, many publishers (W1.7 + memory fix) ───────────
 # The site is built ONCE here on a docker runner (tags: []) and published via

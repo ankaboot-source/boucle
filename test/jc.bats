@@ -731,6 +731,65 @@ NEEDS-SPLIT" > "$LOG"
   rm -f "$LOG" "$TMPF"
 }
 
+# ── Retro posting path (B1 regression) ──────────────────────────────
+# A successful retro run leaves ONLY [retro-post] lines and its pinned
+# summary in the transcript: the real glab/gh call lives inside
+# bin/retro-post, invisible to the log. Without these patterns the
+# empty-output guard exits 3 on a fully successful run, the trigger state
+# never records, and the doctor re-chains a retro on every sweep.
+
+@test "agent_posted_note: [retro-post] helper output is detected (regression: false exit 3)" {
+  LOG=$(mktemp)
+  cat > "$LOG" << 'EOF'
+> retro · glm-5.3-flash
+bin/retro-post report --title "Retro window" --message-file /tmp/report.md
+[retro-post] report=101
+[retro-post] created=102
+[boucle:retro] summary: created=102 enriched=none report=101 implementable=102
+EOF
+  TMPF=$(mktemp)
+  extract_func agent_posted_note "$TMPF"
+  run bash -c "source '$TMPF'; agent_posted_note '$LOG'"
+  assert_success
+  rm -f "$LOG" "$TMPF"
+}
+
+@test "agent_posted_note: the pinned retro summary line alone is detected" {
+  LOG=$(mktemp)
+  echo "[boucle:retro] summary: created=none enriched=none report=7 implementable=none" > "$LOG"
+  TMPF=$(mktemp)
+  extract_func agent_posted_note "$TMPF"
+  run bash -c "source '$TMPF'; agent_posted_note '$LOG'"
+  assert_success
+  rm -f "$LOG" "$TMPF"
+}
+
+@test "agent_posted_note: the stage's [retro] result line is detected" {
+  LOG=$(mktemp)
+  echo "[retro] result: created=none enriched=none report=7 implementable=none" > "$LOG"
+  TMPF=$(mktemp)
+  extract_func agent_posted_note "$TMPF"
+  run bash -c "source '$TMPF'; agent_posted_note '$LOG'"
+  assert_success
+  rm -f "$LOG" "$TMPF"
+}
+
+@test "agent_posted_note: a retro log with no post artifacts IS a silent failure" {
+  # The negative half: analysis prose alone is not a post. If this ever
+  # passes, a retro that never posted anything records a run.
+  LOG=$(mktemp)
+  cat > "$LOG" << 'EOF'
+> retro · glm-5.3-flash
+I analyzed the window and found three recurring failure classes.
+Next I will post the report.
+EOF
+  TMPF=$(mktemp)
+  extract_func agent_posted_note "$TMPF"
+  run bash -c "source '$TMPF'; agent_posted_note '$LOG'"
+  assert_failure
+  rm -f "$LOG" "$TMPF"
+}
+
 # ── Fallback duplicate-verdict guard ────────────────────────────────
 # The fallback guard prevents a provider fallback retry when the agent
 # already posted a note, avoiding duplicate verdicts on the MR.
@@ -1222,6 +1281,45 @@ extract_scrub() {
   refute_output --partial "glpat-AbCdEf1234567890"
   refute_output --partial "ghp_ZZZZ1111YYYY2222"
   refute_output --partial "sk-abc123DEF456ghi"
+  rm -f "$TMPF" "$LOG"
+}
+
+@test "scrub: the upstream token value never survives in the log" {
+  # BOUCLE_UPSTREAM_TOKEN is a second GitHub PAT; the retro passes it to
+  # bin/retro-post and a failed git push can echo the remote config.
+  TMPF=$(mktemp); LOG=$(mktemp)
+  extract_scrub "$TMPF"
+  printf 'posting upstream with upstreamsecretvalue456 now\n' > "$LOG"
+  run bash -c "BOUCLE_UPSTREAM_TOKEN=upstreamsecretvalue456 SCRUBBED_CF_TOKEN='' bash -c \"source '$TMPF'; scrub_agent_log '$LOG'\"; cat '$LOG'"
+  assert_success
+  refute_output --partial "upstreamsecretvalue456"
+  assert_output --partial "[REDACTED:BOUCLE_UPSTREAM_TOKEN]"
+  rm -f "$TMPF" "$LOG"
+}
+
+@test "scrub: fine-grained PATs and Basic-auth headers are redacted" {
+  # github_pat_<...> is NOT matched by gh[pousr]_, and the T2 clone persists
+  # its push credential as an Authorization: Basic base64 extraheader.
+  TMPF=$(mktemp); LOG=$(mktemp)
+  extract_scrub "$TMPF"
+  printf 'token=github_pat_11ABCDEFG0abcdefghijklmnopqrstuvwxyz0123456789ABCDEF\nAuthorization: Basic eC1hY2Nlc3MtdG9rZW46Z2hwX3NlY3JldA==\n' > "$LOG"
+  run bash -c "SCRUBBED_CF_TOKEN='' bash -c \"source '$TMPF'; scrub_agent_log '$LOG'\"; cat '$LOG'"
+  assert_success
+  refute_output --partial "github_pat_11ABCDEFG0"
+  refute_output --partial "eC1hY2Nlc3MtdG9rZW46Z2hwX3NlY3JldA=="
+  assert_output --partial "[REDACTED:github-pat]"
+  assert_output --partial "Authorization: Basic [REDACTED]"
+  rm -f "$TMPF" "$LOG"
+}
+
+@test "scrub: ordinary github_* words are not mistaken for PATs" {
+  # The shape rule is anchored on github_pat_, not github_.
+  TMPF=$(mktemp); LOG=$(mktemp)
+  extract_scrub "$TMPF"
+  printf 'the github_repository context and a github_actions workflow\n' > "$LOG"
+  run bash -c "SCRUBBED_CF_TOKEN='' bash -c \"source '$TMPF'; scrub_agent_log '$LOG'\"; cat '$LOG'"
+  assert_success
+  assert_output --partial "the github_repository context and a github_actions workflow"
   rm -f "$TMPF" "$LOG"
 }
 

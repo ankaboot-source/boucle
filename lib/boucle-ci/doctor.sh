@@ -1165,6 +1165,13 @@ boucle_ci_doctor() {
   # an entry point that can also produce work.
   boucle_schedules_run || true
 
+  # ── Retro trigger (#139) ────────────────────────────────────────────────
+  # Periodic dogfood self-improvement: chain the retro stage when the window
+  # threshold is reached (X merged PRs or Y days). The retro stage re-checks
+  # the threshold under resource_group boucle-retro, so a stale decision here
+  # can never double-fire.
+  boucle_retro_doctor_chain || true
+
   # ── Stale branch cleanup (backstop) ─────────────────────────────────────
   # The merger and catchup already delete worker branches after merge, but
   # this is best-effort: MWPS merges, race conditions, and pre-cleanup-era

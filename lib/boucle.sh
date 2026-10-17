@@ -3098,3 +3098,459 @@ has_llm_config() {
   done
   return 1
 }
+
+# ── Retro — dogfood self-improvement (#139) ──────────────────────────────
+#
+# boucle measures every loop (health.jsonl, the metrics branch, escalation
+# diagnostics) and learns from none of it beyond the local LESSONS.yml. The
+# retro is the missing return path: a bounded analyst role reads a WINDOW of
+# past runs and proposes improvements UPSTREAM (BOUCLE_UPSTREAM_REPO), while
+# consumers keep their identity out of the contribution entirely.
+#
+# Anonymisation is CODE, not prompt discipline (LESSONS.yml lesson #38). The
+# digest handed to the retro agent is scrubbed BEFORE the model sees it, and
+# every body posted upstream passes through the same filter. A prompt that
+# says "be anonymous" is a suggestion; retro_scrub is the authority.
+#
+# Trigger state is ONE append-only log, retros.jsonl on the metrics branch —
+# zero runner state, same principle as the schedule dedup. The days backstop
+# keeps the trigger alive on an inactive repo and when a forge API is flaky
+# (the merge count fails CLOSED; the backstop needs no API at all).
+
+BOUCLE_RETRO_FILE="${BOUCLE_RETRO_FILE:-retros.jsonl}"
+
+# retro_enabled
+#
+# Is the retro on? Default yes; opt OUT with BOUCLE_RETRO_ENABLED=false (also
+# accepts 0/no/off, any case). Deliberately opt-out and deliberately not
+# `= "true"`: only an explicitly falsy value disables, so a consumer who sets
+# =1 to be helpful does not silently get the opposite of what they asked for.
+retro_enabled() {
+  case "$(printf '%s' "${BOUCLE_RETRO_ENABLED:-true}" | tr '[:upper:]' '[:lower:]')" in
+    false | 0 | no | off) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# _retro_remote_host <url> — the host of a git remote URL, or "" when the
+# value carries no host (a bare "owner/repo"). Handles https://, ssh://,
+# scp-like git@host:path and an optional :port.
+_retro_remote_host() {
+  local url="${1:-}"
+  url="${url#*://}"
+  url="${url#*@}"
+  case "$url" in
+    *:[0-9]*/*) printf '%s\n' "${url%%:*}" ;;
+    *:*) printf '%s\n' "${url%%:*}" ;;
+    */*) printf '%s\n' "${url%%/*}" ;;
+  esac
+}
+
+# _retro_remote_path <url> — the owner/repo path of a git remote URL,
+# keeping any .git suffix. Prints nothing when there is no host/path split.
+_retro_remote_path() {
+  local url="${1:-}"
+  url="${url#*://}"
+  url="${url#*@}"
+  case "$url" in
+    *:[0-9]*/*) printf '%s\n' "${url#*:[0-9]*/}" ;;
+    *:*) printf '%s\n' "${url#*:}" ;;
+    */*) printf '%s\n' "${url#*/}" ;;
+  esac
+}
+
+# _retro_repo_from_remote <value>
+#
+# Normalise a git remote URL — or a GITHUB_REPOSITORY / BOUCLE_PROJECT_PATH
+# value — to "owner/repo" (no .git). A bare "owner/repo" is returned as-is;
+# anything not URL-shaped MUST NOT be host-stripped, or "owner/repo" would
+# degrade to "repo" and compare equal to nothing.
+_retro_repo_from_remote() {
+  local url="${1:-}"
+  local cleaned="${url%.git}"
+  case "$cleaned" in
+    *://* | *@* | *:[0-9]*/* | *:*) ;;
+    *)
+      printf '%s\n' "$cleaned"
+      return 0
+      ;;
+  esac
+  cleaned=$(_retro_remote_path "$url")
+  printf '%s\n' "${cleaned%.git}"
+}
+
+# _retro_is_upstream_repo
+#
+# True when the current repository IS BOUCLE_UPSTREAM_REPO. Every identity
+# signal available is compared: GITHUB_REPOSITORY, BOUCLE_PROJECT_PATH,
+# BOUCLE_PROJECT_ID (GitLab ids are numeric and simply never match the
+# upstream slug) and the origin remote URL. ONE definition of "self", shared
+# by the T2 auto-detection and the self-targeting token fallback below.
+_retro_is_upstream_repo() {
+  local upstream="${BOUCLE_UPSTREAM_REPO:-ankaboot-source/boucle}"
+  local candidate slug
+  for candidate in \
+    "${GITHUB_REPOSITORY:-}" \
+    "${BOUCLE_PROJECT_PATH:-}" \
+    "${BOUCLE_PROJECT_ID:-}"; do
+    [ -n "$candidate" ] || continue
+    slug=$(_retro_repo_from_remote "$candidate")
+    [ "$slug" = "$upstream" ] && return 0
+  done
+  local origin
+  origin=$(git remote get-url origin 2> /dev/null || echo "")
+  if [ -n "$origin" ]; then
+    slug=$(_retro_repo_from_remote "$origin")
+    [ "$slug" = "$upstream" ] && return 0
+  fi
+  return 1
+}
+
+# retro_contribute_enabled
+#
+# T2: may this repo open a PR on the upstream, with the consumer's identity?
+#
+#   explicit true / 1 / yes / on   → yes
+#   explicit false / 0 / no / off  → no
+#   auto (default), unset, typo    → yes ONLY when the current repo IS the
+#     upstream (BOUCLE_UPSTREAM_REPO) — see _retro_is_upstream_repo. A
+#     consumer therefore never contributes by default, and an explicit CI
+#     variable overrides either way.
+retro_contribute_enabled() {
+  retro_enabled || return 1
+  case "$(printf '%s' "${BOUCLE_RETRO_CONTRIBUTE:-auto}" | tr '[:upper:]' '[:lower:]')" in
+    true | 1 | yes | on) return 0 ;;
+    false | 0 | no | off) return 1 ;;
+  esac
+  _retro_is_upstream_repo
+}
+
+# retro_upstream_token
+#
+# The token the retro posts upstream with. BOUCLE_UPSTREAM_TOKEN always wins.
+#
+# Fallback — DELIBERATELY narrow: when the current repo IS the upstream repo
+# AND the forge is GitHub, BOUCLE_TOKEN is used. The engine (dogfood, T2
+# auto=true) would otherwise need a second PAT for its OWN repository, and a
+# self-targeting PAT is exactly what a human contributor to their own repo
+# uses. A consumer is unaffected: its BOUCLE_TOKEN is scoped to its own repo
+# and _retro_is_upstream_repo is false there, so the token is never even
+# considered. On GitLab the fallback NEVER applies — BOUCLE_TOKEN is a GitLab
+# token, not a GitHub credential.
+retro_upstream_token() {
+  if [ -n "${BOUCLE_UPSTREAM_TOKEN:-}" ]; then
+    printf '%s\n' "$BOUCLE_UPSTREAM_TOKEN"
+    return 0
+  fi
+  [ "${BOUCLE_FORGE:-}" = "github" ] || return 1
+  _retro_is_upstream_repo || return 1
+  [ -n "${BOUCLE_TOKEN:-}" ] || return 1
+  printf '%s\n' "$BOUCLE_TOKEN"
+}
+
+# retro_upstream_ready
+#
+# Can this run actually reach the upstream? Enabled AND a non-empty token
+# (retro_upstream_token, so the engine's self-targeting fallback counts).
+# Absence is not an error: the retro is skipped cleanly (fail-open), and
+# `bin/doctor --audit` is where the consumer is told about it — an advisory,
+# never a WARN on every sweep.
+retro_upstream_ready() {
+  retro_enabled || return 1
+  [ -n "$(retro_upstream_token 2> /dev/null)" ]
+}
+
+# retro_dry_run
+#
+# Analyse and log only — no post, no PR, no issue. For consumer tests and
+# first installs. Default false; only explicit true spellings enable it.
+retro_dry_run() {
+  case "$(printf '%s' "${BOUCLE_RETRO_DRY_RUN:-false}" | tr '[:upper:]' '[:lower:]')" in
+    true | 1 | yes | on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# retro_force
+#
+# Operator escape hatch: run the retro NOW even when the merged-PR / days
+# window has not elapsed. The stage skips its threshold re-check when this is
+# set; the DOCTOR's chain condition never reads it, so FORCE can never make
+# the periodic trigger fire early — it only lets an explicitly dispatched
+# retro job proceed. Default false; explicit true spellings only.
+retro_force() {
+  case "$(printf '%s' "${BOUCLE_RETRO_FORCE:-false}" | tr '[:upper:]' '[:lower:]')" in
+    true | 1 | yes | on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# retro_scrub — stdin → stdout deterministic anonymiser.
+#
+# Replace the consumer's identity strings with generics before the data
+# reaches the model AND before any body reaches an upstream API:
+#
+#   project id/name/path (CI_*/BOUCLE_PROJECT_*)   → [consumer]
+#   the origin remote's path                      → [consumer]
+#   the origin remote's host, forge hosts         → [host]
+#   bot / human usernames                         → [user]
+#   e-mail addresses                              → [email]
+#   boucle/<digits>-<slug> branch prefixes        → boucle/N-
+#
+# Deliberate properties:
+#   * the upstream host is EXEMPT (github.com): a link to
+#     https://github.com/ankaboot-source/boucle/issues/139 is legitimate, and
+#     blanket-replacing the forge host would rewrite every upstream reference.
+#   * replacements are LITERAL (awk index, like scrub_agent_log): identity
+#     values must never be interpreted as regexes.
+#   * longest value first: replacing a short project NAME before a longer
+#     PATH would leave "group/sub/[consumer]" behind.
+#   * values shorter than 3 chars are skipped — replacing them would shred
+#     unrelated words (an id "7" appears everywhere).
+#   * deterministic: same input and environment → same output.
+#
+# Best-effort: when no temp dir can be created, pass the stream through
+# unchanged rather than failing the caller.
+retro_scrub() {
+  local tmp pairs
+  tmp=$(mktemp -d 2> /dev/null) || {
+    cat
+    return 0
+  }
+  pairs="$tmp/pairs"
+  : > "$pairs"
+
+  # N1: when the repo IS the upstream, the repo's own identity IS the
+  # upstream's identity — rewriting "ankaboot-source/boucle" into [consumer]
+  # in a dogfood post would mangle the very references it must carry.
+  # Non-repo identity (usernames, e-mails, branch prefixes, live URLs) is
+  # still scrubbed; only values equal to the upstream slug are exempt.
+  local upstream_slug="${BOUCLE_UPSTREAM_REPO:-ankaboot-source/boucle}"
+  local exempt_self=0
+  if _retro_is_upstream_repo; then
+    exempt_self=1
+  fi
+
+  # Project identity. Only through these loops, so the minimum-length rule
+  # and the tag choice stay in one place.
+  local v
+  for v in \
+    "${CI_PROJECT_ID:-}" "${CI_PROJECT_NAME:-}" "${CI_PROJECT_PATH:-}" \
+    "${BOUCLE_PROJECT_ID:-}"; do
+    [ -n "$v" ] || continue
+    if [ "$exempt_self" = 1 ] && [ "$v" = "$upstream_slug" ]; then
+      continue
+    fi
+    [ "${#v}" -ge 3 ] && printf '%s\t[consumer]\n' "$v" >> "$pairs"
+  done
+
+  # Usernames.
+  for v in \
+    "${BOUCLE_BOT_USERNAME:-}" "${GITLAB_USER_LOGIN:-}" "${GITHUB_ACTOR:-}"; do
+    [ -n "$v" ] && [ "${#v}" -ge 3 ] && printf '%s\t[user]\n' "$v" >> "$pairs"
+  done
+
+  # Forge hosts. GITHUB_SERVER_URL / CI_SERVER_URL are URLs — keep the host.
+  local upstream_host="github.com"
+  for v in \
+    "${BOUCLE_FORGE_HOST:-}" "${CI_SERVER_HOST:-}" \
+    "${GITHUB_SERVER_URL:-}" "${CI_SERVER_URL:-}"; do
+    [ -n "$v" ] || continue
+    v="${v#https://}"
+    v="${v#http://}"
+    v="${v#ssh://}"
+    v="${v%%/*}"
+    v="${v##*@}"
+    [ -n "$v" ] && [ "${#v}" -ge 3 ] && [ "$v" != "$upstream_host" ] \
+      && printf '%s\t[host]\n' "$v" >> "$pairs"
+  done
+
+  # Live / deploy URLs (S4): the deployed site's host is as identifying as
+  # the forge host. Strip the scheme and keep the bare host.
+  for v in "${BOUCLE_LIVE_URL:-}" "${CI_PAGES_URL:-}"; do
+    [ -n "$v" ] || continue
+    v="${v#https://}"
+    v="${v#http://}"
+    v="${v%%/*}"
+    v="${v##*@}"
+    v="${v%%:*}"
+    [ -n "$v" ] && [ "${#v}" -ge 3 ] && [ "$v" != "$upstream_host" ] \
+      && printf '%s\t[consumer-host]\n' "$v" >> "$pairs"
+  done
+
+  # The origin remote: its host and path are the two most reliable consumer
+  # identity strings in a checkout. Exempted when the repo IS the upstream
+  # (N1) — the origin then names the upstream itself.
+  local origin origin_host origin_path
+  origin=$(git remote get-url origin 2> /dev/null || echo "")
+  if [ -n "$origin" ]; then
+    local origin_slug
+    origin_slug=$(_retro_repo_from_remote "$origin")
+    if [ "$exempt_self" = 1 ] && [ "$origin_slug" = "$upstream_slug" ]; then
+      : # the repo IS the upstream — its own name is legitimate upstream data
+    else
+      origin_host=$(_retro_remote_host "$origin")
+      origin_path=$(_retro_remote_path "$origin")
+      [ -n "$origin_host" ] && [ "$origin_host" != "$upstream_host" ] \
+        && printf '%s\t[host]\n' "$origin_host" >> "$pairs"
+      if [ -n "$origin_path" ]; then
+        # Both the .git-suffixed URL and its stripped form appear in logs.
+        printf '%s\t[consumer]\n' "$origin_path" >> "$pairs"
+        case "$origin_path" in
+          *.git) printf '%s\t[consumer]\n' "${origin_path%.git}" >> "$pairs" ;;
+        esac
+      fi
+    fi
+  fi
+
+  # The e-mail rule MUST run BEFORE the literal replacements: replacing a
+  # username that is the local part of an address would leave its domain
+  # ("[user]@consumer.example") behind, and the domain is an identifier too.
+  sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/[email]/g' \
+    | awk -v pairsfile="$pairs" '
+    function lit_replace(s, find, repl,   out, p) {
+      out = ""
+      while ((p = index(s, find)) > 0) {
+        out = out substr(s, 1, p - 1) repl
+        s = substr(s, p + length(find))
+      }
+      return out s
+    }
+    BEGIN {
+      n = 0
+      while ((getline line < pairsfile) > 0) {
+        if (line == "") continue
+        tab = index(line, "\t")
+        if (tab == 0) continue
+        n++
+        val[n] = substr(line, 1, tab - 1)
+        rep[n] = substr(line, tab + 1)
+      }
+      close(pairsfile)
+      # Longest first (insertion sort): a short value can be a substring of
+      # a longer one, and the longer replacement must win.
+      for (i = 2; i <= n; i++) {
+        tv = val[i]; rv = rep[i]; j = i - 1
+        while (j >= 1 && length(val[j]) < length(tv)) {
+          val[j + 1] = val[j]; rep[j + 1] = rep[j]; j--
+        }
+        val[j + 1] = tv; rep[j + 1] = rv
+      }
+    }
+    {
+      line = $0
+      for (i = 1; i <= n; i++) line = lit_replace(line, val[i], rep[i])
+      print line
+    }
+  ' 2> /dev/null | sed -E 's|boucle/[0-9][0-9]*-|boucle/N-|g'
+  rm -rf "$tmp"
+  return 0
+}
+
+# retro_last_run_read
+#
+# Print the timestamp field of the LAST line of retros.jsonl on the metrics
+# branch, or nothing when no retro has ever recorded a run. Mirrors
+# boucle_metrics_hydrate_health's plumbing: fetch through the working repo's
+# own remote (a scratch clone inherits none of the checkout's credentials).
+#
+# Empty stdout is deliberately ambiguous between "no branch yet" and "fetch
+# failed": callers treat both as "first run", and the retro job re-checks the
+# log under its resource group before posting (anti-accumulation).
+retro_last_run_read() {
+  git rev-parse --git-dir > /dev/null 2>&1 || return 0
+  git remote get-url origin > /dev/null 2>&1 || return 0
+  local tmp out
+  tmp=$(mktemp -d 2> /dev/null) || return 0
+  out="$tmp/retros.jsonl"
+  if git fetch -q --depth 1 origin "$BOUCLE_METRICS_BRANCH" 2> /dev/null \
+    && git cat-file -p "FETCH_HEAD:$BOUCLE_RETRO_FILE" > "$out" 2> /dev/null \
+    && [ -s "$out" ]; then
+    grep -v '^[[:space:]]*$' "$out" 2> /dev/null | tail -n 1 \
+      | jq -r '.timestamp // empty' 2> /dev/null || true
+  fi
+  rm -rf "$tmp"
+  return 0
+}
+
+# retro_record_run <json-line>
+#
+# Append ONE retro run record to <BOUCLE_RETRO_FILE> on the metrics branch.
+# This log is the trigger's only state (zero runner state): the next sweep
+# reads its last timestamp. Reuses boucle_metrics_git_append — orphan branch,
+# dedup, push retries — but deliberately does NOT gate on
+# BOUCLE_METRICS_ENABLED: that toggle scopes ANALYTICS publication, while
+# this file is dedup STATE. Gate it and every sweep looks like a first run,
+# so the retro fires continuously — the opposite of what the toggle asks.
+#
+# Returns non-zero when the record is not on the branch so the caller can say
+# so; the caller MUST still fail-open (a lost record costs one duplicate
+# window, never a broken loop).
+retro_record_run() {
+  local line="${1:-}"
+  [ -n "$line" ] || return 0
+  if command -v jq > /dev/null 2>&1; then
+    printf '%s' "$line" | jq -e . > /dev/null 2>&1 || {
+      echo "[boucle:retro] WARN: refusing to append a non-JSON retros record" >&2
+      return 1
+    }
+  fi
+  local tmp
+  tmp=$(mktemp 2> /dev/null) || return 1
+  printf '%s\n' "$line" > "$tmp"
+  if boucle_metrics_git_append "$BOUCLE_RETRO_FILE" "$tmp" \
+    "retro: record run $(date -u +%Y-%m-%dT%H:%M:%SZ)"; then
+    rm -f "$tmp"
+    return 0
+  fi
+  rm -f "$tmp"
+  echo "[boucle:retro] WARN: could not append the retro run record to $BOUCLE_METRICS_BRANCH:$BOUCLE_RETRO_FILE" >&2
+  return 1
+}
+
+# retro_threshold_reached
+#
+# Is a retro due? True when:
+#
+#   * no run was ever recorded (first run), or
+#   * the last run is at least BOUCLE_RETRO_EVERY_DAYS old (backstop — no API
+#     needed, so an inactive repo and a flaky forge still get their retro), or
+#   * at least BOUCLE_RETRO_EVERY_MERGES PRs/MRs were merged since the last
+#     run (forge_mr_count_merged_since, the backend's job).
+#
+# Fail-CLOSED on the count path: an unreachable API returns false, never a
+# guessed true — a flaky API must not spam retros. The days backstop is
+# checked first and needs no API, so a permanent API failure still yields one
+# retro per window, never zero.
+#
+# Callers combine this with retro_upstream_ready (a retro with no token is
+# skipped cleanly) and re-check the log inside the job's resource group.
+retro_threshold_reached() {
+  retro_enabled || return 1
+
+  local last
+  last=$(retro_last_run_read 2> /dev/null || echo "")
+  if [ -z "$last" ]; then
+    return 0
+  fi
+
+  local merges days
+  merges="${BOUCLE_RETRO_EVERY_MERGES:-10}"
+  case "$merges" in '' | *[!0-9]*) merges=10 ;; esac
+  days="${BOUCLE_RETRO_EVERY_DAYS:-2}"
+  case "$days" in '' | *[!0-9]*) days=2 ;; esac
+
+  local last_epoch now_epoch
+  last_epoch=$(date -u -d "$last" +%s 2> /dev/null || echo "")
+  now_epoch=$(date -u +%s)
+  if [ -n "$last_epoch" ] \
+    && [ $((now_epoch - last_epoch)) -ge $((days * 86400)) ]; then
+    return 0
+  fi
+
+  local count
+  count=$(forge_mr_count_merged_since "$last" 2> /dev/null) || return 1
+  case "$count" in '' | *[!0-9]*) return 1 ;; esac
+  [ "$count" -ge "$merges" ] && return 0
+  return 1
+}

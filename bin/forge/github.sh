@@ -1054,3 +1054,132 @@ forge_job_artifact() {
   cat "$logfile"
   rm -rf "$tmpdir"
 }
+
+# ── Retro: upstream variants + merged-PR count (#139) ────────────────────
+
+# The retro posts upstream with BOUCLE_UPSTREAM_REPO + BOUCLE_UPSTREAM_TOKEN,
+# which is a DIFFERENT repository and a DIFFERENT token from the consumer's
+# own (BOUCLE_PROJECT_ID / BOUCLE_TOKEN). Every generic forge_* function
+# reads the consumer globals, so these four take the target repo and token as
+# explicit arguments and never read BOUCLE_PROJECT_ID / BOUCLE_TOKEN.
+#
+# Each returns non-zero on API error. That is the contract the retro needs:
+# the caller degrades fail-open (issue + plan stays, no upstream post) and
+# must be able to tell "the API refused" from "posted, empty output".
+
+# forge_issue_create_in <repo> <token> <title> <body> [labels_csv]
+# Print the created issue number. Reuses forge_issue_create's body building
+# (labels as a real JSON array — a CSV sent as one string 422s).
+forge_issue_create_in() {
+  local repo="$1" token="$2" title="$3" description="$4" labels="${5:-}"
+  [ -n "$repo" ] && [ -n "$token" ] || return 1
+  local json_labels body out number
+  json_labels=$(printf '%s' "$labels" | tr -d '\n' | jq -R 'split(",") | map(select(length > 0))' 2> /dev/null || echo "[]")
+  body=$(jq -nc --arg t "$title" --arg d "$description" --argjson l "$json_labels" \
+    '{title: $t, body: $d, labels: $l}')
+  out=$(GH_TOKEN="$token" gh api -X POST "/repos/$repo/issues" \
+    --input - <<< "$body" 2>&1) || {
+    echo "ERROR: forge_issue_create_in failed: $(printf '%s' "$out" | jq -r '.message // empty' 2> /dev/null || printf '%s' "$out")" >&2
+    return 1
+  }
+  number=$(printf '%s' "$out" | jq -r '.number // empty' 2> /dev/null)
+  [ -n "$number" ] || return 1
+  printf '%s\n' "$number"
+}
+
+# forge_label_create_in <repo> <token> <name> <color>
+#
+# Idempotent label creation on the upstream (the upstream is always GitHub).
+# The retro's anti-loop guard depends on boucle:report EXISTING on the
+# upstream — an issue created without it could be triaged there. Best-effort:
+# callers fail-open. Same create-if-absent flow as forge_label_create.
+forge_label_create_in() {
+  local repo="$1" token="$2" name="$3" color="$4"
+  [ -n "$repo" ] && [ -n "$token" ] && [ -n "$name" ] || return 1
+  color="${color#\#}"
+  GH_TOKEN="$token" gh api "/repos/$repo/labels/$name" > /dev/null 2>&1 && return 0
+  GH_TOKEN="$token" gh api -X POST "/repos/$repo/labels" \
+    -f name="$name" -f color="$color" > /dev/null 2>&1
+}
+
+# forge_issue_get_in <repo> <token> <iid>
+# Read one upstream issue, normalizing .body → .description like the generic
+# forge_issue_get (the T2 chain reads .title and .description from it).
+# Returns non-zero on API error.
+forge_issue_get_in() {
+  local repo="$1" token="$2" iid="$3"
+  [ -n "$repo" ] && [ -n "$token" ] && [ -n "$iid" ] || return 1
+  local out
+  out=$(GH_TOKEN="$token" gh api "/repos/$repo/issues/$iid" 2> /dev/null) || return 1
+  printf '%s\n' "$out" | jq -c '. + {description: (.description // .body // "")}' 2> /dev/null || return 1
+}
+
+# forge_issue_note_in <repo> <token> <iid> <body>
+# No stamp_agent_marker: the retro posts upstream as a CONTRIBUTOR, and the
+# agent marker would identify the comment as boucle-authored. Callers scrub
+# the body with retro_scrub BEFORE calling this.
+forge_issue_note_in() {
+  local repo="$1" token="$2" iid="$3" message="$4"
+  [ -n "$repo" ] && [ -n "$token" ] && [ -n "$iid" ] || return 1
+  GH_TOKEN="$token" gh api -X POST "/repos/$repo/issues/$iid/comments" \
+    -f body="$message" > /dev/null 2>&1
+}
+
+# forge_issue_list_in <repo> <token> [labels_csv]
+# Print one "<number>\t<title>" line per open issue, PRs excluded (the issues
+# endpoint returns both). Used to find a similar upstream proposal to enrich
+# instead of duplicating.
+forge_issue_list_in() {
+  local repo="$1" token="$2" labels="${3:-}"
+  [ -n "$repo" ] && [ -n "$token" ] || return 1
+  local path="/repos/$repo/issues?state=open&per_page=100"
+  [ -n "$labels" ] && path="$path&labels=$labels"
+  local resp
+  resp=$(GH_TOKEN="$token" gh api --paginate "$path" 2> /dev/null) || return 1
+  printf '%s\n' "$resp" | forge_merge_pages \
+    | jq -r '.[] | select(.pull_request == null) | [.number, .title] | @tsv' 2> /dev/null || return 1
+}
+
+# forge_pr_create_in <repo> <token> <title> <head> <base> <body>
+# Print the created PR number. Same call pattern as forge_mr_create: gh api
+# DIRECTLY (no _gh_api — --paginate is rejected on non-GET requests).
+forge_pr_create_in() {
+  local repo="$1" token="$2" title="$3" head="$4" base="$5" body="$6"
+  [ -n "$repo" ] && [ -n "$token" ] || return 1
+  local out number
+  out=$(GH_TOKEN="$token" gh api -X POST "/repos/$repo/pulls" \
+    -f head="$head" -f base="$base" \
+    -f title="$title" -f body="$body" 2>&1) || {
+    echo "ERROR: forge_pr_create_in failed: $(printf '%s' "$out" | jq -r '.message // empty' 2> /dev/null || printf '%s' "$out")" >&2
+    return 1
+  }
+  number=$(printf '%s' "$out" | jq -r '.number // empty' 2> /dev/null)
+  [ -n "$number" ] || return 1
+  printf '%s\n' "$number"
+}
+
+# forge_mr_count_merged_since <since_iso>
+#
+# Print how many pull requests were merged on or after <since_iso>, for the
+# retro trigger. Day granularity on purpose: the GitHub search API only
+# filters merged PRs by date (`merged:>=YYYY-MM-DD`), so a PR merged later the
+# same day can be counted in two windows — a rate-limited retro cannot spam,
+# and the extra window is the safe direction.
+#
+# Returns non-zero on API failure. Callers MUST treat that as "cannot answer",
+# never as zero (fail-closed on the trigger).
+forge_mr_count_merged_since() {
+  local since="${1:-}"
+  [ -n "$since" ] || return 1
+  local day="${since%%T*}"
+  case "$day" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+    *) return 1 ;;
+  esac
+  local q resp count
+  q=$(printf 'repo:%s is:pr is:merged merged:>=%s' "$BOUCLE_PROJECT_ID" "$day" | jq -sRr @uri)
+  resp=$(_gh_api "/search/issues?q=$q&per_page=1" 2> /dev/null) || return 1
+  count=$(printf '%s' "$resp" | jq -r '.total_count // empty' 2> /dev/null) || return 1
+  case "$count" in '' | *[!0-9]*) return 1 ;; esac
+  printf '%s\n' "$count"
+}

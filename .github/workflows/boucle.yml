@@ -61,14 +61,14 @@ on:
     # branch name (main, master, etc.).
     branches: [main, master]
   schedule:
-    - cron: "*/10 * * * *"  # doctor runs every 10 min
+    - cron: "*/10 * * * *"  # doctor runs every 10 min (retro is chained by the doctor — NEVER a second cron)
   workflow_dispatch:
     inputs:
       BOUCLE_ISSUE:
         description: "Issue IID"
         required: false
       BOUCLE_ROLE:
-        description: "Role to trigger (triage/worker/reviewer/merger/e2e/catchup)"
+        description: "Role to trigger (triage/worker/reviewer/merger/e2e/catchup/retro)"
         required: false
       BOUCLE_ITERATION:
         description: "Iteration number"
@@ -207,6 +207,22 @@ env:
   BOUCLE_REVIEW_CHECKS_WAIT: ${{ vars.BOUCLE_REVIEW_CHECKS_WAIT || '900' }}
   BOUCLE_PREVIEW_MARKER_PATH: ${{ vars.BOUCLE_PREVIEW_MARKER_PATH || '__boucle_commit__.txt' }}
   BOUCLE_DEPLOY_URL_REGEX: ${{ vars.BOUCLE_DEPLOY_URL_REGEX || 'https://[a-z0-9.-]+\\.pages\\.dev' }}
+  # ── Retro: periodic self-improvement sweep (#139) ──────────────────────────
+  # The doctor chains a `retro` workflow_dispatch (BOUCLE_ROLE=retro) once the
+  # cadence is due — NEVER through a second schedule entry: a second cron makes
+  # github.event_name == 'schedule' true for BOTH entries and double-runs the
+  # doctor. This block is the only path repo Variables reach the shell — a
+  # missing line silently disables the feature.
+  BOUCLE_RETRO_ENABLED: ${{ vars.BOUCLE_RETRO_ENABLED || 'true' }}
+  BOUCLE_RETRO_CONTRIBUTE: ${{ vars.BOUCLE_RETRO_CONTRIBUTE || 'auto' }}
+  BOUCLE_RETRO_EVERY_MERGES: ${{ vars.BOUCLE_RETRO_EVERY_MERGES || '10' }}
+  BOUCLE_RETRO_EVERY_DAYS: ${{ vars.BOUCLE_RETRO_EVERY_DAYS || '2' }}
+  BOUCLE_UPSTREAM_REPO: ${{ vars.BOUCLE_UPSTREAM_REPO || 'ankaboot-source/boucle' }}
+  BOUCLE_RETRO_DRY_RUN: ${{ vars.BOUCLE_RETRO_DRY_RUN || 'false' }}
+  # Never defaulted: absent, the retro degrades fail-open (no-op + doctor
+  # advisory) instead of failing. Secrets reach the shell through this block
+  # only — without this line BOUCLE_UPSTREAM_TOKEN is always unset.
+  BOUCLE_UPSTREAM_TOKEN: ${{ secrets.BOUCLE_UPSTREAM_TOKEN }}
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   PI_AUTH: ${{ secrets.PI_AUTH }}
 
@@ -1500,3 +1516,102 @@ jobs:
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
           [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
           $BOUCLE_HOME/bin/boucle-ci doctor
+
+  # ── retro: doctor-chained self-improvement sweep (#139) ───────────────────────
+  # Chained by the doctor via chain_to_role (workflow_dispatch with
+  # BOUCLE_ROLE=retro) once BOUCLE_RETRO_EVERY_MERGES merged PRs or
+  # BOUCLE_RETRO_EVERY_DAYS days have elapsed. NO dedicated schedule — a second
+  # cron entry would make github.event_name == 'schedule' true for BOTH and
+  # double-run the doctor. Analyze-only agent: it proposes anonymized reports
+  # upstream; its only local trace is a report issue (label boucle:retro,
+  # dispatch-skipped).
+  retro:
+    runs-on: ${{ vars.BOUCLE_RUNS_ON || 'ubuntu-latest' }}
+    continue-on-error: true  # boucle manages its own retries — exit 1 is normal
+    if: |
+      vars.BOUCLE_ENABLED != 'false'
+      && github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'retro'
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Setup
+        run: |
+          apt-get update -qq && apt-get install -y -qq curl jq git
+          npm install -g glab 2>/dev/null || true
+          # Install jcode coding agent (standalone Rust binary)
+          JCODE_VER="${JCODE_VERSION:-v0.84.0}"
+          if ! command -v jcode &>/dev/null || ! jcode --version 2>/dev/null | grep -q "$JCODE_VER"; then
+            echo "Installing jcode coding agent (standalone binary, $JCODE_VER)..."
+            mkdir -p "$HOME/.local/bin"
+            JCODE_TMP="/tmp/jcode-${GITHUB_RUN_ID:-local}"
+            curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x86_64.tar.gz" -o "$JCODE_TMP.tar.gz"
+            mkdir -p "$JCODE_TMP"
+            tar xzf "$JCODE_TMP.tar.gz" -C "$JCODE_TMP"
+            mv "$JCODE_TMP/jcode-linux-x86_64.bin" "$HOME/.local/bin/jcode"
+            chmod +x "$HOME/.local/bin/jcode"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Self-update
+        run: |
+          [ "${BOUCLE_UPDATE_DISABLE:-false}" = "true" ] && exit 0
+          [ -d .boucle/bin ] || exit 0
+          [ "${BOUCLE_PIPELINE_SOURCE:-}" = "push" ] && exit 0
+          case "$GITHUB_REF" in
+            refs/heads/*) _BRANCH="${GITHUB_REF#refs/heads/}" ;;
+            *) exit 0 ;;
+          esac
+          [ "$_BRANCH" = "$BOUCLE_DEFAULT_BRANCH" ] || exit 0
+          # Orphan guard: if the submodule SHA is not reachable from the
+          # engine's main (force-push rewrote history), bin/update at the
+          # orphaned SHA may be buggy and cannot self-update. Recover by
+          # force-updating the submodule to main HEAD directly, bypassing
+          # bin/update. This prevents a bootstrap deadlock where a buggy
+          # old bin/update cannot pull the fix for its own bug.
+          #
+          # Shallow-safety: jobs that check out without fetch-depth: 0 get a
+          # shallow submodule clone (--depth=1), where merge-base cannot see
+          # across the shallow boundary and would flag EVERY pinned SHA as
+          # orphaned each time engine main advances — force-bumping the
+          # engine on every run. Unshallow before checking; if the clone
+          # cannot be deepened, skip recovery (a false positive is worse
+          # than a miss: full-depth jobs like worker still catch orphans).
+          if git -C .boucle fetch origin main 2>/dev/null; then
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" = "true" ]; then
+              git -C .boucle fetch --unshallow origin 2>/dev/null || true
+            fi
+            if [ "$(git -C .boucle rev-parse --is-shallow-repository)" != "true" ] &&
+              ! git -C .boucle merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+              echo "[boucle] WARN: submodule SHA orphaned (not on engine main) — recovering to main HEAD"
+              git -C .boucle checkout origin/main 2>/dev/null
+              git add .boucle
+              git config user.email "${BOUCLE_BOT_EMAIL:-boucle-bot@boucle.local}"
+              git config user.name "${BOUCLE_BOT_USERNAME:-up-bot}"
+              git commit -m "chore(boucle): recover orphaned submodule to main HEAD" > /dev/null 2>&1 || true
+              git push 2>/dev/null || echo "[boucle] WARN: orphan recovery push failed, will retry next pipeline" >&2
+            fi
+          fi
+          bash "$PWD/.boucle/bin/update" || echo "[boucle] WARN: self-update failed, continuing with current version" >&2
+      - name: Retro
+        run: |
+          export BOUCLE_PROJECT_ID="${{ github.repository }}"
+          [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
+          $BOUCLE_HOME/bin/boucle-ci retro
+      - name: Upload agent transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boucle-agent-log-retro-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .boucle/**/agent-output.log
+            .boucle-state/**/agent-output.log
+            .boucle-state/agent-output.log
+            .boucle-state/retro-agent-output.log
+            .boucle-state/**/session/
+            .boucle-state/**/health.jsonl
+            .boucle-state/**/cost.json
+            .boucle-state/**/skills-used.json
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7

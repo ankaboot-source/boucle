@@ -25,13 +25,19 @@ Astro website (GitLab-hosted, deployed to Cloudflare Pages). The failure
 modes observed there — and in the *looper* POC that preceded boucle —
 shaped the design.
 
-> **Dogfood status (2026-08):** The engine repo no longer dogfoods on a
-> consumer (the origin Astro site was split out to its own repo to separate
-> engine from consumer). Dogfooding is **suspended voluntarily** — the
-> existing mix of engine and consumer code in one repo was untenable. A
+> **Dogfood status (2026-08, updated 2026-10):** The engine repo no longer
+> dogfoods on a consumer (the origin Astro site was split out to its own repo
+> to separate engine from consumer). Dogfooding is **suspended voluntarily** —
+> the existing mix of engine and consumer code in one repo was untenable. A
 > dedicated test consumer will be re-introduced once the engine/consumer
 > separation is stable. Until then, new classes of bugs are discovered on
 > real consumers; the 73 lessons in LESSONS.yml catalog the forward-looking operating principles.
+> **The upstream flywheel (#54 item 8) is now real instead of pending:** the
+> doctor-triggered retro role analyses a consumer's own loops and proposes
+> anonymized findings upstream; on the engine repo itself, T2 resolves to true
+> (`BOUCLE_RETRO_CONTRIBUTE=auto` on the upstream), so its proposals arrive as
+> human-reviewed contribution PRs — see [LOOP.md](LOOP.md)
+> §"Auto-improvement — the retro".
 
 ## 2. Features
 
@@ -43,6 +49,16 @@ shaped the design.
   match production reality. A doc that drifts from the system it describes
   is treated as a bug.
 - **Do-Not-Disturb mode** — an **opt-in** quiet window (disabled by default; `BOUCLE_DND_ENABLED=true`, default 22:00–07:00) during which the spec-validation gate is auto-validated, letting the loop run autonomously up to the MR without contacting the human. Preserves the human's quality of life; MR approval stays human-gated (in mono-user mode via a 👍 emoji on the reviewer's PASS comment on the PR — native self-approval is unreliable when the author is the bot). Autonomy must be explicit: opt-in globally, or per issue via the `boucle:autonomous` label. See [LOOP.md](LOOP.md) §Do-Not-Disturb (`BOUCLE_DND_*` variables).
+- **Self-improvement flywheel (retro)** — a doctor-triggered bounded role
+  analyses past loops (failures, successes, limits, need-vs-delivered gap) and
+  proposes anonymized findings **upstream only** (`ankaboot-source/boucle`):
+  enrich a similar `boucle:report` issue, or create one with a proposed
+  implementation plan. On the upstream repo itself (T2,
+  `BOUCLE_RETRO_CONTRIBUTE=auto`), a bounded `retro-impl` run MAY open a
+  human-reviewed contribution PR. Anonymization is enforced by code
+  (`retro_scrub`); consumers never implement locally — their only local trace
+  is the per-run report issue (label `boucle:retro`). See [LOOP.md](LOOP.md)
+  §Auto-improvement (`BOUCLE_RETRO_*` variables).
 - **Bot-PR auto-merge** — opt-in (`BOUCLE_AUTOMERGE_ENABLED=true`; default off): the doctor sweep merges dependency-bot PRs (dependabot, renovate) once their checks are green — patch/minor bumps, security bumps at any version, and `chore(boucle):` engine-sync MRs. Fail-closed policy; worker MRs stay human-gated (LESSONS #85). See [LOOP.md](LOOP.md) §Bot-PR auto-merge.
 
 ## 3. Target audience
@@ -68,8 +84,8 @@ shaped the design.
 | --- | --- |
 | Forge | GitLab, GitHub |
 | CI/CD | GitLab CI (8 stages) / GitHub Actions (8 stages) — shared shell library `lib/boucle-ci/` |
-| AI agents | jcode (4 agents: triage, worker, reviewer, e2e) |
-| Models | glm-5.3-flash (triage, e2e), deepseek-v4.1-flash (worker, reviewer) — open-weight preference |
+| AI agents | jcode (6 roles: triage, worker, reviewer, e2e, retro, retro-impl) |
+| Models | glm-5.3-flash (triage, e2e, retro), deepseek-v4.1-flash (worker, reviewer, retro-impl) — open-weight preference |
 | Knowledge graph | codebase-memory-mcp |
 | Deployment | Pluggable: Cloudflare Pages (default), GitHub Pages, GitLab Pages, external (consumer's own CI) |
 | Tests | bats (shell), shellcheck, shfmt |

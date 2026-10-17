@@ -263,6 +263,44 @@ forge_mr_lookup_by_branch() {
     | jq -r '.[0].iid // empty' 2> /dev/null || true
 }
 
+# forge_mr_count_merged_since <since_iso>
+#
+# Print how many merge requests were MERGED at or after <since_iso>, for the
+# retro trigger (#139). `updated_after` is the coarse server-side filter
+# (GitLab has no portable merged_after on older instances), then the exact
+# `.merged_at` check runs client-side: an MR merged BEFORE <since> can be
+# updated after it, and counting it would over-trigger.
+#
+# Returns non-zero on API failure. Callers MUST treat that as "cannot answer",
+# never as zero (fail-closed on the trigger).
+forge_mr_count_merged_since() {
+  local since="${1:-}"
+  [ -n "$since" ] || return 1
+  local encoded raw count
+  encoded=$(printf '%s' "$since" | jq -sRr @uri)
+  raw=$(glab api --hostname "$BOUCLE_FORGE_HOST" --paginate \
+    "/projects/$BOUCLE_PROJECT_ID/merge_requests?state=merged&updated_after=$encoded&per_page=100" 2> /dev/null) || return 1
+  # Compare EPOCH seconds, not strings: GitLab can return an offset form
+  # (+02:00) or a fractional second, and a lexicographic compare misorders
+  # both. _epoch drops the fraction and folds the offset into UTC so
+  # fromdateiso8601 can parse it (jq has no offset-aware parser).
+  count=$(printf '%s\n' "$raw" \
+    | forge_merge_pages \
+    | jq --arg s "$since" '
+      def _epoch:
+        capture("^(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?:\\.[0-9]+)?(?<tz>Z|[+-][0-9]{2}:[0-9]{2})$")
+        | (.tz // "Z") as $tz
+        | (.d + "Z" | fromdateiso8601)
+          - (if $tz == "Z" then 0
+             else (($tz[1:3] | tonumber) * 3600 + ($tz[4:6] | tonumber) * 60)
+               * (if $tz[0:1] == "-" then -1 else 1 end)
+             end);
+      [.[] | select(.merged_at != null)
+       | select((.merged_at | _epoch) >= ($s | _epoch))] | length' 2> /dev/null) || return 1
+  case "$count" in '' | *[!0-9]*) return 1 ;; esac
+  printf '%s\n' "$count"
+}
+
 forge_mr_list() {
   # List open MRs, normalized to the shape consumed by the automerge sweep
   # (see bin/forge/github.sh forge_mr_list for the contract).

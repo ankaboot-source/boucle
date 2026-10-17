@@ -70,6 +70,10 @@ A harness made for humans, by an indie product builder for product builders.
 - **Four specialized agents** — triage (spec), worker (implementation),
   reviewer (verification), e2e (production check), each with a focused prompt
   and step/iteration caps.
+- **Self-improvement flywheel (retro)** — a doctor-triggered, bounded
+  retrospective role turns each window of loops into anonymized upstream
+  proposals (`boucle:report`); on the engine repo it also opens human-reviewed
+  contribution PRs.
 - **Mono-user mode** — no second account required: one account carries the
   issues, the MRs and the loop's own actions.
 - **Deploy-agnostic** — Cloudflare Pages, GitHub Pages, GitLab Pages, or your
@@ -322,6 +326,7 @@ all have sane defaults — override them only when you need to:
 | `BOUCLE_SPEC_PROFILE` | `strict` | Spec gate strictness: `strict` (default — gates all sizes), `product` (gates Size M only), `off` (never gates); unknown → `strict`. |
 | `BOUCLE_DND_ENABLED` | `false` | Do-Not-Disturb master switch: `true` (opt-in) or `false` (default). |
 | `BOUCLE_DND_START` / `BOUCLE_DND_END` / `BOUCLE_DND_TZ` | `22:00` / `07:00` / `UTC` | Quiet-hours window: HH:MM 24h start/end + IANA timezone (e.g. `Europe/Paris`). |
+| `BOUCLE_RETRO_ENABLED` | `true` | Participate in the self-improvement flywheel: the doctor periodically chains a bounded retro analysis of past loops and proposes anonymized findings upstream (`boucle:report`), at your own LLM credits. `false` = no retro job, no upstream posts. |
 | `BOUCLE_DEPLOY_MODE` | `self` | Deploy handling: `self` (default — boucle runs `BOUCLE_DEPLOY_CMD`) or `external` (consumer's own CI/CD deploys; `BOUCLE_LIVE_URL` required). |
 | `BOUCLE_REVIEW_MODE` | `preview` | Reviewer gate: `preview` (default — tests deployed preview) or `diff` (reviews PR diff + check suites). |
 | `BOUCLE_LIVE_URL` | *(unset)* | Canonical e2e target URL — **required** in `external` mode; optional override in `self` mode. |
@@ -342,7 +347,8 @@ or in GitHub under **Settings → Secrets and variables → Actions** — see
 Every other option — `BOUCLE_RUNS_ON`, `BOUCLE_UPDATE_MODE`
 (`release`|`dev`), iteration/concurrency caps (`BOUCLE_MAX_ITERATIONS`,
 `BOUCLE_MAX_PARALLEL_ISSUES`), models per agent, vision routing, provider
-fallback (`BOUCLE_FALLBACK_*`), deploy overrides, staleness, attachment caps —
+fallback (`BOUCLE_FALLBACK_*`), the retro family (`BOUCLE_RETRO_*`), upstream
+targets (`BOUCLE_UPSTREAM_*`), deploy overrides, staleness, attachment caps —
 is documented in [LOOP.md](LOOP.md).
 
 ### The bot user
