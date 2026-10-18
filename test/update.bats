@@ -530,6 +530,17 @@ setup() {
 
 # ── push_update ───────────────────────────────────────────────────────
 
+@test "ci: .gitlab-ci.yml never re-declares BOUCLE_VERSION as a job variable" {
+  # A job-level `BOUCLE_VERSION: "${BOUCLE_VERSION}"` does NOT expand the
+  # project variable: GitLab keeps the literal string and the job-level
+  # definition shadows the inherited project variable. bin/update then sees
+  # a self-reference, needs_update is always true, and every pipeline
+  # re-extracts the engine. Project variables are inherited natively —
+  # declaring nothing is the correct state.
+  run grep -nE '^[[:space:]]+BOUCLE_VERSION:' .gitlab-ci.yml
+  assert_failure
+}
+
 @test "push_update succeeds quietly when the push lands" {
   git() { echo "Everything up-to-date"; return 0; }
   export -f git
@@ -631,6 +642,109 @@ setup() {
   assert_failure
   assert_output --partial "the default branch looks protected"
   unset -f git
+}
+
+# ── push credential assertion ─────────────────────────────────────────
+
+@test "push_update refuses to push when an inherited extraheader survived the purge" {
+  # The consumer window's silent partial failure: actions/checkout's
+  # Authorization extraheader outranks the PAT in the remote URL, so the
+  # workflow-file push went out under the runner token and was rejected.
+  # configure_git_push purges the keys; this asserts the purge landed BEFORE
+  # any push is attempted.
+  BOUCLE_TOKEN="pat-secret"
+  git() {
+    case "$*" in
+      *"--get-regexp"*)
+        printf 'http.https://github.com/acme/site.git/.extraheader x-access-token:stub\n'
+        return 0
+        ;;
+      *"push"*)
+        echo "PUSHED"
+        return 0
+        ;;
+    esac
+    return 0
+  }
+  export -f git
+  run push_update
+  assert_failure
+  assert_output --partial "inherited git extraheader"
+  assert_output --partial "INSTEAD of BOUCLE_TOKEN"
+  refute_output --partial "PUSHED"
+  unset -f git
+}
+
+@test "push_update refuses when a GitHub PAT's scopes omit workflow" {
+  # The self-update always touches .github/workflows/boucle.yml on GitHub.
+  # When the API reports the classic PAT's scopes and 'workflow' is absent,
+  # the push is guaranteed to be rejected — fail before it, with the fix.
+  BOUCLE_FORGE=github
+  BOUCLE_TOKEN="pat-secret"
+  git() {
+    case "$*" in
+      *"--get-regexp"*) return 1 ;;
+      *"push"*) echo "PUSHED"; return 0 ;;
+    esac
+    return 0
+  }
+  curl() { printf 'HTTP/2 200\r\nx-oauth-scopes: repo, read:org\r\n\r\n'; }
+  export -f git curl
+  run push_update
+  assert_failure
+  assert_output --partial "do not include 'workflow'"
+  assert_output --partial "repo' + 'workflow"
+  refute_output --partial "PUSHED"
+  unset -f git curl
+}
+
+@test "push_update allows a GitHub PAT whose scopes include workflow" {
+  BOUCLE_FORGE=github
+  BOUCLE_TOKEN="pat-secret"
+  tmp=$(mktemp -d)
+  git() {
+    case "$*" in
+      *"--get-regexp"*) return 1 ;;
+      *"push"*)
+        : > "$tmp/pushed"
+        return 0
+        ;;
+    esac
+    return 0
+  }
+  curl() { printf 'HTTP/2 200\r\nx-oauth-scopes: repo, workflow\r\n\r\n'; }
+  export -f git curl
+  run push_update
+  assert_success
+  assert [ -f "$tmp/pushed" ]
+  unset -f git curl
+  rm -rf "$tmp"
+}
+
+@test "push_update treats an unknown scope list as unknown, not as missing" {
+  # Fine-grained PATs and GitHub App tokens carry no x-oauth-scopes header.
+  # Empty scopes tells us nothing, and blocking those tokens would turn a
+  # working self-update red.
+  BOUCLE_FORGE=github
+  BOUCLE_TOKEN="pat-secret"
+  tmp=$(mktemp -d)
+  git() {
+    case "$*" in
+      *"--get-regexp"*) return 1 ;;
+      *"push"*)
+        : > "$tmp/pushed"
+        return 0
+        ;;
+    esac
+    return 0
+  }
+  curl() { printf 'HTTP/2 200\r\n\r\n'; }
+  export -f git curl
+  run push_update
+  assert_success
+  assert [ -f "$tmp/pushed" ]
+  unset -f git curl
+  rm -rf "$tmp"
 }
 
 # ── untrack_prompt_overlay ────────────────────────────────────────────

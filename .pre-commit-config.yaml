@@ -37,16 +37,17 @@ repos:
       - id: check-case-conflict
       - id: detect-private-key
 
-  # ── shellcheck (static analysis, local system binary) ──
-  # Local hook: the koalaman/shellcheck-precommit hook pulls a Docker image,
-  # which fails in CI/hosts without a daemon. We use the system binary
-  # (brew install shellcheck) via the Makefile's lint target instead.
-  # Exclude .jcode/ — upstream-vendored scripts synced by bin/update.
+  # ── shell safety gate (static analysis, local system binary) ──
+  # Same gate as `make lint` and CI: bash -n + shellcheck at info severity
+  # with documented exclusions + trap-handler ordering. Local hook: the
+  # koalaman/shellcheck-precommit hook pulls a Docker image, which fails in
+  # CI/hosts without a daemon. Exclude .jcode/ — upstream-vendored scripts
+  # synced by bin/update.
   - repo: local
     hooks:
       - id: shellcheck
-        name: shellcheck (system)
-        entry: bash -c 'shellcheck -x --severity=warning "$@"' --
+        name: shell safety gate (system)
+        entry: bin/check-shell
         language: system
         types: [shell]
         exclude: ^\.jcode/

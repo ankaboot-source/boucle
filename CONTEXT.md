@@ -88,7 +88,7 @@ shaped the design.
 | Models | glm-5.3-flash (triage, e2e, retro), deepseek-v4.1-flash (worker, reviewer, retro-impl) — open-weight preference |
 | Knowledge graph | codebase-memory-mcp |
 | Deployment | Pluggable: Cloudflare Pages (default), GitHub Pages, GitLab Pages, external (consumer's own CI) |
-| Tests | bats (shell), shellcheck, shfmt |
+| Tests | bats (shell), `bin/check-shell` (bash -n + shellcheck at info severity + trap-handler ordering), shfmt |
 | Hooks | pre-commit |
 | Vendored skills | `.jcode/skills/` — content borrowed from the maintainer's skill library, synced from upstream. Only one component ships executable code: `ui-ux-pro-max` (Python stdlib-only, engine of the worker's design skill). No boucle-authored Python. |
 | Design charter | `.jcode/DESIGN-template.md` — per-site design system file (product context → tokens → motion → components → content/iconography/visual foundations), derivative of superdesign-skill DESIGN.md (MIT) and named after that concept. Consumer sites keep their own `DESIGN.md`; the worker reads it before any UI work and it overrides generic design recommendations. `bin/check-design-charter` validates the charter structure (sections, tokens, no placeholders) before UI work. |

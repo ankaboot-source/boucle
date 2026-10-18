@@ -139,6 +139,75 @@ configure_git_push() {
   fi
 }
 
+# git_extraheader_keys: echo the http.*.extraheader keys left in this clone's
+# local config. Empty when none — or when git is unavailable, in which case
+# the caller has nothing to assert against.
+git_extraheader_keys() {
+  git config --local --get-regexp '^http\..*\.extraheader$' 2> /dev/null \
+    | awk '/extraheader/ { print $1 }' || true
+}
+
+# github_token_scopes: echo the OAuth scopes of BOUCLE_TOKEN, one per line.
+#
+# Empty means UNKNOWN, never "no scopes": fine-grained PATs and GitHub App
+# installation tokens carry no x-oauth-scopes header, and an unreachable API
+# tells us nothing. Callers MUST treat empty as "cannot classify" — blocking
+# those tokens here would turn a working self-update red.
+github_token_scopes() {
+  [ -n "${BOUCLE_TOKEN:-}" ] || return 0
+  curl -sS -o /dev/null -D - --max-time 10 \
+    -H "Authorization: Bearer ${BOUCLE_TOKEN}" \
+    https://api.github.com/ 2> /dev/null \
+    | tr -d '\r' \
+    | sed -n 's/^[Xx]-[Oo][Aa]uth-[Ss]copes:[[:space:]]*//p' \
+    | tr ',' '\n' \
+    | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+    | grep -v '^$' || true
+}
+
+# assert_push_credential: fail loudly when the credential that will actually
+# reach the forge is not the configured bot PAT.
+#
+# Two failure modes from the consumer window:
+#   - actions/checkout persists an `http.<url>.extraheader` in the local
+#     config. libcurl sends that header INSTEAD of credentials embedded in
+#     the remote URL, so a workflow-file push goes out under the runner's
+#     token and is rejected for lack of the workflows permission.
+#     configure_git_push removes every such key; this asserts the purge
+#     actually landed.
+#   - a classic GitHub PAT without the `workflow` scope is rejected on every
+#     self-update because the sync always touches .github/workflows/. When
+#     the API reports scopes, check `workflow` BEFORE the push so the failure
+#     is immediate and actionable.
+#
+# Returns 0 when the credential is usable or cannot be classified; 1 with an
+# actionable message on stderr otherwise.
+assert_push_credential() {
+  local keys
+  keys=$(git_extraheader_keys)
+  if [ -n "${BOUCLE_TOKEN:-}" ] && [ -n "$keys" ]; then
+    echo "[boucle] ERROR: an inherited git extraheader survived configure_git_push:" >&2
+    printf '%s\n' "$keys" | sed 's/^/[boucle]   /' >&2
+    echo "[boucle]   libcurl sends that header INSTEAD of BOUCLE_TOKEN, so a" >&2
+    echo "[boucle]   workflow-file push would use the runner's token. Remove it:" >&2
+    echo "[boucle]   git config --local --unset-all <key>  (each key listed above)" >&2
+    return 1
+  fi
+  if [ "${BOUCLE_FORGE:-}" = "github" ] && [ -n "${BOUCLE_TOKEN:-}" ]; then
+    local scopes
+    scopes=$(github_token_scopes | paste -sd, -)
+    if [ -n "$scopes" ] \
+      && ! printf '%s\n' "$scopes" | tr ',' '\n' | grep -qx 'workflow'; then
+      echo "[boucle] ERROR: BOUCLE_TOKEN scopes ($scopes) do not include 'workflow'." >&2
+      echo "[boucle]   The GitHub self-update sync always pushes .github/workflows/boucle.yml," >&2
+      echo "[boucle]   and GitHub rejects a token without the 'workflow' scope on every run." >&2
+      echo "[boucle]   Regenerate the bot PAT with 'repo' + 'workflow' and set BOUCLE_TOKEN." >&2
+      return 1
+    fi
+  fi
+  return 0
+}
+
 # push_update: push the auto-update commit, reporting why it failed.
 #
 # The push used to be `git push 2> /dev/null`, which made a consumer stuck one
@@ -159,6 +228,10 @@ configure_git_push() {
 #
 # Returns 0 if the push succeeded, 1 otherwise.
 push_update() {
+  if ! assert_push_credential; then
+    echo "[boucle] ERROR: refusing to push — the effective credential is not the configured bot PAT (see above)." >&2
+    return 1
+  fi
   local out status
   out="$(git push 2>&1)"
   status=$?

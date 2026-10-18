@@ -24,10 +24,10 @@ BATS := bats
 # matches parens inside $(shell ...), so an unbalanced ) — a `case` pattern,
 # say — closes the call early. Keep every paren here balanced.
 SHEBANG_RE := ^\#!.*\b(ba)?sh([[:space:]]|$$)
-SH_FILES := $(shell git ls-files '*.sh' '*.bash' 'bin/*' ':!:.jcode' ':!:bin/oc' 2>/dev/null)
+SH_FILES := $(shell git ls-files --cached --others --exclude-standard '*.sh' '*.bash' 'bin/*' ':!:.jcode' ':!:bin/oc' 2>/dev/null)
 ALL_SH := $(shell for f in $(SH_FILES); do if echo "$$f" | grep -qE '\.(sh|bash)$$' || head -1 "$$f" 2>/dev/null | grep -qE '$(SHEBANG_RE)'; then echo "$$f"; fi; done | sort -u)
 
-.PHONY: check lint fix test install-hooks check-sync
+.PHONY: check check-shell lint fix test install-hooks check-sync
 
 # Default: run everything.
 check: lint test
@@ -39,14 +39,17 @@ check: lint test
 check-sync:
 	@bin/check-boucle-sync || { echo "(check-boucle-sync skipped — likely shallow clone or no CI context)"; true; }
 
-# Static analysis: shellcheck + shfmt diff (no modifications) + lessons lint.
-lint:
-	@command -v shellcheck >/dev/null 2>&1 || { echo "ERROR: shellcheck not installed (brew install shellcheck)"; exit 1; }
+# Shell safety gate: bash -n, shellcheck at info severity (documented
+# exclusions) and trap-handler ordering. Single source of truth shared by the
+# pre-commit hook and CI's `make check` — see bin/check-shell.
+check-shell:
+	@bin/check-shell
+
+# Static analysis: shell safety gate + shfmt diff (no modifications) + lessons lint.
+lint: check-shell
 	@command -v shfmt >/dev/null 2>&1 || { echo "ERROR: shfmt not installed (brew install shfmt)"; exit 1; }
 	@files='$(ALL_SH)'; \
 	[ -z "$$files" ] && { echo "No shell scripts to check"; exit 0; }; \
-	echo ">> shellcheck"; \
-	printf '%s\n' $$files | xargs shellcheck -x --severity=warning; \
 	echo ">> shfmt -d"; \
 	printf '%s\n' $$files | xargs shfmt -d $(SHFMT_FLAGS)
 	@echo ">> check-lessons"; \

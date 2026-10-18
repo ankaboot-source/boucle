@@ -615,7 +615,8 @@ default:
       esac
 
 # ── Quality gate (lint + unit tests) — ENGINE REPO ONLY ──────────────────
-# Runs shellcheck + shfmt + bats on push/MR pipelines only. Never runs on
+# Runs the shell safety gate (bash -n + shellcheck + trap ordering) + shfmt +
+# bats on push/MR pipelines only. Never runs on
 # webhook triggers (the autonomous loop) or schedules — those are the dev-loop
 # pipeline and the doctor sweep, which don't touch the harness source.
 # Uses the default agents image and installs its own pinned tools (shellcheck,

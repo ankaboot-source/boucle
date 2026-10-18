@@ -1780,6 +1780,18 @@ boucle_notify() {
 
   # Only the transitions a human has to act on. Notifying every state change
   # would get the channel muted within a day, which is worse than silence.
+  #
+  # The MR/PR wording comes from the forge layer (forge_mr_term is the
+  # single source of truth for it). Resolve it ONCE, BEFORE the case below
+  # uses it: `waiting` expands $mr_term, and a definition placed after the
+  # case is an unbound variable under `set -u` on the approval path. Guarded
+  # because notify is fail-open by contract — an unguarded call exits 127
+  # under `set -e` whenever lib/boucle.sh is sourced without the forge
+  # backend, killing the notification before it can even warn. Same
+  # defensive shape as the forge_issue_get guard below.
+  local mr_term="MR"
+  command -v forge_mr_term > /dev/null 2>&1 && mr_term=$(forge_mr_term)
+
   local event waiting
   case "$label" in
     boucle:spec-review)
@@ -1810,15 +1822,6 @@ boucle_notify() {
     echo "[boucle:notify] suppressed ($event, #$iid) — inside the DND window" >&2
     return 0
   fi
-
-  # The MR/PR wording comes from the forge layer (forge_mr_term is the
-  # single source of truth for it). Resolve it ONCE, guarded: notify is
-  # fail-open by contract — a dead webhook must never block the loop — and
-  # an unguarded call exits 127 under `set -e` whenever lib/boucle.sh is
-  # sourced without the forge backend, killing the notification before it
-  # can even warn. Same defensive shape as the forge_issue_get guard below.
-  local mr_term="MR"
-  command -v forge_mr_term > /dev/null 2>&1 && mr_term=$mr_term
 
   # Title and URL are best-effort: a notification naming only the issue
   # number still beats no notification.
@@ -3140,7 +3143,7 @@ boucle_worker_rebase_conflict() {
         # whole 30m job timeout before the worker's build/push. A kill
         # (exit 124) is fine if the tree is already clean — the tree state
         # below is the verdict.
-        timeout "${BOUCLE_CONFLICT_RESOLVE_TIMEOUT:-420}" $BOUCLE_HOME/bin/jc worker \
+        timeout "${BOUCLE_CONFLICT_RESOLVE_TIMEOUT:-420}" "$BOUCLE_HOME/bin/jc" worker \
           || echo "WARN: conflict-resolution agent exited non-zero (or timed out) — checking the tree state..."
         if git status --porcelain | grep -qE '^(UU|AA|DD|AU|UA|DU|UD)'; then
           echo "FAIL: conflict markers remain after the agent (attempt $attempt/3) — aborting" >&2
