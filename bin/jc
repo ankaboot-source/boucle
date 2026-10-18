@@ -1977,6 +1977,13 @@ AGENT_LOG="$STATE_DIR/agent-output.log"
 # keeps the richer fields (tokens, cost, skills) that only exist once the
 # later sections have run; the flag makes the trap a no-op after that.
 _BOUCLE_HEALTH_WRITTEN=""
+# Token/cost/model fields are filled by 7d on the happy path. Initialise them
+# empty BEFORE the trap is armed: the trap reads them, and a variable that
+# only exists later is an inherited-environment surprise waiting to happen.
+h_pt=""
+h_cost=""
+h_model=""
+h_provider=""
 emit_health_record() {
   local rc=$?
   [ -z "$_BOUCLE_HEALTH_WRITTEN" ] || return "$rc"
@@ -2014,7 +2021,25 @@ emit_health_record() {
     [ -n "$lessons_source" ] || lessons_source="unbuilt"
   fi
   local lessons_n=0
-  [ -n "$lessons" ] && lessons_n=$(printf '%s' "$lessons" | tr ',' '\n' | grep -c . || echo 0)
+  # `if`, not `[ -n ] && ...`: the trap runs under `set -e`, and a standalone
+  # test that is false would abort the handler before the row is written.
+  if [ -n "$lessons" ]; then
+    lessons_n=$(printf '%s' "$lessons" | tr ',' '\n' | grep -c . || echo 0)
+  fi
+  # A row with every measured field empty is not a measurement: it is the trap
+  # having run before its extractors/variables were available, or a transcript
+  # nothing could read. Say so loudly — a silent row of zeroes reads as a
+  # healthy run, which is exactly what hid the trap-ordering defect.
+  local measured=""
+  if [ -n "$skills" ]; then measured="$measured skills"; fi
+  if [ -n "$swarm" ] && [ "$swarm" != "0" ]; then measured="$measured swarm"; fi
+  if [ -n "$setup_fail" ]; then measured="$measured setup"; fi
+  if [ -n "$evidence" ] && [ "$evidence" != "not-invoked" ]; then measured="$measured evidence"; fi
+  if [ -n "$lessons" ]; then measured="$measured lessons"; fi
+  if [ -n "${h_pt:-}" ]; then measured="$measured tokens"; fi
+  if [ -z "$measured" ]; then
+    echo "[boucle] ERROR: health row for issue ${ISSUE:-?} role ${ROLE:-?} carries NO measurement (skills, swarm, setup, evidence, lessons and tokens are all empty). This row MUST NOT be read as a healthy run — check that the trap runs after its extractors are defined." >&2
+  fi
   echo "[boucle:metrics] role=$ROLE iteration=$ITERATION lessons_n=$lessons_n lessons_source=$lessons_source lessons=${lessons:-none}" >&2
   boucle_health_record "$ISSUE" "$ROLE" "$ITERATION" "${AGENT_EXIT:-$rc}" \
     "${prompt_total_chars:-0}" "${h_pt:-}" "${h_cost:-}" \

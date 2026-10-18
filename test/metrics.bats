@@ -706,6 +706,17 @@ metrics_remote_config_only() {
   assert_output --partial "extract_swarm_spawns"
 }
 
+@test "jc: an all-empty health row raises a loud error" {
+  # A row with every measured field empty is the signature of the trap having
+  # run before its extractors existed. It must never pass quietly as a
+  # healthy run — that is what hid the definition-order defect.
+  run grep -A8 'local measured=""' "$REPO/bin/jc"
+  assert_success
+  assert_output --partial 'if [ -z "$measured" ]'
+  run grep 'carries NO measurement' "$REPO/bin/jc"
+  assert_success
+}
+
 @test "jc: the swarm count reaches the health record through the trap" {
   # The count is the 13th argument; a row written without it defaults to 0,
   # which is indistinguishable from a measured zero.

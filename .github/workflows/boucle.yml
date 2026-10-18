@@ -323,7 +323,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      # `make check` = lint (shellcheck + shfmt) + test (bats). ubuntu-latest
+      # `make check` = lint (bin/check-shell: bash -n + shellcheck + trap
+      # ordering, then shfmt) + test (bats). ubuntu-latest
       # ships shellcheck but neither shfmt nor bats, and the Makefile guards
       # abort the job on the first missing one — so install them here. Pinned:
       # an shfmt minor bump can change formatting and would fail `shfmt -d` on

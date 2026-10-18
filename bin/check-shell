@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+# bin/check-shell — the engine's shell safety gate.
+#
+# Why this exists: engine shell jobs are exercised mainly on the happy path.
+# Unset-variable and inherited-environment defects surface only on re-runs,
+# self-update and failure paths, and nothing caught the next instance before a
+# consumer hit it. One consumer dogfood window produced five separate defects
+# of this class: a `set -u` death in self-update, a deploy helper that lost its
+# job-local BRANCH, an e2e crash on an absent production URL, an EXIT trap that
+# ran before its extractor functions were defined, and a checkout-inherited git
+# extraheader that silently overrode the bot PAT.
+#
+# `make lint` ran shellcheck at `--severity=warning`, so the info-level
+# quoting class (SC2086) was invisible. This gate closes that hole and adds the
+# definition-order check shellcheck cannot express.
+#
+# Three layers:
+#   1. `bash -n` over every engine shell file (syntax baseline).
+#   2. shellcheck at `--severity=info` with a documented exclusion list — the
+#      warning threshold alone skips the info-level quoting class (SC2086),
+#      and unbound variables (SC2154, a warning) are the sibling class.
+#   3. A trap-handler ordering check: an EXIT trap that calls a function
+#      defined later in the file silently emits empty fields. shellcheck does
+#      not model definition order, so it is checked here explicitly.
+#
+# Suppressions: repo-wide exceptions live in .shellcheckrc and MUST carry a
+# comment naming the reason. Per-line exceptions MUST use an inline
+# `# shellcheck disable=SCxxxx # why` directive. Never add a bare disable.
+#
+# Usage:
+#   bin/check-shell              # discover every tracked engine shell file
+#   bin/check-shell FILE...      # check only the given files (pre-commit)
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+# Shellcheck policy. `--severity=info` is deliberate: the warning threshold
+# does not surface the quoting class (SC2086 is info), and the five-defect
+# window was exactly that class plus unbound variables (SC2154, a warning).
+# The excluded codes are info-level notes outside this class:
+#   SC2015  A && B || C — the codebase uses this deliberately as try/fallback
+#   SC2016  single quotes prevent expansion — intentional in jq filters/formats
+#   SC2317  unreachable command — false positives for sourced/indirect calls
+#   SC1001  `\:` is a regular `:` — intentional in a case pattern
+# Everything else at info or above fails the gate.
+SHELLCHECK_EXCLUDES="SC2015,SC2016,SC2317,SC1001"
+
+# discover_shell_files: tracked engine shell files.
+# Match on the shebang as well as the extension, the way pre-commit's
+# `types: [shell]` does: bin/ is a mixed toolbox (bin/check-lessons is
+# Python), and shellcheck does not skip a file it cannot parse.
+# .jcode/ is upstream-vendored (synced by bin/update); bin/oc is vendored —
+# checking them here creates churn the next update overwrites.
+discover_shell_files() {
+  local f first
+  if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+    # --others includes a new engine script before it is staged; without it a
+    # local `bin/check-shell` run silently skips the file being written.
+    git ls-files --cached --others --exclude-standard '*.sh' '*.bash' 'bin/*' 'scripts/*' ':!:.jcode' ':!:bin/oc' 2> /dev/null
+  else
+    # Tarball/consumer extraction without git history: walk the tree.
+    find . -path ./.git -prune -o -path ./.jcode -prune -o -type f -print 2> /dev/null
+  fi | while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    case "$f" in
+      *.sh | *.bash)
+        printf '%s\n' "$f"
+        ;;
+      *)
+        first=$(head -n 1 "$f" 2> /dev/null || true)
+        if printf '%s\n' "$first" | grep -qE '^#!.*\b(ba)?sh([[:space:]]|$)'; then
+          printf '%s\n' "$f"
+        fi
+        ;;
+    esac
+  done | sort -u
+}
+
+# check_trap_order <file>: a named EXIT trap handler defined later in the same
+# file is an ordering bug — the trap is armed on a function that does not exist
+# yet, and everything the handler would extract is silently empty. A handler
+# defined in a sourced file is allowed (it was loaded before the trap line);
+# report it as a note, not a failure.
+check_trap_order() {
+  local file="$1" rc=0 line rest raw handler signals def_line
+  while IFS=: read -r line rest; do
+    [ -n "$line" ] || continue
+    # A handler is either a bare name (`trap cleanup EXIT`) or a quoted name
+    # (`trap '_cleanup' EXIT`). An inline body (`trap 'rm -f "$f"' EXIT`) is
+    # skipped: its first token is not an identifier, or the quoted content
+    # still contains shell syntax.
+    raw=$(printf '%s\n' "$rest" | awk '{print $2}')
+    case "$raw" in
+      \'*\' | \"*\")
+        handler=${raw#?}
+        handler=${handler%?}
+        case "$handler" in
+          '' | *[!A-Za-z0-9_]*) continue ;;
+        esac
+        ;;
+      '' | *[!A-Za-z0-9_]*) continue ;;
+      *) handler=$raw ;;
+    esac
+    signals=$(printf '%s\n' "$rest" | awk '{for (i = 3; i <= NF; i++) printf "%s ", $i}')
+    printf '%s\n' "$signals" | grep -qE '(^|[[:space:]])EXIT([[:space:]]|$)' || continue
+    def_line=$(awk -v h="$handler" '
+      $0 ~ "^[[:space:]]*(function[[:space:]]+)?" h "[[:space:]]*\\(\\)" { print NR; exit }
+    ' "$file")
+    if [ -z "$def_line" ]; then
+      echo "$file:$line: note: trap handler '$handler' is not defined in this file — ensure the sourced file is loaded before the trap is armed"
+    elif [ "$def_line" -gt "$line" ]; then
+      echo "$file:$line: error: trap handler '$handler' is defined later (line $def_line) — define it before arming the trap [trap-order]"
+      rc=1
+    fi
+  done < <(grep -nE '^[[:space:]]*trap[[:space:]]+' "$file" 2> /dev/null || true)
+  return "$rc"
+}
+
+run_shellcheck() {
+  # `check-unassigned-uppercase` is also enabled in .shellcheckrc, but an
+  # explicit-argument run (pre-commit, a fixture outside the repo) does not
+  # necessarily resolve that file — the gate's policy must not depend on the
+  # checked file's directory. Uppercase names ARE the engine's env-var class.
+  shellcheck -x --severity=info --enable=check-unassigned-uppercase \
+    --exclude="$SHELLCHECK_EXCLUDES" -f gcc "$@"
+}
+
+main() {
+  local -a files
+  if [ "$#" -gt 0 ]; then
+    files=("$@")
+    for f in "${files[@]}"; do
+      [ -f "$f" ] || {
+        echo "ERROR: no such file: $f" >&2
+        return 1
+      }
+    done
+  else
+    mapfile -t files < <(discover_shell_files)
+  fi
+  if [ "${#files[@]}" -eq 0 ]; then
+    echo "No shell files to check"
+    return 0
+  fi
+  command -v shellcheck > /dev/null 2>&1 || {
+    echo "ERROR: shellcheck not installed (brew install shellcheck)" >&2
+    return 1
+  }
+
+  local rc=0 f
+  echo ">> bash -n (${#files[@]} file(s))"
+  for f in "${files[@]}"; do
+    bash -n "$f" || rc=1
+  done
+
+  echo ">> shellcheck (info severity, unset/quoting class)"
+  run_shellcheck "${files[@]}" || rc=1
+
+  echo ">> trap handler ordering"
+  for f in "${files[@]}"; do
+    check_trap_order "$f" || rc=1
+  done
+
+  if [ "$rc" -ne 0 ]; then
+    echo "FAIL: shell safety gate — fix the findings above (intentional cases need a documented suppression in .shellcheckrc or an inline directive)"
+  else
+    echo "OK: shell safety gate (${#files[@]} file(s))"
+  fi
+  return "$rc"
+}
+
+main "$@"

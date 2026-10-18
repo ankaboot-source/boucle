@@ -172,7 +172,7 @@ flowchart LR
 
 | Stage | Trigger (`BOUCLE_ROLE` gating) | `resource_group` | What it does | Script |
 |---|---|---|---|---|
-| `check` | push / MR to default branch, `boucle/*` branches | — | **engine repo:** shellcheck, shfmt, bats, doc-sync lint. **consumer repo:** `check-boucle-sync` only — the engine's gate is not the consumer's, and running `make check` against their Makefile turned their pipeline red on every push | `lib/boucle-ci/check.sh` |
+| `check` | push / MR to default branch, `boucle/*` branches | — | **engine repo:** `bin/check-shell` (bash -n, shellcheck at info severity, trap-handler ordering), shfmt, bats, doc-sync lint. **consumer repo:** `check-boucle-sync` only — the engine's gate is not the consumer's, and running `make check` against their Makefile turned their pipeline red on every push | `lib/boucle-ci/check.sh` |
 | `dispatch` | webhook (no `BOUCLE_ROLE`) | `boucle-dispatch` | webhook router: parse payload, route to role | `lib/boucle-ci/dispatch.sh` |
 | `triage` | webhook (no `BOUCLE_ROLE`) | — (no `BOUCLE_ISSUE` at eval) | analyse issue, draft spec | `lib/boucle-ci/triage.sh` |
 | `worker` | trigger `BOUCLE_ROLE=worker` | `boucle-issue-$BOUCLE_ISSUE` | implement on `boucle/<iid>-<slug>`, deploy preview | `lib/boucle-ci/worker.sh` |

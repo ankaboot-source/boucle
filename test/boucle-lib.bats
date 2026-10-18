@@ -1700,6 +1700,26 @@ extract_notify() {
   rm -f "$TMPF"
 }
 
+@test "notify: approval wording resolves the forge MR/PR term before the case uses it" {
+  # `waiting` expands $mr_term. Defining it AFTER the case is an unbound
+  # variable under `set -u` on the approval path (and hardcoding it ignores
+  # GitHub's PR wording). This was a self-referencing assignment
+  # (`mr_term=$mr_term`) that shellcheck's SC2269 now catches.
+  TMPF=$(mktemp)
+  TMPBODY=$(mktemp)
+  extract_notify "$TMPF"
+  run bash -c "set -u
+    export BOUCLE_NOTIFY_URL='http://127.0.0.1:9/dead' BOUCLE_DND_ENABLED=false
+    forge_mr_term() { echo PR; }
+    curl() { printf '%s' \"\$body\" > '$TMPBODY'; }
+    source '$TMPF'
+    boucle_notify 42 'boucle:approval'"
+  assert_success
+  run grep -q 'Review and approve the PR' "$TMPBODY"
+  assert_success
+  rm -f "$TMPF" "$TMPBODY"
+}
+
 @test "notify: hooked on the transition, not on the state" {
   # The doctor sweep re-applies labels that are already set. Notifying on
   # presence rather than on change would re-fire on every sweep.

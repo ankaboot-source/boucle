@@ -16,3 +16,12 @@ enable=check-unassigned-uppercase,require-variable-braces
 # SC2155: declare-and-assign masks return code — boucle uses `local x=$(...)` intentionally in places.
 # SC2034: unused variable — false positives for exported vars.
 disable=SC1090,SC1091,SC2034
+
+# Suppression policy (enforced by bin/check-shell):
+# - A repo-wide exception belongs in the `disable=` line above and MUST carry
+#   a comment naming the reason.
+# - A per-line exception MUST be an inline `# shellcheck disable=SCxxxx # why`
+#   directive. Never add a bare disable: an unexplained suppression hides the
+#   class of defect this gate exists to catch.
+# - The gate runs at `--severity=info`; its exclusion list (style notes outside
+#   the unset/inherited/quoting class) is documented in bin/check-shell.

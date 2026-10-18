@@ -125,7 +125,7 @@ for dir in "$STATE_DIR/attachments" "$STATE_DIR/mr-attachments" "$STATE_DIR/repo
       image/svg+xml) continue ;;
       image/*)
         IMAGE_FILES+=("$f")
-        IMAGE_RELS+=("${f#${dir}/}")
+        IMAGE_RELS+=("${f#"$dir"/}")
         ;;
     esac
   done < <(find "$dir" -type f -print0 2> /dev/null || true)

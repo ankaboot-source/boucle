@@ -210,7 +210,7 @@ HELP_EOF
   # that the response is a JSON ARRAY and return [] otherwise.
   # Download attachments uploaded to the issue (capped per BOUCLE_IMAGE_*_BYTES).
   # Makes them available to the triage agent via BOUCLE_ISSUE_ATTACHMENTS.
-  $BOUCLE_HOME/bin/fetch-issue-attachments || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
+  "$BOUCLE_HOME/bin/fetch-issue-attachments" || echo "[boucle] WARN: attachment fetch failed — continuing without attachments"
 
   # Describe image attachments using a vision model, then inject the text
   # descriptions into the agent prompt. This replaces the old detect-vision-need
@@ -406,7 +406,7 @@ HELP_EOF
   # continues to comment parsing even if the agent exits non-zero
   # (step limit, crash, timeout, etc.).
   rc=0
-  $BOUCLE_HOME/bin/jc triage || rc=$?
+  "$BOUCLE_HOME/bin/jc" triage || rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "WARN: $BOUCLE_HOME/bin/jc triage exited $rc — checking if a triage comment was posted anyway."
   fi
@@ -682,7 +682,7 @@ HELP_EOF
   # NOTE: bin/collapse-duplicate-notes is fully forge-agnostic (uses the
   # forge_* contract: forge_issue_notes / forge_issue_note_update /
   # forge_note_delete) since the GitHub-support port.
-  $BOUCLE_HOME/bin/collapse-duplicate-notes triage "$BOUCLE_PROJECT_ID" "$IID" "$PRE_RUN_TRIAGE_ID" "$BOUCLE_FORGE_HOST" || true
+  "$BOUCLE_HOME/bin/collapse-duplicate-notes" triage "$BOUCLE_PROJECT_ID" "$IID" "$PRE_RUN_TRIAGE_ID" "$BOUCLE_FORGE_HOST" || true
 
   # ── Recurring-theme detection (non-blocking context tag) ──────────
   RECURRING_REFS=$(parse_recurring_marker "$(printf '[{"body":%s,"created_at":"2026-01-01T00:00:00Z"}]' "$(printf '%s' "$COMMENT" | jq -Rs .)")")
@@ -755,7 +755,15 @@ HELP_EOF
           echo "[boucle] 🤖 Issue flagged autonomous — auto-validating spec gate for #$IID"
           SHOULD_GATE=false
           GATE_SKIP_LABELS="boucle:autonomous"
-          AUTONOMOUS_NOTE=$(printf "🤖 **Spec gate auto-approved — issue flagged autonomous**\n\nThe human spec validation was automatically approved because this issue carries the \`boucle:autonomous\` label. The loop therefore continues up to the $(forge_mr_term) without human contact.\n\nThe \`boucle:autonomous\` label remains visible on the issue (board) until the next state transition.\n\nYou can validate the $(forge_mr_term) when it is ready. To stop auto-approving the spec for this issue, remove the \`boucle:autonomous\` label.")
+          local mr_term
+          mr_term=$(forge_mr_term)
+          AUTONOMOUS_NOTE="🤖 **Spec gate auto-approved — issue flagged autonomous**
+
+The human spec validation was automatically approved because this issue carries the \`boucle:autonomous\` label. The loop therefore continues up to the ${mr_term} without human contact.
+
+The \`boucle:autonomous\` label remains visible on the issue (board) until the next state transition.
+
+You can validate the ${mr_term} when it is ready. To stop auto-approving the spec for this issue, remove the \`boucle:autonomous\` label."
           forge_issue_note "$IID" "$AUTONOMOUS_NOTE"
         fi
         if [ "$SHOULD_GATE" = "true" ] && "$BOUCLE_HOME/bin/dnd" 2> /dev/null; then
@@ -866,7 +874,7 @@ HELP_EOF
           # Include gate-skip flag labels (boucle:autonomous / boucle:dnd)
           # so the board shows WHY the gate was skipped. Consumed on the
           # next state transition (set_boucle_label strips boucle:* labels).
-          set_boucle_label "$IID" "boucle:todo,size:$(echo $SIZE | tr '[:upper:]' '[:lower:]')${GATE_SKIP_LABELS:+,$GATE_SKIP_LABELS}" "boucle::status::bot"
+          set_boucle_label "$IID" "boucle:todo,size:$(echo "$SIZE" | tr '[:upper:]' '[:lower:]')${GATE_SKIP_LABELS:+,$GATE_SKIP_LABELS}" "boucle::status::bot"
           # Dependency gate FIRST: a blocked issue is not "ready",
           # so it should not count against the capacity cap.
           if ! check_dependencies_and_gate "$IID"; then

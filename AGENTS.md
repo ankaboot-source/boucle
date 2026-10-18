@@ -373,6 +373,50 @@ and [LOOP.md](LOOP.md) §"Interactive commands") is governed by two lessons:
 actor identity alone) and **#101** (inline dispatch operations hold the
 `boucle-dispatch` lock — slow work MUST be a separate job).
 
+## Shell safety in engine scripts
+
+Engine shell jobs are exercised mainly on the happy path. Unset variables and
+inherited environments surface only on re-runs, self-update and failure paths,
+and one consumer window produced five defects of that class. The rules below
+are the contract; `bin/check-shell` enforces the static half, and `make lint`
+(hence CI's `make check`) runs it.
+
+- **Declare required environment variables at the top of every engine script**
+  with `: "${VAR:?VAR is required}"`, or default optional ones with
+  `"${VAR:-}"` and a comment naming the default. NEVER expand a bare `$VAR`
+  that a caller may not have set.
+- **NEVER rely on a job-local variable across a process boundary.** A
+  `bash -c`, a git hook, or a subshell does not inherit shell variables that
+  were not exported; git hooks also inherit `GIT_*`. Export explicitly, or pass
+  the value as an argument.
+- **Define a trap handler and every function it calls before arming the trap.**
+  A handler armed first and defined later silently emits empty fields;
+  `bin/check-shell` rejects that ordering.
+- **A trap row with every measured field empty MUST say so loudly** (see
+  `emit_health_record` in `bin/jc`). An empty row is not a healthy run.
+- **Before a git push, assert the effective credential.** When a PAT is
+  configured, purge inherited `http.*.extraheader` entries
+  (`configure_git_push`) and fail loudly if one survives or if the token's
+  scopes cannot write the paths being pushed (`assert_push_credential` in
+  `bin/update`). NEVER swallow a push failure.
+- **Suppress only with a reason.** A repo-wide exception belongs in
+  `.shellcheckrc` with a comment; a per-line exception is
+  `# shellcheck disable=SCxxxx # why`. NEVER add a bare disable.
+- **Run `make lint` (or `bin/check-shell`) before committing** — the same gate
+  CI runs in `make check`.
+
+```mermaid
+flowchart LR
+    A[Engine shell change] --> B[bash -n]
+    B --> C[shellcheck: warning + quoting/unset class]
+    C --> D[trap handler defined before arming]
+    D --> E{Credential push path?}
+    E -- Yes --> F[assert extraheader purged + token scopes]
+    E -- No --> G[make check]
+    F --> G
+    G --> H[CI check job]
+```
+
 ## Documentation self-maintenance
 
 Boucle self-maintains its own documentation as part of the autonomous loop.
