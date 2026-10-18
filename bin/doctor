@@ -455,7 +455,7 @@ else
 
   # ── Repo Secrets ───────────────────────────────────────────────────────
   SECRETS=$(GH_TOKEN="$BOUCLE_TOKEN" gh secret list --repo "$BOUCLE_PROJECT_ID" 2> /dev/null | awk '{print $1}')
-  for var in BOUCLE_TOKEN PI_AUTH BOUCLE_LLM_API_KEY; do
+  for var in BOUCLE_TOKEN BOUCLE_LLM_API_KEY; do
     if echo "$SECRETS" | grep -qx "$var"; then
       pass "secret $var exists"
     else
