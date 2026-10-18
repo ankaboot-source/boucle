@@ -153,7 +153,8 @@ lib_funcs() {
   lib_funcs boucle_pr_is_security boucle_semver_version boucle_semver_gate boucle_title_semver_gate boucle_bump_gate boucle_bot_pr_eligible "$TMPF"
   run bash -c "source '$TMPF'; boucle_bot_pr_eligible 'chore(boucle): update engine to v1.2.3' 'bot' '' false 'boucle-update/main' ''"; assert_output "sync"
   run bash -c "source '$TMPF'; boucle_bot_pr_eligible 'Bump actions/checkout from 4.1.0 to 4.1.2' 'dependabot[bot]' 'dependencies' false 'dependabot/github_actions/actions/checkout-4.1.2' ''"; assert_output "patch"
-  run bash -c "source '$TMPF'; boucle_bot_pr_eligible 'Bump x from 4 to 5' 'dependabot[bot]' '' false 'dependabot/github_actions/x-5' ''"; assert_failure
+  run bash -c "source '$TMPF'; boucle_bot_pr_eligible 'Bump x from 4 to 5' 'dependabot[bot]' '' false 'dependabot/github_actions/x-5' ''"; assert_output "major"
+  run bash -c "source '$TMPF'; boucle_bot_pr_eligible 'Bump x from 4 to 5' 'dependabot[bot]' 'dependencies' false 'dependabot/npm_and_yarn/x-5' ''"; assert_failure
   run bash -c "source '$TMPF'; boucle_bot_pr_eligible 'Bump x from 1.0 to 1.1' 'somehuman' '' false 'patch/human' ''"; assert_failure
   run bash -c "source '$TMPF'; boucle_bot_pr_eligible 'Bump x from 1.0 to 1.1' 'dependabot[bot]' '' true 'dependabot/x' ''"; assert_failure
   run bash -c "source '$TMPF'; boucle_bot_pr_eligible 'feat: my feature' 'worker-bot' '' false 'boucle/123-slug' ''"; assert_failure

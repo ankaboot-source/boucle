@@ -168,7 +168,7 @@ run_config_audit() {
   # will merge without a human.
   if [ "${BOUCLE_AUTOMERGE_ENABLED:-false}" = "true" ]; then
     audit_advisory "BOUCLE_AUTOMERGE_ENABLED=true" \
-      "boucle auto-merges dependency-bot PRs (patch/minor, plus security at any version) and chore(boucle): sync MRs once checks are green. Worker MRs stay human-gated (LESSONS #85)."
+      "boucle auto-merges dependency-bot PRs (patch/minor, github-actions majors, plus security at any version) and chore(boucle): sync MRs once checks are green. Code-lib majors and worker MRs stay human-gated (LESSONS #85)."
   fi
 
   # preview review mode with the renderer disabled.

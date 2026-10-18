@@ -344,11 +344,16 @@ boucle_title_semver_gate() {
 }
 
 # boucle_bump_gate <title> <labels> <branch> <body> — the single bump-kind
-# gate. Prints security|minor|patch, or exits 1 (major / unknown → a human).
+# gate. Prints security|minor|patch, or "major" ONLY for the github-actions
+# ecosystem (CLI tooling, low-risk — issue #160); exits 1 for code-lib majors
+# and anything unknown (→ a human).
 #
 # Fail-closed throughout:
 #   1. security → always mergeable (title/label/branch signals).
-#   2. dependabot title endpoints ("from A to B") → semver gate.
+#   2. dependabot title endpoints ("from A to B") → semver gate. A MAJOR is
+#      allowed only on a `dependabot/github_actions*` branch — an action is
+#      encapsulated CLI tooling whose majors rarely break callers; a code-lib
+#      major can break at runtime in ways green CI does not prove.
 #   3. renovate branch group fast-paths (digest = patch; all-patch /
 #      all-minor-patch / lock-file-maintenance / pin-dependencies = within
 #      their declared range) → accept. Per-dependency <M>.x branches are
@@ -368,6 +373,18 @@ boucle_bump_gate() {
       patch | minor)
         echo "$gate"
         return 0
+        ;;
+      major)
+        # GitHub-actions bump: an action is encapsulated CLI tooling, and the
+        # maintainer approved auto-merge for that ecosystem (#160). Any other
+        # major stays human-gated.
+        case "$branch" in
+          dependabot/github_actions*)
+            echo "major"
+            return 0
+            ;;
+        esac
+        return 1
         ;;
       *) return 1 ;;
     esac

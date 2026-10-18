@@ -600,7 +600,10 @@ flowchart TD
    `CVE-`/`GHSA-` id, exact `security`/`vulnerability` labels, or a forge
    security branch (`dependabot/security*`, `renovate/vulnerability*`,
    `GHSA-*`) — at any version; OR semver **patch/minor** computed from the
-   dependabot title endpoints ("from A to B"); OR a renovate branch with
+   dependabot title endpoints ("from A to B"); OR semver **major** on a
+   `dependabot/github_actions*` branch only (an action is encapsulated CLI
+   tooling — low-risk by nature; code-lib majors stay human-gated); OR a
+   renovate branch with
    self-declared range (`-digest` = patch,
    `all-patch`/`all-minor-patch`/`lock-file-maintenance`/`pin-dependencies`),
    confirmed by the renovate body table when the branch is a per-dependency
