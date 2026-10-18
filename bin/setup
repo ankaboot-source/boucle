@@ -995,15 +995,9 @@ else
     log_skip "CLOUDFLARE_API_TOKEN (no --cf-token provided)"
   fi
 
-  # PI_AUTH (base64-encoded BOT_TOKEN). On GitHub, the Actions workflow
-  # uses PI_AUTH for forge API calls.
-  if [ -n "$BOT_TOKEN" ]; then
-    PI_AUTH_B64=$(echo -n "$BOT_TOKEN" | base64 -w0 2> /dev/null || echo -n "$BOT_TOKEN" | base64)
-    run "echo \"$PI_AUTH_B64\" | GH_TOKEN=\"$BOT_TOKEN\" gh secret set PI_AUTH --repo \"$PROJECT_ID\" 2>/dev/null"
-    log_pass "PI_AUTH set (base64-encoded BOT_TOKEN, secrets)"
-  else
-    log_skip "PI_AUTH (no --bot-token provided)"
-  fi
+  # PI_AUTH removed (#167) — it was the base64-encoded BOT_TOKEN of the
+  # retired pi runtime; nothing has consumed it since jcode replaced pi.
+  # Operators may delete the legacy secret from existing repositories.
 
   # ── GitHub: repo vars via gh variable set ───────────────────────────
   # BOUCLE_ENABLED
