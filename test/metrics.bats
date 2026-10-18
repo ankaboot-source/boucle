@@ -939,3 +939,115 @@ FIX
   assert_line --regexp '^  e4 +1 +0 +n/a'
   assert_line --regexp '^  zz +1 +0 +n/a' 
 }
+
+# ── A row that says what it could NOT measure (coverage) ───────────────
+#
+# The class of defect: a row was incomplete rather than explicitly empty.
+# cost_usd was not written at all, the tokens sum filtered on
+# `type == "number"` while the health log writes EVERY value as a string, and
+# an empty verdicts array looked identical whether the gates ran and recorded
+# an outcome or never ran at all. Every one of those is a field the retro
+# agent has to read as "unknown", and none of them said so.
+
+@test "row: carries the tokens and the dollars the runs reported" {
+  # The regression: a consumer with millions of measured tokens published
+  # tokens:null (the sum matched no value) and no cost_usd key whatsoever, so
+  # every cost aggregate over the branch read null.
+  lib
+  cat > "$TMP/.boucle-state/7/health.jsonl" <<'FIX'
+{"timestamp":"2026-08-24T10:00:00Z","role":"worker","iteration":1,"exit_code":0,"prompt_chars":100,"tokens":"1500000","cost_usd":"n/a","model":"m","provider":"p","skills":[],"arm":"full","setup_fail":""}
+{"timestamp":"2026-08-24T10:10:00Z","role":"worker","iteration":2,"exit_code":0,"prompt_chars":100,"tokens":"2270000","cost_usd":"0.42","model":"m","provider":"p","skills":[],"arm":"full","setup_fail":""}
+FIX
+  run bash -c "cd '$REPO' && . lib/boucle.sh 2>/dev/null;
+    forge_issue_notes() { echo '[]'; }; forge_mr_lookup_by_branch() { echo ''; }; forge_mr_notes() { echo '[]'; };
+    BOUCLE_WORKSPACE='$TMP' boucle_metrics_row 7 done | jq -c '[.tokens, .cost_usd]'"
+  assert_success
+  assert_output '[3770000,0.42]'
+}
+
+@test "row: an unknown value is an explicit null plus a reason, never an absent key" {
+  lib
+  cat > "$TMP/.boucle-state/7/health.jsonl" <<'FIX'
+{"timestamp":"2026-08-24T10:00:00Z","role":"worker","iteration":1,"exit_code":0,"prompt_chars":100,"tokens":"n/a","cost_usd":"n/a","model":"m","provider":"p","skills":[],"arm":"full","setup_fail":""}
+FIX
+  run bash -c "cd '$REPO' && . lib/boucle.sh 2>/dev/null;
+    forge_issue_notes() { echo '[]'; }; forge_mr_lookup_by_branch() { echo ''; }; forge_mr_notes() { echo '[]'; };
+    BOUCLE_WORKSPACE='$TMP' boucle_metrics_row 7 done | jq -c '{has_cost: has(\"cost_usd\"), cost: .cost_usd, gap: .telemetry_gap, coverage}'"
+  assert_success
+  assert_output '{"has_cost":true,"cost":null,"gap":["tokens_unavailable","cost_unavailable","verdict_missing"],"coverage":"partial"}'
+}
+
+@test "row: an empty verdicts array after a completed run is itself a gap" {
+  # "did review run?" has to be answerable from the row. An empty array with
+  # runs > 0 means the gate either did not run or its outcome was lost — never
+  # a pass, and never silence.
+  lib
+  cat > "$TMP/.boucle-state/7/health.jsonl" <<'FIX'
+{"timestamp":"2026-08-24T10:00:00Z","role":"worker","iteration":1,"exit_code":0,"prompt_chars":100,"tokens":"10","cost_usd":"n/a","model":"m","provider":"p","skills":[],"arm":"full","setup_fail":""}
+FIX
+  run bash -c "cd '$REPO' && . lib/boucle.sh 2>/dev/null;
+    forge_issue_notes() { echo '[]'; }; forge_mr_lookup_by_branch() { echo ''; }; forge_mr_notes() { echo '[]'; };
+    BOUCLE_WORKSPACE='$TMP' boucle_metrics_row 7 done | jq -c '[.runs, (.telemetry_gap | index(\"verdict_missing\") != null)]'"
+  assert_success
+  assert_output '[1,true]'
+
+  # The same issue WITH the gate outcomes recorded carries no such gap.
+  cat > "$TMP/.boucle-state/7/health.jsonl" <<'FIX'
+{"timestamp":"2026-08-24T10:00:00Z","role":"worker","iteration":1,"exit_code":0,"prompt_chars":100,"tokens":"10","cost_usd":"n/a","model":"m","provider":"p","skills":[],"arm":"full","setup_fail":""}
+{"timestamp":"2026-08-24T10:05:00Z","role":"reviewer","outcome":"FAIL","detail":"iteration 1"}
+{"timestamp":"2026-08-24T10:20:00Z","role":"e2e","outcome":"PASS","detail":""}
+FIX
+  run bash -c "cd '$REPO' && . lib/boucle.sh 2>/dev/null;
+    forge_issue_notes() { echo '[]'; }; forge_mr_lookup_by_branch() { echo ''; }; forge_mr_notes() { echo '[]'; };
+    BOUCLE_WORKSPACE='$TMP' boucle_metrics_row 7 done | jq -c '[.verdicts, .coverage, .telemetry_gap]'"
+  assert_success
+  assert_output '[["FAIL","PASS"],"partial",["cost_unavailable"]]'
+}
+
+@test "row: a coverage row carries every documented key, all null, and says why" {
+  # Emission is mandatory, so a terminal transition with no health log still
+  # publishes a row. This pins that it is the SAME shape as a measured row
+  # (a reader must not have to special-case a missing key) and that nothing
+  # in it is a fabricated zero.
+  lib
+  run bash -c "cd '$REPO' && . lib/boucle.sh 2>/dev/null;
+    boucle_metrics_gap_row 42 done no_health_data | jq -c '{issue, terminal, coverage, gap: .telemetry_gap, iterations, runs, tokens, cost_usd}'"
+  assert_success
+  assert_output '{"issue":"42","terminal":"done","coverage":"no-data","gap":["no_health_data"],"iterations":null,"runs":null,"tokens":null,"cost_usd":null}'
+}
+
+@test "publish: no health log publishes a coverage row instead of nothing" {
+  # The window this comes from: 33 closed issues, 3 metrics rows, and nothing
+  # anywhere saying which 30 were missing. A run that leaves no row is a blind
+  # spot nobody downstream can even count.
+  lib
+  metrics_remote
+  run bash -c "cd '$TMP/work' && . '$REPO/lib/boucle.sh' 2>/dev/null;
+    BOUCLE_WORKSPACE='$TMP/work' boucle_metrics_publish 99 done 2>&1"
+  assert_success
+  assert_output --partial "coverage row"
+  run remote_file "metrics.jsonl"
+  assert_success
+  assert_output --partial '"issue":"99"'
+  assert_output --partial '"coverage":"no-data"'
+  assert_output --partial '"telemetry_gap":["no_health_data"]'
+  assert_output --partial '"iterations":null'
+  refute_output --partial '"iterations":0'
+}
+
+@test "stats: a coverage row is counted, never averaged as 0 iterations" {
+  # The whole point of publishing it: the run is visible. The whole point of
+  # excluding it: an issue nobody measured is not an issue that took no
+  # iterations and needed no human help.
+  printf '%s\n' \
+    '{"schema":3,"issue":"1","terminal":"done","arm":"full","iterations":1,"skills":[],"skills_n":0,"setup_failures":0,"human_spec":0,"human_delivery":0,"telemetry_gap":[]}' \
+    '{"schema":3,"issue":"2","terminal":"done","arm":"full","iterations":3,"skills":[],"skills_n":0,"setup_failures":0,"human_spec":0,"human_delivery":0,"telemetry_gap":["cost_unavailable"]}' \
+    '{"schema":3,"issue":"3","terminal":"human","arm":"unknown","coverage":"no-data","iterations":null,"runs":null,"skills":[],"skills_n":0,"setup_failures":null,"human_spec":null,"human_delivery":null,"telemetry_gap":["no_health_data"]}' \
+    > "$TMP/m.jsonl"
+  run "$REPO/bin/skills-stats" --file "$TMP/m.jsonl"
+  assert_success
+  assert_output --partial "3 issue(s)"
+  assert_output --partial "1 row(s) carry no measurement"
+  # (1+3)/2, not (1+3+0)/3, and 0 escalated rather than 1.
+  assert_line --regexp '^no-skills +2 +2 +0 +2\.00'
+}

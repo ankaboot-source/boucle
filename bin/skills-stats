@@ -122,7 +122,8 @@ if [ -z "$(printf '%s' "$ROWS" | tr -d '[:space:]')" ]; then
   echo "No metrics yet."
   echo
   echo "One row is published per issue when it reaches boucle:done or"
-  echo "boucle:human, to the '$BRANCH' branch."
+  echo "boucle:human, to the '$BRANCH' branch. A terminal transition with no"
+  echo "health log still publishes a row, marked coverage: no-data."
   echo
   echo "If issues have completed and this is still empty, the two likely"
   echo "causes, in order:"
@@ -134,6 +135,20 @@ if [ -z "$(printf '%s' "$ROWS" | tr -d '[:space:]')" ]; then
 fi
 
 TOTAL=$(printf '%s\n' "$ROWS" | grep -c '^{' || echo 0)
+
+# Coverage rows are not data points. A terminal transition that could find no
+# health log still publishes a row (emission is mandatory: a run that leaves no
+# row is a blind spot nobody can count), and it says so — coverage: no-data,
+# telemetry_gap: ["no_health_data"], every measurement an explicit null. Folding
+# one into an average would count a run that was never measured as an issue that
+# took 0 iterations and needed no human help, which is the fabrication this
+# reader exists to refuse. They are counted separately and excluded below.
+GAPROWS=$(printf '%s\n' "$ROWS" | jq -s \
+  '[.[] | select(type == "object" and ((.telemetry_gap // []) | index("no_health_data")))] | length' \
+  2> /dev/null || echo 0)
+case "$GAPROWS" in '' | *[!0-9]*) GAPROWS=0 ;; esac
+ROWS=$(printf '%s\n' "$ROWS" | jq -c 'select(((.telemetry_gap // []) | index("no_health_data")) == null)' 2> /dev/null \
+  || printf '%s\n' "$ROWS")
 
 # ── Aggregate ─────────────────────────────────────────────────────────
 # Escalated issues are reported apart from completed ones throughout: their
@@ -184,6 +199,10 @@ fmt() { # fmt <value> <suffix>
 }
 
 echo "boucle skills-stats — $TOTAL issue(s), grouped by ${MODE}"
+if [ "${GAPROWS:-0}" -gt 0 ]; then
+  echo "⚠ $GAPROWS row(s) carry no measurement (coverage: no-data — no health log at the terminal transition)."
+  echo "  They are counted here, never averaged below: run 'bin/jc' logs to find out why they were not measured."
+fi
 echo
 
 if [ "$MODE" = "experiment" ]; then

@@ -1179,6 +1179,55 @@ tell a recovered trajectory apart from a first-pass success. The raw log
 carries them per run; the row is what a dashboard reads without parsing
 every line.
 
+**Every documented field is always present — a value, or an explicit
+`null` plus the reason.** Never an absent key, and never a fabricated zero.
+A missing key cannot be told apart from a key the reader does not know
+about, and a reader that takes the absence for a zero invents a
+measurement: rows shipped without `cost_usd` at all while a raw log held
+millions of tokens, so every cost aggregate over the branch read `null`.
+Unmeasured values are summed with `tonumber?`, so the `n/a` the health
+writer records drops out instead of becoming `0`, and a sum over nothing is
+`null` ("not measured"). `telemetry_gap` names what is missing:
+
+| Reason | Means |
+|---|---|
+| `no_runs` | the log holds no agent run for this issue |
+| `model_unavailable` | no run recorded which model ran |
+| `tokens_unavailable` | no run reported a token count |
+| `cost_unavailable` | no run reported a cost (no `BOUCLE_PRICING_JSON`, or the provider stayed silent) |
+| `verdict_missing` | runs exist and no reviewer/e2e outcome was recorded — an empty `verdicts` array after a completed run is a gap, **never** a pass |
+| `no_health_data` | there was no health log at all (see the coverage row below) |
+
+`coverage` summarises them per row: `complete` (no gap), `partial` (some
+fields unknown) or `no-data` (nothing measurable at all). The row's `schema`
+is **3**; every schema-1 and schema-2 key keeps its name and meaning.
+
+**Emission is mandatory: no health log still publishes a row.** A terminal
+transition with no readable `health.jsonl` used to publish nothing ("no
+health data for issue #N — nothing to publish"), which is how a two-month
+window came to hold 3 metrics rows for 33 closed issues with nothing
+anywhere saying which 30 were missing. The row is now written anyway, as a
+**coverage row**: identity and terminal state, every measurement an explicit
+`null`, `coverage: "no-data"`, `telemetry_gap: ["no_health_data"]`. It is
+counted as a run and never averaged as a measurement — a reader that
+aggregates rows MUST skip it (`bin/skills-stats` does, and says how many it
+skipped).
+
+**The digest reconciles coverage instead of leaving it to be inferred.** The
+retro digest compares the window's usable rows against its closed issues and
+prints one `metrics_coverage: X/Y` line naming the gap:
+
+```
+metrics_coverage: 2/33 (usable metrics rows / closed issues in the window; without a row: #3 #4 #5 (+28 more); coverage rows: 1)
+```
+
+Coverage rows are excluded from `X` (they are the gap, not a row), the
+issues without a row are named with their per-window renumbered ids (never a
+raw IID — S3), and every per-issue row carries `gaps: [...]` in the same
+vocabulary as `telemetry_gap`. Window aggregates carry `issues_with_verdicts`
+and `gap_counts` for the same reason: `verdicts: {}` alone cannot tell "no
+gate ever ran" from "no gate outcome was ever recorded".
+
 ```bash
 bin/skills-stats                # observed split (confounded, always available)
 bin/skills-stats --experiment   # arm split (causal; needs BOUCLE_EXPERIMENT runs)
