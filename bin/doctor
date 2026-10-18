@@ -141,6 +141,15 @@ run_config_audit() {
         audit_advisory "BOUCLE_RETRO_ENABLED=true without BOUCLE_UPSTREAM_TOKEN" \
           "Retro participation is skipped (fail-open): no anonymized proposal reaches the upstream engine. Set a GitHub PAT with public_repo scope at $vars_url, or set BOUCLE_RETRO_ENABLED=false."
       fi
+      # #157: without a jcode-resolvable LLM config the retro agent cannot
+      # start. The doctor used to chain it anyway, the job died on `no jcode
+      # config`, nothing recorded a run, and the next sweep chained it again —
+      # a red job every 10 minutes. One advisory instead. The helper resolves
+      # the SAME three paths as bin/jc (env pair / freeride key / config.toml).
+      if type retro_llm_ready > /dev/null 2>&1 && ! retro_llm_ready; then
+        audit_advisory "BOUCLE_RETRO_ENABLED=true with no jcode LLM config (BOUCLE_LLM_API_KEY / any freeride key / pre-installed config)" \
+          "Retro participation is skipped (fail-open): the retro agent cannot start. Set BOUCLE_LLM_BASE_URL + BOUCLE_LLM_API_KEY, any freeride provider key, or a pre-installed ~/.jcode/config.toml on the runner — or set BOUCLE_RETRO_ENABLED=false."
+      fi
       ;;
   esac
 

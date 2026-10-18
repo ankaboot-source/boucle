@@ -653,6 +653,14 @@ boucle_retro_doctor_chain() {
   case "${BOUCLE_ENABLED:-}" in true | "") ;; *) return 0 ;; esac
   retro_enabled || return 0
   retro_upstream_ready || return 0
+  # #157: without a resolvable jcode LLM config the agent cannot start, the
+  # run records nothing, and the next sweep would chain it again — a red job
+  # every 10 minutes. One log line here; bin/doctor --audit carries the
+  # operator-facing advisory.
+  retro_llm_ready || {
+    echo "  → retro LLM config missing — not chaining (bin/doctor --audit reports it)"
+    return 0
+  }
   retro_threshold_reached || return 0
   echo "  → retro due — chaining the retro stage"
   chain_to_role "retro" "retro"
@@ -682,6 +690,14 @@ boucle_ci_retro() {
     # decided to participate: skip cleanly, no WARN per sweep — the operator
     # advisory lives in bin/doctor --audit.
     echo "[retro] no upstream token — retro skipped (bin/doctor --audit reports it)" >&2
+    exit 0
+  fi
+  if ! retro_llm_ready; then
+    # #157: the agent cannot start without a jcode-resolvable LLM config.
+    # Exit 0 (green job) BEFORE the window/digest work; the one operator
+    # signal is the bin/doctor --audit advisory. A red exit here would repeat
+    # every sweep because no run record is written to advance the cadence.
+    echo "[retro] no jcode LLM config — retro skipped (bin/doctor --audit reports it)" >&2
     exit 0
   fi
   # Idempotence against the doctor's stale pre-check: the doctor may chain

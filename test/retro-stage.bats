@@ -66,6 +66,10 @@ stage() {
     source '$REPO/lib/boucle.sh' 2> /dev/null || true
     source '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null || true
     retro_threshold_reached() { return 0; }
+    # LLM readiness is not what these tests exercise (#157 has its own
+    # tests in retro.bats); stub it ready so the harness stays hermetic —
+    # the real helper would consult the runner's HOME.
+    retro_llm_ready() { return 0; }
     retro_last_run_read() { echo '2026-10-01T00:00:00Z'; }
     _retro_build_digest() { printf '# digest\n' > \"\$1\"; }
     retro_record_run() { echo \"RECORD:\$1\" >> \"\$CAPTURE\"; }
@@ -302,6 +306,7 @@ EOF
     BOUCLE_ENABLED=true
     retro_enabled() { return 0; }
     retro_upstream_ready() { return 0; }
+    retro_llm_ready() { return 0; }
     retro_threshold_reached() { return 0; }
     chain_to_role() { echo \"CHAIN:\$1:\$2\"; }
     boucle_retro_doctor_chain
@@ -318,6 +323,7 @@ EOF
     BOUCLE_ENABLED=true
     retro_enabled() { return 0; }
     retro_upstream_ready() { return 0; }
+    retro_llm_ready() { return 0; }
     retro_threshold_reached() { return 1; }
     chain_to_role() { echo \"CHAIN:\$1:\$2\"; }
     boucle_retro_doctor_chain
@@ -334,6 +340,7 @@ EOF
     BOUCLE_ENABLED=
     retro_enabled() { return 0; }
     retro_upstream_ready() { return 0; }
+    retro_llm_ready() { return 0; }
     retro_threshold_reached() { return 0; }
     chain_to_role() { echo \"CHAIN:\$1:\$2\"; }
     boucle_retro_doctor_chain
@@ -364,6 +371,7 @@ EOF
     BOUCLE_ENABLED=true BOUCLE_RETRO_FORCE=true
     retro_enabled() { return 0; }
     retro_upstream_ready() { return 0; }
+    retro_llm_ready() { return 0; }
     retro_threshold_reached() { return 1; }
     chain_to_role() { echo \"CHAIN:\$1:\$2\"; }
     boucle_retro_doctor_chain
