@@ -600,7 +600,10 @@ flowchart TD
    `CVE-`/`GHSA-` id, exact `security`/`vulnerability` labels, or a forge
    security branch (`dependabot/security*`, `renovate/vulnerability*`,
    `GHSA-*`) — at any version; OR semver **patch/minor** computed from the
-   dependabot title endpoints ("from A to B"); OR a renovate branch with
+   dependabot title endpoints ("from A to B"); OR semver **major** on a
+   `dependabot/github_actions*` branch only (an action is encapsulated CLI
+   tooling — low-risk by nature; code-lib majors stay human-gated); OR a
+   renovate branch with
    self-declared range (`-digest` = patch,
    `all-patch`/`all-minor-patch`/`lock-file-maintenance`/`pin-dependencies`),
    confirmed by the renovate body table when the branch is a per-dependency
@@ -704,6 +707,33 @@ flowchart TD
 | **Contribute** (T2 only) | after a creation, proposal size S/M, upstream write access | the bounded `retro-impl` run clones the upstream, implements, pushes `retro/<slug>` and opens the PR directly, referencing the issue — standard human review. The PR NEVER enters the state machine by itself. A token without upstream write access degrades fail-open to issue + plan |
 | **Silence** | nothing worth reporting | nothing upstream (anti-noise); the local report documents the window |
 
+### The window digest
+
+The retro agent reads ONE pre-built digest (`_retro_build_digest`), never the
+raw window: per-issue rows (runs, iterations, terminal state, verdicts,
+escalations, models, tokens/cost), window aggregates, closed-issue titles,
+recent lesson titles and the open upstream proposals. The digest **cross-checks
+its own completeness** before it renders:
+
+- the data-source line carries the fetch status in **three** states —
+  `fetched: yes`, `fetched: yes, 0 rows on the branch — collector unwired or
+  never ran`, `fetch failed — <branch> unavailable (branch, credential or
+  remote missing)` — plus the metrics row counts (in window / whole branch),
+  the issue-row count and the **last metrics row timestamp**. The timestamp
+  separates "the collector stopped at date X" from "the collector never ran";
+- a window with **closed issues and ZERO metrics rows** renders
+  `WARNING: metrics blackout — 0 metrics rows for N closed issue(s) in
+  window; the retro evidence layer is missing`. The banner is
+  machine-greppable **verbatim**: a hollow digest MUST never look like a quiet
+  one. Neither the legend nor any other digest line carries the `WARNING:
+  metrics` prefix or the word "blackout", so a grep for either cannot
+  false-positive;
+- a genuinely quiet window (no closed issues, no metrics rows) stays silent —
+  inactivity is NOT a blackout.
+
+The banner is a finding, not a rendering detail: the retro MUST cite it in the
+local report instead of reading the empty aggregates as "no activity".
+
 ### Anonymization is code
 
 `retro_scrub` — a deterministic helper — runs on the agent's **inputs** (before
@@ -730,6 +760,11 @@ open-route would triage it). The next retro **closes the previous report**
 - Missing `BOUCLE_UPSTREAM_TOKEN` → the retro is skipped cleanly and
   `bin/doctor --audit` reports an **advisory** — never a warning on every
   sweep.
+- No jcode-resolvable LLM config (neither the `BOUCLE_LLM_BASE_URL` +
+  `BOUCLE_LLM_API_KEY` pair, nor any freeride provider key, nor a
+  pre-installed `~/.jcode/config.toml`) → the doctor does NOT chain and the
+  stage exits 0 with a skip line; `bin/doctor --audit` reports **one
+  advisory**. The retro NEVER runs as a red job per sweep.
 - `BOUCLE_RETRO_ENABLED=false` → no retro job, no post, no blocking advisory.
 - `BOUCLE_RETRO_DRY_RUN=true` → analysis and logs only, no post (consumer
   tests); the run record still advances the cadence.

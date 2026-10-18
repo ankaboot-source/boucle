@@ -66,6 +66,10 @@ stage() {
     source '$REPO/lib/boucle.sh' 2> /dev/null || true
     source '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null || true
     retro_threshold_reached() { return 0; }
+    # LLM readiness is not what these tests exercise (#157 has its own
+    # tests in retro.bats); stub it ready so the harness stays hermetic —
+    # the real helper would consult the runner's HOME.
+    retro_llm_ready() { return 0; }
     retro_last_run_read() { echo '2026-10-01T00:00:00Z'; }
     _retro_build_digest() { printf '# digest\n' > \"\$1\"; }
     retro_record_run() { echo \"RECORD:\$1\" >> \"\$CAPTURE\"; }
@@ -302,6 +306,7 @@ EOF
     BOUCLE_ENABLED=true
     retro_enabled() { return 0; }
     retro_upstream_ready() { return 0; }
+    retro_llm_ready() { return 0; }
     retro_threshold_reached() { return 0; }
     chain_to_role() { echo \"CHAIN:\$1:\$2\"; }
     boucle_retro_doctor_chain
@@ -318,6 +323,7 @@ EOF
     BOUCLE_ENABLED=true
     retro_enabled() { return 0; }
     retro_upstream_ready() { return 0; }
+    retro_llm_ready() { return 0; }
     retro_threshold_reached() { return 1; }
     chain_to_role() { echo \"CHAIN:\$1:\$2\"; }
     boucle_retro_doctor_chain
@@ -334,6 +340,7 @@ EOF
     BOUCLE_ENABLED=
     retro_enabled() { return 0; }
     retro_upstream_ready() { return 0; }
+    retro_llm_ready() { return 0; }
     retro_threshold_reached() { return 0; }
     chain_to_role() { echo \"CHAIN:\$1:\$2\"; }
     boucle_retro_doctor_chain
@@ -364,6 +371,7 @@ EOF
     BOUCLE_ENABLED=true BOUCLE_RETRO_FORCE=true
     retro_enabled() { return 0; }
     retro_upstream_ready() { return 0; }
+    retro_llm_ready() { return 0; }
     retro_threshold_reached() { return 1; }
     chain_to_role() { echo \"CHAIN:\$1:\$2\"; }
     boucle_retro_doctor_chain
@@ -563,6 +571,123 @@ EOF
   assert_output --partial '"issue":"#1"'
   assert_output --partial '"issue":"#2"'
   assert_output --partial "- #3 Closed leak"
+}
+
+# ── Digest: completeness cross-check (metrics blackout) ─────────────────
+# A window with closed issues but ZERO metrics rows is a hollow retro: it
+# renders clean while the primary evidence layer is absent. The digest MUST
+# warn on it, MUST name a failed fetch differently from an empty one, and MUST
+# stay silent when the window is genuinely quiet or the rows are present.
+
+# digest_work <work-dir> [metrics-lines-file]
+# Bare origin + work clone whose `boucle/metrics` branch carries the given
+# metrics.jsonl and one raw run row per issue it names. Without a file the
+# branch is never created — the fetch-failure path.
+digest_work() {
+  local work="$1" metrics="${2:-}"
+  git init -q --bare "$TMP/remote.git"
+  git init -q "$work"
+  git -C "$work" remote add origin "$TMP/remote.git"
+  git -C "$work" -c user.email=a@b -c user.name=a commit -q --allow-empty -m init
+  git -C "$work" push -q origin HEAD:main
+  [ -n "$metrics" ] || return 0
+  git -C "$work" checkout -q --orphan boucle/metrics
+  cp "$metrics" "$work/metrics.jsonl"
+  mkdir -p "$work/raw"
+  local id
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    printf '%s\n' '{"timestamp":"2026-10-01T09:00:00Z","role":"worker","iteration":1,"outcome":"committed"}' \
+      > "$work/raw/$id.jsonl"
+  done < <(jq -r '.issue // empty' "$work/metrics.jsonl" 2> /dev/null || true)
+  git -C "$work" add -A
+  git -C "$work" -c user.email=a@b -c user.name=a commit -q -m metrics
+  git -C "$work" push -q origin boucle/metrics
+}
+
+# digest_run <work-dir> <out-file> <closed-issues-json>
+digest_run() {
+  local work="$1" out="$2" closed="$3"
+  bash -c "
+    set -euo pipefail
+    unset GITHUB_REPOSITORY BOUCLE_PROJECT_ID BOUCLE_PROJECT_PATH || true
+    export BOUCLE_WORKSPACE='$work' BOUCLE_HOME='$REPO'
+    source '$REPO/lib/boucle.sh' 2> /dev/null || true
+    source '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null || true
+    cd '$work'
+    forge_issue_list_all() { echo '$closed'; }
+    retro_upstream_ready() { return 1; }
+    _retro_build_digest '$out' '2026-09-15T00:00:00Z'
+  "
+}
+
+@test "digest: closed issues with zero metrics rows warn — blackout, never a clean empty window" {
+  WORK="$TMP/blackout-work"
+  : > "$TMP/empty-metrics.jsonl"
+  digest_work "$WORK" "$TMP/empty-metrics.jsonl"
+
+  run digest_run "$WORK" "$TMP/blackout.md" \
+    '[{"id":11,"title":"One","closed_at":"2026-10-03T00:00:00Z"},{"id":12,"title":"Two","closed_at":"2026-10-04T00:00:00Z"},{"id":13,"title":"Old","closed_at":"2026-08-01T00:00:00Z"}]'
+  assert_success
+  run cat "$TMP/blackout.md"
+  # The count is window-scoped (the August issue is out) and names the two
+  # fault modes apart: fetched-but-empty is NOT a failed fetch.
+  assert_output --partial "WARNING: metrics blackout — 0 metrics rows for 2 closed issue(s) in window; the retro evidence layer is missing (collector unwired, or its rows dropped before the window query)."
+  assert_output --partial "fetched: yes, 0 rows on the branch — collector unwired or never ran"
+  assert_output --partial "metrics rows: 0 in window, 0 on branch"
+  assert_output --partial "last metrics row: never"
+  assert_output --partial "list: raw file names (metrics-window list empty)"
+  # The per-issue section must not read as "no data"; it points at the finding.
+  assert_output --partial "metrics blackout"
+  refute_output --partial "no metrics data in this window"
+}
+
+@test "digest: metrics rows present render as today — no warning, no noise" {
+  WORK="$TMP/present-work"
+  printf '%s\n' \
+    '{"schema":2,"timestamp":"2026-10-01T10:00:00Z","issue":"4242","terminal":"done"}' \
+    '{"schema":2,"timestamp":"2026-10-02T10:00:00Z","issue":"777","terminal":"human"}' \
+    > "$TMP/present-metrics.jsonl"
+  digest_work "$WORK" "$TMP/present-metrics.jsonl"
+
+  run digest_run "$WORK" "$TMP/present.md" \
+    '[{"id":42,"title":"Closed","closed_at":"2026-10-03T00:00:00Z"}]'
+  assert_success
+  run cat "$TMP/present.md"
+  # The banner prefix and the word "blackout" are unique to a real banner: no
+  # other digest line carries them, so a grep for either cannot false-positive.
+  refute_output --partial "WARNING: metrics blackout"
+  refute_output --partial "blackout"
+  assert_output --partial "fetched: yes;"
+  assert_output --partial "metrics rows: 2 in window, 2 on branch"
+  assert_output --partial "issue rows: 2, bounded to 40"
+  assert_output --partial "last metrics row: 2026-10-02T10:00:00Z"
+}
+
+@test "digest: a genuinely quiet window stays silent — no closed issues, no metrics rows" {
+  WORK="$TMP/quiet-work"
+  : > "$TMP/empty-metrics.jsonl"
+  digest_work "$WORK" "$TMP/empty-metrics.jsonl"
+
+  run digest_run "$WORK" "$TMP/quiet.md" '[{"id":7,"title":"Long closed","closed_at":"2026-01-01T00:00:00Z"}]'
+  assert_success
+  run cat "$TMP/quiet.md"
+  refute_output --partial "WARNING: metrics blackout"
+  refute_output --partial "blackout"
+  assert_output --partial "fetched: yes, 0 rows on the branch"
+}
+
+@test "digest: a failed fetch is named as such, and a closed-issue window still warns" {
+  WORK="$TMP/nofetch-work"
+  digest_work "$WORK"
+
+  run digest_run "$WORK" "$TMP/nofetch.md" \
+    '[{"id":9,"title":"Closed","closed_at":"2026-10-03T00:00:00Z"}]'
+  assert_success
+  run cat "$TMP/nofetch.md"
+  assert_output --partial "fetch failed — boucle/metrics unavailable (branch, credential or remote missing)"
+  assert_output --partial "WARNING: metrics blackout — 0 metrics rows for 1 closed issue(s) in window"
+  refute_output --partial "fetched: yes, 0 rows"
 }
 
 # ── Doctor advisory: the engine's self-targeting token ──────────────────

@@ -294,6 +294,146 @@ EOF
   assert_failure
 }
 
+# ── LLM-config readiness (#157) ────────────────────────────────────────
+# Without a resolvable jcode LLM config the retro agent cannot start. The
+# doctor used to chain it anyway: the job died on `no jcode config`, nothing
+# recorded a run, so the next sweep chained it again — a red job every 10
+# minutes. These tests pin the mirror of bin/jc's ensure_jcode_config.
+
+# clear_llm_env — hermetic: no ambient key may satisfy the mirror.
+clear_llm_env() {
+  unset BOUCLE_LLM_BASE_URL BOUCLE_LLM_API_KEY BOUCLE_FALLBACK_API_KEY \
+    BOUCLE_NVIDIA_API_KEY BOUCLE_GROQ_API_KEY BOUCLE_CEREBRAS_API_KEY \
+    BOUCLE_ZHIPU_API_KEY BOUCLE_CLOUDFLARE_API_KEY BOUCLE_HUGGINGFACE_API_KEY \
+    BOUCLE_MISTRAL_API_KEY BOUCLE_FIXTURE_API_KEY 2> /dev/null || true
+}
+
+@test "retro_llm_ready: the env pair makes it ready (#157)" {
+  lib
+  clear_llm_env
+  export BOUCLE_HOME="$REPO" JCODE_HOME="$TMP/no-jcode"
+  export BOUCLE_LLM_BASE_URL=https://api.example.com/v1 BOUCLE_LLM_API_KEY=k
+  run retro_llm_ready
+  assert_success
+}
+
+@test "retro_llm_ready: a freeride catalog key makes it ready (real catalog) (#157)" {
+  # The key NAME is read from the real bin/jc catalog at runtime — no
+  # hand-copied list. BOUCLE_MISTRAL_API_KEY is one of its columns.
+  lib
+  clear_llm_env
+  export BOUCLE_HOME="$REPO" JCODE_HOME="$TMP/no-jcode"
+  export BOUCLE_MISTRAL_API_KEY=free-key
+  run retro_llm_ready
+  assert_success
+}
+
+@test "retro_llm_ready: the catalog is read from BOUCLE_HOME/bin/jc (fixture) (#157)" {
+  lib
+  clear_llm_env
+  mkdir -p "$TMP/fakehome/bin"
+  printf '%s\n' '"fixture|https://x|BOUCLE_FIXTURE_API_KEY|m|m|none"' > "$TMP/fakehome/bin/jc"
+  export BOUCLE_HOME="$TMP/fakehome" JCODE_HOME="$TMP/no-jcode"
+  export BOUCLE_FIXTURE_API_KEY=fixture-key
+  run retro_llm_ready
+  assert_success
+}
+
+@test "retro_llm_ready: a pre-installed config.toml makes it ready (#157)" {
+  lib
+  clear_llm_env
+  mkdir -p "$TMP/jcode-home"
+  printf '[provider]\n' > "$TMP/jcode-home/config.toml"
+  export BOUCLE_HOME="$REPO" JCODE_HOME="$TMP/jcode-home"
+  run retro_llm_ready
+  assert_success
+}
+
+@test "retro_llm_ready: nothing resolvable is NOT ready (#157)" {
+  lib
+  clear_llm_env
+  export BOUCLE_HOME="$REPO" JCODE_HOME="$TMP/no-jcode"
+  run retro_llm_ready
+  assert_failure
+}
+
+@test "retro_llm_ready: a fallback-only key is not a usable config (#157)" {
+  # ensure_jcode_config writes the fallback profile only alongside the
+  # primary env pair; counting BOUCLE_FALLBACK_API_KEY here would re-create
+  # the red-job-per-sweep bug.
+  lib
+  clear_llm_env
+  export BOUCLE_HOME="$REPO" JCODE_HOME="$TMP/no-jcode"
+  export BOUCLE_FALLBACK_API_KEY=fallback-only
+  run retro_llm_ready
+  assert_failure
+}
+
+@test "retro_llm_ready: a missing/unreadable bin/jc fails closed (#157)" {
+  # Guessing provider keys is how the original bug class happened: no
+  # catalog to read means NOT ready, even with a config.toml on disk.
+  lib
+  clear_llm_env
+  mkdir -p "$TMP/jcode-home"
+  printf '[provider]\n' > "$TMP/jcode-home/config.toml"
+  export BOUCLE_HOME="$TMP/no-such-home" JCODE_HOME="$TMP/jcode-home"
+  run retro_llm_ready
+  assert_failure
+}
+
+@test "doctor chain: no LLM config → not chained, threshold not consulted (#157)" {
+  run bash -c "
+    set -euo pipefail
+    source '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null || true
+    BOUCLE_ENABLED=true
+    retro_enabled() { return 0; }
+    retro_upstream_ready() { return 0; }
+    retro_llm_ready() { return 1; }
+    retro_threshold_reached() { echo THRESHOLD-CALLED; return 0; }
+    chain_to_role() { echo \"CHAIN:\$1:\$2\"; }
+    boucle_retro_doctor_chain
+  "
+  assert_success
+  assert_output --partial "retro LLM config missing — not chaining"
+  refute_output --partial "THRESHOLD-CALLED"
+  refute_output --partial "CHAIN:"
+}
+
+@test "stage: no LLM config exits 0 with a skip line, before window/threshold (#157)" {
+  run bash -c "
+    set -euo pipefail
+    source '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null || true
+    BOUCLE_ENABLED=true
+    retro_enabled() { return 0; }
+    retro_upstream_ready() { return 0; }
+    retro_llm_ready() { return 1; }
+    retro_threshold_reached() { echo THRESHOLD-CALLED; return 0; }
+    boucle_ci_retro
+  "
+  assert_success
+  assert_output --partial "no jcode LLM config — retro skipped"
+  # The guard fires BEFORE the threshold/window work: no agent is invoked
+  # (BOUCLE_HOME is unset, so any jc call would be a 127, not exit 0).
+  refute_output --partial "THRESHOLD-CALLED"
+}
+
+@test "doctor --audit: no jcode LLM config is one advisory, resolved by the env pair (#157)" {
+  cd "$REPO" || return 1
+  run env -i PATH="$PATH" HOME="$HOME" BOUCLE_LLM_API_KEY=k \
+    BOUCLE_UPSTREAM_TOKEN=t JCODE_HOME="$TMP/no-jcode" \
+    bash bin/doctor --audit
+  assert_success
+  assert_output --partial "BOUCLE_RETRO_ENABLED=true with no jcode LLM config"
+
+  # The env pair resolves it: no advisory.
+  run env -i PATH="$PATH" HOME="$HOME" BOUCLE_LLM_API_KEY=k \
+    BOUCLE_LLM_BASE_URL=https://api.example.com/v1 \
+    BOUCLE_UPSTREAM_TOKEN=t JCODE_HOME="$TMP/no-jcode" \
+    bash bin/doctor --audit
+  assert_success
+  refute_output --partial "no jcode LLM config"
+}
+
 @test "retro: dry-run is OFF by default and only explicit true spellings enable it" {
   lib
   unset BOUCLE_RETRO_DRY_RUN || true

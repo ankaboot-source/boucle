@@ -83,7 +83,7 @@ test:
 	for _v in $$(env | grep -oE '^GIT_PUSH_OPTION_[A-Z0-9_]+'); do unset $$_v; done; \
 	for _v in GITHUB_REPOSITORY GITHUB_SERVER_URL GITHUB_API_URL \
 	CI_PROJECT_ID CI_PROJECT_NAME CI_PROJECT_PATH CI_REPOSITORY_URL; do unset $$_v; done; \
-	$(BATS) --formatter tap test/
+	LC_ALL=C LC_NUMERIC=C $(BATS) --formatter tap test/
 
 # Install pre-commit hooks (prek preferred, falls back to pre-commit).
 install-hooks:

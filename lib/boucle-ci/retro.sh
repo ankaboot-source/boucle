@@ -220,6 +220,12 @@ retro_post_pr() {
 # health rows carry runs/verdicts/setup_failures/models/tokens/cost, the
 # metrics rows carry the terminal state.
 #
+# The digest cross-checks its own completeness: a window with closed issues but
+# ZERO metrics rows is a HOLLOW retro (the primary evidence layer is missing and
+# the digest would otherwise render clean), so it carries an explicit, greppable
+# `WARNING: metrics blackout` banner. A failed fetch and a fetch that returned no
+# rows are reported with distinct wording — different root causes.
+#
 # Returns non-zero only when nothing could be assembled at all.
 # _retro_renumber_map — stdin: one consumer IID per line, in order of first
 # appearance; stdout: "<old>\t#<new>" lines. Deterministic per window. The
@@ -237,7 +243,14 @@ _retro_build_digest() {
   until=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
   # ── Metrics snapshot ────────────────────────────────────────────────
-  local have_metrics=no
+  # THREE states, not two, because "the collector wrote nothing" and "the fetch
+  # failed" have different root causes and the digest MUST say which one. A
+  # hollow window renders clean otherwise (the blackout banner below is what
+  # makes it loud):
+  #   metrics_fetch=no            → branch / credential / remote missing
+  #   metrics_fetch=yes, 0 rows   → collector unwired or never ran
+  #   metrics_fetch=yes, N rows   → normal
+  local metrics_fetch=no metrics_rows=0 metrics_window_rows=0 metrics_last_ts=""
   : > "$tmp/metrics.jsonl"
   : > "$tmp/raw-list"
   if git rev-parse --git-dir > /dev/null 2>&1 \
@@ -245,13 +258,28 @@ _retro_build_digest() {
     && git fetch -q --depth 1 origin "$BOUCLE_METRICS_BRANCH" 2> /dev/null; then
     git cat-file -p "FETCH_HEAD:$BOUCLE_METRICS_FILE" > "$tmp/metrics.jsonl" 2> /dev/null || : > "$tmp/metrics.jsonl"
     git ls-tree -r --name-only FETCH_HEAD -- "$BOUCLE_METRICS_RAW_DIR" > "$tmp/raw-list" 2> /dev/null || : > "$tmp/raw-list"
-    have_metrics=yes
+    metrics_fetch=yes
+  fi
+  if [ -s "$tmp/metrics.jsonl" ]; then
+    metrics_rows=$(jq -s 'length' "$tmp/metrics.jsonl" 2> /dev/null || echo 0)
+    metrics_window_rows=$(jq -s --arg since "$since" \
+      '[.[] | select((.timestamp // "") >= $since)] | length' \
+      "$tmp/metrics.jsonl" 2> /dev/null || echo 0)
+    # Last-seen row, NOT last window row: it tells "collector stopped at X"
+    # apart from "collector never ran" in a window where the slice is empty.
+    metrics_last_ts=$(jq -s -r '[.[] | .timestamp // empty] | max // ""' \
+      "$tmp/metrics.jsonl" 2> /dev/null || echo "")
+    # A jq parse error can still emit partial output, so coerce the counts back
+    # to integers: a count is compared with -eq, never trusted as text (the
+    # `grep -c` "0\n0" class of bug).
+    case "$metrics_rows" in '' | *[!0-9]*) metrics_rows=0 ;; esac
+    case "$metrics_window_rows" in '' | *[!0-9]*) metrics_window_rows=0 ;; esac
   fi
 
   # Which issues are in the window? Newest 40 by terminal timestamp when the
   # metrics rows exist. Without them (an old consumer), fall back to the raw
   # file names — bounded, not ordered by recency, and the digest says so.
-  local issue_list=""
+  local issue_list="" issue_list_source=metrics
   if [ -s "$tmp/metrics.jsonl" ]; then
     issue_list=$(jq -s -r --arg since "$since" --argjson max "$_RETRO_MAX_ISSUES" \
       '[.[] | select((.timestamp // "") >= $since)]
@@ -260,6 +288,7 @@ _retro_build_digest() {
       "$tmp/metrics.jsonl" 2> /dev/null || echo "")
   fi
   if [ -z "$issue_list" ]; then
+    issue_list_source=raw
     issue_list=$(sed -n 's|^.*/\([^/]*\)\.jsonl$|\1|p' "$tmp/raw-list" 2> /dev/null \
       | head -n "$_RETRO_MAX_ISSUES" || echo "")
   fi
@@ -354,10 +383,12 @@ _retro_build_digest() {
 
   # ── Closed issues in the window (titles only) ────────────────────────
   # closed_window keeps the WHOLE window; closed_items is the bounded slice
-  # the digest prints. The coverage reconciliation below needs the full
+  # the digest prints (#156): the coverage reconciliation needs the full
   # denominator — a ratio computed against a truncated one would report a gap
-  # that is an artefact of the bound.
-  local closed_block="" closed_items="[]" closed_window="[]"
+  # that is an artefact of the bound. closed_count is the UNBOUNDED in-window
+  # count (#153): the blackout banner needs the true size of the window, not
+  # the bounded slice.
+  local closed_block="" closed_items="[]" closed_window="[]" closed_count=0
   local closed_json
   closed_json=$(forge_issue_list_all closed 2> /dev/null || echo "[]")
   closed_window=$(printf '%s' "$closed_json" | jq -c --arg since "$since" '
@@ -366,6 +397,10 @@ _retro_build_digest() {
      | select(.closed >= $since)]
     | sort_by(.closed) | reverse' 2> /dev/null || echo "[]")
   closed_items=$(printf '%s' "$closed_window" | jq -c --argjson max "$_RETRO_MAX_CLOSED" '.[0:$max]' 2> /dev/null || echo "[]")
+  closed_count=$(printf '%s' "$closed_json" | jq -r --arg since "$since" '
+    [.[] | select((.pull_request // null) == null) | select((.closed_at // "") >= $since)] | length' \
+    2> /dev/null || echo 0)
+  case "$closed_count" in '' | *[!0-9]*) closed_count=0 ;; esac
 
   # ── Anonymise consumer IIDs (S3) ─────────────────────────────────────
   # Renumber #1..#N in order of first appearance (per-issue rows
@@ -392,7 +427,7 @@ _retro_build_digest() {
   closed_ids=$(printf '%s' "$closed_window" | jq -c '[.[].iid]' 2> /dev/null || echo "[]")
   coverage_line=$(jq -n -r \
     --arg since "$since" \
-    --arg fetched "$have_metrics" \
+    --arg fetched "$metrics_fetch" \
     --argjson map "$map_json" \
     --argjson named_max "$_RETRO_MAX_MISSING_IDS" \
     --argjson closed "$closed_ids" \
@@ -462,17 +497,52 @@ _retro_build_digest() {
   fi
 
   # ── Assemble + scrub ──────────────────────────────────────────────────
+  # A blackout is `closed issues in the window` with `0 metrics rows in the same
+  # window`. Genuinely inactive consumers stay silent: both sides zero is not a
+  # blackout, it is a quiet window.
+  local blackout=no
+  if [ "$closed_count" -gt 0 ] && [ "$metrics_window_rows" -eq 0 ]; then
+    blackout=yes
+  fi
+  local digest_rows fetch_label last_label list_label
+  digest_rows=$(wc -l < "$tmp/rows.out.jsonl" 2> /dev/null | tr -d ' ')
+  case "$digest_rows" in '' | *[!0-9]*) digest_rows=0 ;; esac
+  case "$metrics_fetch" in
+    yes)
+      if [ "$metrics_rows" -gt 0 ]; then
+        # Distinguish "fetched with rows" from "fetched, 0 rows": the first is
+        # normal, the second means the collector is unwired (or never ran).
+        fetch_label="fetched: yes"
+      else
+        fetch_label="fetched: yes, 0 rows on the branch — collector unwired or never ran"
+      fi
+      ;;
+    *)
+      fetch_label="fetch failed — $BOUCLE_METRICS_BRANCH unavailable (branch, credential or remote missing)"
+      ;;
+  esac
+  last_label="${metrics_last_ts:-never}"
+  if [ "$issue_list_source" = raw ]; then
+    list_label="raw file names (metrics-window list empty)"
+  else
+    list_label="metrics window"
+  fi
   {
     echo "# Retro window digest"
     echo
     echo "Window: $since → $until"
-    echo "Data source: $BOUCLE_METRICS_BRANCH (fetched: $have_metrics; $(wc -l < "$tmp/rows.out.jsonl" 2> /dev/null | tr -d ' ') issue rows, bounded to $_RETRO_MAX_ISSUES)"
+    echo "Data source: $BOUCLE_METRICS_BRANCH ($fetch_label; metrics rows: $metrics_window_rows in window, $metrics_rows on branch; issue rows: $digest_rows, bounded to $_RETRO_MAX_ISSUES; list: $list_label; last metrics row: $last_label)"
     echo "$coverage_line"
+    if [ "$blackout" = yes ]; then
+      echo "WARNING: metrics blackout — 0 metrics rows for $closed_count closed issue(s) in window; the retro evidence layer is missing (collector unwired, or its rows dropped before the window query)."
+    fi
     echo "Anonymisation: every consumer identifier is ALREADY replaced by retro_scrub — [consumer], [host], [user], [email], boucle/N-. Do not try to de-anonymise; the generics are the data."
     echo
     echo "## Per-issue rows (oldest → newest)"
     if [ -s "$tmp/rows.jsonl" ]; then
       cat "$tmp/rows.out.jsonl"
+    elif [ "$blackout" = yes ]; then
+      echo "(none — metrics blackout: no metrics rows for this window; the WARNING above is the finding)"
     else
       echo "(none — no metrics data in this window)"
     fi
@@ -512,6 +582,7 @@ _retro_build_digest() {
     echo "- metrics_coverage: usable metrics rows / closed issues in the window. A closed issue with no row is delivery this digest cannot see at all — report the gap, never read the absence as a zero."
     echo "- tokens / cost_usd: null when no run reported a number — never a fake zero; gaps names which fields are missing and why."
     echo "- issue numbers are renumbered per window (#1..#N in order of first appearance); branch prefixes are anonymized by the scrub."
+    echo "- data source: metrics rows are the collector's rows in the window; on branch = all of them. The last metrics row distinguishes 'collector stopped at date X' from 'never ran'. A line beginning 'WARNING: metrics' means the window has closed issues but no metrics evidence — cite it verbatim; never read the empty aggregates as 'no activity'."
   } | retro_scrub > "$out" 2> /dev/null || return 1
   [ -s "$out" ] || return 1
 
@@ -741,6 +812,14 @@ boucle_retro_doctor_chain() {
   case "${BOUCLE_ENABLED:-}" in true | "") ;; *) return 0 ;; esac
   retro_enabled || return 0
   retro_upstream_ready || return 0
+  # #157: without a resolvable jcode LLM config the agent cannot start, the
+  # run records nothing, and the next sweep would chain it again — a red job
+  # every 10 minutes. One log line here; bin/doctor --audit carries the
+  # operator-facing advisory.
+  retro_llm_ready || {
+    echo "  → retro LLM config missing — not chaining (bin/doctor --audit reports it)"
+    return 0
+  }
   retro_threshold_reached || return 0
   echo "  → retro due — chaining the retro stage"
   chain_to_role "retro" "retro"
@@ -770,6 +849,14 @@ boucle_ci_retro() {
     # decided to participate: skip cleanly, no WARN per sweep — the operator
     # advisory lives in bin/doctor --audit.
     echo "[retro] no upstream token — retro skipped (bin/doctor --audit reports it)" >&2
+    exit 0
+  fi
+  if ! retro_llm_ready; then
+    # #157: the agent cannot start without a jcode-resolvable LLM config.
+    # Exit 0 (green job) BEFORE the window/digest work; the one operator
+    # signal is the bin/doctor --audit advisory. A red exit here would repeat
+    # every sweep because no run record is written to advance the cadence.
+    echo "[retro] no jcode LLM config — retro skipped (bin/doctor --audit reports it)" >&2
     exit 0
   fi
   # Idempotence against the doctor's stale pre-check: the doctor may chain

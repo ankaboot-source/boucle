@@ -344,11 +344,16 @@ boucle_title_semver_gate() {
 }
 
 # boucle_bump_gate <title> <labels> <branch> <body> — the single bump-kind
-# gate. Prints security|minor|patch, or exits 1 (major / unknown → a human).
+# gate. Prints security|minor|patch, or "major" ONLY for the github-actions
+# ecosystem (CLI tooling, low-risk — issue #160); exits 1 for code-lib majors
+# and anything unknown (→ a human).
 #
 # Fail-closed throughout:
 #   1. security → always mergeable (title/label/branch signals).
-#   2. dependabot title endpoints ("from A to B") → semver gate.
+#   2. dependabot title endpoints ("from A to B") → semver gate. A MAJOR is
+#      allowed only on a `dependabot/github_actions*` branch — an action is
+#      encapsulated CLI tooling whose majors rarely break callers; a code-lib
+#      major can break at runtime in ways green CI does not prove.
 #   3. renovate branch group fast-paths (digest = patch; all-patch /
 #      all-minor-patch / lock-file-maintenance / pin-dependencies = within
 #      their declared range) → accept. Per-dependency <M>.x branches are
@@ -368,6 +373,18 @@ boucle_bump_gate() {
       patch | minor)
         echo "$gate"
         return 0
+        ;;
+      major)
+        # GitHub-actions bump: an action is encapsulated CLI tooling, and the
+        # maintainer approved auto-merge for that ecosystem (#160). Any other
+        # major stays human-gated.
+        case "$branch" in
+          dependabot/github_actions*)
+            echo "major"
+            return 0
+            ;;
+        esac
+        return 1
         ;;
       *) return 1 ;;
     esac
@@ -3379,6 +3396,43 @@ retro_upstream_token() {
 retro_upstream_ready() {
   retro_enabled || return 1
   [ -n "$(retro_upstream_token 2> /dev/null)" ]
+}
+
+# retro_llm_ready
+#
+# Can the retro agent start at all? Mirror bin/jc's ensure_jcode_config
+# resolution exactly (#157): the env pair, any freeride provider key, or a
+# pre-installed config.toml. A repo with retro enabled but no usable LLM
+# config used to chain the retro on EVERY sweep and crash the job on
+# `no jcode config` — a red job every 10 minutes, forever, with the trigger
+# state never advancing. Skipping BEFORE the chain/invocation turns that into
+# ONE doctor --audit advisory.
+#
+# The freeride key names are READ FROM bin/jc at runtime (the catalog's
+# `name|url|KEY|...` lines): a second, hand-copied list here would drift the
+# moment a provider is added. A missing/unreadable bin/jc fails CLOSED —
+# guessing provider keys is how the original bug class happened.
+retro_llm_ready() {
+  # (a) explicit env pair — the standard consumer/dogfood path.
+  if [ -n "${BOUCLE_LLM_BASE_URL:-}" ] && [ -n "${BOUCLE_LLM_API_KEY:-}" ]; then
+    return 0
+  fi
+  local jc_file="${BOUCLE_HOME:-.}/bin/jc"
+  [ -r "$jc_file" ] || return 1
+  # (b) any freeride provider key, from the single-sourced catalog in
+  # bin/jc. The pipe-anchored extraction picks the catalog COLUMN only: a
+  # bare BOUCLE_FALLBACK_API_KEY does NOT make a usable config —
+  # ensure_jcode_config writes a fallback profile only alongside the primary
+  # pair, so counting it here would re-create the red-job-per-sweep bug.
+  local key_var
+  while IFS= read -r key_var; do
+    [ -n "$key_var" ] || continue
+    if [ -n "${!key_var:-}" ]; then
+      return 0
+    fi
+  done < <(grep -oE '[|]BOUCLE_[A-Z]+_API_KEY[|]' "$jc_file" 2> /dev/null | tr -d '|' | sort -u)
+  # (c) a pre-installed config on the runner (local dev / legacy installs).
+  [ -f "${JCODE_HOME:-$HOME/.jcode}/config.toml" ]
 }
 
 # retro_dry_run

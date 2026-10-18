@@ -9,7 +9,7 @@
 # set the forge-agnostic variable BOUCLE_RUNS_ON to '["self-hosted", "boucle"]'
 # (or any runs-on expression). BOUCLE_RUNS_ON is forge-agnostic — on GitLab it
 # maps to `tags: [$BOUCLE_RUNS_ON]` (default `boucle`).
-# Secrets: BOUCLE_TOKEN (bot PAT), CLOUDFLARE_API_TOKEN, PI_AUTH, BOUCLE_LLM_API_KEY.
+# Secrets: BOUCLE_TOKEN (bot PAT), CLOUDFLARE_API_TOKEN, BOUCLE_LLM_API_KEY.
 # Variables: BOUCLE_FORGE, BOUCLE_FORGE_HOST, BOUCLE_RUNS_ON, BOUCLE_SPEC_PROFILE,
 #   BOUCLE_UPDATE_MODE, BOUCLE_MAX_PARALLEL_ISSUES, BOUCLE_MAX_ITERATIONS, etc.
 
@@ -224,7 +224,7 @@ env:
   # only — without this line BOUCLE_UPSTREAM_TOKEN is always unset.
   BOUCLE_UPSTREAM_TOKEN: ${{ secrets.BOUCLE_UPSTREAM_TOKEN }}
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  PI_AUTH: ${{ secrets.PI_AUTH }}
+
 
 # `metadata: read` is a GitHub *App* permission, not a workflow one — the
 # workflow `permissions:` block only accepts the scopes listed at
@@ -320,7 +320,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
       # `make check` = lint (shellcheck + shfmt) + test (bats). ubuntu-latest
@@ -412,7 +412,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
       - name: Install dependencies
@@ -652,7 +652,7 @@ jobs:
       # submodule on consumers): git submodule update clobbers anything
       # inside the submodule, so state must never ride along with the engine.
       - name: Restore boucle state cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/boucle-state
           key: boucle-state-${{ github.event.inputs.BOUCLE_ISSUE || github.event.issue.number || 'default' }}
@@ -754,7 +754,7 @@ jobs:
           retention-days: 7
       - name: Save boucle state cache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/boucle-state
           key: boucle-state-${{ github.event.inputs.BOUCLE_ISSUE || github.event.issue.number || 'default' }}
@@ -1188,7 +1188,7 @@ jobs:
         with:
           fetch-depth: 0
           submodules: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           # No cache: 'npm' — boucle is a shell project with no package-lock.json.

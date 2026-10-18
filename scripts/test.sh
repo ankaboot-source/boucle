@@ -36,4 +36,9 @@ for _v in GITHUB_REPOSITORY GITHUB_SERVER_URL GITHUB_API_URL \
   CI_PROJECT_ID CI_PROJECT_NAME CI_PROJECT_PATH CI_REPOSITORY_URL; do
   unset "$_v"
 done
+# Locale guard: `printf "%.2f"` renders decimal commas on fr shells — stats
+# fixtures expect the canonical locale-C point (2.00, never 2,00). Pin the
+# whole suite so results never depend on the host locale, like the env guards
+# above.
+export LC_ALL=C LC_NUMERIC=C
 exec bats --formatter tap test/
