@@ -317,7 +317,7 @@ jobs:
       # test/*.bats load bats-support/bats-assert from test/test_helper/, which
       # are git submodules. Without them every test aborts in setup() with
       # "Could not find .../bats-support/load".
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
       - uses: actions/setup-node@v7
@@ -370,7 +370,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true  # boucle manages its own retries — exit 1 is normal (dispatch ABORT, reviewer re-trigger, etc.)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Bootstrap chain smoke test
@@ -410,7 +410,7 @@ jobs:
       issue-iid: ${{ steps.dispatch.outputs.issue-iid }}
       role: ${{ steps.dispatch.outputs.role }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - uses: actions/setup-node@v7
@@ -520,7 +520,7 @@ jobs:
       )
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Setup
@@ -641,7 +641,7 @@ jobs:
       group: boucle-worker-${{ github.event.inputs.BOUCLE_ISSUE || github.event.issue.number }}
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
@@ -781,7 +781,7 @@ jobs:
       group: boucle-reviewer-${{ github.event.inputs.BOUCLE_ISSUE }}
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
@@ -883,7 +883,7 @@ jobs:
       group: boucle-merge
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
@@ -964,7 +964,7 @@ jobs:
       group: boucle-merge
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Setup
@@ -996,7 +996,7 @@ jobs:
       && github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'post-merge'
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Setup
@@ -1080,7 +1080,7 @@ jobs:
       )
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Setup
@@ -1185,7 +1185,7 @@ jobs:
       && github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
@@ -1264,7 +1264,7 @@ jobs:
       group: boucle-e2e-${{ github.event.inputs.BOUCLE_ISSUE }}
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Setup
@@ -1372,7 +1372,7 @@ jobs:
       group: boucle-cmd-${{ github.event.inputs.BOUCLE_ISSUE }}
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Setup
@@ -1399,7 +1399,7 @@ jobs:
       group: boucle-cmd-${{ github.event.inputs.BOUCLE_ISSUE }}
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Setup
@@ -1425,7 +1425,7 @@ jobs:
       group: boucle-cmd-${{ github.event.inputs.BOUCLE_ISSUE }}
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Setup
@@ -1452,7 +1452,7 @@ jobs:
       )
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Setup
@@ -1534,7 +1534,7 @@ jobs:
       && github.event_name == 'workflow_dispatch' && github.event.inputs.BOUCLE_ROLE == 'retro'
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Setup
