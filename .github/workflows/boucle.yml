@@ -592,7 +592,7 @@ jobs:
       # from the log before every exit path, so this is safe to upload.
       - name: Upload agent transcript
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: boucle-agent-log-triage-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -735,7 +735,7 @@ jobs:
           $BOUCLE_HOME/bin/boucle-ci worker
       - name: Upload agent transcript
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: boucle-agent-log-worker-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -852,7 +852,7 @@ jobs:
           $BOUCLE_HOME/bin/boucle-ci reviewer
       - name: Upload agent transcript
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: boucle-agent-log-reviewer-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -1334,7 +1334,7 @@ jobs:
           $BOUCLE_HOME/bin/boucle-ci e2e
       - name: Upload agent transcript
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: boucle-agent-log-e2e-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -1601,7 +1601,7 @@ jobs:
           $BOUCLE_HOME/bin/boucle-ci retro
       - name: Upload agent transcript
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: boucle-agent-log-retro-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
