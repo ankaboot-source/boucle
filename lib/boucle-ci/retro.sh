@@ -224,7 +224,10 @@ retro_post_pr() {
 # ZERO metrics rows is a HOLLOW retro (the primary evidence layer is missing and
 # the digest would otherwise render clean), so it carries an explicit, greppable
 # `WARNING: metrics blackout` banner. A failed fetch and a fetch that returned no
-# rows are reported with distinct wording — different root causes.
+# rows are reported with distinct wording — different root causes. When the
+# branch is readable, the banner also names the collector's liveness state from
+# the persisted publish events (unwired | wired-failing | wired-ok, rows lost)
+# instead of offering a disjunction — see _retro_blackout_cause.
 #
 # Returns non-zero only when nothing could be assembled at all.
 # _retro_renumber_map — stdin: one consumer IID per line, in order of first
@@ -233,6 +236,40 @@ retro_post_pr() {
 # is the code-enforced part, retro_scrub cannot know which integers are IIDs.
 _retro_renumber_map() {
   awk 'NF && !seen[$0]++ { printf "%s\t#%d\n", $0, ++n }'
+}
+
+# _retro_blackout_cause <publish-events> <last-ok> <last-reason> <fetched>
+#
+# Name WHY a window has closed issues and zero metrics rows, from the outcome
+# events the collector now records on every terminal transition
+# (boucle_metrics_publish_event: event=metrics_publish, ok, reason). Absence
+# alone cannot tell the three failures apart, and they have different fixes:
+#
+#   unwired           no metrics_publish event anywhere — the terminal
+#                     transition never invoked the collector.
+#   wired-failing     events exist and the last one failed — the collector ran,
+#                     and the reason (disabled | no_health_data |
+#                     git_append_failed) names what broke.
+#   wired-ok, rows lost
+#                     events exist and reported success, yet no row is in the
+#                     window — the row was written and lost after the fact.
+#
+# When the branch itself could not be fetched, neither rows nor events are
+# visible, so the digest says so rather than guessing between the three.
+_retro_blackout_cause() {
+  local events="${1:-0}" last_ok="${2:-}" last_reason="${3:-unknown}" fetched="${4:-no}"
+  case "$events" in '' | *[!0-9]*) events=0 ;; esac
+  if [ "$fetched" != yes ]; then
+    echo "unclassified — the metrics branch could not be fetched, so neither rows nor publish events are visible"
+    return 0
+  fi
+  if [ "$events" -eq 0 ]; then
+    echo "unwired — no metrics_publish event anywhere for the window: the terminal transition never invoked the collector"
+  elif [ "$last_ok" = false ]; then
+    echo "wired-failing — the collector ran and its last publish failed (reason: ${last_reason:-unknown})"
+  else
+    echo "wired-ok, rows lost — the collector reported a successful publish, but no row is visible in the window"
+  fi
 }
 
 _retro_build_digest() {
@@ -248,7 +285,9 @@ _retro_build_digest() {
   # hollow window renders clean otherwise (the blackout banner below is what
   # makes it loud):
   #   metrics_fetch=no            → branch / credential / remote missing
-  #   metrics_fetch=yes, 0 rows   → collector unwired or never ran
+  #   metrics_fetch=yes, 0 rows   → no summary row; the publish events decide
+  #                                 whether the collector was unwired, failed,
+  #                                 or succeeded and lost its row
   #   metrics_fetch=yes, N rows   → normal
   local metrics_fetch=no metrics_rows=0 metrics_window_rows=0 metrics_last_ts=""
   : > "$tmp/metrics.jsonl"
@@ -308,6 +347,29 @@ _retro_build_digest() {
       | jq -c --arg iid "$iid" 'select(type == "object") | . + {issue: $iid}' \
         >> "$tmp/raw.jsonl" 2> /dev/null || true
   done <<< "$issue_list"
+
+  # ── Collector liveness (publish outcome events) ─────────────────────
+  # Every terminal transition records what the publish attempt did:
+  # {"event":"metrics_publish","iid":...,"ok":true|false,"reason":...}.
+  # Those events are the only signal that separates "never called" from
+  # "called and failed" — both leave zero rows, and the blackout warning must
+  # state which one happened. The last event decides the diagnosis.
+  local publish_events=0 publish_last_ok="" publish_last_reason="unknown"
+  if [ -s "$tmp/raw.jsonl" ]; then
+    publish_events=$(jq -s '[.[] | select(.event == "metrics_publish")] | length' \
+      "$tmp/raw.jsonl" 2> /dev/null || echo 0)
+    case "$publish_events" in '' | *[!0-9]*) publish_events=0 ;; esac
+    if [ "$publish_events" -gt 0 ]; then
+      local last_event
+      last_event=$(jq -s -r '[.[] | select(.event == "metrics_publish")]
+        | sort_by(.timestamp // "") | last
+        | [(.ok == true), (.reason // "unknown")] | @tsv' \
+        "$tmp/raw.jsonl" 2> /dev/null || printf 'false\tunknown\n')
+      publish_last_ok=$(printf '%s' "$last_event" | cut -f1)
+      publish_last_reason=$(printf '%s' "$last_event" | cut -f2)
+      [ -n "$publish_last_reason" ] || publish_last_reason=unknown
+    fi
+  fi
 
   : > "$tmp/rows.jsonl"
   if [ -s "$tmp/raw.jsonl" ]; then
@@ -511,10 +573,11 @@ _retro_build_digest() {
     yes)
       if [ "$metrics_rows" -gt 0 ]; then
         # Distinguish "fetched with rows" from "fetched, 0 rows": the first is
-        # normal, the second means the collector is unwired (or never ran).
+        # normal, the second needs the blackout-cause diagnosis below — it is
+        # NOT necessarily "unwired" any more.
         fetch_label="fetched: yes"
       else
-        fetch_label="fetched: yes, 0 rows on the branch — collector unwired or never ran"
+        fetch_label="fetched: yes, 0 rows on the branch"
       fi
       ;;
     *)
@@ -534,7 +597,7 @@ _retro_build_digest() {
     echo "Data source: $BOUCLE_METRICS_BRANCH ($fetch_label; metrics rows: $metrics_window_rows in window, $metrics_rows on branch; issue rows: $digest_rows, bounded to $_RETRO_MAX_ISSUES; list: $list_label; last metrics row: $last_label)"
     echo "$coverage_line"
     if [ "$blackout" = yes ]; then
-      echo "WARNING: metrics blackout — 0 metrics rows for $closed_count closed issue(s) in window; the retro evidence layer is missing (collector unwired, or its rows dropped before the window query)."
+      echo "WARNING: metrics blackout — 0 metrics rows for $closed_count closed issue(s) in window; the retro evidence layer is missing: $(_retro_blackout_cause "$publish_events" "$publish_last_ok" "$publish_last_reason" "$metrics_fetch")."
     fi
     echo "Anonymisation: every consumer identifier is ALREADY replaced by retro_scrub — [consumer], [host], [user], [email], boucle/N-. Do not try to de-anonymise; the generics are the data."
     echo

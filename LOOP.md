@@ -716,8 +716,8 @@ recent lesson titles and the open upstream proposals. The digest **cross-checks
 its own completeness** before it renders:
 
 - the data-source line carries the fetch status in **three** states —
-  `fetched: yes`, `fetched: yes, 0 rows on the branch — collector unwired or
-  never ran`, `fetch failed — <branch> unavailable (branch, credential or
+  `fetched: yes`, `fetched: yes, 0 rows on the branch`, `fetch failed —
+  <branch> unavailable (branch, credential or
   remote missing)` — plus the metrics row counts (in window / whole branch),
   the issue-row count and the **last metrics row timestamp**. The timestamp
   separates "the collector stopped at date X" from "the collector never ran";
@@ -727,7 +727,11 @@ its own completeness** before it renders:
   machine-greppable **verbatim**: a hollow digest MUST never look like a quiet
   one. Neither the legend nor any other digest line carries the `WARNING:
   metrics` prefix or the word "blackout", so a grep for either cannot
-  false-positive;
+  false-positive. When the branch is readable, the banner names the cause from
+  the collector's persisted publish events — `unwired` (no event anywhere),
+  `wired-failing (reason: …)` (the last event failed) or `wired-ok, rows lost`
+  (the last event succeeded but no row is in the window) — and only says
+  `unclassified` when the branch itself could not be fetched;
 - a genuinely quiet window (no closed issues, no metrics rows) stays silent —
   inactivity is NOT a blackout.
 
@@ -1132,6 +1136,18 @@ branch when the issue reaches `boucle:done` or `boucle:human`. Orphan so the
 measurement log never enters the consumer's history or triggers their CI, and
 fail-open throughout: a metrics write must never be what stops an issue
 reaching done.
+
+**A publish that fails says so where the failure outlives the job.** Because
+the path is fail-open, a failed metrics write would otherwise leave only a
+stderr `WARN` in the log of an ephemeral runner. Every terminal transition
+therefore appends a structured outcome event to `health.jsonl` —
+`{"event":"metrics_publish","iid":…,"ok":true|false,"reason":"published" |
+"disabled" | "no_health_data" | "git_append_failed"}` — syncs the raw log to
+the metrics branch, and, on GitHub Actions, emits a `::warning::` annotation
+attached to the run summary. The retro digest reads those events and names the
+blackout cause instead of guessing: `unwired`, `wired-failing (reason: …)` or
+`wired-ok, rows lost`. Absence of a row is no longer the only signal, and
+absence can no longer be mistaken for the only cause.
 
 **An empty skills list is not a finding on its own.** Each run also records
 `skills_evidence`, which says what the empty list is evidence *of*:

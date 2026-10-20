@@ -238,9 +238,20 @@ stub_forge() {
   assert_success
   assert_output --partial '"issue":"7"'
 
-  # Orphan: the measurement log must not carry the consumer's history.
-  run bash -c "git --git-dir='$REMOTE' log --oneline boucle/metrics | wc -l | tr -d ' '"
-  assert_output "1"
+  # Orphan: the measurement log must not carry the consumer's history. Assert
+  # the PROPERTY (main is not an ancestor), not a commit count: the publish
+  # also syncs the raw health log so its outcome event is durable, which adds
+  # a second commit to the same branch.
+  run bash -c "git --git-dir='$REMOTE' merge-base --is-ancestor main boucle/metrics 2>/dev/null && echo ANCESTOR || echo ORPHAN"
+  assert_output "ORPHAN"
+
+  # The event that makes this publish diagnosable is on the branch with the
+  # rest of the raw log.
+  run git --git-dir="$REMOTE" show "boucle/metrics:raw/7.jsonl"
+  assert_success
+  assert_output --partial '"event":"metrics_publish"'
+  assert_output --partial '"ok":true'
+  assert_output --partial '"reason":"published"'
 }
 
 @test "publish: a failing write warns and returns 0 — never blocks the loop" {
@@ -259,6 +270,14 @@ stub_forge() {
     forge_issue_notes() { echo '[]'; }; forge_mr_lookup_by_branch() { echo ''; }; forge_mr_notes() { echo '[]'; };
     BOUCLE_WORKSPACE='$WORK' boucle_metrics_publish 7 done; echo \"rc=\$?\""
   assert_output --partial "rc=0"
+
+  # The failure is recorded as an event, not only as a lost row: absence of a
+  # row cannot distinguish "never called" from "called and failed", and the
+  # event is what the retro digest classifies.
+  run grep '"event":"metrics_publish"' "$WORK/.boucle-state/7/health.jsonl"
+  assert_success
+  assert_output --partial '"ok":false'
+  assert_output --partial '"reason":"git_append_failed"'
 }
 
 @test "toggle: publishing is ON by default" {
@@ -1061,4 +1080,122 @@ FIX
   assert_output --partial "1 row(s) carry no measurement"
   # (1+3)/2, not (1+3+0)/3, and 0 escalated rather than 1.
   assert_line --regexp '^no-skills +2 +2 +0 +2\.00'
+}
+
+# ── Collector liveness: absence is diagnosed, not guessed ───────────────
+#
+# Zero metrics rows in a window with closed issues has three causes with
+# different fixes: the terminal transition never called the collector
+# (unwired), the collector ran and every append failed (wired-but-failing), or
+# the row was written and lost (rows lost). A row cannot record its own
+# absence, so the collector persists its outcome as a structured event and
+# the digest classifies the blackout from it.
+
+@test "publish: a failure emits a CI warning annotation, not only a stderr line" {
+  # The fail-open contract makes the stderr WARN invisible: it lives in the
+  # log of an ephemeral runner nobody aggregates. The annotation is attached
+  # to the run summary, so "wired but failing" survives the job.
+  lib
+  health_fixture
+  WORK="$TMP/annotate"
+  mkdir -p "$WORK/.boucle-state/7"
+  cp "$TMP/.boucle-state/7/health.jsonl" "$WORK/.boucle-state/7/"
+  git init -q "$WORK"
+  git -C "$WORK" remote add origin "file:///definitely/not/a/repo"
+
+  run bash -c "cd '$WORK' && . '$REPO/lib/boucle.sh' 2>/dev/null;
+    GITHUB_ACTIONS=true BOUCLE_WORKSPACE='$WORK' boucle_metrics_publish 7 done 2>&1"
+  assert_success
+  assert_output --partial "::warning::"
+  assert_output --partial "git_append_failed"
+}
+
+@test "publish: a disabled collector records the event locally, pushes nothing" {
+  lib
+  health_fixture
+  metrics_remote
+  run bash -c "cd '$TMP/work' && . '$REPO/lib/boucle.sh' 2>/dev/null;
+    BOUCLE_METRICS_ENABLED=false BOUCLE_WORKSPACE='$TMP' boucle_metrics_publish 7 done 2>&1"
+  assert_success
+  run grep '"event":"metrics_publish"' "$TMP/.boucle-state/7/health.jsonl"
+  assert_success
+  assert_output --partial '"ok":false'
+  assert_output --partial '"reason":"disabled"'
+  run bash -c "git --git-dir='$TMP/origin.git' rev-parse --verify boucle/metrics 2>&1 || echo ABSENT"
+  assert_output --partial "ABSENT"
+}
+
+# digest_liveness_setup <work-dir> <metrics-jsonl> <raw-event-line>
+#
+# Build an orphan metrics branch carrying the given summary row(s) and ONE
+# raw/<iid>.jsonl line (the publish outcome event). A real digest run against
+# it then has closed issues, zero rows and exactly the liveness signal under
+# test.
+digest_liveness_setup() {
+  local work="$1" metrics="$2" event="$3"
+  git init -q --bare "$work.origin.git"
+  git init -q "$work"
+  git -C "$work" remote add origin "$work.origin.git"
+  git -C "$work" -c user.email=a@b -c user.name=a commit -q --allow-empty -m init
+  git -C "$work" push -q origin HEAD:main
+  git -C "$work" checkout -q --orphan boucle/metrics
+  : > "$work/metrics.jsonl"
+  [ -z "$metrics" ] || printf '%s\n' "$metrics" > "$work/metrics.jsonl"
+  mkdir -p "$work/raw"
+  [ -z "$event" ] || printf '%s\n' "$event" > "$work/raw/4242.jsonl"
+  git -C "$work" add -A
+  git -C "$work" -c user.email=a@b -c user.name=a commit -q -m metrics
+  git -C "$work" push -q origin boucle/metrics
+}
+
+digest_liveness_run() {
+  local work="$1" out="$2"
+  bash -c "
+    set -euo pipefail
+    unset GITHUB_REPOSITORY BOUCLE_PROJECT_ID BOUCLE_PROJECT_PATH || true
+    export BOUCLE_WORKSPACE='$work' BOUCLE_HOME='$REPO'
+    source '$REPO/lib/boucle.sh' 2> /dev/null || true
+    source '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null || true
+    cd '$work'
+    forge_issue_list_all() { echo '[{\"iid\":4242,\"title\":\"Closed\",\"closed_at\":\"2026-10-03T00:00:00Z\"}]'; }
+    retro_upstream_ready() { return 1; }
+    _retro_build_digest '$out' '2026-09-15T00:00:00Z'
+  "
+}
+
+@test "digest: zero rows with no publish event anywhere is UNWIRED" {
+  lib
+  WORK="$TMP/liveness-unwired"
+  digest_liveness_setup "$WORK" "" ""
+  run digest_liveness_run "$WORK" "$TMP/unwired.md"
+  assert_success
+  run cat "$TMP/unwired.md"
+  assert_output --partial "WARNING: metrics blackout"
+  assert_output --partial "unwired — no metrics_publish event anywhere for the window: the terminal transition never invoked the collector"
+  refute_output --partial "wired-failing"
+  refute_output --partial "wired-ok, rows lost"
+}
+
+@test "digest: failed publish events classify a blackout as WIRED-FAILING with the reason" {
+  lib
+  WORK="$TMP/liveness-failing"
+  digest_liveness_setup "$WORK" "" \
+    '{"timestamp":"2026-10-02T10:00:00Z","event":"metrics_publish","iid":"4242","ok":false,"reason":"git_append_failed"}'
+  run digest_liveness_run "$WORK" "$TMP/failing.md"
+  assert_success
+  run cat "$TMP/failing.md"
+  assert_output --partial "wired-failing — the collector ran and its last publish failed (reason: git_append_failed)"
+  refute_output --partial "unwired"
+}
+
+@test "digest: successful publish events with no row classify as WIRED-OK, ROWS LOST" {
+  lib
+  WORK="$TMP/liveness-lost"
+  digest_liveness_setup "$WORK" "" \
+    '{"timestamp":"2026-10-02T10:00:00Z","event":"metrics_publish","iid":"4242","ok":true,"reason":"published"}'
+  run digest_liveness_run "$WORK" "$TMP/lost.md"
+  assert_success
+  run cat "$TMP/lost.md"
+  assert_output --partial "wired-ok, rows lost — the collector reported a successful publish, but no row is visible in the window"
+  refute_output --partial "unwired"
 }
