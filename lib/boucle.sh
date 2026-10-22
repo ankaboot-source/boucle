@@ -1389,6 +1389,47 @@ boucle_metrics_gap_row() {
      }' 2> /dev/null || true
 }
 
+# boucle_ci_warning <message>
+#
+# Emit a warning annotation when the job runs on GitHub Actions. The publish
+# path is fail-open, so a failed metrics write reaches nobody by default: its
+# stderr WARN is a line in a job log no one aggregates, and the runner that
+# wrote it is gone before the retro runs. The annotation makes the failure
+# survive the job (it is attached to the run summary, not to the ephemeral
+# container). Other forges keep the stderr line the caller already emits.
+boucle_ci_warning() {
+  local msg="${1:-}"
+  [ -n "$msg" ] || return 0
+  case "${GITHUB_ACTIONS:-}" in
+    true) printf '::warning::%s\n' "$msg" ;;
+    *) : ;;
+  esac
+}
+
+# boucle_metrics_publish_event <iid> <ok> <reason>
+#
+# Persist the OUTCOME of a publish attempt as a structured event in the local
+# health log. Absence of a metrics row cannot distinguish the three ways a
+# blackout happens — the terminal transition never called the collector
+# (unwired), the collector ran but every append failed (wired-but-failing), or
+# the rows were written and lost before the window query (rows lost). The
+# summary row is the thing that may be missing, so the outcome must be
+# recorded somewhere else: one JSONL line, written with printf only (no jq
+# dependency — this must work exactly when the rest of the publish does not).
+#
+# <reason> is a closed vocabulary: published | disabled | no_health_data |
+# git_append_failed. Written before the raw-health sync so the event travels
+# to the metrics branch with the rest of the log.
+boucle_metrics_publish_event() {
+  local iid="${1:-}" ok="${2:-false}" reason="${3:-unknown}"
+  [ -n "$iid" ] || return 0
+  local file="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
+  mkdir -p "$(dirname "$file")" 2> /dev/null || true
+  printf '{"timestamp":"%s","event":"metrics_publish","iid":"%s","ok":%s,"reason":"%s"}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$iid" "$ok" "$reason" \
+    >> "$file" 2> /dev/null || true
+}
+
 # boucle_metrics_publish <iid> <terminal>
 #
 # Append one row to <metrics branch>:<metrics file>. This is the ONLY copy of
@@ -1409,6 +1450,7 @@ boucle_metrics_publish() {
   # becomes "why is the metrics branch empty?" three weeks later.
   if ! boucle_metrics_enabled; then
     echo "[boucle:metrics] disabled (BOUCLE_METRICS_ENABLED=${BOUCLE_METRICS_ENABLED:-}) — issue #$iid not published; health.jsonl is still written locally" >&2
+    boucle_metrics_publish_event "$iid" false "disabled"
     return 0
   fi
 
@@ -1425,21 +1467,36 @@ boucle_metrics_publish() {
     row=$(boucle_metrics_gap_row "$iid" "$terminal" "no_health_data" 2> /dev/null || echo "")
     if [ -z "$row" ] || [ "$row" = "null" ]; then
       echo "[boucle:metrics] no health data for issue #$iid and no usable jq — nothing to publish" >&2
+      boucle_metrics_publish_event "$iid" false "no_health_data"
+      boucle_ci_warning "boucle metrics publish failed for issue #$iid (reason: no_health_data) — the loop continues, the measurement does not"
+      boucle_metrics_sync_health "$iid" || true
       return 0
     fi
     echo "[boucle:metrics] no health data for issue #$iid — publishing a coverage row (coverage=no-data, gap=no_health_data) so the run is counted, not silenced" >&2
   fi
 
   local rowfile
-  rowfile=$(mktemp 2> /dev/null) || return 0
+  rowfile=$(mktemp 2> /dev/null) || {
+    boucle_metrics_publish_event "$iid" false "git_append_failed"
+    boucle_ci_warning "boucle metrics publish failed for issue #$iid (reason: git_append_failed) — the loop continues, the measurement does not"
+    return 0
+  }
   printf '%s\n' "$row" > "$rowfile"
   if boucle_metrics_git_append "$BOUCLE_METRICS_FILE" "$rowfile" \
     "metrics: issue #$iid ($terminal)"; then
     echo "[boucle:metrics] published issue #$iid ($terminal) to $BOUCLE_METRICS_BRANCH:$BOUCLE_METRICS_FILE" >&2
+    boucle_metrics_publish_event "$iid" true "published"
   else
     echo "[boucle:metrics] WARN: could not publish metrics for issue #$iid — the row is lost, the loop is not" >&2
+    boucle_metrics_publish_event "$iid" false "git_append_failed"
+    boucle_ci_warning "boucle metrics publish failed for issue #$iid (reason: git_append_failed) — the loop continues, the measurement does not"
   fi
   rm -f "$rowfile"
+  # The event is now part of the raw health log; push it so the retro digest
+  # can classify a blackout instead of only stating that one happened. A push
+  # failure here is the same failure the publish just reported, and the sync
+  # says so itself — the loop is never blocked.
+  boucle_metrics_sync_health "$iid" || true
   return 0
 }
 

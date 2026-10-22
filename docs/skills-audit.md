@@ -217,6 +217,15 @@ final. Orphan so the log never enters the consumer's history or triggers their
 CI; fail-open throughout, so a metrics write can never be what stops an issue
 reaching done.
 
+**A failed publish is itself measured.** Because the path is fail-open, a
+failed write would otherwise leave only a stderr `WARN` in an ephemeral job
+log. Each terminal transition appends a `metrics_publish` outcome event
+(`ok`, `reason`) to `health.jsonl`, syncs the raw log to the branch, and emits
+a GitHub Actions `::warning::` annotation on failure. The retro digest reads
+those events and names a blackout's cause — `unwired`, `wired-failing
+(reason)` or `wired-ok, rows lost` — instead of treating zero rows as one
+undifferentiated mystery.
+
 ### Two pre-existing bugs found while wiring this
 
 1. **`health.jsonl` never received a single run record.** `bin/jc` is *executed*
