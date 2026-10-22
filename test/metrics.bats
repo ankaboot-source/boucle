@@ -1199,3 +1199,30 @@ digest_liveness_run() {
   assert_output --partial "wired-ok, rows lost — the collector reported a successful publish, but no row is visible in the window"
   refute_output --partial "unwired"
 }
+
+@test "digest: a publish event outside the bounded raw slice is still found" {
+  # The digest bounds the per-issue rows it READS to 40, but the liveness
+  # question is about the whole branch: a consumer with a longer history must
+  # not be misread as unwired because its failing event fell outside the
+  # first 40 raw file names. Put 40 decoy logs first and the only event on
+  # the 41st.
+  lib
+  WORK="$TMP/liveness-unbounded"
+  digest_liveness_setup "$WORK" "" ""
+  local i
+  for i in $(seq 0 39); do
+    printf '%s\n' '{"timestamp":"2026-09-01T00:00:00Z","role":"worker","iteration":1,"outcome":"committed"}' \
+      > "$WORK/raw/$i.jsonl"
+  done
+  printf '%s\n' '{"timestamp":"2026-10-02T10:00:00Z","event":"metrics_publish","iid":"9999","ok":false,"reason":"git_append_failed"}' \
+    > "$WORK/raw/9999.jsonl"
+  git -C "$WORK" add -A
+  git -C "$WORK" -c user.email=a@b -c user.name=a commit -q -m metrics
+  git -C "$WORK" push -q origin boucle/metrics
+
+  run digest_liveness_run "$WORK" "$TMP/unbounded.md"
+  assert_success
+  run cat "$TMP/unbounded.md"
+  assert_output --partial "wired-failing — the collector ran and its last publish failed (reason: git_append_failed)"
+  refute_output --partial "unwired"
+}

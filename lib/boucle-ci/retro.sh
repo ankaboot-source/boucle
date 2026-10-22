@@ -353,22 +353,41 @@ _retro_build_digest() {
   # {"event":"metrics_publish","iid":...,"ok":true|false,"reason":...}.
   # Those events are the only signal that separates "never called" from
   # "called and failed" — both leave zero rows, and the blackout warning must
-  # state which one happened. The last event decides the diagnosis.
+  # state which one happened. Scan the WHOLE raw tree, not `$tmp/raw.jsonl`:
+  # that slice is bounded to $_RETRO_MAX_ISSUES, so a consumer with a longer
+  # history would misread a failing collector as unwired whenever the event
+  # fell outside the first 40 file names. `git grep` reads committed blobs
+  # from the fetched tree without a checkout.
   local publish_events=0 publish_last_ok="" publish_last_reason="unknown"
-  if [ -s "$tmp/raw.jsonl" ]; then
-    publish_events=$(jq -s '[.[] | select(.event == "metrics_publish")] | length' \
-      "$tmp/raw.jsonl" 2> /dev/null || echo 0)
-    case "$publish_events" in '' | *[!0-9]*) publish_events=0 ;; esac
-    if [ "$publish_events" -gt 0 ]; then
-      local last_event
-      last_event=$(jq -s -r '[.[] | select(.event == "metrics_publish")]
-        | sort_by(.timestamp // "") | last
-        | [(.ok == true), (.reason // "unknown")] | @tsv' \
-        "$tmp/raw.jsonl" 2> /dev/null || printf 'false\tunknown\n')
-      publish_last_ok=$(printf '%s' "$last_event" | cut -f1)
-      publish_last_reason=$(printf '%s' "$last_event" | cut -f2)
+  : > "$tmp/publish-events.jsonl"
+  if [ "$metrics_fetch" = yes ]; then
+    git grep -h -E '"event"[[:space:]]*:[[:space:]]*"metrics_publish"' \
+      FETCH_HEAD -- "$BOUCLE_METRICS_RAW_DIR" \
+      > "$tmp/publish-events.jsonl" 2> /dev/null \
+      || : > "$tmp/publish-events.jsonl"
+  fi
+  if [ -s "$tmp/publish-events.jsonl" ]; then
+    local event_stats
+    # fromjson? per line: one truncated health line (a crash mid-append) must
+    # not discard the events that DID parse and turn a real failure into a
+    # false "unwired".
+    event_stats=$(jq -R -s -r '
+      split("\n") | map(fromjson? // empty)
+      | map(select(.event == "metrics_publish")) as $e
+      | ($e | length) as $n
+      | ($e | sort_by(.timestamp // "") | last // {}) as $last
+      | (if $last.ok == true then "true"
+         elif $last.ok == false then "false"
+         else "unknown" end) as $last_ok
+      | "\($n)\t\($last_ok)\t\($last.reason // "unknown")"
+    ' "$tmp/publish-events.jsonl" 2> /dev/null || echo "")
+    if [ -n "$event_stats" ]; then
+      publish_events=$(printf '%s' "$event_stats" | cut -f1)
+      publish_last_ok=$(printf '%s' "$event_stats" | cut -f2)
+      publish_last_reason=$(printf '%s' "$event_stats" | cut -f3)
       [ -n "$publish_last_reason" ] || publish_last_reason=unknown
     fi
+    case "$publish_events" in '' | *[!0-9]*) publish_events=0 ;; esac
   fi
 
   : > "$tmp/rows.jsonl"
