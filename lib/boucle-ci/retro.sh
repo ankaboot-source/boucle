@@ -253,20 +253,32 @@ _retro_renumber_map() {
 #   wired-ok, rows lost
 #                     events exist and reported success, yet no row is in the
 #                     window — the row was written and lost after the fact.
+#   disabled          an explicit BOUCLE_METRICS_ENABLED opt-out, or an event
+#                     with reason=disabled — deliberate, not a defect.
 #
-# When the branch itself could not be fetched, neither rows nor events are
-# visible, so the digest says so rather than guessing between the three.
+# When the branch itself could not be fetched and no event is available, the
+# digest says so rather than guessing. An event CAN still be available in that
+# case: the last outcome is mirrored to a CI variable, which is the only
+# signal that survives a run whose metrics push failed.
 _retro_blackout_cause() {
   local events="${1:-0}" last_ok="${2:-}" last_reason="${3:-unknown}" fetched="${4:-no}"
   case "$events" in '' | *[!0-9]*) events=0 ;; esac
-  if [ "$fetched" != yes ]; then
+  if [ "$fetched" != yes ] && [ "$events" -eq 0 ]; then
     echo "unclassified — the metrics branch could not be fetched, so neither rows nor publish events are visible"
     return 0
   fi
   if [ "$events" -eq 0 ]; then
-    echo "unwired — no metrics_publish event anywhere for the window: the terminal transition never invoked the collector"
+    if ! boucle_metrics_enabled; then
+      echo "disabled — BOUCLE_METRICS_ENABLED opted out of the branch write: the blackout is deliberate, not a defect"
+    else
+      echo "unwired — no metrics_publish event anywhere for the window: the terminal transition never invoked the collector"
+    fi
   elif [ "$last_ok" = false ]; then
-    echo "wired-failing — the collector ran and its last publish failed (reason: ${last_reason:-unknown})"
+    if [ "$last_reason" = disabled ]; then
+      echo "disabled — BOUCLE_METRICS_ENABLED opted out of the branch write: the blackout is deliberate, not a defect"
+    else
+      echo "wired-failing — the collector ran and its last publish failed (reason: ${last_reason:-unknown})"
+    fi
   else
     echo "wired-ok, rows lost — the collector reported a successful publish, but no row is visible in the window"
   fi
@@ -365,6 +377,18 @@ _retro_build_digest() {
       FETCH_HEAD -- "$BOUCLE_METRICS_RAW_DIR" \
       > "$tmp/publish-events.jsonl" 2> /dev/null \
       || : > "$tmp/publish-events.jsonl"
+  fi
+  # The last outcome is also mirrored outside git. This is the ONLY signal
+  # that survives the failure the diagnosis exists to name: when every push
+  # fails, the branch does not exist, the fetch above fails, and no raw event
+  # can be read. Without this line the digest would answer `unclassified`
+  # forever for a consumer whose collector is wired and failing.
+  if type forge_ci_var_get > /dev/null 2>&1 && [ -n "${BOUCLE_PROJECT_ID:-}" ]; then
+    local _last_publish
+    _last_publish=$(forge_ci_var_get "$BOUCLE_METRICS_LAST_PUBLISH_VAR" 2> /dev/null || true)
+    if [ -n "$_last_publish" ]; then
+      printf '%s\n' "$_last_publish" >> "$tmp/publish-events.jsonl" 2> /dev/null || true
+    fi
   fi
   if [ -s "$tmp/publish-events.jsonl" ]; then
     local event_stats

@@ -221,9 +221,12 @@ reaching done.
 failed write would otherwise leave only a stderr `WARN` in an ephemeral job
 log. Each terminal transition appends a `metrics_publish` outcome event
 (`ok`, `reason`) to `health.jsonl`, syncs the raw log to the branch, and emits
-a GitHub Actions `::warning::` annotation on failure. The retro digest reads
-those events and names a blackout's cause — `unwired`, `wired-failing
-(reason)` or `wired-ok, rows lost` — instead of treating zero rows as one
+a GitHub Actions `::warning::` annotation on failure. The last outcome is also
+mirrored to the `BOUCLE_METRICS_LAST_PUBLISH` CI variable, the only sink that
+survives a push that never succeeds (the metrics branch and its raw events are
+exactly what such a push cannot produce). The retro digest reads those events
+and names a blackout's cause — `unwired`, `wired-failing (reason)`, `wired-ok,
+rows lost` or `disabled` — instead of treating zero rows as one
 undifferentiated mystery.
 
 ### Two pre-existing bugs found while wiring this
@@ -242,8 +245,9 @@ undifferentiated mystery.
    and `skills-used.json` "belong in the job artifacts" — and neither was ever
    listed in the artifact paths, on either forge. On an ephemeral runner every
    run collected them and then destroyed them with the container. Both, plus
-   `health.jsonl`, are now in the artifact paths on GitLab and in all four
-   GitHub upload steps.
+   `health.jsonl`, are now in the artifact paths on GitLab and in every GitHub
+   upload step, including the doctor and merger jobs where terminal
+   transitions happen.
 
 ### Reading it
 

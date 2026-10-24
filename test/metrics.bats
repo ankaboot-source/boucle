@@ -1226,3 +1226,82 @@ digest_liveness_run() {
   assert_output --partial "wired-failing — the collector ran and its last publish failed (reason: git_append_failed)"
   refute_output --partial "unwired"
 }
+
+# ── Collector liveness: the sink that survives a broken push (#170) ─────
+#
+# The events on the branch are read back through the same git remote the
+# publish failed to write. A consumer whose metrics push fails on EVERY run has
+# no branch at all, so the digest's fetch fails and the branch events cannot
+# exist. The last outcome is therefore mirrored to a CI variable, which is
+# independent of the git credential and readable by the retro job.
+
+@test "publish: the last outcome is mirrored to a CI variable" {
+  lib
+  health_fixture
+  WORK="$TMP/nowhere-var"
+  mkdir -p "$WORK/.boucle-state/7"
+  cp "$TMP/.boucle-state/7/health.jsonl" "$WORK/.boucle-state/7/"
+  git init -q "$WORK"
+  git -C "$WORK" remote add origin "file:///definitely/not/a/repo"
+
+  run bash -c "cd '$WORK' && . '$REPO/lib/boucle.sh' 2>/dev/null;
+    forge_ci_var_set() { printf '%s' \"\$2\" > '$TMP/last-publish'; };
+    BOUCLE_PROJECT_ID=owner/repo BOUCLE_WORKSPACE='$WORK' boucle_metrics_publish 7 done; echo \"rc=\$?\""
+  assert_output --partial "rc=0"
+  run cat "$TMP/last-publish"
+  assert_success
+  assert_output --partial '"event":"metrics_publish"'
+  assert_output --partial '"ok":false'
+  assert_output --partial '"reason":"git_append_failed"'
+}
+
+@test "digest: a push-failed blackout is diagnosed from the CI variable" {
+  # No boucle/metrics branch exists (every push failed), so metrics_fetch=no
+  # and there is no raw event to read. The mirrored last outcome is the only
+  # signal; without it the digest would answer `unclassified`.
+  lib
+  metrics_remote
+  stub_forge
+  run bash -c "
+    set -euo pipefail
+    unset GITHUB_REPOSITORY BOUCLE_PROJECT_PATH || true
+    export BOUCLE_WORKSPACE='$TMP/work' BOUCLE_HOME='$REPO' BOUCLE_PROJECT_ID=owner/repo
+    source '$REPO/lib/boucle.sh' 2> /dev/null || true
+    source '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null || true
+    cd '$TMP/work'
+    forge_ci_var_get() { printf '%s' '{\"timestamp\":\"2026-10-02T10:00:00Z\",\"event\":\"metrics_publish\",\"iid\":\"7\",\"ok\":false,\"reason\":\"git_append_failed\"}'; }
+    forge_issue_list_all() { echo '[{\"iid\":7,\"title\":\"Closed\",\"closed_at\":\"2026-10-03T00:00:00Z\"}]'; }
+    retro_upstream_ready() { return 1; }
+    _retro_build_digest '$TMP/push-failed.md' '2026-09-15T00:00:00Z'
+  "
+  assert_success
+  run cat "$TMP/push-failed.md"
+  assert_output --partial "WARNING: metrics blackout"
+  assert_output --partial "wired-failing — the collector ran and its last publish failed (reason: git_append_failed)"
+  refute_output --partial "unclassified"
+}
+
+@test "digest: an explicit opt-out is diagnosed disabled, not wired-failing" {
+  lib
+  WORK="$TMP/liveness-disabled"
+  digest_liveness_setup "$WORK" "" ""
+  BOUCLE_METRICS_ENABLED=false run digest_liveness_run "$WORK" "$TMP/disabled.md"
+  assert_success
+  run cat "$TMP/disabled.md"
+  assert_output --partial "disabled — BOUCLE_METRICS_ENABLED opted out"
+  refute_output --partial "wired-failing"
+}
+
+@test "digest: a disabled publish event is diagnosed disabled" {
+  # A consumer who opted out still gets an event (reason=disabled). It must
+  # not be reported as a failure: the collector did exactly what it was told.
+  lib
+  WORK="$TMP/liveness-disabled-event"
+  digest_liveness_setup "$WORK" "" \
+    '{"timestamp":"2026-10-02T10:00:00Z","event":"metrics_publish","iid":"4242","ok":false,"reason":"disabled"}'
+  run digest_liveness_run "$WORK" "$TMP/disabled-event.md"
+  assert_success
+  run cat "$TMP/disabled-event.md"
+  assert_output --partial "disabled — BOUCLE_METRICS_ENABLED opted out"
+  refute_output --partial "wired-failing"
+}

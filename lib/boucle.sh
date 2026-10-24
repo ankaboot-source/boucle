@@ -993,6 +993,13 @@ BOUCLE_METRICS_FILE="${BOUCLE_METRICS_FILE:-metrics.jsonl}"
 # succeeds while its effect is null. The raw log is therefore pushed as it is
 # written, not read back at the end from a file that is not there.
 BOUCLE_METRICS_RAW_DIR="${BOUCLE_METRICS_RAW_DIR:-raw}"
+# Last publish outcome, mirrored to a forge CI variable. The metrics branch is
+# the durable sink, but it is also the thing that fails in the failure mode
+# this mirror exists to diagnose: a publish that cannot push leaves no row and
+# no branch event. A CI variable is independent of the git credential, survives
+# the ephemeral runner, and the retro digest runs with the forge context needed
+# to read it. Value: one JSON object with the metrics_publish event shape.
+BOUCLE_METRICS_LAST_PUBLISH_VAR="${BOUCLE_METRICS_LAST_PUBLISH_VAR:-BOUCLE_METRICS_LAST_PUBLISH}"
 
 # boucle_metrics_enabled
 #
@@ -1420,14 +1427,27 @@ boucle_ci_warning() {
 # <reason> is a closed vocabulary: published | disabled | no_health_data |
 # git_append_failed. Written before the raw-health sync so the event travels
 # to the metrics branch with the rest of the log.
+#
+# The LAST outcome is also mirrored to a forge CI variable. The metrics branch
+# is the durable sink, but it is exactly what fails in the failure mode this
+# event exists to diagnose — a publish that cannot push leaves no branch event
+# either. The variable is independent of the git credential, survives the
+# ephemeral runner, and is readable by the retro digest in a later job.
 boucle_metrics_publish_event() {
   local iid="${1:-}" ok="${2:-false}" reason="${3:-unknown}"
   [ -n "$iid" ] || return 0
-  local file="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl"
+  local file="${BOUCLE_WORKSPACE:-.}/.boucle-state/${iid}/health.jsonl" ts line
   mkdir -p "$(dirname "$file")" 2> /dev/null || true
-  printf '{"timestamp":"%s","event":"metrics_publish","iid":"%s","ok":%s,"reason":"%s"}\n' \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$iid" "$ok" "$reason" \
-    >> "$file" 2> /dev/null || true
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  line=$(printf '{"timestamp":"%s","event":"metrics_publish","iid":"%s","ok":%s,"reason":"%s"}' \
+    "$ts" "$iid" "$ok" "$reason")
+  printf '%s\n' "$line" >> "$file" 2> /dev/null || true
+  # Guarded so a caller that has not loaded the forge backend (bin/jc, a local
+  # run, a unit test) pays nothing.
+  if type forge_ci_var_set > /dev/null 2>&1 && [ -n "${BOUCLE_PROJECT_ID:-}" ]; then
+    forge_ci_var_set "$BOUCLE_METRICS_LAST_PUBLISH_VAR" "$line" false false \
+      > /dev/null 2>&1 || true
+  fi
 }
 
 # boucle_metrics_publish <iid> <terminal>
@@ -1475,7 +1495,7 @@ boucle_metrics_publish() {
     echo "[boucle:metrics] no health data for issue #$iid — publishing a coverage row (coverage=no-data, gap=no_health_data) so the run is counted, not silenced" >&2
   fi
 
-  local rowfile
+  local rowfile publish_ok=1
   rowfile=$(mktemp 2> /dev/null) || {
     boucle_metrics_publish_event "$iid" false "git_append_failed"
     boucle_ci_warning "boucle metrics publish failed for issue #$iid (reason: git_append_failed) — the loop continues, the measurement does not"
@@ -1487,16 +1507,20 @@ boucle_metrics_publish() {
     echo "[boucle:metrics] published issue #$iid ($terminal) to $BOUCLE_METRICS_BRANCH:$BOUCLE_METRICS_FILE" >&2
     boucle_metrics_publish_event "$iid" true "published"
   else
+    publish_ok=0
     echo "[boucle:metrics] WARN: could not publish metrics for issue #$iid — the row is lost, the loop is not" >&2
     boucle_metrics_publish_event "$iid" false "git_append_failed"
     boucle_ci_warning "boucle metrics publish failed for issue #$iid (reason: git_append_failed) — the loop continues, the measurement does not"
   fi
   rm -f "$rowfile"
   # The event is now part of the raw health log; push it so the retro digest
-  # can classify a blackout instead of only stating that one happened. A push
-  # failure here is the same failure the publish just reported, and the sync
-  # says so itself — the loop is never blocked.
-  boucle_metrics_sync_health "$iid" || true
+  # can classify a blackout instead of only stating that one happened. When the
+  # row append itself failed, do NOT retry the push: the CI variable above is
+  # the durable sink for that case, and a broken push must not be attempted
+  # twice at a terminal transition. Never blocks the loop either way.
+  if [ "$publish_ok" = 1 ]; then
+    boucle_metrics_sync_health "$iid" || true
+  fi
   return 0
 }
 
