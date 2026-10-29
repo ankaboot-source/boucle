@@ -631,9 +631,12 @@ digest_run() {
   assert_success
   run cat "$TMP/blackout.md"
   # The count is window-scoped (the August issue is out) and names the two
-  # fault modes apart: fetched-but-empty is NOT a failed fetch.
-  assert_output --partial "WARNING: metrics blackout — 0 metrics rows for 2 closed issue(s) in window; the retro evidence layer is missing (collector unwired, or its rows dropped before the window query)."
-  assert_output --partial "fetched: yes, 0 rows on the branch — collector unwired or never ran"
+  # fault modes apart: fetched-but-empty is NOT a failed fetch. With no
+  # metrics_publish event anywhere, the cause is named as unwired rather than
+  # offered as a disjunction with "rows dropped".
+  assert_output --partial "WARNING: metrics blackout — 0 metrics rows for 2 closed issue(s) in window; the retro evidence layer is missing: unwired — no metrics_publish event anywhere for the window: the terminal transition never invoked the collector."
+  assert_output --partial "fetched: yes, 0 rows on the branch"
+  refute_output --partial "collector unwired or never ran"
   assert_output --partial "metrics rows: 0 in window, 0 on branch"
   assert_output --partial "last metrics row: never"
   assert_output --partial "list: raw file names (metrics-window list empty)"

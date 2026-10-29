@@ -915,6 +915,10 @@ merger:
   # Run on ANY available runner (tags: []) so an approved MR is never blocked
   # waiting behind a heavy worker/reviewer job on the single data runner.
   tags: []
+  # A terminal transition can happen here (merge → done/human) and writes the
+  # metrics liveness event into health.jsonl. Upload it, or a failed publish
+  # leaves no trace once the runner is gone.
+  artifacts: *agent_artifacts
   # Serialize all merges project-wide — one MR merges at a time.
   resource_group: boucle-merge
   needs:
@@ -1150,6 +1154,9 @@ doctor:
   # install that pins `default: tags:` to its own runner (README "Advanced —
   # dedicated runners") does not strand the doctor behind a running worker.
   tags: []
+  # Doctor sweeps are the most common terminal transition. Their health log
+  # carries the metrics_publish event, which must outlive the runner.
+  artifacts: *agent_artifacts
   # resource_group: prevents concurrent doctor runs. On shared runners
   # (SaaS or self-hosted), the doctor schedule fires every 10 min
   # and each run occupies a runner slot. Without this group, a slow

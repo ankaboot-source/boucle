@@ -951,6 +951,19 @@ jobs:
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
           [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
           $BOUCLE_HOME/bin/boucle-ci merger
+      # A terminal transition can happen here (merge → done/human) and writes
+      # the metrics liveness event into health.jsonl. Upload it, or a failed
+      # publish leaves no trace once the runner is gone.
+      - name: Upload metrics health
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: boucle-metrics-health-merger-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .boucle-state/**/health.jsonl
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
 
   # ── automerge: merge bot chore PRs (serial) ─────────────────────────────
   automerge:
@@ -1517,6 +1530,18 @@ jobs:
           export BOUCLE_PROJECT_ID="${{ github.repository }}"
           [ -d .boucle ] && export BOUCLE_HOME="$PWD/.boucle"
           $BOUCLE_HOME/bin/boucle-ci doctor
+      # Doctor sweeps are the most common terminal transition. Their health log
+      # carries the metrics_publish event, which must outlive the runner.
+      - name: Upload metrics health
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: boucle-metrics-health-doctor-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .boucle-state/**/health.jsonl
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
 
   # ── retro: doctor-chained self-improvement sweep (#139) ───────────────────────
   # Chained by the doctor via chain_to_role (workflow_dispatch with
