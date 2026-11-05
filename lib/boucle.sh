@@ -26,6 +26,13 @@ type forge_init &> /dev/null && {
   type forge_issue_get &> /dev/null || forge_init
 } || true
 
+# ── Freeride catalog + helpers (single source of truth: lib/freeride.sh) ──
+# Sourced here so triage's no-key guard (has_llm_config) resolves the SAME
+# catalog the agent runtime (bin/jc) uses. Fail-open: an install without the
+# file keeps working, minus the freeride-aware helpers.
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/freeride.sh" 2> /dev/null || true
+
 # ── Escalation context ──────────────────────────────────────────────────
 
 # job_link — markdown pointer to the CI job behind the current run.
@@ -3307,19 +3314,11 @@ boucle_deepen_rebase_fetch() {
 }
 
 # ── Freeride mode helpers ────────────────────────────────────────────────
-# has_llm_config: returns 0 if any LLM configuration is available
-# (legacy endpoint or at least one freeride provider key). Used by triage
-# to detect the no-key condition before launching the agent.
-has_llm_config() {
-  [ -n "${BOUCLE_LLM_BASE_URL:-}" ] && [ -n "${BOUCLE_LLM_API_KEY:-}" ] && return 0
-  for _key_var in BOUCLE_GROQ_API_KEY BOUCLE_NVIDIA_API_KEY \
-    BOUCLE_CEREBRAS_API_KEY BOUCLE_ZHIPU_API_KEY BOUCLE_CLOUDFLARE_API_KEY \
-    BOUCLE_HUGGINGFACE_API_KEY BOUCLE_MISTRAL_API_KEY; do
-    eval "_val=\${${_key_var}:-}"
-    [ -n "$_val" ] && return 0
-  done
-  return 1
-}
+# has_llm_config, is_freeride_mode, freeride_providers and
+# inject_freeride_thinking live in lib/freeride.sh (sourced above) — the
+# single source of truth shared with bin/jc, bin/setup and bin/doctor. The
+# hand-copied key list that used to sit here drifted from bin/jc's catalog
+# the moment a provider was added; it is gone on purpose.
 
 # ── Retro — dogfood self-improvement (#139) ──────────────────────────────
 #
@@ -3492,20 +3491,29 @@ retro_upstream_ready() {
 # state never advancing. Skipping BEFORE the chain/invocation turns that into
 # ONE doctor --audit advisory.
 #
-# The freeride key names are READ FROM bin/jc at runtime (the catalog's
-# `name|url|KEY|...` lines): a second, hand-copied list here would drift the
-# moment a provider is added. A missing/unreadable bin/jc fails CLOSED —
-# guessing provider keys is how the original bug class happened.
+# The freeride key names are READ FROM lib/freeride.sh at runtime (the
+# catalog's `name|url|KEY|...` lines): a second, hand-copied list here would
+# drift the moment a provider is added. A missing/unreadable catalog fails
+# CLOSED — guessing provider keys is how the original bug class happened.
+# `bin/jc` is read too, as a migration shim: during the bin/update window an
+# older consumer still carries the catalog there, and the readiness check
+# must not go dark mid-transition.
 retro_llm_ready() {
   # (a) explicit env pair — the standard consumer/dogfood path.
   if [ -n "${BOUCLE_LLM_BASE_URL:-}" ] && [ -n "${BOUCLE_LLM_API_KEY:-}" ]; then
     return 0
   fi
-  local jc_file="${BOUCLE_HOME:-.}/bin/jc"
-  [ -r "$jc_file" ] || return 1
+  local catalog_file="${BOUCLE_HOME:-.}/lib/freeride.sh"
+  local legacy_catalog_file="${BOUCLE_HOME:-.}/bin/jc"
+  # Fail CLOSED when NO catalog is readable at all: guessing provider keys is
+  # exactly how the original bug class happened — and a config.toml on disk
+  # must not rescue a repo whose catalog is missing.
+  if [ ! -r "$catalog_file" ] && [ ! -r "$legacy_catalog_file" ]; then
+    return 1
+  fi
   # (b) any freeride provider key, from the single-sourced catalog in
-  # bin/jc. The pipe-anchored extraction picks the catalog COLUMN only: a
-  # bare BOUCLE_FALLBACK_API_KEY does NOT make a usable config —
+  # lib/freeride.sh. The pipe-anchored extraction picks the catalog COLUMN
+  # only: a bare BOUCLE_FALLBACK_API_KEY does NOT make a usable config —
   # ensure_jcode_config writes a fallback profile only alongside the primary
   # pair, so counting it here would re-create the red-job-per-sweep bug.
   local key_var
@@ -3514,7 +3522,12 @@ retro_llm_ready() {
     if [ -n "${!key_var:-}" ]; then
       return 0
     fi
-  done < <(grep -oE '[|]BOUCLE_[A-Z]+_API_KEY[|]' "$jc_file" 2> /dev/null | tr -d '|' | sort -u)
+  done < <(
+    {
+      [ -r "$catalog_file" ] && grep -oE '[|]BOUCLE_[A-Z]+_API_KEY[|]' "$catalog_file" 2> /dev/null
+      [ -r "$legacy_catalog_file" ] && grep -oE '[|]BOUCLE_[A-Z]+_API_KEY[|]' "$legacy_catalog_file" 2> /dev/null
+    } | tr -d '|' | sort -u
+  )
   # (c) a pre-installed config on the runner (local dev / legacy installs).
   [ -f "${JCODE_HOME:-$HOME/.jcode}/config.toml" ]
 }

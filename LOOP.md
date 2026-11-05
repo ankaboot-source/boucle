@@ -408,8 +408,17 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_DOCTOR_BACKSTOP` | `21600` | Seconds after which a full sweep runs regardless of the fingerprint (6 h). |
 | `BOUCLE_STALENESS_IDLE_FACTOR` | `3` | Multiplier applied to `BOUCLE_STALENESS_THRESHOLD` when nothing is in flight. |
 | `BOUCLE_UPDATE_MODE` | `release` | Update mode: `release` (pinned engine release) or `dev` (tracking branch). |
-| `BOUCLE_LLM_BASE_URL` | — | LLM API endpoint (any OpenAI-compatible). |
-| `BOUCLE_LLM_API_KEY` | — | LLM API key (masked secret). |
+| `BOUCLE_LLM_BASE_URL` | — | LLM API endpoint (any OpenAI-compatible). Legacy mode: set with `BOUCLE_LLM_API_KEY`. |
+| `BOUCLE_LLM_API_KEY` | — | LLM API key (masked secret). Legacy mode: wins over freeride while both legacy variables are set. |
+| `BOUCLE_NVIDIA_API_KEY` | — | Freeride provider key (NVIDIA NIM, masked secret). |
+| `BOUCLE_GROQ_API_KEY` | — | Freeride provider key (Groq, masked secret). |
+| `BOUCLE_CEREBRAS_API_KEY` | — | Freeride provider key (Cerebras, masked secret). |
+| `BOUCLE_ZHIPU_API_KEY` | — | Freeride provider key (Zhipu BigModel, masked secret). |
+| `BOUCLE_CLOUDFLARE_API_KEY` | — | Freeride provider key (Cloudflare Workers AI, masked secret). Requires `BOUCLE_CLOUDFLARE_ACCOUNT_ID`. |
+| `BOUCLE_CLOUDFLARE_ACCOUNT_ID` | — | Cloudflare account id (non-masked), required alongside `BOUCLE_CLOUDFLARE_API_KEY` — it is embedded in the provider base URL. |
+| `BOUCLE_HUGGINGFACE_API_KEY` | — | Freeride provider key (Hugging Face router, masked secret). |
+| `BOUCLE_MISTRAL_API_KEY` | — | Freeride provider key (Mistral, masked secret). |
+| `BOUCLE_<PROVIDER>_MODEL` | *(catalog default)* | Per-provider model override in freeride mode (`BOUCLE_GROQ_MODEL`, `BOUCLE_NVIDIA_MODEL`, ...). |
 | `BOUCLE_VISION_ROUTING` | `enabled` | Vision model routing: `enabled` or `disabled`. |
 | `BOUCLE_VISION_MODEL` | `minimax-m3` | Vision model for image-enabled roles. |
 | `BOUCLE_VISION_ROLES` | `triage,worker,reviewer` | Roles eligible for vision model routing (comma-separated). |
@@ -438,6 +447,20 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_MAX_PROMPT_CHARS` | `0` | Thread-level ceiling on the **assembled** prompt. `0` = disabled. See §Prompt budget. |
 | `BOUCLE_PROMPT_WARN_CHARS` | `0` | Log a warning above this assembled size without altering the prompt. `0` = never warn. |
 | `BOUCLE_ALLOWED_USERS` | *(installer)* | Issue allow-list: comma-separated usernames whose issues boucle accepts. Seeded by bin/setup with the installer's username. Unset/empty = allow list disabled (legacy fail-open). Case-insensitive. |
+
+### LLM modes (legacy vs freeride)
+
+boucle resolves its LLM in strict priority order:
+
+1. **Legacy** — `BOUCLE_LLM_BASE_URL` + `BOUCLE_LLM_API_KEY` (any OpenAI-compatible endpoint). This pair WINS whenever both are set: freeride provider keys sitting alongside it are inert.
+2. **Freeride** — any free-tier provider key (`BOUCLE_<PROVIDER>_API_KEY`). The engine rotates across the configured providers on a provider failure or quota exhaustion, and injects each provider's thinking hint. The catalog (base URLs, per-role default models, thinking) is single-sourced in `lib/freeride.sh` — never hand-copy it.
+3. **No-key** — no config at all. Triage posts a help message explaining how to set a free-tier key; nothing else runs.
+
+`bin/setup` offers the choice — `--llm-mode legacy|freeride`, or the `BOUCLE_LLM_MODE` env fallback. A fresh install defaults to legacy, so existing installs are unchanged; if a freeride key or the legacy pair is already configured, setup keeps the detected mode.
+
+**Switch legacy → freeride.** Freeride is inert while the legacy pair is set (step 1 wins). Remove BOTH `BOUCLE_LLM_BASE_URL` and `BOUCLE_LLM_API_KEY`, then set at least one `BOUCLE_<PROVIDER>_API_KEY`. `bin/setup --llm-mode freeride` performs the removal: it requires explicit confirmation (interactive `y`, or `BOUCLE_LLM_DELETE_LEGACY=true` non-interactively), and in `--dry-run` it prints the deletion without executing it. Declining prints a warning that the legacy pair keeps priority.
+
+`bin/doctor --audit` raises a **blocker** only when NEITHER path is configured; it lists the detected freeride providers with their resolved models otherwise.
 
 ### Issue allow list
 

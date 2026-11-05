@@ -91,12 +91,24 @@ run_config_audit() {
   local vars_url="https://${HOST}/${PROJECT_ID:-<project>}/-/settings/ci_cd"
   [ "$FORGE" = "github" ] && vars_url="https://github.com/${PROJECT_ID:-<owner/repo>}/settings/secrets/actions"
 
-  # The loop cannot run at all without a key.
-  if [ -z "${BOUCLE_LLM_API_KEY:-}" ]; then
-    audit_blocker "BOUCLE_LLM_API_KEY is not set" \
-      "Add it as a MASKED variable: $vars_url"
-  else
+  # The loop cannot run at all without an LLM config. Two paths satisfy it:
+  # the legacy pair (BOUCLE_LLM_BASE_URL + BOUCLE_LLM_API_KEY) or any
+  # freeride provider key (BOUCLE_<PROVIDER>_API_KEY). A repo running fine
+  # in freeride mode used to be flagged BLOCKER because only the legacy key
+  # was checked. The provider catalog lives in lib/freeride.sh (sourced via
+  # lib/boucle.sh above); legacy still passes as before.
+  if [ -n "${BOUCLE_LLM_API_KEY:-}" ]; then
     pass "BOUCLE_LLM_API_KEY is set"
+  elif [ -n "$(freeride_providers triage 2> /dev/null || true)" ]; then
+    local fr_detected="" fr_name fr_model
+    while IFS='|' read -r fr_name _ _ fr_model _; do
+      [ -n "$fr_name" ] || continue
+      fr_detected="${fr_detected:+$fr_detected, }${fr_name} (${fr_model})"
+    done <<< "$(freeride_providers triage 2> /dev/null || true)"
+    pass "freeride LLM config detected: $fr_detected"
+  else
+    audit_blocker "BOUCLE_LLM_API_KEY is not set and no freeride provider key is configured" \
+      "Set BOUCLE_LLM_BASE_URL + BOUCLE_LLM_API_KEY (the 'BOUCLE_LLM_API_KEY' value must be MASKED), or any freeride provider key (BOUCLE_GROQ_API_KEY, BOUCLE_NVIDIA_API_KEY, ...) at $vars_url"
   fi
 
   # external mode has nowhere to point e2e without a live URL.
