@@ -51,6 +51,12 @@
 
 set -uo pipefail
 
+# Pin the numeric locale: the table (and its assertions) expect '.' as the
+# decimal separator. bash's printf builtin respects LC_NUMERIC — on a
+# fr_FR.UTF-8 host it prints '2,00' and every dot-decimal consumer of this
+# output (tests, dashboards, diff checks) breaks silently.
+export LC_ALL=C
+
 MODE="observed"
 PER_SKILL=0
 PER_LESSON=0
