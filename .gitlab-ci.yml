@@ -1049,6 +1049,14 @@ deploy:
     # Not running is the same behaviour minus the pipeline entry.
     - if: $BOUCLE_DEPLOY_MODE == "external"
       when: never
+    # Mirror of build-site's "no publisher" guard: with BOUCLE_DEPLOY_CMD empty
+    # and no gitlab-pages provider there is nothing to build or deploy. Leaving
+    # deploy included while build-site is excluded makes its non-optional
+    # `needs: build-site` reference an absent job — GitLab creates the push
+    # pipeline then fails it immediately (0 job, created_at == finished_at).
+    # test/ci-needs-dag.bats asserts the two exclusion sets stay identical.
+    - if: $BOUCLE_DEPLOY_CMD == "" && $BOUCLE_DEPLOY_PROVIDER != "gitlab-pages"
+      when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
   needs:
     - job: build-site
@@ -1256,6 +1264,11 @@ pages:
   tags: []
   rules:
     - if: $BOUCLE_ENABLED != "true"
+      when: never
+    # pages needs build-site (non-optional). In external mode build-site is
+    # excluded, so pages must be excluded too or the pipeline is unrunnable
+    # (invalid DAG, 0 job). See test/ci-needs-dag.bats.
+    - if: $BOUCLE_DEPLOY_MODE == "external"
       when: never
     - if: $BOUCLE_DEPLOY_PROVIDER != "gitlab-pages"
       when: never
