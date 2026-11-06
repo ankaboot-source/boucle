@@ -84,6 +84,34 @@ render() {
   refute_output --partial "inherit:"
 }
 
+# ── Explicit BOUCLE_PROFILE variable (#186) ───────────────────────────
+
+@test "render_root_shim emits an explicit BOUCLE_PROFILE for every profile" {
+  run render site "" false false
+  assert_success
+  assert_output --partial 'BOUCLE_PROFILE: "site"'
+
+  run render infra "" true true
+  assert_success
+  assert_output --partial 'BOUCLE_PROFILE: "infra"'
+}
+
+@test "render_root_shim auto defers: BOUCLE_PROFILE=auto and NO infra preset" {
+  run render auto "" true true
+  assert_success
+  assert_output --partial 'BOUCLE_PROFILE: "auto"'
+  # The preset (and its inherit contract) is deferred to the first issue.
+  refute_output --partial "BOUCLE_DEPLOY_MODE"
+  refute_output --partial "BOUCLE_REVIEW_MODE"
+  refute_output --partial "BOUCLE_E2E_COMMAND"
+  refute_output --partial "BOUCLE_BUILD_CMD"
+  refute_output --partial "BOUCLE_UPDATE_DISABLE"
+  # No `inherit:` YAML key is declared (the header only explains it is absent).
+  refute_line --regexp '^[[:space:]]*inherit:'
+  # The deferral is documented in the header.
+  assert_output --partial "defers the install-profile decision"
+}
+
 # ── CLI surface ───────────────────────────────────────────────────────
 
 @test "bin/setup --help documents --profile and BOUCLE_PROFILE" {
@@ -96,7 +124,7 @@ render() {
 @test "bin/setup rejects an unknown --profile at parse time" {
   run env -i PATH="$PATH" HOME="$HOME" bash bin/setup --profile bogus
   assert_failure
-  assert_output --partial "--profile must be 'site' or 'infra'"
+  assert_output --partial "--profile must be 'site', 'infra' or 'auto'"
 }
 
 @test "bin/setup wires BOUCLE_PROFILE and the shim renderer" {

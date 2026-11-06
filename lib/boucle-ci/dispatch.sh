@@ -1056,15 +1056,19 @@ boucle_ci_dispatch() {
     # signals they've taken action (e.g. added an API key after a no-key
     # or quota-exhausted help message). dispatch_human_actor handles
     # mono-user mode (where the human IS the bot account).
+    # thumbs_down also re-triggers (issue #186): the first-issue profile
+    # determination asks a yes/no question, and 👎 ("stay site") is a
+    # decisive answer — without this it would never reach triage.
     if [ "$OBJECT_KIND" = "note" ] && dispatch_human_actor; then
       SHOULD_TRIAGE=true
     elif [ "$OBJECT_KIND" = "emoji" ] && dispatch_human_actor; then
       EMOJI_NAME=$(jq -r '.object_attributes.name // empty' "$BOUCLE_TRIGGER_PAYLOAD")
       EMOJI_ACTION=$(jq -r '.object_attributes.action // empty' "$BOUCLE_TRIGGER_PAYLOAD")
       AWARDABLE_TYPE=$(jq -r '.object_attributes.awardable_type // empty' "$BOUCLE_TRIGGER_PAYLOAD")
+      EMOJI_CANON=$(forge_reaction_canonical "$EMOJI_NAME" 2> /dev/null || echo "")
       if [ "$EMOJI_ACTION" = "award" ] \
         && [ "$AWARDABLE_TYPE" = "Note" ] \
-        && echo "$EMOJI_NAME" | grep -Eq "^($BOUCLE_SPEC_APPROVAL_EMOJIS)$"; then
+        && { echo "$EMOJI_NAME" | grep -Eq "^($BOUCLE_SPEC_APPROVAL_EMOJIS)$" || [ "$EMOJI_CANON" = "thumbs_down" ]; }; then
         SHOULD_TRIAGE=true
       fi
     fi

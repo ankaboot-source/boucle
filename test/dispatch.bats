@@ -300,6 +300,19 @@ guard_decision() {
   [ "$count" -ge 3 ]
 }
 
+@test "needs-info: a thumbs_down reaction re-triggers triage (#186)" {
+  # The first-issue profile determination asks a yes/no question and 👎
+  # ("stay site") is a decisive answer — the needs-info emoji branch must
+  # accept thumbs_down, not only the spec-approval set.
+  block=$(awk '
+    /^  elif echo "\$LABELS" \| grep -q "boucle:needs-info"; then$/ { p = 1 }
+    p == 1 { print }
+    p == 1 && /^  elif echo "\$LABELS" \| grep -q "boucle:todo"/ { exit }
+  ' lib/boucle-ci/dispatch.sh)
+  echo "$block" | grep -q 'thumbs_down'
+  echo "$block" | grep -q 'SHOULD_TRIAGE=true'
+}
+
 # ── Spec-gate approval contract (A2, lesson #83 + #89): three approval signals ─
 # A human reply on a boucle:spec-review issue is an amendment UNLESS its first
 # line is the magic word `approved` (case-insensitive, standalone). The magic

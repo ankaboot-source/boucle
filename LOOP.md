@@ -400,6 +400,81 @@ The preset sets `BOUCLE_DEPLOY_MODE=external`, `BOUCLE_REVIEW_MODE=diff`,
 `BOUCLE_BUILD_CMD`, and writes the neutralization contract into the shim. See
 Recipe 2 for an Ansible install.
 
+### First-issue profile determination (#186)
+
+The install profile is normally decided once, at `bin/setup` time. That leaves
+two gaps: a non-interactive install silently defaults to `site` (so an infra
+repo runs the full site pipeline), and a repo can change shape after install.
+`--profile auto` closes both gaps by deferring the decision to the **first
+issue entering the loop**.
+
+```mermaid
+flowchart TD
+    A[First issue triaged] --> B{BOUCLE_PROFILE explicit?}
+    B -- site/infra --> Z[No intervention — normal triage]
+    B -- auto/unset --> C[detect_project_profile]
+    C -- site/unknown --> Z
+    C -- infra --> D[Post determination comment<br/>needs-info + assign reporter]
+    D --> E{Human answers}
+    E -- thumbsup/heart/rocket/tada<br/>or 'profile: infra' --> F[Apply infra preset<br/>update comment to applied<br/>continue triage]
+    E -- thumbs-down<br/>or 'profile: site' --> G[Record site<br/>update comment to applied<br/>continue triage]
+    E -- no decisive answer --> D
+```
+
+**Detection signals** (`lib/profile.sh` `detect_project_profile`, deterministic,
+no LLM, no network):
+
+- **site** — `astro.config.*`, `next.config.*`, `nuxt.config.*`, `mkdocs.yml`,
+  `_config.yml`, `hugo.toml|yaml|yml`, or a `package.json` declaring `astro`,
+  `next`, `nuxt`, `gatsby`, `@11ty/eleventy`, `vitepress` or `hugo`.
+- **infra** — `ansible.cfg`, a root `*.tf` or a `terraform/` directory, a
+  playbook-shaped YAML (`hosts:` + `tasks:`/`roles:`), `kustomization.yaml`,
+  `Pulumi*.yaml`, or a CloudFormation template (`AWSTemplateFormatVersion`).
+- **unknown** — both families present (ambiguous: the human arbitrates, both
+  evidences shown) or neither.
+
+**Flow.** Triage runs the guard BEFORE the attachment fetch and the agent run
+(same rail as the no-key guard). An explicit `BOUCLE_PROFILE=site|infra` (YAML
+shim variable — `bin/setup --profile site|infra`, or `auto` from
+`--profile auto`) makes the guard exit silently, permanently. Otherwise:
+
+1. No determination comment yet → detect. `site`/`unknown` → normal triage,
+   zero friction. `infra` → post a determination comment (marker
+   `<!-- boucle:needs-info v=1 reason=profile -->`), label `boucle:needs-info`,
+   assign the reporter, exit 0 — no agent run is burned.
+2. Re-trigger (👍/❤️/🚀/🎉 reaction or a `profile: site|infra` reply on the
+   determination comment) → apply the preset, update the comment to its applied
+   state (marker `<!-- boucle:profile-applied v=1 profile=infra -->`), clear
+   needs-info, and continue the issue's normal triage.
+3. Idempotent: an applied marker or an explicit `BOUCLE_PROFILE` permanently
+   suppresses the determination.
+
+**What is applied automatically** (`forge_ci_var_set`) on confirmation:
+
+| Variable | infra |
+|---|---|
+| `BOUCLE_PROFILE` | `infra` |
+| `BOUCLE_DEPLOY_MODE` | `external` |
+| `BOUCLE_REVIEW_MODE` | `diff` |
+| `BOUCLE_E2E_COMMAND` | `true` |
+| `BOUCLE_BUILD_CMD` | `true` |
+| `BOUCLE_UPDATE_DISABLE` | `true` |
+
+GitLab: project CI/CD variables override the root shim's `variables:` block,
+so the preset takes effect on the next job without editing the shim. GitHub: a
+repo Variable only reaches a job when the workflow maps it in `env:` — the
+preset variables are mapped, but `BOUCLE_PROFILE` is not, so the determination
+comment prints the exact `gh variable set` commands (fail-open, documented
+deviation).
+
+**What is NOT applied automatically.** The variables cannot neutralize the
+engine's inherited `default:` (`boucle-agents` image + `interruptible: true`).
+That contract lives in the root shim (`inherit: default: false` on every
+pre-existing job, see §Non-site consumer (infra)) and only
+`bin/setup --profile infra` regenerates it. The determination comment warns
+about this; a confirmed infra profile SHOULD run `bin/setup --profile infra`
+once to fully harden the shim.
+
 #### Doctor cron (`BOUCLE_DOCTOR_CRON`)
 
 The doctor runs on a forge **schedule**, not in this YAML — create it in
@@ -432,6 +507,7 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_METRICS_FILE` | `metrics.jsonl` | File on that branch, one JSON object per issue. |
 | `BOUCLE_METRICS_RAW_DIR` | `raw` | Directory on that branch holding `<issue>.jsonl` — the raw per-run health lines the summary row is computed from, pushed as they are written so they outlive the ephemeral job that produced them. |
 | `BOUCLE_METRICS_SYNC` | `true` | Push each health line to the branch as it is appended. Opt-out, same falsy spellings as `BOUCLE_METRICS_ENABLED`. Turning it off costs a network round-trip per agent run and gives up the summary row for any issue whose terminal label is applied by a different job than the one that did the work — which is most of them. |
+| `BOUCLE_PROFILE` | *(empty)* | Install profile: `site` (a static site boucle builds and deploys), `infra` (a non-site repo: external deploy, diff review, command-mode e2e, neutral build — see [Non-site consumer (infra)](#non-site-consumer-infra)), or `auto` (defer the decision to the first triaged issue, #186 — see [First-issue profile determination](#first-issue-profile-determination-186)). Set by `bin/setup --profile ...` (written into the root shim as an explicit variable); an empty value is treated as `auto`. An explicit `site`/`infra` permanently suppresses the first-issue determination. |
 | `BOUCLE_DEPLOY_MODE` | `self` | Deploy mode: `self` (boucle runs `BOUCLE_DEPLOY_CMD`) or `external` (consumer's own CI/CD deploys). A repo that publishes nothing MUST use `external` — see [Non-static-site consumers](#non-static-site-consumers). |
 | `BOUCLE_REVIEW_MODE` | `preview` | Review mode: `preview` (tests deployed preview), `diff` (reviews PR diff + check suites), or `screenshot` (builds locally, captures screenshots of impacted pages, reviewer grades via vision-model descriptions guided by acceptance criteria). **Auto-fallback:** `preview` mode auto-activates `screenshot` when the deploy provider has no per-branch preview (`github-pages`, `gitlab-pages`) — the worker captures screenshots locally instead of overwriting production, and the reviewer grades from those screenshots. A screenshot failure degrades to `diff` review. |
 | `BOUCLE_DEPLOY_PROVIDER` | *(empty)* | Deploy provider profile: `gitlab-pages` (declarative, token-less — leave `BOUCLE_DEPLOY_CMD` empty, live URL = `$CI_PAGES_URL`) or `github-pages` (declarative, token-less — worker pushes `$BOUCLE_BUILD_OUTPUT` to `gh-pages`, live URL = `https://<owner>.github.io/<repo>/`). Empty = deploy via `BOUCLE_DEPLOY_CMD`. |
