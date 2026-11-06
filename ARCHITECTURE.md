@@ -181,10 +181,10 @@ flowchart LR
 | `post-merge` | trigger `BOUCLE_ROLE=post-merge` (from merger, catchup, or doctor) | — | deploy-wait + e2e trigger | `lib/boucle-ci/post-merge.sh` |
 | `catchup` | trigger `BOUCLE_ROLE=catchup` | — | direct-merge recovery: audit note + chain to post-merge | `lib/boucle-ci/catchup.sh` |
 | `build-site` | push to default branch, unless `BOUCLE_DEPLOY_MODE=external` or no publisher is configured | — | one build, consumed as an artifact by `deploy` and `pages` | inline |
-| `deploy` | push to default branch, unless `BOUCLE_DEPLOY_MODE=external` | — | build + deploy (Cloudflare Pages / GitLab Pages) | `lib/boucle-ci/deploy.sh` |
+| `deploy` | push to default branch, unless `BOUCLE_DEPLOY_MODE=external` or no publisher is configured (one exclusion set with `build-site`) | — | build + deploy (Cloudflare Pages / GitLab Pages) | `lib/boucle-ci/deploy.sh` |
 | `e2e` | trigger `BOUCLE_ROLE=e2e` | `boucle-issue-$BOUCLE_ISSUE` | verify production URL, SHA-anchored verdict | `lib/boucle-ci/e2e.sh` |
 | `doctor` | schedule (every 10 min) | — | self-healing board sweep | `lib/boucle-ci/doctor.sh` |
-| `pages` | push to default branch | — | GitLab Pages publish | inline |
+| `pages` | push to default branch, `BOUCLE_DEPLOY_PROVIDER=gitlab-pages` and not `BOUCLE_DEPLOY_MODE=external` (co-excludes with `build-site`) | — | GitLab Pages publish | inline |
 
 **Role chaining.** Stages are chained via `chain_to_role` →
 `forge_trigger_role`, which triggers a new pipeline with `BOUCLE_ISSUE` +

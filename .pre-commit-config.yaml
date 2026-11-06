@@ -50,12 +50,10 @@ repos:
         entry: bin/check-shell
         language: system
         types: [shell]
-        # .bats files carry `@test "..." { ... }` syntax that is not valid
-        # bash — bin/check-shell runs `bash -n` on whatever files pre-commit
-        # hands it (types: [shell] classifies .bats as shell), so every
-        # commit touching a bats test would be blocked. The bats suite has
-        # its own hook below; exclude the tests from the shell gate.
-        exclude: ^(\.jcode/|.*\.bats$)
+        # No .bats exclusion here, deliberately: bin/check-shell partitions
+        # .bats files itself (bats --count gather phase) — see its header.
+        # Excluding them at the hook level would bypass that gate.
+        exclude: ^\.jcode/
 
   # ── shfmt (formatting) ──
   # Exclude .jcode/ — reformatting vendored scripts creates churn that

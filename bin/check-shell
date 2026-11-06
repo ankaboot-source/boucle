@@ -14,7 +14,7 @@
 # quoting class (SC2086) was invisible. This gate closes that hole and adds the
 # definition-order check shellcheck cannot express.
 #
-# Three layers:
+# Three layers for shell files:
 #   1. `bash -n` over every engine shell file (syntax baseline).
 #   2. shellcheck at `--severity=info` with a documented exclusion list — the
 #      warning threshold alone skips the info-level quoting class (SC2086),
@@ -22,6 +22,17 @@
 #   3. A trap-handler ordering check: an EXIT trap that calls a function
 #      defined later in the file silently emits empty fields. shellcheck does
 #      not model definition order, so it is checked here explicitly.
+#
+# `.bats` files are bats DSL, not bash: `bash -n` rejects every `@test` block,
+# and shellcheck reports bats idioms as defects (SC2329 "function never
+# invoked", SC2030/SC2031 subshell scoping). When a `.bats` file is passed
+# explicitly — the pre-commit hook classifies `.bats` as `shell`, so a commit
+# that touches one lands here — layers 1-3 are replaced by `bats --count`:
+# bats' gather phase parses the file without running a test, so a malformed
+# file fails and a valid one costs milliseconds. The full suite (`make test`)
+# remains the real behavioural validation. The discovery walk in
+# discover_shell_files does not match a bats shebang, so standalone runs keep
+# their existing scope.
 #
 # Suppressions: repo-wide exceptions live in .shellcheckrc and MUST carry a
 # comment naming the reason. Per-line exceptions MUST use an inline
@@ -133,7 +144,7 @@ run_shellcheck() {
 }
 
 main() {
-  local -a files
+  local -a files shell_files=() bats_files=()
   if [ "$#" -gt 0 ]; then
     files=("$@")
     for f in "${files[@]}"; do
@@ -149,24 +160,57 @@ main() {
     echo "No shell files to check"
     return 0
   fi
-  command -v shellcheck > /dev/null 2>&1 || {
-    echo "ERROR: shellcheck not installed (brew install shellcheck)" >&2
-    return 1
-  }
 
-  local rc=0 f
-  echo ">> bash -n (${#files[@]} file(s))"
+  # Partition by language: `.bats` is bats DSL, not bash. Layers 1-3 cannot
+  # parse it, so those files take the bats gather phase instead (documented
+  # in the header). Keeping the exclusion here — rather than in the hook's
+  # `exclude:` — means a manually-invoked gate and a consumer's CI get the
+  # same correct behaviour as the pre-commit hook.
   for f in "${files[@]}"; do
-    bash -n "$f" || rc=1
+    case "$f" in
+      *.bats) bats_files+=("$f") ;;
+      *) shell_files+=("$f") ;;
+    esac
   done
 
-  echo ">> shellcheck (info severity, unset/quoting class)"
-  run_shellcheck "${files[@]}" || rc=1
+  local rc=0 f out
+  if [ "${#shell_files[@]}" -gt 0 ]; then
+    command -v shellcheck > /dev/null 2>&1 || {
+      echo "ERROR: shellcheck not installed (brew install shellcheck)" >&2
+      return 1
+    }
 
-  echo ">> trap handler ordering"
-  for f in "${files[@]}"; do
-    check_trap_order "$f" || rc=1
-  done
+    echo ">> bash -n (${#shell_files[@]} file(s))"
+    for f in "${shell_files[@]}"; do
+      bash -n "$f" || rc=1
+    done
+
+    echo ">> shellcheck (info severity, unset/quoting class)"
+    run_shellcheck "${shell_files[@]}" || rc=1
+
+    echo ">> trap handler ordering"
+    for f in "${shell_files[@]}"; do
+      check_trap_order "$f" || rc=1
+    done
+  fi
+
+  if [ "${#bats_files[@]}" -gt 0 ]; then
+    command -v bats > /dev/null 2>&1 || {
+      echo "ERROR: bats not installed (brew install bats-core)" >&2
+      return 1
+    }
+
+    echo ">> bats --count (${#bats_files[@]} file(s))"
+    for f in "${bats_files[@]}"; do
+      # --count runs only the gather phase: a syntax error in an @test body
+      # fails here while no test is executed. Output is suppressed on success
+      # (it is only the test count); on failure it names the file and line.
+      if ! out=$(bats --count "$f" 2>&1); then
+        printf '%s\n' "$out" >&2
+        rc=1
+      fi
+    done
+  fi
 
   if [ "$rc" -ne 0 ]; then
     echo "FAIL: shell safety gate — fix the findings above (intentional cases need a documented suppression in .shellcheckrc or an inline directive)"

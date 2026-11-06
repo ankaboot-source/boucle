@@ -99,7 +99,10 @@ setup() {
   assert_success
 }
 
-@test "doctor fails when BOUCLE_DEPLOY_MODE=external but BOUCLE_LIVE_URL is unset" {
+@test "doctor warns (not fails) when BOUCLE_DEPLOY_MODE=external but BOUCLE_LIVE_URL is unset" {
+  # A consumer that publishes nothing (an Ansible playbook, a backend) has no
+  # live URL on purpose: e2e runs BOUCLE_E2E_COMMAND. This MUST NOT fail the
+  # doctor. Self mode (no deploy command) still fails — see the next test.
   run bash -c '
     FAILURES=0
     pass() { echo "  ✓ $1"; }
@@ -112,9 +115,31 @@ setup() {
     BOUCLE_DEPLOY_MODE=external
     BOUCLE_LIVE_URL=""
     source <(sed -n "/^# ── Mode-specific checks/,/^echo \"\"/p" bin/doctor)
+    [ "$FAILURES" -eq 0 ]
+  '
+  assert_success
+  assert_output --partial "BOUCLE_DEPLOY_MODE=external without BOUCLE_LIVE_URL"
+}
+
+@test "doctor still fails when BOUCLE_DEPLOY_MODE=self has no deploy command" {
+  # The external softening MUST NOT weaken self mode: with no deploy command
+  # and no pages provider, self mode has no way to deploy at all.
+  run bash -c '
+    FAILURES=0
+    pass() { echo "  ✓ $1"; }
+    warn() { echo "  ⚠ $1" >&2; }
+    fail() { echo "  ✗ $1" >&2; FAILURES=$((FAILURES + 1)); }
+    BOUCLE_HOME="."
+    BOUCLE_FORGE=gitlab
+    BOUCLE_PROJECT_ID="123"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
+    BOUCLE_DEPLOY_MODE=self
+    BOUCLE_DEPLOY_CMD=""
+    source <(sed -n "/^# ── Mode-specific checks/,/^echo \"\"/p" bin/doctor)
     [ "$FAILURES" -eq 1 ]
   '
   assert_success
+  assert_output --partial "requires BOUCLE_DEPLOY_CMD"
 }
 
 # ── Bot identity vs token owner (#32) ─────────────────────────────────

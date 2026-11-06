@@ -105,7 +105,7 @@ Boucle supports two deploy modes and two review modes, orthogonal and composable
 | Mode | Behavior |
 |------|----------|
 | `self` (default) | Boucle runs `BOUCLE_DEPLOY_CMD` to deploy a preview (worker) and production (post-merge). URL is derived from deploy output via `BOUCLE_DEPLOY_URL_REGEX`, then falls back to `https://${BOUCLE_DEPLOY_PROJECT}.pages.dev`. |
-| `external` | Boucle does NOT deploy. Post-merge waits for the consumer's own CI/CD on the merged commit (via `forge_commit_check_suites`), then hands `BOUCLE_LIVE_URL` to e2e. `BOUCLE_LIVE_URL` is **required**. |
+| `external` | Boucle does NOT deploy. Post-merge waits for the consumer's own CI/CD on the merged commit (via `forge_commit_check_suites`), then hands `BOUCLE_LIVE_URL` to e2e. `BOUCLE_LIVE_URL` is required for **URL-mode** e2e; a consumer that publishes no site (an Ansible playbook, a backend service) sets `BOUCLE_E2E_COMMAND` instead and omits it — see [Non-static-site consumers](#non-static-site-consumers). |
 
 ### GitLab Pages declarative mode (`BOUCLE_DEPLOY_PROVIDER=gitlab-pages`)
 
@@ -205,11 +205,38 @@ orthogonal and composable (see [Deploy targets & review modes](#deploy-targets--
 For any non-static-site repo, set:
 
 - `BOUCLE_DEPLOY_MODE=external` — boucle MUST NOT deploy; the consumer's own CI
-  deploys (or nothing deploys at all).
+  deploys (or nothing deploys at all). **REQUIRED for a repo that publishes
+  nothing**: `external` is the only setting that states "boucle does not
+  deploy" independently of `BOUCLE_DEPLOY_CMD`.
 - `BOUCLE_REVIEW_MODE=diff` — there is no preview URL per MR, so the reviewer
   MUST review the MR diff + check suites instead of a deployed preview.
 - `BOUCLE_BUILD_CMD` — the consumer's build/verify command, or empty when the
   consumer's CI builds.
+
+A repo that publishes nothing MUST set `BOUCLE_DEPLOY_MODE=external`. Relying on
+the default `self` plus an empty `BOUCLE_DEPLOY_CMD` only *happens* to work,
+because `deploy`, `build-site` and `pages` share one exclusion set (kept in
+lockstep by `test/ci-needs-dag.bats`). When that symmetry did not hold, this
+exact configuration — `self` (default), empty `BOUCLE_DEPLOY_CMD`, no
+`BOUCLE_DEPLOY_PROVIDER` — produced an **invalid DAG**: the push rule included
+`deploy` while the "no publisher" rule excluded `build-site`, and `deploy`'s
+non-optional `needs: build-site` referenced a job absent from the pipeline.
+GitLab created the pipeline and failed it immediately — 0 job,
+`created_at == finished_at`, `started_at: null` — on every push to the default
+branch.
+
+```mermaid
+flowchart TD
+    P[push to default branch] --> E{BOUCLE_DEPLOY_MODE=external?}
+    E -- yes --> N[build-site, deploy, pages all excluded<br/>valid, quiet pipeline]
+    E -- no --> Q{BOUCLE_DEPLOY_CMD empty AND<br/>BOUCLE_DEPLOY_PROVIDER is not gitlab-pages?}
+    Q -- yes --> N
+    Q -- no --> R[build-site + deploy/pages included<br/>valid DAG]
+```
+
+The general rule: a `needs:` edge MUST NOT survive its upstream job. Any job
+with a **non-optional** `needs` MUST co-exclude with the job it needs
+(exclusion set of the downstream job ⊇ exclusion set of the upstream job).
 
 ### Functional navigation checks (`BOUCLE_REVIEW_COMMAND`)
 
@@ -405,13 +432,13 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_METRICS_FILE` | `metrics.jsonl` | File on that branch, one JSON object per issue. |
 | `BOUCLE_METRICS_RAW_DIR` | `raw` | Directory on that branch holding `<issue>.jsonl` — the raw per-run health lines the summary row is computed from, pushed as they are written so they outlive the ephemeral job that produced them. |
 | `BOUCLE_METRICS_SYNC` | `true` | Push each health line to the branch as it is appended. Opt-out, same falsy spellings as `BOUCLE_METRICS_ENABLED`. Turning it off costs a network round-trip per agent run and gives up the summary row for any issue whose terminal label is applied by a different job than the one that did the work — which is most of them. |
-| `BOUCLE_DEPLOY_MODE` | `self` | Deploy mode: `self` (boucle runs `BOUCLE_DEPLOY_CMD`) or `external` (consumer's own CI/CD deploys). |
+| `BOUCLE_DEPLOY_MODE` | `self` | Deploy mode: `self` (boucle runs `BOUCLE_DEPLOY_CMD`) or `external` (consumer's own CI/CD deploys). A repo that publishes nothing MUST use `external` — see [Non-static-site consumers](#non-static-site-consumers). |
 | `BOUCLE_REVIEW_MODE` | `preview` | Review mode: `preview` (tests deployed preview), `diff` (reviews PR diff + check suites), or `screenshot` (builds locally, captures screenshots of impacted pages, reviewer grades via vision-model descriptions guided by acceptance criteria). **Auto-fallback:** `preview` mode auto-activates `screenshot` when the deploy provider has no per-branch preview (`github-pages`, `gitlab-pages`) — the worker captures screenshots locally instead of overwriting production, and the reviewer grades from those screenshots. A screenshot failure degrades to `diff` review. |
 | `BOUCLE_DEPLOY_PROVIDER` | *(empty)* | Deploy provider profile: `gitlab-pages` (declarative, token-less — leave `BOUCLE_DEPLOY_CMD` empty, live URL = `$CI_PAGES_URL`) or `github-pages` (declarative, token-less — worker pushes `$BOUCLE_BUILD_OUTPUT` to `gh-pages`, live URL = `https://<owner>.github.io/<repo>/`). Empty = deploy via `BOUCLE_DEPLOY_CMD`. |
 | `BOUCLE_DEPLOY_CMD` | `npx wrangler pages deploy ...` | Deploy command (self mode). |
 | `BOUCLE_DEPLOY_URL_REGEX` | `https://[a-z0-9.-]+\.pages\.dev` | Regex to extract URL from deploy output. |
 | `BOUCLE_DEPLOY_PROJECT` | `""` | Cloudflare Pages project name (self mode). |
-| `BOUCLE_LIVE_URL` | `""` | Production/live URL (overrides regex/pages.dev fallback; **required** in external mode). |
+| `BOUCLE_LIVE_URL` | `""` | Production/live URL (overrides regex/pages.dev fallback; **required** in external mode for URL-mode e2e — optional when `BOUCLE_E2E_COMMAND` is set). |
 | `BOUCLE_PRODUCTION_URL` | `""` | Production URL fallback for e2e. |
 | `BOUCLE_E2E_COMMAND` | *(empty)* | Consumer-supplied verify command. Empty = URL-mode (agent probes `BOUCLE_LIVE_URL`). Non-empty = run the command; exit `0` = PASS, non-zero = FAIL. Use `true` for a no-op that always passes. See §Non-static-site consumers. |
 | `BOUCLE_E2E_COMMAND_TIMEOUT` | `3600` | Max seconds the verify command may run. Exceeding it kills the command and FAILs (exit `124`). |
@@ -857,8 +884,8 @@ discovered mid-loop, one failed run at a time.
 
 ```
 $ bin/doctor --audit
-  ✗ BLOCKER  BOUCLE_DEPLOY_MODE=external without BOUCLE_LIVE_URL
-             → external mode never deploys, so e2e has no target. Set BOUCLE_LIVE_URL at …
+  ✗ BLOCKER  BOUCLE_LLM_API_KEY is not set and no freeride provider key is configured
+             → Set BOUCLE_LLM_BASE_URL + BOUCLE_LLM_API_KEY, or any freeride provider key (BOUCLE_GROQ_API_KEY, BOUCLE_NVIDIA_API_KEY, …)
 
 Readiness: 54/100  (1 blocker(s), 0 degraded, 2 advisory)
 ```
