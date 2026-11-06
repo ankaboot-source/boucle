@@ -119,3 +119,37 @@ trap '"'"'rm -f "$tmpfile"'"'"' EXIT')
   assert_success
   rm -rf "$tmp"
 }
+
+@test "check-shell routes .bats files to bats --count, not bash -n" {
+  # .bats is bats DSL: bash -n rejects every `@test` block and shellcheck
+  # reports bats idioms as defects. The gate must run bats' gather phase on
+  # them so a valid suite passes instead of failing on syntax that is not bash.
+  tmp=$(mktemp -d)
+  file=$(write_fixture "$tmp" sample.bats '#!/usr/bin/env bats
+
+@test "a valid bats file" {
+  [ 1 -eq 1 ]
+}')
+  run bin/check-shell "$file"
+  assert_success
+  assert_output --partial ">> bats --count"
+  assert_output --partial "OK: shell safety gate"
+  rm -rf "$tmp"
+}
+
+@test "check-shell rejects a .bats file whose test body is not valid" {
+  # bats --count parses test bodies during the gather phase, so a malformed
+  # block must still fail the gate — .bats is checked, not ignored.
+  tmp=$(mktemp -d)
+  file=$(write_fixture "$tmp" broken.bats '#!/usr/bin/env bats
+
+@test "broken" {
+  if then
+    echo x
+  fi
+}')
+  run bin/check-shell "$file"
+  assert_failure
+  assert_output --partial "FAIL: shell safety gate"
+  rm -rf "$tmp"
+}

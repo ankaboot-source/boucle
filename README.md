@@ -327,9 +327,9 @@ all have sane defaults — override them only when you need to:
 | `BOUCLE_DND_ENABLED` | `false` | Do-Not-Disturb master switch: `true` (opt-in) or `false` (default). |
 | `BOUCLE_DND_START` / `BOUCLE_DND_END` / `BOUCLE_DND_TZ` | `22:00` / `07:00` / `UTC` | Quiet-hours window: HH:MM 24h start/end + IANA timezone (e.g. `Europe/Paris`). |
 | `BOUCLE_RETRO_ENABLED` | `true` | Participate in the self-improvement flywheel: the doctor periodically chains a bounded retro analysis of past loops and proposes anonymized findings upstream (`boucle:report`), at your own LLM credits. `false` = no retro job, no upstream posts. |
-| `BOUCLE_DEPLOY_MODE` | `self` | Deploy handling: `self` (default — boucle runs `BOUCLE_DEPLOY_CMD`) or `external` (consumer's own CI/CD deploys; `BOUCLE_LIVE_URL` required). |
+| `BOUCLE_DEPLOY_MODE` | `self` | Deploy handling: `self` (default — boucle runs `BOUCLE_DEPLOY_CMD`) or `external` (consumer's own CI/CD deploys). **A repo that publishes nothing MUST use `external`** — see [LOOP.md](LOOP.md) §Non-static-site consumers. |
 | `BOUCLE_REVIEW_MODE` | `preview` | Reviewer gate: `preview` (default — tests deployed preview) or `diff` (reviews PR diff + check suites). |
-| `BOUCLE_LIVE_URL` | *(unset)* | Canonical e2e target URL — **required** in `external` mode; optional override in `self` mode. |
+| `BOUCLE_LIVE_URL` | *(unset)* | Canonical e2e target URL — **required** in `external` mode for URL-mode e2e; optional when `BOUCLE_E2E_COMMAND` is set, and an override in `self` mode. |
 | `BOUCLE_NOTIFY_URL` | *(unset)* | Send-only webhook (Slack, Discord, ntfy, Telegram) pinged when the loop needs you — spec gate, MR gate, escalation. Silent during DND, fail-open. |
 
 Deploy targets: Cloudflare Pages (default), GitHub Pages, GitLab Pages, or the

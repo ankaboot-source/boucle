@@ -99,11 +99,15 @@ run_config_audit() {
     pass "BOUCLE_LLM_API_KEY is set"
   fi
 
-  # external mode has nowhere to point e2e without a live URL.
+  # external mode with no live URL is a VALID, complete configuration for a
+  # consumer that publishes no site (an Ansible playbook, a backend service):
+  # there is nothing to probe, and e2e runs a consumer-supplied
+  # BOUCLE_E2E_COMMAND instead. Only URL-mode e2e needs a target, so this is
+  # advisory — never a blocker degrading readiness.
   local deploy_mode="${BOUCLE_DEPLOY_MODE:-self}"
   if [ "$deploy_mode" = "external" ] && [ -z "${BOUCLE_LIVE_URL:-}" ]; then
-    audit_blocker "BOUCLE_DEPLOY_MODE=external without BOUCLE_LIVE_URL" \
-      "external mode never deploys, so e2e has no target. Set BOUCLE_LIVE_URL at $vars_url"
+    audit_advisory "BOUCLE_DEPLOY_MODE=external without BOUCLE_LIVE_URL" \
+      "Expected when the consumer publishes no site: e2e uses BOUCLE_E2E_COMMAND. Set BOUCLE_LIVE_URL at $vars_url only if URL-mode e2e must probe a live site."
   else
     pass "deploy mode '$deploy_mode' is coherent"
   fi
@@ -578,7 +582,7 @@ fi
 DEPLOY_MODE="${BOUCLE_DEPLOY_MODE:-self}"
 if [ "$DEPLOY_MODE" = "external" ]; then
   if [ -z "${BOUCLE_LIVE_URL:-}" ]; then
-    fail "BOUCLE_DEPLOY_MODE=external requires BOUCLE_LIVE_URL (consumer's own deploy target URL)"
+    warn "BOUCLE_DEPLOY_MODE=external without BOUCLE_LIVE_URL — expected when the consumer publishes no site (e2e uses BOUCLE_E2E_COMMAND); set BOUCLE_LIVE_URL if URL-mode e2e must probe a live site"
   else
     pass "BOUCLE_LIVE_URL set for external deploy mode"
   fi
