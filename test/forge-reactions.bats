@@ -84,6 +84,18 @@ setup() {
   assert_output "tada"
 }
 
+@test "GitLab raw award names map to canonical (#186)" {
+  # GitLab's award_emoji API and emoji webhooks send these raw names.
+  # 👎 drives the first-issue profile determination ("stay site"): an
+  # unmapped raw name would be silently dropped by forge_note_reactions
+  # and by dispatch's needs-info re-trigger check, killing the 👎 path
+  # on the forge where emoji webhooks are the primary mechanism.
+  run forge_reaction_canonical "thumbsdown"
+  assert_output "thumbs_down"
+  run forge_reaction_canonical "thumbsup"
+  assert_output "thumbsup"
+}
+
 @test "old approval emoji names map to empty (not valid)" {
   run forge_reaction_canonical "white_check_mark"
   assert_output ""

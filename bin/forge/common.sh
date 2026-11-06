@@ -198,7 +198,7 @@ forge_mr_approve_instruction() {
 #
 #   Canonical set (the SAME on every forge):
 #     thumbsup      (GitHub "+1",  GitLab "thumbsup")
-#     thumbs_down   (GitHub "-1",  GitLab "thumbs_down")
+#     thumbs_down   (GitHub "-1",  GitLab "thumbsdown"; "thumbs_down" also accepted)
 #     smile         (GitHub "laugh", GitLab "smile")
 #     confused      (GitHub "confused", GitLab "confused")
 #     heart         (GitHub "heart", GitLab "heart")
@@ -214,7 +214,7 @@ forge_reaction_canonical() {
   local name="$1"
   case "$name" in
     thumbsup | thumbs_up | "+1" | "👍") echo "thumbsup" ;;
-    thumbs_down | "-1" | "👎") echo "thumbs_down" ;;
+    thumbs_down | thumbsdown | "-1" | "👎") echo "thumbs_down" ;;
     smile | laugh | "😄") echo "smile" ;;
     confused | "😕") echo "confused" ;;
     heart | love | "❤") echo "heart" ;;
