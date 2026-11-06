@@ -514,6 +514,14 @@ default to `site` (unchanged behaviour), so pass `--profile infra` explicitly
 (or set `BOUCLE_PROFILE=infra`). See [LOOP.md](LOOP.md) §Non-site consumer
 (infra) for the full checklist.
 
+Prefer not to decide at install time? Pass `--profile auto` (or set
+`BOUCLE_PROFILE=auto`) and boucle determines the profile from the repo shape at
+the **first issue** it triages: it posts a determination comment (with the
+evidence and the exact variables it will set), waits for a 👍/👎 reaction or a
+`profile: site|infra` reply, and applies the preset on confirmation — no agent
+run is burned while it waits. See [LOOP.md](LOOP.md) §First-issue profile
+determination (#186).
+
 ## 🗺️ Roadmap
 
 - [ ] **servo rendering** — migrate preview rendering from Puppeteer to

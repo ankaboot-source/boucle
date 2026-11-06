@@ -179,6 +179,209 @@ HELP_EOF
     exit 0
   fi
 
+  # ── First-issue profile determination (#186) ──────────────────────────
+  # Mirrors the no-key guard: runs BEFORE attachment fetch / agent run. An
+  # explicit BOUCLE_PROFILE (site|infra) means the install already chose —
+  # never intervene. Otherwise (auto/absent — legacy installs), detect the
+  # repo shape: `infra` is a mismatch with the effective `site` default, so
+  # post a determination comment and pause at needs-info; `site`/`unknown`
+  # proceed silently (zero friction, fail-open). The confirmation rides the
+  # SAME re-trigger rails as no-key: dispatch routes a needs-info note/emoji
+  # event back to triage, where this block reads the answer and applies the
+  # preset. Idempotence: a `profile-applied` marker or an explicit
+  # BOUCLE_PROFILE permanently suppresses the determination.
+  boucle_profile_evidence_md() {
+    printf '%s\n' "$1" | sed -n 's/^evidence: \(.*\)$/- `\1`/p'
+  }
+
+  # boucle_profile_det_body <evidence_md>
+  # Build the determination comment: detected profile, evidence, the EXACT
+  # variables applied on confirmation, how to answer, and the shim-contract
+  # warning. Single-quoted heredoc + placeholder substitution so markdown
+  # backticks survive (no command substitution).
+  boucle_profile_det_body() {
+    local evidence_md="$1" body=""
+    body=$(
+      cat << 'PROFILE_DET_EOF'
+## 🏷️ Project profile determination
+
+This repository looks like an **infrastructure / non-site** project, but
+boucle is running with the **site** install profile (the default). On a site
+profile the worker's build gate, the deploy step and URL-mode e2e all target
+a website this repo does not build.
+
+**Detected profile:** `infra`
+
+**Evidence:**
+__EVIDENCE__
+
+If you confirm, boucle applies the infra preset through the forge API:
+
+| Variable | Value |
+|---|---|
+| `BOUCLE_PROFILE` | `infra` |
+| `BOUCLE_DEPLOY_MODE` | `external` |
+| `BOUCLE_REVIEW_MODE` | `diff` |
+| `BOUCLE_E2E_COMMAND` | `true` |
+| `BOUCLE_BUILD_CMD` | `true` |
+| `BOUCLE_UPDATE_DISABLE` | `true` |
+
+**How to answer:**
+- 👍 (or ❤️ / 🚀 / 🎉) — apply the infra preset above and continue triage.
+- 👎 — keep the site profile and continue triage.
+- Or reply with a line `profile: infra` (or `profile: site`) to override.
+
+> ⚠️ These variables do NOT neutralize the engine's inherited `default:`
+> (the boucle-agents image and `interruptible: true` leak into your own
+> jobs). Full hardening requires running `bin/setup --profile infra` once,
+> which regenerates the root shim with the `inherit: default: false`
+> contract on every job.
+
+<!-- boucle:needs-info v=1 reason=profile -->
+PROFILE_DET_EOF
+    )
+    body="${body//__EVIDENCE__/$evidence_md}"
+    printf '%s' "$body"
+  }
+
+  # boucle_profile_applied_body <profile>
+  boucle_profile_applied_body() {
+    local profile="$1" body=""
+    body=$(
+      cat << 'PROFILE_APP_EOF'
+## 🏷️ Project profile applied
+
+The project profile has been set to **`__PROFILE__`** through the forge API.
+The issue continues its normal triage now.
+
+Precedence (GitLab): project CI/CD variables override variables defined in
+`.gitlab-ci.yml`, so the preset takes effect on the next job without editing
+the root shim.
+
+> ⚠️ The variables do NOT neutralize the engine's inherited `default:`. Run
+> `bin/setup --profile __PROFILE__` once to regenerate the root shim with the
+> `inherit: default: false` contract if you have not already.
+
+<!-- boucle:profile-applied v=1 profile=__PROFILE__ -->
+PROFILE_APP_EOF
+    )
+    body="${body//__PROFILE__/$profile}"
+    printf '%s' "$body"
+  }
+
+  PROFILE_EFFECTIVE="${BOUCLE_PROFILE:-auto}"
+  if [ "$PROFILE_EFFECTIVE" != "site" ] && [ "$PROFILE_EFFECTIVE" != "infra" ]; then
+    # Read the determination/applied markers once (same newest-first jq
+    # shape the no-key guard uses).
+    PROFILE_NOTES=$(forge_issue_notes "$IID" 2> /dev/null || echo "[]")
+    PROFILE_NOTE_ID=$(printf '%s' "$PROFILE_NOTES" \
+      | jq -r '[.[] | select((.body // "") | contains("<!-- boucle:needs-info") and contains("reason=profile"))] | last | .id // 0' 2> /dev/null || echo "0")
+    PROFILE_APPLIED_ID=$(printf '%s' "$PROFILE_NOTES" \
+      | jq -r '[.[] | select((.body // "") | contains("<!-- boucle:profile-applied"))] | last | .id // 0' 2> /dev/null || echo "0")
+    PROFILE_MARKER="none"
+    PROFILE_TARGET_ID=""
+    if [ -n "$PROFILE_APPLIED_ID" ] && [ "$PROFILE_APPLIED_ID" != "0" ]; then
+      PROFILE_MARKER="profile-applied"
+      PROFILE_TARGET_ID="$PROFILE_APPLIED_ID"
+    elif [ -n "$PROFILE_NOTE_ID" ] && [ "$PROFILE_NOTE_ID" != "0" ]; then
+      PROFILE_MARKER="needs-info"
+      PROFILE_TARGET_ID="$PROFILE_NOTE_ID"
+    fi
+
+    PROFILE_REACTION_NAMES="[]"
+    PROFILE_REPLIES=""
+    if [ "$PROFILE_MARKER" = "needs-info" ]; then
+      PROFILE_REACTIONS=$(forge_note_reactions issue "$IID" "$PROFILE_TARGET_ID" 2> /dev/null || echo "[]")
+      PROFILE_REACTION_NAMES=$(printf '%s' "$PROFILE_REACTIONS" | jq -c '[.[]? | .name]' 2> /dev/null || echo "[]")
+      # Human replies: every non-system note that does NOT carry the boucle
+      # agent marker (boucle stamps its own comments, so the determination
+      # note and every bot note are excluded by construction). The decision
+      # regex is anchored on a bare `profile: site|infra` line, so quoting
+      # the instructions in a reply never false-matches.
+      PROFILE_REPLIES=$(printf '%s' "$PROFILE_NOTES" | jq -r '
+        [.[] | select((.system // false) != true)
+             | select(((.body // "") | contains("<!-- boucle:agent")) | not)
+             | (.body // "")] | join("\n")' 2> /dev/null || echo "")
+    fi
+
+    PROFILE_ACTION=$(profile_decision "$PROFILE_EFFECTIVE" "$PROFILE_MARKER" "$PROFILE_REACTION_NAMES" "$PROFILE_REPLIES" 2> /dev/null || echo "stay")
+    echo "[boucle:profile] effective=$PROFILE_EFFECTIVE marker=$PROFILE_MARKER action=$PROFILE_ACTION"
+
+    case "$PROFILE_ACTION" in
+      explicit | applied)
+        : # install already chose / already applied — proceed silently
+        ;;
+      no-marker)
+        PROFILE_DETECTION=$(detect_project_profile "${BOUCLE_WORKSPACE:-.}" 2> /dev/null || printf 'unknown\n')
+        PROFILE_DETECTED=$(printf '%s\n' "$PROFILE_DETECTION" | sed -n '1p')
+        PROFILE_EVIDENCE=$(printf '%s\n' "$PROFILE_DETECTION" | sed -n '2,$p')
+        if [ "$PROFILE_DETECTED" = "infra" ]; then
+          echo "[boucle:profile] detected infra with an auto/absent profile — posting determination"
+          PROFILE_EVIDENCE_MD=$(boucle_profile_evidence_md "$PROFILE_EVIDENCE")
+          PROFILE_MSG=$(boucle_profile_det_body "$PROFILE_EVIDENCE_MD")
+          # GitHub fail-open (documented deviation): the workflow maps the
+          # preset variables but NOT BOUCLE_PROFILE itself, so a repo-variable
+          # write for it alone is inert. Print the exact commands instead.
+          if [ "${BOUCLE_FORGE:-}" = "github" ]; then
+            PROFILE_MSG="${PROFILE_MSG}
+
+### GitHub: make the profile explicit
+
+The workflow maps the preset variables, but \`BOUCLE_PROFILE\` is not mapped
+in its \`env:\` block. After confirming, run:
+
+\`\`\`bash
+gh variable set BOUCLE_PROFILE --body infra
+gh variable set BOUCLE_DEPLOY_MODE --body external
+gh variable set BOUCLE_REVIEW_MODE --body diff
+gh variable set BOUCLE_E2E_COMMAND --body true
+gh variable set BOUCLE_BUILD_CMD --body true
+gh variable set BOUCLE_UPDATE_DISABLE --body true
+\`\`\`
+
+<!-- boucle:needs-info v=1 reason=profile -->"
+          fi
+          forge_issue_note "$IID" "$PROFILE_MSG" 2> /dev/null || true
+          REPORTER_ID=$(resolve_reporter_id "$IID" 2> /dev/null || echo "")
+          if [ -n "$REPORTER_ID" ]; then
+            forge_issue_assign "$IID" "$REPORTER_ID" 2> /dev/null || true
+          fi
+          set_boucle_label "$IID" "boucle:needs-info" "boucle::status::bot" 2> /dev/null || true
+          exit 0
+        fi
+        # site / unknown → zero friction, fail-open.
+        ;;
+      apply-infra | apply-site)
+        if [ "$PROFILE_ACTION" = "apply-infra" ]; then
+          PROFILE_TARGET="infra"
+        else
+          PROFILE_TARGET="site"
+        fi
+        echo "[boucle:profile] applying preset: $PROFILE_TARGET"
+        apply_profile_preset "$PROFILE_TARGET" 2> /dev/null || true
+        PROFILE_APPLIED_MSG=$(boucle_profile_applied_body "$PROFILE_TARGET")
+        forge_issue_note_update "$IID" "$PROFILE_TARGET_ID" "$PROFILE_APPLIED_MSG" 2> /dev/null || true
+        # Clear needs-info; the issue continues its normal triage below.
+        set_boucle_label "$IID" "boucle:triage" "boucle::status::bot" 2> /dev/null || true
+        ;;
+      stay)
+        # No decisive answer: refresh the determination and stay paused —
+        # never burn an agent on an unanswered profile question.
+        echo "[boucle:profile] no decisive answer — staying at needs-info"
+        PROFILE_DETECTION=$(detect_project_profile "${BOUCLE_WORKSPACE:-.}" 2> /dev/null || printf 'unknown\n')
+        PROFILE_EVIDENCE=$(printf '%s\n' "$PROFILE_DETECTION" | sed -n '2,$p')
+        PROFILE_EVIDENCE_MD=$(boucle_profile_evidence_md "$PROFILE_EVIDENCE")
+        PROFILE_MSG=$(boucle_profile_det_body "$PROFILE_EVIDENCE_MD")
+        forge_issue_note_update "$IID" "$PROFILE_TARGET_ID" "$PROFILE_MSG" 2> /dev/null || true
+        set_boucle_label "$IID" "boucle:needs-info" "boucle::status::bot" 2> /dev/null || true
+        exit 0
+        ;;
+      *)
+        # Unknown action from profile_decision — fail open, keep triaging.
+        ;;
+    esac
+  fi
+
   # Label helper: preserve non-boucle labels when writing a boucle label.
   # The jq filter uses startswith("boucle:") which catches BOTH the detail
   # axis (boucle:triage) AND the gross axis (boucle::status::bot, also

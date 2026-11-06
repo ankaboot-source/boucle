@@ -45,6 +45,24 @@ audit() {
   assert_output --partial "ADVISORY"
 }
 
+@test "audit: an unset/auto profile is advisory, never a blocker (#186)" {
+  # The first-issue profile determination defers the site/infra decision, so
+  # an undetermined profile is a valid state — the first triaged issue will
+  # propose it. Advisory only.
+  run env -i PATH="$PATH" HOME="$HOME" BOUCLE_LLM_API_KEY=k bash bin/doctor --audit
+  assert_success
+  assert_output --partial "ADVISORY"
+  assert_output --partial "BOUCLE_PROFILE is unset/auto"
+  refute_output --partial "BLOCKER"
+}
+
+@test "audit: an explicit profile is not flagged (#186)" {
+  run env -i PATH="$PATH" HOME="$HOME" BOUCLE_LLM_API_KEY=k BOUCLE_PROFILE=infra bash bin/doctor --audit
+  assert_success
+  assert_output --partial "install profile 'infra' is explicit"
+  refute_output --partial "BOUCLE_PROFILE is unset/auto"
+}
+
 @test "audit: a missing LLM key is a blocker and names where to set it" {
   run env -i PATH="$PATH" HOME="$HOME" bash bin/doctor --audit
   assert_failure

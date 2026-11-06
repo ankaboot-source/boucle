@@ -33,6 +33,14 @@ type forge_init &> /dev/null && {
 # shellcheck source=/dev/null
 . "$(dirname "${BASH_SOURCE[0]}")/freeride.sh" 2> /dev/null || true
 
+# ── First-issue profile detection + decision (#186) ─────────────────────
+# Sourced here so the triage stage (and any stage that sources lib/boucle.sh)
+# can call detect_project_profile / profile_decision / apply_profile_preset.
+# Fail-open: an install without the file keeps working, minus the profile
+# determination path.
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/profile.sh" 2> /dev/null || true
+
 # ── Escalation context ──────────────────────────────────────────────────
 
 # job_link — markdown pointer to the CI job behind the current run.

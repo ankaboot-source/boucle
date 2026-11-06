@@ -124,6 +124,18 @@ run_config_audit() {
     pass "deploy mode '$deploy_mode' is coherent"
   fi
 
+  # First-issue profile determination (#186): an auto/unset profile is a
+  # deliberate, valid state — the install deferred the site/infra decision.
+  # The first triaged issue proposes the detected profile and applies it on
+  # confirmation. Advisory only: it never blocks the loop.
+  local profile_mode="${BOUCLE_PROFILE:-auto}"
+  if [ "$profile_mode" = "auto" ] || [ -z "$profile_mode" ]; then
+    audit_advisory "BOUCLE_PROFILE is unset/auto — the project profile is undetermined" \
+      "The first triaged issue will propose the detected profile (site|infra) and apply it on confirmation (#186). Set BOUCLE_PROFILE=site (or infra) at $vars_url to pin it now."
+  else
+    pass "install profile '$profile_mode' is explicit"
+  fi
+
   # Configured but inert: looks like a safety net, is not one.
   if [ -n "${BOUCLE_FALLBACK_PROVIDER:-}" ]; then
     if [ -z "${BOUCLE_FALLBACK_BASE_URL:-}" ] || [ -z "${BOUCLE_FALLBACK_API_KEY:-}" ]; then
