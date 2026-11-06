@@ -28,6 +28,15 @@ audit() {
   assert_output --partial "BOUCLE_LIVE_URL"
 }
 
+@test "audit: external mode with command-mode e2e needs no live URL (#182)" {
+  # BOUCLE_E2E_COMMAND runs a verify command instead of probing a URL, so an
+  # infra install (no BOUCLE_LIVE_URL) must not be blocked.
+  run env -i PATH="$PATH" HOME="$HOME" BOUCLE_LLM_API_KEY=k BOUCLE_DEPLOY_MODE=external BOUCLE_E2E_COMMAND=true bash bin/doctor --audit
+  assert_success
+  refute_output --partial "BLOCKER"
+  assert_output --partial "deploy mode 'external' is coherent"
+}
+
 @test "audit: a missing LLM key is a blocker and names where to set it" {
   run env -i PATH="$PATH" HOME="$HOME" bash bin/doctor --audit
   assert_failure

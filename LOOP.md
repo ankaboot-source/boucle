@@ -338,6 +338,52 @@ A Python library or CLI tool with a test suite.
 - `BOUCLE_E2E_COMMAND="make test"` — or `pytest`.
 - No `BOUCLE_LIVE_URL`.
 
+### Non-site consumer (infra)
+
+`bin/setup --profile infra` (the interactive profile question, or the
+`BOUCLE_PROFILE=infra` env fallback) provisions a non-site install and
+generates a root shim that NEUTRALIZES the engine `default:` inheritance. An
+infra repo (Ansible/Terraform/Docker/CLI) MUST apply four neutralizations, or
+the engine's CI footprint pollutes pipelines it does not own:
+
+- [ ] **Neutralize `default:` per job.** The engine's `default:` (the
+      `boucle-agents` image, the ~200-line `before_script`, and
+      `interruptible: true`) is deep-merged into the pipeline and applies to
+      EVERY job — including pre-existing consumer jobs. GitLab's `default:`
+      cannot be un-inherited globally, so EVERY pre-existing job MUST carry
+      `inherit: {default: false}`. Without it, a boucle webhook can cancel a
+      running `terraform apply` / `ansible-playbook`. Every NEW job added to
+      the shim MUST do the same; the generated shim documents the contract.
+- [ ] **Gate every schedule on a variable.** The doctor schedule fires every
+      10 minutes (144×/day). A consumer job gated on a bare
+      `$CI_PIPELINE_SOURCE == "schedule"` would run on every one of those
+      firings — gate each such job on its own variable
+      (`$MY_JOB == "true"`), never on the bare source (LESSONS #107/#125).
+- [ ] **Disable the engine self-update.** `BOUCLE_UPDATE_DISABLE=true` stops
+      `bin/update` from running on every non-push pipeline of the default
+      branch, so no `chore(boucle):` bot commit can land on a protected infra
+      branch. The infra preset offers it (default `true`).
+- [ ] **Expect no-op red pipelines.** The anti-accumulation guard fails a
+      dispatch that produces no work, by design. On an infra repo whose
+      webhooks fire on issues/comments boucle only journals, a red pipeline is
+      benign — do NOT "fix" it by disabling the guard.
+
+The preset sets `BOUCLE_DEPLOY_MODE=external`, `BOUCLE_REVIEW_MODE=diff`,
+`BOUCLE_E2E_COMMAND` (command-mode e2e, asked, default `true`) and a neutral
+`BOUCLE_BUILD_CMD`, and writes the neutralization contract into the shim. See
+Recipe 2 for an Ansible install.
+
+#### Doctor cron (`BOUCLE_DOCTOR_CRON`)
+
+The doctor runs on a forge **schedule**, not in this YAML — create it in
+Settings → CI/CD → Schedules (GitLab) or `on.schedule` (GitHub). The default
+cadence is `*/10 * * * *` (every 10 minutes). On a schedule-noise-sensitive
+repo set a slower cron; `BOUCLE_DOCTOR_CRON` (default `*/10 * * * *`) is the
+value `bin/setup --profile infra` prints and the operator MUST recreate in the
+schedule — the engine cannot read a schedule's cron expression. A consumer
+that already runs an operational schedule MAY reuse it: the doctor is
+fingerprint-optimized and skips a sweep when the board has not moved.
+
 ## CI/CD variables
 
 Complete reference of all boucle CI/CD variables (set as repo secrets/variables). Defaults shown; override per-consumer. `bin/setup` seeds defaults where possible (e.g. `BOUCLE_DND_TZ` from the installing machine's timezone, fallback model variables).
@@ -389,6 +435,7 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_MAX_PARALLEL_ISSUES` | `5` | Max concurrent boucle:working issues (`0` = unlimited). |
 | `BOUCLE_DOCTOR_ON_DISPATCH` | `auto` | Run the doctor sweep at the end of `dispatch`, so recovery rides the webhooks that arrive instead of a schedule that mostly does not. `auto` = on for GitHub, off for GitLab; `true`/`false` force. Measured on the engine's own GitHub workflow over 20 days: `*/10 * * * *` asks for 144 firings a day and GitHub delivers 9.3 (6.5%), median gap 54 min, p90 4.5 h, worst 5.7 days — and the delivered minutes are flat across all six `/10` buckets, so the firings are dropped, not delayed. `auto` stays off on GitLab because there is no equivalent measurement in hand. The schedule remains as the backstop. |
 | `BOUCLE_DOCTOR_ON_DISPATCH_INTERVAL` | `600` | Minimum seconds between two opportunistic sweeps. Stamped in the `BOUCLE_DOCTOR_LAST_SWEEP` forge variable rather than `$BOUCLE_STATE_CACHE`, which is `$HOME` on a GitHub-hosted runner and therefore ephemeral — a rate limit that never persists is not a rate limit. A non-numeric value falls back to the default rather than disabling the limit. |
+| `BOUCLE_DOCTOR_CRON` | `*/10 * * * *` | Recommended doctor-schedule cadence. The doctor runs on a forge schedule (GitLab Schedules / GitHub `on.schedule`), not in this YAML, so the engine cannot read this value at runtime — it is the cadence `bin/setup --profile infra` prints and the operator recreates in the schedule. Use a slower cron on schedule-noise-sensitive infra repos (the sweep is fingerprint-optimized). See §Non-site consumer (infra). |
 | `BOUCLE_MAX_ITERATIONS` | `5` | Max worker re-runs per issue before escalation. |
 | `BOUCLE_STALENESS_THRESHOLD` | `2400` | Seconds before a stuck issue is re-triggered (must exceed max job timeout, 30 min). |
 | `BOUCLE_SCHEDULES_ENABLED` | `false` | Opt-in: create issues from `.boucle/schedules/*.md` when their cron is due. |

@@ -111,11 +111,14 @@ run_config_audit() {
       "Set BOUCLE_LLM_BASE_URL + BOUCLE_LLM_API_KEY (the 'BOUCLE_LLM_API_KEY' value must be MASKED), or any freeride provider key (BOUCLE_GROQ_API_KEY, BOUCLE_NVIDIA_API_KEY, ...) at $vars_url"
   fi
 
-  # external mode has nowhere to point e2e without a live URL.
+  # external mode has nowhere to point e2e without a live URL — UNLESS
+  # command-mode e2e is configured (BOUCLE_E2E_COMMAND non-empty), which never
+  # probes a URL. Non-site/infra installs (bin/setup --profile infra) set it,
+  # so they must not be blocked for lacking a URL they have no use for.
   local deploy_mode="${BOUCLE_DEPLOY_MODE:-self}"
-  if [ "$deploy_mode" = "external" ] && [ -z "${BOUCLE_LIVE_URL:-}" ]; then
+  if [ "$deploy_mode" = "external" ] && [ -z "${BOUCLE_LIVE_URL:-}" ] && [ -z "${BOUCLE_E2E_COMMAND:-}" ]; then
     audit_blocker "BOUCLE_DEPLOY_MODE=external without BOUCLE_LIVE_URL" \
-      "external mode never deploys, so e2e has no target. Set BOUCLE_LIVE_URL at $vars_url"
+      "external mode never deploys, so e2e has no target. Set BOUCLE_LIVE_URL (URL-mode e2e) or BOUCLE_E2E_COMMAND (command-mode e2e) at $vars_url"
   else
     pass "deploy mode '$deploy_mode' is coherent"
   fi

@@ -28,6 +28,7 @@ never touch the engine itself.
   - [The bot user](#the-bot-user)
   - [Running without a bot account (mono-user)](#running-without-a-bot-account-mono-user)
   - [Advanced — dedicated runners](#advanced--dedicated-runners)
+  - [Advanced — non-site installs](#advanced--non-site-installs)
 - [🗺️ Roadmap](#-roadmap)
 - [⚖️ License](#-license)
 - [📚 Docs](#-docs)
@@ -488,6 +489,30 @@ toolchain, which exists only in the image.
 **GitHub.** Actions runners do not use that image. `ubuntu-latest` already
 ships the system toolchain, and each job installs jcode and the rest itself;
 `BOUCLE_RUNS_ON` only picks the runner labels.
+
+### Advanced — non-site installs
+
+Installing on a repository that is **not** a static site — an Ansible/Terraform
+playbook repo, a Docker-compose backend, a CLI tool — needs escape hatches
+the defaults do not set. Use the preset:
+
+```bash
+.boucle/bin/setup --profile infra    # idempotent — safe to re-run
+```
+
+It sets `BOUCLE_DEPLOY_MODE=external` (boucle never deploys),
+`BOUCLE_REVIEW_MODE=diff` (review the MR diff, no preview URL),
+`BOUCLE_E2E_COMMAND` (command-mode e2e — run a verify command instead of
+probing a URL; asked, default `true`), a neutral `BOUCLE_BUILD_CMD`, and offers
+`BOUCLE_UPDATE_DISABLE=true` (no engine self-update commits). It also generates
+a root shim whose header carries the `inherit: {default: false}` contract every
+pre-existing job MUST honour, so no job inherits the `boucle-agents` image or
+`interruptible: true`.
+
+Interactive installs are asked which profile to use; non-interactive installs
+default to `site` (unchanged behaviour), so pass `--profile infra` explicitly
+(or set `BOUCLE_PROFILE=infra`). See [LOOP.md](LOOP.md) §Non-site consumer
+(infra) for the full checklist.
 
 ## 🗺️ Roadmap
 
