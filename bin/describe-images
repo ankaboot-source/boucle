@@ -22,6 +22,11 @@
 #   BOUCLE_VISION_TIMEOUT  — per-image timeout (default: 120s)
 set -euo pipefail
 
+# Freeride catalog + mode helpers (single source of truth: lib/freeride.sh).
+# Fail-open: an install without the file keeps the legacy vision path.
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/../lib/freeride.sh" 2> /dev/null || true
+
 ROLE="${1:?usage: bin/describe-images <role> [--criteria]}"
 # Criteria-guided mode: enabled via a second CLI arg `--criteria` or the env
 # var BOUCLE_DESCRIBE_MODE=criteria. When enabled, the vision model answers
@@ -138,6 +143,21 @@ if [ "$IMAGE_COUNT" -eq 0 ]; then
 fi
 
 echo "[describe-images] role=${ROLE} images=${IMAGE_COUNT} → generating descriptions with vision model" >&2
+
+# ── Freeride vision-routing guard (fail-open) ─────────────────────────
+# In freeride mode the runner's jcode config defines `freeride-<provider>`
+# profiles (bin/jc), not the `boucle` profile describe-images would use, and
+# the default BOUCLE_VISION_MODEL (minimax-m3) is an OpenRouter model the
+# freeride catalog no longer carries. The invocation would fail per image
+# anyway; skip it once, with a warning, instead of burning the timeout and
+# logging confusing failures. An explicit non-default BOUCLE_VISION_MODEL is
+# honored — the operator may point it at a freeride-served vision model.
+if [ "${BOUCLE_VISION_ROUTING:-enabled}" != "disabled" ] \
+  && [ "${BOUCLE_VISION_MODEL:-minimax-m3}" = "minimax-m3" ] \
+  && type is_freeride_mode > /dev/null 2>&1 && is_freeride_mode; then
+  echo "[describe-images] freeride mode active and BOUCLE_VISION_MODEL is the default (minimax-m3, OpenRouter) — skipping vision routing (fail-open). Set BOUCLE_VISION_MODEL to a freeride-served vision model to enable it." >&2
+  exit 0
+fi
 
 # ── Resolve vision model + provider ──────────────────────────────────
 VISION_MODEL="${BOUCLE_VISION_MODEL:-minimax-m3}"

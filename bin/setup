@@ -24,6 +24,7 @@ MONO_USER="${BOUCLE_MONO_USER:-}"
 CF_TOKEN="${BOUCLE_CF_TOKEN:-}"
 RUNNER_TAG="${BOUCLE_RUNNER_TAG:-}"
 ALLOWED_USERS="${BOUCLE_ALLOWED_USERS:-}"
+LLM_MODE="${BOUCLE_LLM_MODE:-}"
 DRY_RUN=false
 NON_INTERACTIVE=false
 
@@ -100,6 +101,17 @@ while [[ $# -gt 0 ]]; do
       ALLOWED_USERS="$2"
       shift 2
       ;;
+    --llm-mode)
+      LLM_MODE="$2"
+      case "$LLM_MODE" in
+        legacy | freeride) ;;
+        *)
+          echo "Error: --llm-mode must be 'legacy' or 'freeride' (got: $LLM_MODE)" >&2
+          exit 1
+          ;;
+      esac
+      shift 2
+      ;;
     --dry-run)
       DRY_RUN=true
       shift
@@ -145,6 +157,11 @@ while [[ $# -gt 0 ]]; do
       echo "                           runners — no runner of your own required."
       echo "  --allowed-users <u1,u2>  Usernames allowed to feed issues to boucle, comma-separated."
       echo "                           Default: the user running setup. Empty = allow list disabled (legacy)."
+      echo "  --llm-mode <mode>         LLM mode: 'legacy' (one endpoint: BOUCLE_LLM_BASE_URL +"
+      echo "                           BOUCLE_LLM_API_KEY) or 'freeride' (free-tier provider keys,"
+      echo "                           rotated on failure). Interactive installs are prompted;"
+      echo "                           non-interactive defaults to the detected mode, else legacy."
+      echo "                           Env fallback: BOUCLE_LLM_MODE."
       echo "  --dry-run                 Print what would be done, don't execute"
       echo "  --non-interactive        No prompts: read config from BOUCLE_* env vars only."
       echo "                           If BOUCLE_LLM_API_KEY is unset, it is skipped and must be"
@@ -155,7 +172,7 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Env fallbacks: BOUCLE_FORGE BOUCLE_PROJECT BOUCLE_HOST BOUCLE_BOT_ID BOUCLE_BOT_USERNAME"
       echo "               BOUCLE_BOT_TOKEN BOUCLE_CF_TOKEN BOUCLE_RUNNER_TAG BOUCLE_ALLOWED_USERS"
-      echo "               BOUCLE_LLM_API_KEY BOUCLE_LLM_BASE_URL BOUCLE_E2E_COMMAND"
+      echo "               BOUCLE_LLM_MODE BOUCLE_LLM_API_KEY BOUCLE_LLM_BASE_URL BOUCLE_E2E_COMMAND"
       exit 0
       ;;
     *)
@@ -702,6 +719,195 @@ fi
 
 echo ""
 
+# ── 0b. LLM mode (legacy vs freeride) ────────────────────────────────
+# Freeride mode exists in the runtime (the 7-provider free-tier catalog in
+# lib/freeride.sh) but setup used to know only the legacy pair — a fresh
+# install was pushed toward legacy, and switching to freeride meant
+# hand-editing forge variables. This step detects the current mode, lets the
+# operator choose, seeds the freeride provider keys (masked), and — when
+# freeride is chosen while the legacy pair exists — offers to remove the
+# legacy pair so freeride can actually take over (legacy wins priority).
+#
+# Mode resolution: BOUCLE_LLM_MODE / --llm-mode forces it; otherwise the
+# detected remote/local mode is kept when one exists; otherwise legacy (the
+# documented default) is used non-interactively, and interactive installs
+# are prompted.
+echo "=== LLM mode ==="
+
+# shellcheck source=/dev/null
+. "$(dirname "$0")/../lib/freeride.sh" 2> /dev/null || true
+
+# llm_ci_var_exists <key> — 0 when the CI variable/secret already exists.
+# Idempotence: a re-run must never re-write an existing provider key.
+llm_ci_var_exists() {
+  local key="$1" listing
+  if [ "$FORGE" = "gitlab" ]; then
+    [ -n "$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/$key" 2> /dev/null | jq -r '.key // empty' || true)" ]
+  else
+    listing="$(GH_TOKEN="$BOT_TOKEN" gh variable list --repo "$PROJECT_ID" 2> /dev/null | awk '{print $1}' || true)"
+    printf '%s\n' "$listing" | grep -qx "$key" && return 0
+    listing="$(GH_TOKEN="$BOT_TOKEN" gh secret list --repo "$PROJECT_ID" 2> /dev/null | awk '{print $1}' || true)"
+    printf '%s\n' "$listing" | grep -qx "$key"
+  fi
+}
+
+# llm_ci_var_post <key> <value> <masked> — create the CI variable/secret.
+# Mirrors how BOUCLE_LLM_API_KEY is posted: GitLab masked+protected;
+# GitHub masked values must be secrets (write-only), plaintext are variables.
+llm_ci_var_post() {
+  local key="$1" value="$2" masked="${3:-false}"
+  if [ "$DRY_RUN" = "true" ]; then
+    if [ "$masked" = "true" ]; then
+      echo "  [dry-run] set $key (masked) — value omitted from dry-run output"
+    else
+      echo "  [dry-run] set $key=$value"
+    fi
+    return 0
+  fi
+  if [ "$FORGE" = "gitlab" ]; then
+    glab api --hostname "$HOST" -X POST "/projects/$PROJECT_ID/variables" -f key="$key" -f value="$value" -f masked="$masked" -f protected=true > /dev/null 2>&1 || true
+  elif [ "$masked" = "true" ]; then
+    echo "$value" | GH_TOKEN="$BOT_TOKEN" gh secret set "$key" --repo "$PROJECT_ID" 2> /dev/null || true
+  else
+    echo "$value" | GH_TOKEN="$BOT_TOKEN" gh variable set "$key" --repo "$PROJECT_ID" --body - 2> /dev/null || true
+  fi
+}
+
+# llm_ci_var_delete <key> — best-effort removal (honors --dry-run).
+llm_ci_var_delete() {
+  local key="$1"
+  if [ "$DRY_RUN" = "true" ]; then
+    echo "  [dry-run] delete CI variable $key"
+    return 0
+  fi
+  if [ "$FORGE" = "gitlab" ]; then
+    glab api --hostname "$HOST" -X DELETE "/projects/$PROJECT_ID/variables/$key" > /dev/null 2>&1 || true
+  else
+    GH_TOKEN="$BOT_TOKEN" gh secret delete "$key" --repo "$PROJECT_ID" > /dev/null 2>&1 || true
+    GH_TOKEN="$BOT_TOKEN" gh variable delete "$key" --repo "$PROJECT_ID" > /dev/null 2>&1 || true
+  fi
+}
+
+# Detect the current remote mode (CI variables/secrets) and any local intent.
+LLM_DETECTED="none"
+if llm_ci_var_exists BOUCLE_LLM_BASE_URL && llm_ci_var_exists BOUCLE_LLM_API_KEY; then
+  LLM_DETECTED="legacy"
+fi
+LLM_FREERIDE_SEEN=""
+while IFS='|' read -r _fr_name _fr_url _fr_key _fr_code _fr_reason _fr_think; do
+  [ -n "$_fr_key" ] || continue
+  if llm_ci_var_exists "$_fr_key"; then
+    LLM_FREERIDE_SEEN="yes"
+  fi
+  eval "_fr_local=\${${_fr_key}:-}"
+  if [ -n "$_fr_local" ]; then
+    LLM_FREERIDE_SEEN="yes"
+  fi
+done < <(freeride_catalog)
+if [ "$LLM_DETECTED" = "none" ] && [ -n "$LLM_FREERIDE_SEEN" ]; then
+  LLM_DETECTED="freeride"
+fi
+
+# Resolve the active mode.
+LLM_MODE_ACTIVE=""
+if [ -n "$LLM_MODE" ]; then
+  case "$LLM_MODE" in
+    legacy | freeride) LLM_MODE_ACTIVE="$LLM_MODE" ;;
+    *)
+      echo "Error: BOUCLE_LLM_MODE must be 'legacy' or 'freeride' (got: $LLM_MODE)" >&2
+      exit 1
+      ;;
+  esac
+elif [ "$LLM_DETECTED" != "none" ]; then
+  LLM_MODE_ACTIVE="$LLM_DETECTED"
+elif [ "$NON_INTERACTIVE" = "true" ]; then
+  LLM_MODE_ACTIVE="legacy"
+else
+  echo "  How does boucle reach an LLM?"
+  echo "    legacy   — one OpenAI-compatible endpoint (BOUCLE_LLM_BASE_URL + BOUCLE_LLM_API_KEY)"
+  echo "    freeride — free-tier provider keys, rotated on failure. Catalog:"
+  while IFS='|' read -r _fr_name _fr_url _fr_key _fr_code _fr_reason _fr_think; do
+    [ -n "$_fr_name" ] || continue
+    echo "               $_fr_name — $_fr_key (triage model: $_fr_reason)"
+  done < <(freeride_catalog)
+  read -r -p "  LLM mode [legacy/freeride] (legacy): " _llm_ans || true
+  case "$_llm_ans" in
+    freeride | f | F) LLM_MODE_ACTIVE="freeride" ;;
+    *) LLM_MODE_ACTIVE="legacy" ;;
+  esac
+fi
+echo "  Active LLM mode: $LLM_MODE_ACTIVE (detected: $LLM_DETECTED)"
+
+# Freeride chosen: seed each catalog provider that is not already configured.
+if [ "$LLM_MODE_ACTIVE" = "freeride" ]; then
+  while IFS='|' read -r _fr_name _fr_url _fr_key _fr_code _fr_reason _fr_think; do
+    [ -n "$_fr_name" ] || continue
+    # cloudflare needs its account id (non-masked) to resolve its base_url.
+    if [ "$_fr_name" = "cloudflare" ]; then
+      if llm_ci_var_exists BOUCLE_CLOUDFLARE_ACCOUNT_ID; then
+        log_skip "BOUCLE_CLOUDFLARE_ACCOUNT_ID already exists"
+      else
+        CF_ACCT="${BOUCLE_CLOUDFLARE_ACCOUNT_ID:-}"
+        if [ -z "$CF_ACCT" ] && [ "$NON_INTERACTIVE" = "false" ]; then
+          read -r -p "BOUCLE_CLOUDFLARE_ACCOUNT_ID (cloudflare provider): " CF_ACCT || true
+        fi
+        if [ -n "$CF_ACCT" ]; then
+          llm_ci_var_post BOUCLE_CLOUDFLARE_ACCOUNT_ID "$CF_ACCT" false
+          log_pass "BOUCLE_CLOUDFLARE_ACCOUNT_ID set"
+        else
+          log_skip "BOUCLE_CLOUDFLARE_ACCOUNT_ID (not provided — the cloudflare provider stays disabled)"
+        fi
+      fi
+    fi
+    if llm_ci_var_exists "$_fr_key"; then
+      log_skip "$_fr_key already exists"
+    else
+      eval "_fr_val=\${${_fr_key}:-}"
+      if [ -z "$_fr_val" ] && [ "$NON_INTERACTIVE" = "false" ]; then
+        read -r -p "$_fr_key value (masked, blank to skip): " _fr_val || true
+      fi
+      if [ -n "$_fr_val" ]; then
+        llm_ci_var_post "$_fr_key" "$_fr_val" true
+        log_pass "$_fr_key set (masked) — provider $_fr_name"
+      else
+        log_skip "$_fr_key (no key provided — provider $_fr_name stays disabled)"
+      fi
+    fi
+    # Optional per-provider model override, taken from the local env.
+    _fr_override="BOUCLE_$(printf '%s' "$_fr_name" | tr '[:lower:]' '[:upper:]')_MODEL"
+    eval "_fr_override_val=\${${_fr_override}:-}"
+    if [ -n "$_fr_override_val" ] && ! llm_ci_var_exists "$_fr_override"; then
+      llm_ci_var_post "$_fr_override" "$_fr_override_val" false
+      log_pass "$_fr_override set ($_fr_override_val)"
+    fi
+  done < <(freeride_catalog)
+
+  # Freeride is inert while the legacy pair is set (legacy wins priority).
+  if llm_ci_var_exists BOUCLE_LLM_API_KEY || llm_ci_var_exists BOUCLE_LLM_BASE_URL; then
+    LLM_DELETE_LEGACY=false
+    if [ "$DRY_RUN" = "true" ]; then
+      LLM_DELETE_LEGACY=true
+    elif [ "$NON_INTERACTIVE" = "true" ]; then
+      case "$(printf '%s' "${BOUCLE_LLM_DELETE_LEGACY:-false}" | tr '[:upper:]' '[:lower:]')" in
+        true | 1 | yes | on) LLM_DELETE_LEGACY=true ;;
+      esac
+    else
+      read -r -p "Remove the legacy pair (BOUCLE_LLM_BASE_URL + BOUCLE_LLM_API_KEY) so freeride takes over? [y/N] " _del_ans || true
+      case "$_del_ans" in y | Y | yes | YES) LLM_DELETE_LEGACY=true ;; esac
+    fi
+    if [ "$LLM_DELETE_LEGACY" = "true" ]; then
+      llm_ci_var_delete BOUCLE_LLM_API_KEY
+      llm_ci_var_delete BOUCLE_LLM_BASE_URL
+      log_pass "legacy pair removed — freeride is now the active mode"
+    else
+      echo "  ! WARNING: the legacy pair keeps PRIORITY over freeride — freeride keys are inert until it is removed." >&2
+      echo "             Re-run with BOUCLE_LLM_DELETE_LEGACY=true (or answer 'y') to remove it." >&2
+    fi
+  fi
+fi
+
+echo ""
+
 # ── 1. CI Variables / Secrets ────────────────────────────────────────
 echo "=== CI Variables ==="
 
@@ -749,9 +955,6 @@ if [ "$FORGE" = "gitlab" ]; then
     run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables -f key=BOUCLE_SPEC_PROFILE -f value=strict -f masked=false -f protected=false >/dev/null"
     log_pass "BOUCLE_SPEC_PROFILE set"
   fi
-
-  # BOUCLE_LLM_API_KEY
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_LLM_API_KEY" 2> /dev/null | jq -r '.key // empty' || true)
 
   # BOUCLE_DND_TZ
   EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_DND_TZ" 2> /dev/null | jq -r '.key // empty' 2> /dev/null || true)
@@ -815,36 +1018,45 @@ if [ "$FORGE" = "gitlab" ]; then
     log_pass "BOUCLE_UPDATE_MODE set to release"
   fi
 
-  if [ -n "$EXISTING" ]; then
-    log_skip "BOUCLE_LLM_API_KEY already exists"
-  else
-    LLM_API_KEY="${BOUCLE_LLM_API_KEY:-}"
-    if [ -z "$LLM_API_KEY" ] && [ "$NON_INTERACTIVE" = "false" ]; then
-      read -r -p "BOUCLE_LLM_API_KEY value (masked): " LLM_API_KEY || true
-    fi
-    if [ -n "$LLM_API_KEY" ]; then
-      if [ "$DRY_RUN" = "true" ]; then
-        echo "  [dry-run] set BOUCLE_LLM_API_KEY (masked) — value omitted from dry-run output"
-      else
-        glab api --hostname "$HOST" -X POST "/projects/$PROJECT_ID/variables" --field key=BOUCLE_LLM_API_KEY --field value="$LLM_API_KEY" --field masked=true > /dev/null
-      fi
-      log_pass "BOUCLE_LLM_API_KEY set (masked)"
-    elif [ "$NON_INTERACTIVE" = "true" ]; then
-      CI_VARS_URL="${PROJECT_URL:-https://$HOST/$PROJECT}/-/settings/ci_cd"
-      log_skip "BOUCLE_LLM_API_KEY — set it manually as a masked CI/CD variable: $CI_VARS_URL"
+  # ── Legacy LLM pair (only when legacy mode is active) ────────────────
+  # The LLM-mode step above chose the mode. In freeride mode the legacy pair
+  # MUST stay absent: is_freeride_mode() returns false while it is set, so
+  # seeding it would silently override freeride.
+  if [ "$LLM_MODE_ACTIVE" = "legacy" ]; then
+    # BOUCLE_LLM_API_KEY
+    if llm_ci_var_exists BOUCLE_LLM_API_KEY; then
+      log_skip "BOUCLE_LLM_API_KEY already exists"
     else
-      log_fail "BOUCLE_LLM_API_KEY — no value provided"
+      LLM_API_KEY="${BOUCLE_LLM_API_KEY:-}"
+      if [ -z "$LLM_API_KEY" ] && [ "$NON_INTERACTIVE" = "false" ]; then
+        read -r -p "BOUCLE_LLM_API_KEY value (masked): " LLM_API_KEY || true
+      fi
+      if [ -n "$LLM_API_KEY" ]; then
+        if [ "$DRY_RUN" = "true" ]; then
+          echo "  [dry-run] set BOUCLE_LLM_API_KEY (masked) — value omitted from dry-run output"
+        else
+          glab api --hostname "$HOST" -X POST "/projects/$PROJECT_ID/variables" --field key=BOUCLE_LLM_API_KEY --field value="$LLM_API_KEY" --field masked=true > /dev/null
+        fi
+        log_pass "BOUCLE_LLM_API_KEY set (masked)"
+      elif [ "$NON_INTERACTIVE" = "true" ]; then
+        CI_VARS_URL="${PROJECT_URL:-https://$HOST/$PROJECT}/-/settings/ci_cd"
+        log_skip "BOUCLE_LLM_API_KEY — set it manually as a masked CI/CD variable: $CI_VARS_URL"
+      else
+        log_fail "BOUCLE_LLM_API_KEY — no value provided"
+      fi
     fi
-  fi
 
-  # BOUCLE_LLM_BASE_URL
-  EXISTING=$(glab api --hostname "$HOST" "/projects/$PROJECT_ID/variables/BOUCLE_LLM_BASE_URL" 2> /dev/null | jq -r '.key // empty' || true)
-  if [ -n "$EXISTING" ]; then
-    log_skip "BOUCLE_LLM_BASE_URL already exists"
+    # BOUCLE_LLM_BASE_URL
+    if llm_ci_var_exists BOUCLE_LLM_BASE_URL; then
+      log_skip "BOUCLE_LLM_BASE_URL already exists"
+    else
+      LLM_BASE_URL="${BOUCLE_LLM_BASE_URL:-https://ollama.com/v1}"
+      run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables --field key=BOUCLE_LLM_BASE_URL --field value=$LLM_BASE_URL >/dev/null"
+      log_pass "BOUCLE_LLM_BASE_URL set (${BOUCLE_LLM_BASE_URL:-default: https://ollama.com/v1})"
+    fi
   else
-    LLM_BASE_URL="${BOUCLE_LLM_BASE_URL:-https://ollama.com/v1}"
-    run "glab api --hostname $HOST -X POST /projects/$PROJECT_ID/variables --field key=BOUCLE_LLM_BASE_URL --field value=$LLM_BASE_URL >/dev/null"
-    log_pass "BOUCLE_LLM_BASE_URL set (${BOUCLE_LLM_BASE_URL:-default: https://ollama.com/v1})"
+    log_skip "BOUCLE_LLM_API_KEY (freeride mode active — legacy pair not seeded)"
+    log_skip "BOUCLE_LLM_BASE_URL (freeride mode active — legacy pair not seeded)"
   fi
 
   # BOUCLE_FALLBACK_PROVIDER
@@ -1029,28 +1241,45 @@ else
   run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_RUNS_ON --repo \"$PROJECT_ID\" --body \"$RUNS_ON\" 2>/dev/null"
   log_pass "BOUCLE_RUNS_ON set to $RUNS_ON (vars)"
 
-  # BOUCLE_LLM_API_KEY (masked — use secret not var for maskable values)
-  LLM_API_KEY="${BOUCLE_LLM_API_KEY:-}"
-  if [ -z "$LLM_API_KEY" ] && [ "$NON_INTERACTIVE" = "false" ]; then
-    read -r -p "BOUCLE_LLM_API_KEY value (masked): " LLM_API_KEY || true
-  fi
-  if [ -n "$LLM_API_KEY" ]; then
-    if [ "$DRY_RUN" = "true" ]; then
-      echo "  [dry-run] set BOUCLE_LLM_API_KEY (secret, masked) — value omitted"
+  # ── Legacy LLM pair (only when legacy mode is active) ────────────────
+  # The LLM-mode step above chose the mode. In freeride mode the legacy pair
+  # MUST stay absent: is_freeride_mode() returns false while it is set, so
+  # seeding it would silently override freeride.
+  if [ "$LLM_MODE_ACTIVE" = "legacy" ]; then
+    # BOUCLE_LLM_API_KEY (masked — use secret not var for maskable values)
+    if llm_ci_var_exists BOUCLE_LLM_API_KEY; then
+      log_skip "BOUCLE_LLM_API_KEY already exists"
     else
-      echo "$LLM_API_KEY" | GH_TOKEN="$BOT_TOKEN" gh secret set BOUCLE_LLM_API_KEY --repo "$PROJECT_ID" 2> /dev/null
+      LLM_API_KEY="${BOUCLE_LLM_API_KEY:-}"
+      if [ -z "$LLM_API_KEY" ] && [ "$NON_INTERACTIVE" = "false" ]; then
+        read -r -p "BOUCLE_LLM_API_KEY value (masked): " LLM_API_KEY || true
+      fi
+      if [ -n "$LLM_API_KEY" ]; then
+        if [ "$DRY_RUN" = "true" ]; then
+          echo "  [dry-run] set BOUCLE_LLM_API_KEY (secret, masked) — value omitted"
+        else
+          echo "$LLM_API_KEY" | GH_TOKEN="$BOT_TOKEN" gh secret set BOUCLE_LLM_API_KEY --repo "$PROJECT_ID" 2> /dev/null
+        fi
+        log_pass "BOUCLE_LLM_API_KEY set (secrets, masked)"
+      elif [ "$NON_INTERACTIVE" = "true" ]; then
+        log_skip "BOUCLE_LLM_API_KEY — set it manually as a repo secret in Settings > Secrets > Actions"
+      else
+        log_fail "BOUCLE_LLM_API_KEY — no value provided"
+      fi
     fi
-    log_pass "BOUCLE_LLM_API_KEY set (secrets, masked)"
-  elif [ "$NON_INTERACTIVE" = "true" ]; then
-    log_skip "BOUCLE_LLM_API_KEY — set it manually as a repo secret in Settings > Secrets > Actions"
-  else
-    log_fail "BOUCLE_LLM_API_KEY — no value provided"
-  fi
 
-  # BOUCLE_LLM_BASE_URL (var, not secret)
-  LLM_BASE_URL="${BOUCLE_LLM_BASE_URL:-https://ollama.com/v1}"
-  run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_LLM_BASE_URL --repo \"$PROJECT_ID\" --body \"$LLM_BASE_URL\" 2>/dev/null"
-  log_pass "BOUCLE_LLM_BASE_URL set to ${BOUCLE_LLM_BASE_URL:-default: https://ollama.com/v1} (vars)"
+    # BOUCLE_LLM_BASE_URL (var, not secret)
+    if llm_ci_var_exists BOUCLE_LLM_BASE_URL; then
+      log_skip "BOUCLE_LLM_BASE_URL already exists"
+    else
+      LLM_BASE_URL="${BOUCLE_LLM_BASE_URL:-https://ollama.com/v1}"
+      run "GH_TOKEN=\"$BOT_TOKEN\" gh variable set BOUCLE_LLM_BASE_URL --repo \"$PROJECT_ID\" --body \"$LLM_BASE_URL\" 2>/dev/null"
+      log_pass "BOUCLE_LLM_BASE_URL set to ${BOUCLE_LLM_BASE_URL:-default: https://ollama.com/v1} (vars)"
+    fi
+  else
+    log_skip "BOUCLE_LLM_API_KEY (freeride mode active — legacy pair not seeded)"
+    log_skip "BOUCLE_LLM_BASE_URL (freeride mode active — legacy pair not seeded)"
+  fi
 
   # ── GitHub: DND variables ────────────────────────────────────────────
 
@@ -1613,6 +1842,7 @@ echo "=== Summary ==="
 echo "  Passed: $PASS"
 echo "  Skipped: $SKIP"
 echo "  Failed: $FAIL"
+echo "  Active LLM mode: ${LLM_MODE_ACTIVE:-unknown}"
 echo ""
 
 if [ "$FAIL" -gt 0 ]; then

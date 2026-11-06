@@ -53,9 +53,15 @@ cd "$ROOT"
 #   SC2015  A && B || C — the codebase uses this deliberately as try/fallback
 #   SC2016  single quotes prevent expansion — intentional in jq filters/formats
 #   SC2317  unreachable command — false positives for sourced/indirect calls
+#   SC2329  function never invoked — same indirect-invocation false-positive
+#           family: functions referenced via `trap ... EXIT` (shellcheck
+#           does not count trap registrations) and sourced library files
+#           (lib/boucle-ci/*.sh are sourced by bin/jc, so nothing is
+#           invoked in-file). Excluding this keeps local shellcheck
+#           versions semantically aligned with the CI-pinned one.
 #   SC1001  `\:` is a regular `:` — intentional in a case pattern
 # Everything else at info or above fails the gate.
-SHELLCHECK_EXCLUDES="SC2015,SC2016,SC2317,SC1001"
+SHELLCHECK_EXCLUDES="SC2015,SC2016,SC2317,SC2329,SC1001"
 
 # discover_shell_files: tracked engine shell files.
 # Match on the shebang as well as the extension, the way pre-commit's
