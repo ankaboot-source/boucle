@@ -315,12 +315,30 @@ default:
       # format" plus a retry storm in its wake (#144). Validate the archive
       # magic before extracting, retry transient failures, fail loudly.
       # Magic values: 1f8b = gzip, fd377a585a00 = xz, 7f454c46 = ELF.
+      #
+      # GitHub auth (#188): anonymous release downloads count against the
+      # shared 60/h-per-IP rate limit — on a shared runner one throttled
+      # neighbour 504s every job, which reddened a consumer's 10-min doctor
+      # cadence for hours. When a token is available, send it (5000/h):
+      #   BOUCLE_GITHUB_TOKEN   — dedicated download token (masked CI var),
+      #   BOUCLE_UPSTREAM_TOKEN — the retro's GitHub PAT (already masked),
+      #   GITHUB_TOKEN          — injected natively by GitHub Actions.
+      # NEVER BOUCLE_TOKEN: on a GitLab consumer it is the forge PAT, and
+      # sending it to github.com would leak a GitLab credential. Mark
+      # whatever token you provide as MASKED so a CI_DEBUG_TRACE run cannot
+      # print it.
       fetch_checked() {
         local url="$1" dst="$2" magic="$3" tries="${4:-3}"
-        local nb=$(( ${#magic} / 2 )) n hex=""
+        local nb=$(( ${#magic} / 2 )) n hex="" auth=()
+        case "${url}" in
+          https://github.com/*|https://api.github.com/*|https://raw.githubusercontent.com/*)
+            local gh_tok="${BOUCLE_GITHUB_TOKEN:-${BOUCLE_UPSTREAM_TOKEN:-${GITHUB_TOKEN:-}}}"
+            [ -n "${gh_tok}" ] && auth=(-H "Authorization: Bearer ${gh_tok}")
+            ;;
+        esac
         for ((n = 1; n <= tries; n++)); do
           hex=""
-          if curl -fLsS --retry 2 --retry-delay 3 -o "${dst}" "${url}"; then
+          if curl -fLsS --retry 2 --retry-delay 3 ${auth[@]+"${auth[@]}"} -o "${dst}" "${url}"; then
             hex="$(od -An -N "${nb}" -tx1 "${dst}" | tr -d ' \n')"
             if [ "${hex}" = "${magic}" ]; then
               return 0
@@ -379,13 +397,18 @@ default:
       # CLI even on a GitLab consumer: the upstream is ALWAYS GitHub. No
       # other GitLab job needs gh, so the install is OFFLINE-SAFE — a
       # failed download warns once and the loop stays GitLab-native.
+      # fetch_checked, not raw curl (#188): a throttled GitHub answers
+      # with an HTML error page that `curl -sL` (no -f) fed straight to
+      # tar — every job of a consumer warned "gzip: stdin: not in gzip
+      # format". The magic check rejects the page, the retries ride out
+      # transient 504s, and the fail-open contract is unchanged.
       GH_VER="2.89.0"
       _GH_INSTALLED="$(gh --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)"
       if [ -z "$_GH_INSTALLED" ] || [ "$_GH_INSTALLED" != "$GH_VER" ]; then
         echo "Installing gh v${GH_VER} (was: ${_GH_INSTALLED:-MISSING})..."
         mkdir -p "$HOME/.local/bin"
         GH_TMP="/tmp/gh-${CI_JOB_ID:-local}"
-        if curl -sL "https://github.com/cli/cli/releases/download/v${GH_VER}/gh_${GH_VER}_linux_amd64.tar.gz" -o "$GH_TMP.tar.gz" \
+        if fetch_checked "https://github.com/cli/cli/releases/download/v${GH_VER}/gh_${GH_VER}_linux_amd64.tar.gz" "$GH_TMP.tar.gz" "1f8b" \
           && mkdir -p "$GH_TMP" \
           && tar xzf "$GH_TMP.tar.gz" -C "$GH_TMP"; then
           cp "$GH_TMP/gh_${GH_VER}_linux_amd64/bin/gh" "$HOME/.local/bin/gh" 2>/dev/null \
@@ -495,19 +518,48 @@ default:
       # runner pinned to an old version indefinitely (observed: consumer
       # ran v0.68.0 for days despite JCODE_VER=v0.73.0 in the config). Now
       # we check the installed version matches JCODE_VER and reinstall if not.
-      JCODE_VER="${JCODE_VERSION:-v0.84.0}"
-      if ! command -v jcode &>/dev/null || ! jcode --version 2>/dev/null | grep -q "$JCODE_VER"; then
-        echo "Installing jcode coding agent (standalone binary, $JCODE_VER)..."
-        mkdir -p "$HOME/.local/bin"
-        JCODE_TMP="/tmp/jcode-${CI_JOB_ID:-local}"
-        curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x86_64.tar.gz" -o "$JCODE_TMP.tar.gz"
-        mkdir -p "$JCODE_TMP"
-        tar xzf "$JCODE_TMP.tar.gz" -C "$JCODE_TMP"
-        # The tarball contains jcode-linux-x86_64.bin at its root.
-        mv "$JCODE_TMP/jcode-linux-x86_64.bin" "$HOME/.local/bin/jcode"
-        chmod +x "$HOME/.local/bin/jcode"
-        rm -rf "$JCODE_TMP" "$JCODE_TMP.tar.gz"
-      fi
+      #
+      # Gated to the five agent jobs (#188): only triage/worker/reviewer/
+      # e2e/retro spawn jcode (via bin/jc). Control-plane jobs (doctor,
+      # dispatch, merger, post-merge, catchup, automerge, deploy,
+      # build-site, pages, cmd-*) never spawn an agent — yet they used to
+      # download jcode whenever the image pin lagged JCODE_VER, and one
+      # raw-curl failure (a GitHub 504 on a throttled shared-runner IP)
+      # killed the job: a consumer's doctor went red every 10 minutes for
+      # hours. doctor's "jcode in PATH" audit is a presence check — the
+      # agents image bakes the binary (docker/Dockerfile.agents, pins kept
+      # in sync by test/runner-toolchain.bats), so gating the install
+      # never fails the audit.
+      #
+      # fetch_checked + soft-fail (#188): when the download keeps failing
+      # but SOME jcode is installed, continue with a loud WARN — a slightly
+      # stale agent beats a hard-failed loop, and the drift window between
+      # a pin bump and an image rebuild is short. Fatal only when no jcode
+      # is present at all: the agent has nothing to run.
+      case "$CI_JOB_NAME" in
+        triage|worker|reviewer|e2e|retro)
+          JCODE_VER="${JCODE_VERSION:-v0.84.0}"
+          if ! command -v jcode &>/dev/null || ! jcode --version 2>/dev/null | grep -q "$JCODE_VER"; then
+            echo "Installing jcode coding agent (standalone binary, $JCODE_VER)..."
+            mkdir -p "$HOME/.local/bin"
+            JCODE_TMP="/tmp/jcode-${CI_JOB_ID:-local}"
+            if fetch_checked "https://github.com/1jehuang/jcode/releases/download/${JCODE_VER}/jcode-linux-x86_64.tar.gz" "$JCODE_TMP.tar.gz" "1f8b"; then
+              mkdir -p "$JCODE_TMP"
+              tar xzf "$JCODE_TMP.tar.gz" -C "$JCODE_TMP"
+              # The tarball contains jcode-linux-x86_64.bin at its root.
+              mv "$JCODE_TMP/jcode-linux-x86_64.bin" "$HOME/.local/bin/jcode"
+              chmod +x "$HOME/.local/bin/jcode"
+            elif command -v jcode &>/dev/null; then
+              echo "[boucle] WARN: jcode $JCODE_VER download failed — continuing with the installed $(jcode --version 2>/dev/null | head -1)" >&2
+            else
+              echo "[boucle] ERROR: jcode $JCODE_VER download failed and no jcode is installed — the agent cannot run" >&2
+              rm -rf "$JCODE_TMP" "$JCODE_TMP.tar.gz"
+              exit 1
+            fi
+            rm -rf "$JCODE_TMP" "$JCODE_TMP.tar.gz"
+          fi
+          ;;
+      esac
 
       # ── codebase-memory-mcp (codebase knowledge graph) ──
       # Static binary — no node needed. codebase-memory-mcp: installed for repo indexing only (pi has no MCP support)
