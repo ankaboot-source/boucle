@@ -16,6 +16,12 @@
 # the two jobs actually mention. A future guard added to one side of ANY needs
 # edge is a red test.
 #
+# `deploy`'s need on `build-site` is `optional: true` (BOUCLE_DEPLOY_INLINE
+# excludes build-site while deploy runs), so that edge is outside the general
+# test by construction. It is pinned explicitly instead: build-site's rules MUST
+# equal deploy's plus exactly one inline-only `when: never` guard, and deploy's
+# need MUST stay optional.
+#
 # These tests read the YAML, not the prose: a rule deleted in a refactor is a
 # red test, not a silently broken consumer pipeline.
 
@@ -162,21 +168,168 @@ PY
   assert_output "ok"
 }
 
-@test "deploy and build-site share one exclusion set (no drift)" {
-  # Equal rules is the strongest form of "upstream exclusion is a subset of
-  # downstream exclusion": the pair can never be half-included again.
+@test "build-site rules equal deploy rules plus exactly the inline guard" {
+  # Equal rules was the strongest "no drift" form while deploy needed build-site
+  # non-optionally. The need is now optional (inline deploy runs alone), so the
+  # contract is equality up to build-site's single inline-only guard: every
+  # other rule must match deploy's, in the same order.
   run python3 - <<'PY'
 import json
 
 import yaml
 
 ci = yaml.safe_load(open(".gitlab-ci.yml"))
+inline = '$BOUCLE_DEPLOY_INLINE == "true" && $BOUCLE_DEPLOY_PROVIDER != "gitlab-pages"'
 deploy = [(r.get("if"), r.get("when", "on_success")) for r in ci["deploy"]["rules"]]
 build = [(r.get("if"), r.get("when", "on_success")) for r in ci["build-site"]["rules"]]
-assert deploy == build, "deploy/build-site rules drifted:\ndeploy=%s\nbuild=%s" % (
-    json.dumps(deploy),
-    json.dumps(build),
+guards = [i for i, rule in enumerate(build) if rule == (inline, "never")]
+assert len(guards) == 1, "build-site must carry exactly one inline guard:\n%s" % json.dumps(build)
+without = build[: guards[0]] + build[guards[0] + 1 :]
+assert without == deploy, (
+    "build-site/deploy rules drifted outside the inline guard:\ndeploy=%s\nbuild-without-inline=%s"
+    % (json.dumps(deploy), json.dumps(without))
 )
+print("ok")
+PY
+  assert_success
+  assert_output "ok"
+}
+
+@test "deploy's need on build-site is optional (inline deploy runs alone)" {
+  # BOUCLE_DEPLOY_INLINE=true excludes build-site. A non-optional need would
+  # reference an absent job and GitLab would fail the push pipeline at once.
+  run python3 - <<'PY'
+import yaml
+
+ci = yaml.safe_load(open(".gitlab-ci.yml"))
+assert ci["deploy"]["needs"] == [{"job": "build-site", "optional": True}], ci["deploy"]["needs"]
+print("ok")
+PY
+  assert_success
+  assert_output "ok"
+}
+
+@test "BOUCLE_DEPLOY_INLINE defaults to false" {
+  run python3 - <<'PY'
+import yaml
+
+ci = yaml.safe_load(open(".gitlab-ci.yml"))
+assert ci["variables"]["BOUCLE_DEPLOY_INLINE"] == "false", ci["variables"].get("BOUCLE_DEPLOY_INLINE")
+print("ok")
+PY
+  assert_success
+  assert_output "ok"
+}
+
+@test "inline deploy excludes build-site and pages but keeps deploy" {
+  # The optimisation's happy path: self mode, deploy command set, no Pages
+  # provider, push to the default branch. `deploy` builds in-job; the artifact
+  # producer and the Pages publisher are out of the pipeline.
+  run python3 - <<'PY'
+import re
+import yaml
+
+ci = yaml.safe_load(open(".gitlab-ci.yml"))
+
+
+def included(job, vals):
+    def _v(name):
+        return vals.get(name, "")
+
+    def _t(name):
+        return _v(name) != ""
+
+    def cond_is_true(cond):
+        expr = re.sub(
+            r'\$(\w+)\s*(==|!=)\s*"([^"]*)"',
+            lambda m: "_v(%r) %s %r" % (m.group(1), m.group(2), m.group(3)),
+            cond,
+        )
+        expr = re.sub(
+            r"\$(\w+)\s*(==|!=)\s*\$(\w+)",
+            lambda m: "_v(%r) %s _v(%r)" % (m.group(1), m.group(2), m.group(3)),
+            expr,
+        )
+        expr = re.sub(r"\$(\w+)", lambda m: "_t(%r)" % m.group(1), expr)
+        return bool(eval(expr.replace("&&", " and ").replace("||", " or "),
+                         {"__builtins__": {}}, {"_v": _v, "_t": _t}))
+
+    for rule in job.get("rules") or []:
+        cond = rule.get("if")
+        if cond is None or cond_is_true(cond):
+            return rule.get("when", "on_success") != "never"
+    return False
+
+
+vals = {
+    "BOUCLE_ENABLED": "true",
+    "BOUCLE_DEPLOY_MODE": "self",
+    "BOUCLE_DEPLOY_INLINE": "true",
+    "BOUCLE_DEPLOY_CMD": "npx wrangler pages deploy public",
+    "BOUCLE_DEPLOY_PROVIDER": "",
+    "CI_COMMIT_BRANCH": "main",
+    "CI_DEFAULT_BRANCH": "main",
+    "CI_PIPELINE_SOURCE": "push",
+}
+got = {job: included(ci[job], vals) for job in ("build-site", "deploy", "pages")}
+assert got == {"build-site": False, "deploy": True, "pages": False}, got
+print("ok")
+PY
+  assert_success
+  assert_output "ok"
+}
+
+@test "inline deploy keeps build-site when BOUCLE_DEPLOY_PROVIDER=gitlab-pages" {
+  # `pages` needs build-site's artifact non-optionally. The inline guard MUST
+  # carve gitlab-pages out or the Pages pipeline references an absent job.
+  run python3 - <<'PY'
+import re
+import yaml
+
+ci = yaml.safe_load(open(".gitlab-ci.yml"))
+
+
+def included(job, vals):
+    def _v(name):
+        return vals.get(name, "")
+
+    def _t(name):
+        return _v(name) != ""
+
+    def cond_is_true(cond):
+        expr = re.sub(
+            r'\$(\w+)\s*(==|!=)\s*"([^"]*)"',
+            lambda m: "_v(%r) %s %r" % (m.group(1), m.group(2), m.group(3)),
+            cond,
+        )
+        expr = re.sub(
+            r"\$(\w+)\s*(==|!=)\s*\$(\w+)",
+            lambda m: "_v(%r) %s _v(%r)" % (m.group(1), m.group(2), m.group(3)),
+            expr,
+        )
+        expr = re.sub(r"\$(\w+)", lambda m: "_t(%r)" % m.group(1), expr)
+        return bool(eval(expr.replace("&&", " and ").replace("||", " or "),
+                         {"__builtins__": {}}, {"_v": _v, "_t": _t}))
+
+    for rule in job.get("rules") or []:
+        cond = rule.get("if")
+        if cond is None or cond_is_true(cond):
+            return rule.get("when", "on_success") != "never"
+    return False
+
+
+vals = {
+    "BOUCLE_ENABLED": "true",
+    "BOUCLE_DEPLOY_MODE": "self",
+    "BOUCLE_DEPLOY_INLINE": "true",
+    "BOUCLE_DEPLOY_CMD": "",  # Pages mode: the command stays empty
+    "BOUCLE_DEPLOY_PROVIDER": "gitlab-pages",
+    "CI_COMMIT_BRANCH": "main",
+    "CI_DEFAULT_BRANCH": "main",
+    "CI_PIPELINE_SOURCE": "push",
+}
+got = {job: included(ci[job], vals) for job in ("build-site", "deploy", "pages")}
+assert got == {"build-site": True, "deploy": True, "pages": True}, got
 print("ok")
 PY
   assert_success

@@ -155,6 +155,28 @@ assert guard < push, sys.argv[2] + ": guard at " + str(guard) + " after push rul
   done
 }
 
+@test "build-site: the inline-deploy guard is never, before the push rule" {
+  # BOUCLE_DEPLOY_INLINE=true moves the build into `deploy`. rules: is
+  # first-match-wins, so a guard placed after the push rule would never fire
+  # and build-site would keep producing the artifact the optimisation removes.
+  rules=$(rules_of build-site)
+  python3 -c '
+import json, sys
+rules = json.loads(sys.argv[1])
+guard = push = None
+for i, r in enumerate(rules):
+    cond = r.get("if", "")
+    if "BOUCLE_DEPLOY_INLINE" in cond:
+        assert r.get("when") == "never", r
+        guard = i if guard is None else guard
+    if "CI_PIPELINE_SOURCE == \"push\"" in cond:
+        push = i if push is None else push
+assert guard is not None, "no inline-deploy guard on build-site: " + json.dumps(rules)
+assert push is not None, "no push rule on build-site: " + json.dumps(rules)
+assert guard < push, "inline guard at " + str(guard) + " after push rule at " + str(push)
+' "$rules"
+}
+
 @test "the loop jobs are untouched: still trigger-gated only" {
   # Guardrail on this change itself. Narrowing push-time jobs must not have
   # narrowed a loop job, which would break the loop rather than quiet it.

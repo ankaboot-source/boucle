@@ -195,6 +195,12 @@ variables:
   BOUCLE_VISION_ROLES: "triage,worker,reviewer"
   # Deploy mode: "self" (boucle runs BOUCLE_DEPLOY_CMD) or "external" (consumer's own CI deploys)
   BOUCLE_DEPLOY_MODE: "self"
+  # GitLab-only deploy granularity. "true": the deploy job builds and publishes
+  # in one job and build-site is excluded (no public/ artifact upload/download —
+  # on a slow runner that transfer can cost more than the build itself).
+  # Ignored for BOUCLE_DEPLOY_PROVIDER=gitlab-pages: the pages job has a
+  # non-optional need on build-site, which produces its artifact.
+  BOUCLE_DEPLOY_INLINE: "false"
   # Review mode: "preview" (review tests against deployed preview) or "diff" (review PR diff + check suites)
   BOUCLE_REVIEW_MODE: "preview"
   # Command-mode e2e: consumer-supplied verify command (replaces the URL-probing
@@ -1103,20 +1109,28 @@ deploy:
       when: never
     # Mirror of build-site's "no publisher" guard: with BOUCLE_DEPLOY_CMD empty
     # and no gitlab-pages provider there is nothing to build or deploy. Leaving
-    # deploy included while build-site is excluded makes its non-optional
-    # `needs: build-site` reference an absent job — GitLab creates the push
-    # pipeline then fails it immediately (0 job, created_at == finished_at).
-    # test/ci-needs-dag.bats asserts the two exclusion sets stay identical.
+    # deploy included while build-site is excluded created a pipeline whose
+    # deploy job had nothing to publish; before its need below was optional it
+    # also referenced an absent job, and GitLab failed the push pipeline at
+    # once (0 job, created_at == finished_at). test/ci-needs-dag.bats asserts
+    # this rule list stays identical to build-site's apart from build-site's
+    # inline-only guard.
     - if: $BOUCLE_DEPLOY_CMD == "" && $BOUCLE_DEPLOY_PROVIDER != "gitlab-pages"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
   needs:
+    # Optional because BOUCLE_DEPLOY_INLINE=true excludes build-site: deploy
+    # then builds in this job, from a fresh checkout. When build-site IS in the
+    # pipeline, deploy still waits for it.
     - job: build-site
+      optional: true
   script:
     # Shared stage (lib/boucle-ci/deploy.sh) — same code path as GitHub
     # Actions. It skips the build when $BOUCLE_BUILD_OUTPUT is already
-    # populated, which is the case here: build-site hands it over as an
-    # artifact (rebuilding OOMs WASM toolchains on shell executors).
+    # populated: with build-site in the pipeline that directory arrives as an
+    # artifact (rebuilding OOMs WASM toolchains on shell executors); under
+    # BOUCLE_DEPLOY_INLINE=true there is no build-site, so a fresh checkout
+    # leaves it empty and this job runs the build itself.
     - boucle-ci deploy
   timeout: 10m
 
@@ -1273,6 +1287,10 @@ retro:
 # instead of re-building — this fixes the WASM Out-of-memory failures seen when
 # the build ran on small shell executors.
 #
+# BOUCLE_DEPLOY_INLINE=true opts out: `deploy` runs the build itself and this
+# job (whose artifact upload/download is the slow part on slow runners) is
+# excluded. gitlab-pages keeps this job: `pages` needs its artifact.
+#
 # No `image:` override, on purpose: this job runs the default BOUCLE_BUILD_CMD
 # (`npm ci && npm run build`). On a bare node:22-slim — which is
 # debian:bookworm-slim, so no make and no compiler — any dependency with a
@@ -1295,6 +1313,12 @@ build-site:
     # Same reasoning one step further: with no deploy command AND no
     # declarative Pages provider, there is no publisher at all.
     - if: $BOUCLE_DEPLOY_CMD == "" && $BOUCLE_DEPLOY_PROVIDER != "gitlab-pages"
+      when: never
+    # Inline deploy: `deploy` builds and publishes in one job, so no artifact
+    # is produced or consumed here. gitlab-pages is deliberately carved out of
+    # this guard: `pages` needs build-site non-optionally, and build-site is
+    # the only producer of the Pages artifact.
+    - if: $BOUCLE_DEPLOY_INLINE == "true" && $BOUCLE_DEPLOY_PROVIDER != "gitlab-pages"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
   script:
