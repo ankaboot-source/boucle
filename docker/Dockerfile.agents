@@ -42,6 +42,8 @@ FROM node:22-slim
 #      peak RSS through one or the other. Both were absent, so every run
 #      reported "unavailable" and the memory series was structurally empty.
 #      unzip — bin/forge/github.sh unpacks artifact archives with it.
+#      xz-utils — the toolchain check requires `xz`; node:22-slim does not
+#      ship it, so the verify step failed with "MISSING: xz" on every build.
 #      chromium — the distribution's own build, used by bin/render-preview for
 #      the triage preview and the worker's screenshots. Baking it in is what
 #      lets those steps download nothing at job time; the previous
@@ -62,6 +64,7 @@ RUN apt-get update \
         procps \
         time \
         unzip \
+        xz-utils \
         chromium \
         fonts-dejavu-core \
         fonts-liberation2 \
