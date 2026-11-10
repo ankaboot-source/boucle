@@ -1,0 +1,1 @@
+{"timestamp":"2026-11-10T12:54:55Z","role":"triage","iteration":1,"exit_code":0,"prompt_chars":21974,"tokens":"466634","cost_usd":"n/a","model":"glm-5.3-flash","provider":"boucle","skills":[],"skills_evidence":"not-invoked","arm":"full","setup_fail":"","swarm_spawns":0,"lessons":["e2","e4","e8","e14","e17","e19","e21","e22","e28"],"lessons_source":"matched"}
