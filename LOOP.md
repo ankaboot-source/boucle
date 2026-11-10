@@ -112,7 +112,7 @@ Boucle supports two deploy modes and two review modes, orthogonal and composable
 By default on GitLab, `build-site` builds the site once and hands
 `$BOUCLE_BUILD_OUTPUT` to `deploy` as a CI artifact. On a slow runner that
 artifact upload+download can cost more than the build itself (observed: 40 min
-on a consumer runner, urgence-palestine.fr#328). Set
+on a consumer runner, Nov 2026). Set
 `BOUCLE_DEPLOY_INLINE=true` to remove the transfer: `deploy` builds and
 publishes in one job, and `build-site` is excluded from the pipeline.
 
