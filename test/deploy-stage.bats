@@ -77,6 +77,52 @@ setup() {
   assert_output --partial "BUILD_RAN"
 }
 
+@test "inline deploy warns when a populated output tree skips the rebuild" {
+  # BOUCLE_DEPLOY_INLINE=true promises the deploy job builds. An inherited
+  # non-empty tree silently breaks that promise: deploy publishes possibly
+  # stale content. Warn, and never delete the tree — on some consumers
+  # BOUCLE_BUILD_OUTPUT is a source publicDir, not a disposable artifact.
+  run bash -c '
+    out="$BATS_TEST_TMPDIR/public"
+    mkdir -p "$out" && echo "<html></html>" > "$out/index.html"
+    BOUCLE_DEPLOY_INLINE=true
+    BOUCLE_DEPLOY_CMD="echo DEPLOYED https://example.com"
+    BOUCLE_DEPLOY_MODE=self
+    BOUCLE_DEPLOY_URL_REGEX="https://[a-zA-Z0-9./-]+"
+    BOUCLE_BUILD_CMD="echo BUILD_RAN"
+    BOUCLE_BUILD_OUTPUT="$out"
+    BOUCLE_DEFAULT_BRANCH=main
+    curl() { echo "200"; }
+    source lib/boucle.sh
+    boucle_do_deploy
+  '
+  assert_success
+  assert_output --partial "WARN: BOUCLE_DEPLOY_INLINE=true"
+  assert_output --partial "skipping build"
+  refute_output --partial "BUILD_RAN"
+  # The tree must survive: public/ may be a source publicDir.
+  assert [ -f "$BATS_TEST_TMPDIR/public/index.html" ]
+}
+
+@test "inline deploy builds on a fresh checkout (empty output tree)" {
+  # The inline path's normal state: no build-site artifact, so deploy builds.
+  run bash -c '
+    BOUCLE_DEPLOY_INLINE=true
+    BOUCLE_DEPLOY_CMD="echo DEPLOYED https://example.com"
+    BOUCLE_DEPLOY_MODE=self
+    BOUCLE_DEPLOY_URL_REGEX="https://[a-zA-Z0-9./-]+"
+    BOUCLE_BUILD_CMD="echo BUILD_RAN"
+    BOUCLE_BUILD_OUTPUT="$BATS_TEST_TMPDIR/public"
+    BOUCLE_DEFAULT_BRANCH=main
+    curl() { echo "200"; }
+    source lib/boucle.sh
+    boucle_do_deploy
+  '
+  assert_success
+  assert_output --partial "BUILD_RAN"
+  refute_output --partial "WARN: BOUCLE_DEPLOY_INLINE=true"
+}
+
 @test "the shared deploy stage carries the conditional build, not an unconditional one" {
   run grep -q 'already populated (build artifact) — skipping build' lib/boucle.sh
   assert_success

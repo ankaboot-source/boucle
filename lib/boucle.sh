@@ -2811,6 +2811,16 @@ boucle_do_deploy() {
     return 0
   fi
 
+  # Inline deploy contract: `deploy` is expected to build, but an inherited
+  # non-empty output tree silently breaks that promise — the deploy then
+  # publishes possibly stale content. Warn, never delete: on some consumers
+  # BOUCLE_BUILD_OUTPUT is a source publicDir, not a disposable artifact.
+  if [ "${BOUCLE_DEPLOY_INLINE:-false}" = "true" ] \
+    && [ -n "${BOUCLE_BUILD_OUTPUT:-}" ] && [ -d "$BOUCLE_BUILD_OUTPUT" ] \
+    && [ -n "$(ls -A "$BOUCLE_BUILD_OUTPUT" 2> /dev/null)" ]; then
+    echo "WARN: BOUCLE_DEPLOY_INLINE=true but $BOUCLE_BUILD_OUTPUT is already populated — deploying WITHOUT rebuilding (possibly stale content)" >&2
+  fi
+
   # Build — unless the build output is already populated. On GitLab the
   # build-site job hands this job `public/` as an artifact, and rebuilding
   # here OOMs WASM toolchains on shell executors. On
