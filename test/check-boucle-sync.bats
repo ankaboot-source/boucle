@@ -238,6 +238,30 @@ start_orphan_root() {
   refute_output --partial "no changes under .boucle/"
 }
 
+@test "push to the trunk with an unreachable before-SHA (trunk == head) → degenerate range fails closed" {
+  # HEAD IS the default branch here: the trunk fallback resolves to the pushed
+  # head, so the range would be empty for the wrong reason — an unauthorized
+  # .boucle/ edit would slip through it.
+  make_commit "feat: meddle with the engine" ".boucle/.gitlab-ci.yml"
+  run_guard_push_from "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+  assert_failure 1
+  assert_output --partial "degenerates to an empty range"
+  assert_output --partial "FAILING CLOSED"
+  assert_output --partial "GIT_DEPTH"
+  refute_output --partial "no changes under .boucle/"
+}
+
+@test "no-op push (before-SHA == HEAD, reachable) → still passes, never fail closed" {
+  # The degenerate guard MUST NOT fire when the merge base is real: a push that
+  # introduces nothing keeps its normal, empty-range pass.
+  make_commit "feat: add src file" "src/app.txt"
+  head="$(git -C "$TMP_REPO" rev-parse HEAD)"
+  run_guard_push_from "$head"
+  assert_success
+  assert_output --partial "no changes under .boucle/"
+  refute_output --partial "FAILING CLOSED"
+}
+
 @test "merge-request mode: still diffed against the target branch → pass" {
   git -C "$TMP_REPO" checkout -q -b lane
   make_commit "feat: add src file" "src/app.txt"

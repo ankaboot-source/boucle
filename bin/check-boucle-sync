@@ -38,20 +38,23 @@
 #      `git fetch --deepen=200 origin` (no-op on a full clone, tolerant of an
 #      offline runner or missing credentials), then one retry;
 #   3. trunk-relative: origin/$CI_DEFAULT_BRANCH, else $CI_DEFAULT_BRANCH —
-#      the same ref the merge-request path uses;
-#   4. no base at all → FAIL CLOSED (exit 1). A guard NEVER turns an
-#      unresolvable range into a silent pass.
+#      the same ref the merge-request path uses. If that ref already IS the
+#      pushed head (a push to the trunk whose before-SHA is unreachable), the
+#      range degenerates to empty for the wrong reason: step 4 applies;
+#   4. no base at all, or a fallback base identical to the pushed head →
+#      FAIL CLOSED (exit 1). A guard NEVER turns an unresolvable or degenerate
+#      range into a silent pass.
 # Merge request: merge base of the target branch and HEAD, falling back to the
 # target branch tip. Local/manual: HEAD~1..HEAD.
 #
 # Exit codes:
 #   0 — no .boucle/ change, or every .boucle/ change is an authorized bot commit
 #   1 — at least one commit modified .boucle/ without an authorized subject,
-#       OR the commit range could not be resolved (fail closed)
+#       OR the commit range could not be resolved / degenerated (fail closed)
 #
 # Idempotent, read-only: the only side effect is the bounded, best-effort
 # `git fetch --deepen` above, and only when the base is genuinely missing.
-# shellcheck + shfmt clean.
+# Passes shellcheck and shfmt.
 set -euo pipefail
 
 default_branch="${CI_DEFAULT_BRANCH:-main}"
@@ -77,6 +80,12 @@ is_authorized() {
 # rev_resolves <rev>: the revision names a commit present in this clone.
 rev_resolves() {
   [ -n "${1}" ] && git rev-parse --verify --quiet "${1}^{commit}" > /dev/null 2>&1
+}
+
+# commit_of <rev>: print the resolved commit id, or nothing when it does not
+# resolve. Used to compare two refs by identity.
+commit_of() {
+  git rev-parse --verify --quiet "${1}^{commit}" 2> /dev/null || true
 }
 
 # merge_base_of <a> <b>: print the merge base, or nothing when there is none
@@ -107,31 +116,63 @@ resolve_trunk_base() {
   fi
 }
 
-# resolve_base <before> <after>: print the base commit, or fail (no output).
+# resolve_base <before> <after>: set BASE and BASE_SOURCE, return 1 when no
+# base at all could be resolved. BASE_SOURCE says where the base came from:
+# "merge-base" when it is a real merge base with the before-SHA (or the
+# before-SHA itself), "trunk" when only the trunk-relative fallback resolved.
+# The caller needs that distinction: a trunk base that already IS the pushed
+# head is a degenerate range, not a "no changes" answer.
 resolve_base() {
-  local before="${1}" after="${2}" base=""
+  local before="${1}" after="${2}" mb=""
+  base_source="merge-base"
   if rev_resolves "${before}"; then
-    base=$(merge_base_of "${before}" "${after}")
+    mb=$(merge_base_of "${before}" "${after}")
   fi
-  if [ -z "${base}" ]; then
+  if [ -z "${mb}" ]; then
     # Missing base: the before-SHA is unreachable (force-push orphaned it in a
     # shallow clone) or the two histories are disjoint. Deepen once, retry.
     deepen_clone_once
     if rev_resolves "${before}"; then
-      base=$(merge_base_of "${before}" "${after}")
+      mb=$(merge_base_of "${before}" "${after}")
     fi
   fi
-  if [ -n "${base}" ]; then
-    printf '%s\n' "${base}"
+  if [ -n "${mb}" ]; then
+    base="${mb}"
     return 0
   fi
-  resolve_trunk_base
+  base_source="trunk"
+  if ! base=$(resolve_trunk_base); then
+    base=""
+    base_source=""
+    return 1
+  fi
+  return 0
 }
 
 # ── Fail closed: an unresolvable range is never a silent pass ───────────
+# fail_closed <before> <after> [unresolved|degenerate]
 fail_closed() {
-  local before="${1}" after_rev="${2}"
-  cat >&2 << EOF
+  local before="${1}" after_rev="${2}" reason="${3:-unresolved}"
+  if [ "${reason}" = "degenerate" ]; then
+    cat >&2 << EOF
+check-boucle-sync: the push range degenerates to an empty range — FAILING CLOSED.
+
+  before-SHA : ${before:-<unset>}
+  after-SHA  : ${after_rev}
+  base used  : ${base} (trunk-relative fallback)
+
+The before-SHA is unreachable in this clone (a force-push left it behind and
+the clone is shallow), so the trunk-relative fallback is all that is left — and
+that ref already points at the pushed head. The empty range says nothing about
+what this push introduced, so an unauthorized .boucle/ edit could slip through
+it. That is a fail-open, not a "no changes" answer.
+
+Fix: raise GIT_DEPTH for this job (GIT_DEPTH: 0 clones the full history) or
+fetch the before-SHA (git fetch origin <sha>), then re-run. If the range is
+genuinely empty, inspect the push manually.
+EOF
+  else
+    cat >&2 << EOF
 check-boucle-sync: cannot resolve a commit range — FAILING CLOSED.
 
   before-SHA : ${before:-<unset>}
@@ -148,6 +189,9 @@ could then slip through. The usual causes are:
 
 Fix: raise GIT_DEPTH for the job (GIT_DEPTH: 0 clones the full history) or
 fetch the before-SHA (git fetch origin <sha>), then re-run.
+EOF
+  fi
+  cat >&2 << 'EOF'
 
 Remediation for the .boucle/ rule itself:
   consumer config → CI variables (Settings → CI/CD → Variables) or the root
@@ -178,8 +222,22 @@ elif [ -n "${CI_COMMIT_BEFORE_SHA:-}" ] && [ "${CI_COMMIT_BEFORE_SHA}" != "00000
   # A clone that does not contain the pushed commit itself cannot be ranged;
   # HEAD is the same commit in a CI checkout, so use it rather than fatal.
   rev_resolves "${after}" || after="HEAD"
-  base=$(resolve_base "${CI_COMMIT_BEFORE_SHA}" "${after}") ||
-    fail_closed "${CI_COMMIT_BEFORE_SHA}" "${after}"
+  base=""
+  base_source=""
+  resolve_base "${CI_COMMIT_BEFORE_SHA}" "${after}" ||
+    fail_closed "${CI_COMMIT_BEFORE_SHA}" "${after}" unresolved
+  # A trunk-relative base that resolves to the pushed head teaches us nothing:
+  # the before-SHA is unreachable AND the trunk ref already points at the head,
+  # so the empty range is a fail-open, not a "no changes" answer. Only the
+  # fallback is rejected here — a real merge base that happens to equal the
+  # after-SHA (a push that only removed commits) keeps its existing behaviour.
+  if [ "${base_source}" = "trunk" ]; then
+    base_sha=$(commit_of "${base}")
+    after_sha=$(commit_of "${after}")
+    if [ -n "${base_sha}" ] && [ "${base_sha}" = "${after_sha}" ]; then
+      fail_closed "${CI_COMMIT_BEFORE_SHA}" "${after}" degenerate
+    fi
+  fi
 else
   # Local/manual run (no CI vars). Guard: only 1 commit in the repo → skip.
   if git rev-parse --verify --quiet 'HEAD~1^{commit}' > /dev/null 2>&1; then
