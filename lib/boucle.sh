@@ -2732,9 +2732,13 @@ boucle_worker_deploy() {
   local rc=$?
   local url
   url=$(grep -oE "$BOUCLE_DEPLOY_URL_REGEX" "$deploy_log" | head -1)
+  # Observability: surface the deploy command output on EVERY run, not only
+  # on failure. A successful deploy otherwise leaves no trace of the tool
+  # version, upload progress or deployed URL in the job log, which makes
+  # "what exactly shipped?" unauditable after the fact.
+  cat "$deploy_log" >&2
   if [ "$rc" -ne 0 ] && [ -z "$url" ]; then
     echo "FAIL: deploy exited $rc with no preview URL" >&2
-    cat "$deploy_log" >&2
     return 1
   fi
   if [ "$rc" -ne 0 ] && [ -n "$url" ]; then
@@ -2845,12 +2849,14 @@ boucle_do_deploy() {
   (eval "$BOUCLE_DEPLOY_CMD") > "$deploy_log" 2>&1
   deploy_rc=$?
   url=$(grep -oE "$BOUCLE_DEPLOY_URL_REGEX" "$deploy_log" | head -1)
+  # Observability: surface the deploy command output on EVERY run, not only
+  # on failure (same contract as the worker preview deploy above).
+  cat "$deploy_log" >&2
   if [ "$deploy_rc" -ne 0 ] && [ -n "$url" ]; then
     echo "WARN: deploy exited non-zero ($deploy_rc) but emitted a URL — proceeding (may be a partial deploy)" >&2
   fi
   if [ "$deploy_rc" -ne 0 ] && [ -z "$url" ]; then
     echo "FAIL: deploy exited $deploy_rc with no URL" >&2
-    cat "$deploy_log" >&2
     rm -f "$deploy_log"
     return 1
   fi
