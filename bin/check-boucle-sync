@@ -19,12 +19,42 @@
 #     variables (Settings → CI/CD → Variables) or the root .gitlab-ci.yml shim.
 #   - Engine bug → fix in the upstream boucle repo, then bin/update syncs it.
 #
+# ── Commit range: ONE explicit base, two-dot uses ───────────────────────
+# `A...B` is the wrong tool for "what did this push introduce":
+#   * `git diff A...B` needs a MERGE BASE. A force-push (rebase) orphans the
+#     previous head and a shallow CI clone (GIT_DEPTH) never fetched it, so git
+#     dies with `fatal: <A>...<B>: no merge base` — a red branch pipeline that
+#     has nothing to do with .boucle/ (observed on a consumer).
+#   * `git log A...B` is a SYMMETRIC difference: it walks the BEFORE side too,
+#     so commits the push never introduced (pre-rebase lane commits, trunk
+#     commits) were blamed for .boucle/ edits.
+# So the base is resolved once, then `git diff BASE AFTER` (file list) and
+# `git log BASE..AFTER` (commit list) are used — they cannot disagree, and
+# only newly introduced commits are judged.
+#
+# Base resolution order (push mode):
+#   1. merge base of the before-SHA and the after-SHA — the only correct base;
+#   2. the before-SHA is missing/diverged: one bounded, best-effort
+#      `git fetch --deepen=200 origin` (no-op on a full clone, tolerant of an
+#      offline runner or missing credentials), then one retry;
+#   3. trunk-relative: origin/$CI_DEFAULT_BRANCH, else $CI_DEFAULT_BRANCH —
+#      the same ref the merge-request path uses;
+#   4. no base at all → FAIL CLOSED (exit 1). A guard NEVER turns an
+#      unresolvable range into a silent pass.
+# Merge request: merge base of the target branch and HEAD, falling back to the
+# target branch tip. Local/manual: HEAD~1..HEAD.
+#
 # Exit codes:
 #   0 — no .boucle/ change, or every .boucle/ change is an authorized bot commit
-#   1 — at least one commit modified .boucle/ without an authorized subject
+#   1 — at least one commit modified .boucle/ without an authorized subject,
+#       OR the commit range could not be resolved (fail closed)
 #
-# Idempotent, read-only, no side effects. shellcheck + shfmt clean.
+# Idempotent, read-only: the only side effect is the bounded, best-effort
+# `git fetch --deepen` above, and only when the base is genuinely missing.
+# shellcheck + shfmt clean.
 set -euo pipefail
+
+default_branch="${CI_DEFAULT_BRANCH:-main}"
 
 # ── Authorized bot commit subjects ──────────────────────────────────────
 # bin/update produces these. Anything else touching .boucle/ is unauthorized.
@@ -43,44 +73,142 @@ is_authorized() {
   esac
 }
 
+# ── Base resolution helpers ─────────────────────────────────────────────
+# rev_resolves <rev>: the revision names a commit present in this clone.
+rev_resolves() {
+  [ -n "${1}" ] && git rev-parse --verify --quiet "${1}^{commit}" > /dev/null 2>&1
+}
+
+# merge_base_of <a> <b>: print the merge base, or nothing when there is none
+# (disjoint histories, unreachable revision) — never fatal.
+merge_base_of() {
+  git merge-base "${1}" "${2}" 2> /dev/null || true
+}
+
+# Best-effort and bounded: only called when the base is genuinely missing.
+# A shallow CI clone (GIT_DEPTH: 20) does not contain the orphaned before-SHA
+# of a force-push; one 200-commit deepen usually reaches the branch point.
+# Every failure is tolerated — offline runner, no credentials, already-full
+# clone — and the caller falls through to the trunk-relative base.
+deepen_clone_once() {
+  git rev-parse --is-shallow-repository 2> /dev/null | grep -qx true || return 0
+  git fetch --quiet --deepen=200 origin > /dev/null 2>&1 || return 0
+  return 0
+}
+
+# The trunk-relative base — the same ref the merge-request path uses.
+resolve_trunk_base() {
+  if git rev-parse --verify --quiet "origin/${default_branch}^{commit}" > /dev/null 2>&1; then
+    printf '%s\n' "origin/${default_branch}"
+  elif git rev-parse --verify --quiet "${default_branch}^{commit}" > /dev/null 2>&1; then
+    printf '%s\n' "${default_branch}"
+  else
+    return 1
+  fi
+}
+
+# resolve_base <before> <after>: print the base commit, or fail (no output).
+resolve_base() {
+  local before="${1}" after="${2}" base=""
+  if rev_resolves "${before}"; then
+    base=$(merge_base_of "${before}" "${after}")
+  fi
+  if [ -z "${base}" ]; then
+    # Missing base: the before-SHA is unreachable (force-push orphaned it in a
+    # shallow clone) or the two histories are disjoint. Deepen once, retry.
+    deepen_clone_once
+    if rev_resolves "${before}"; then
+      base=$(merge_base_of "${before}" "${after}")
+    fi
+  fi
+  if [ -n "${base}" ]; then
+    printf '%s\n' "${base}"
+    return 0
+  fi
+  resolve_trunk_base
+}
+
+# ── Fail closed: an unresolvable range is never a silent pass ───────────
+fail_closed() {
+  local before="${1}" after_rev="${2}"
+  cat >&2 << EOF
+check-boucle-sync: cannot resolve a commit range — FAILING CLOSED.
+
+  before-SHA : ${before:-<unset>}
+  after-SHA  : ${after_rev}
+  trunk refs : origin/${default_branch}, ${default_branch}
+
+An unverifiable range must never become a pass: an unauthorized .boucle/ edit
+could then slip through. The usual causes are:
+
+  * a force-push (rebase) orphaned the before-SHA and this clone is shallow
+    (GIT_DEPTH), so no merge base exists;
+  * neither origin/${default_branch} nor ${default_branch} exists in this
+    clone, so the trunk-relative fallback is unavailable.
+
+Fix: raise GIT_DEPTH for the job (GIT_DEPTH: 0 clones the full history) or
+fetch the before-SHA (git fetch origin <sha>), then re-run.
+
+Remediation for the .boucle/ rule itself:
+  consumer config → CI variables (Settings → CI/CD → Variables) or the root
+  .gitlab-ci.yml shim;
+  engine bug      → fix in the upstream boucle repo, then bin/update syncs it.
+EOF
+  echo "check-boucle-sync FAILED — commit range could not be resolved" >&2
+  exit 1
+}
+
 # ── Resolve the commit range to check ───────────────────────────────────
 # Priority: merge request → push to default branch → local/manual run.
-range=""
+base=""
+after="HEAD"
 if [ -n "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" ]; then
   # On a merge request: diff against the target branch.
   target_ref="origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
-  if git rev-parse --verify "${target_ref}" > /dev/null 2>&1; then
-    range="${target_ref}...HEAD"
-  else
-    range="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}...HEAD"
+  if ! git rev-parse --verify --quiet "${target_ref}^{commit}" > /dev/null 2>&1; then
+    target_ref="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
   fi
+  base=$(merge_base_of "${target_ref}" "${after}")
+  # No merge base (unrelated histories): diff straight against the target tip.
+  [ -n "${base}" ] || base="${target_ref}"
 elif [ -n "${CI_COMMIT_BEFORE_SHA:-}" ] && [ "${CI_COMMIT_BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]; then
   # On a push to the default branch. Guard: all-zeros / empty before-SHA means
   # the first push of a branch — nothing to diff against, skip.
-  range="${CI_COMMIT_BEFORE_SHA}...${CI_COMMIT_SHA:-}"
+  after="${CI_COMMIT_SHA:-HEAD}"
+  # A clone that does not contain the pushed commit itself cannot be ranged;
+  # HEAD is the same commit in a CI checkout, so use it rather than fatal.
+  rev_resolves "${after}" || after="HEAD"
+  base=$(resolve_base "${CI_COMMIT_BEFORE_SHA}" "${after}") ||
+    fail_closed "${CI_COMMIT_BEFORE_SHA}" "${after}"
 else
   # Local/manual run (no CI vars). Guard: only 1 commit in the repo → skip.
-  if git rev-parse --verify HEAD~1 > /dev/null 2>&1; then
-    range="HEAD~1...HEAD"
+  if git rev-parse --verify --quiet 'HEAD~1^{commit}' > /dev/null 2>&1; then
+    base=$(merge_base_of 'HEAD~1' "${after}")
+    [ -n "${base}" ] || base='HEAD~1'
   else
     echo "check-boucle-sync: no commit range to check (first commit or no CI context) — pass"
     exit 0
   fi
 fi
 
+echo "check-boucle-sync: range ${base}..${after}"
+
 # ── Any .boucle/ changes in the range? ──────────────────────────────────
-changed_files=$(git diff --name-only "${range}")
+changed_files=$(git diff --name-only "${base}" "${after}")
 boucle_files=$(printf '%s\n' "${changed_files}" | grep '^\.boucle/' || true)
 if [ -z "${boucle_files}" ]; then
   echo "check-boucle-sync: no changes under .boucle/ — pass"
   exit 0
 fi
 
-# ── Check every commit that touched .boucle/ ────────────────────────────
+# ── Check every commit the range introduced ─────────────────────────────
 FAIL=0
-for sha in $(git log --format=%H "${range}"); do
+for sha in $(git log --format=%H "${base}..${after}"); do
   # Only consider commits that actually modified a file under .boucle/.
-  if ! git diff-tree --no-commit-id --name-only -r "${sha}" | grep -q '^\.boucle/'; then
+  # --root: a root commit (the first commit of a repository or of an orphan
+  # branch) is invisible to plain `diff-tree`, and an unauthorized .boucle/
+  # edit in one would pass silently.
+  if ! git diff-tree --root --no-commit-id --name-only -r "${sha}" | grep -q '^\.boucle/'; then
     continue
   fi
   subject=$(git log -1 --format=%s "${sha}")

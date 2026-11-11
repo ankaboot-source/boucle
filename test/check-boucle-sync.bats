@@ -44,13 +44,30 @@ make_commit() {
 
 # Helper: run the guard in the temp repo (local/manual mode, HEAD~1...HEAD).
 run_guard() {
-  run bash -c "cd '$TMP_REPO' && '$CHECK'"
+  run bash -c "cd '$TMP_REPO' && LC_ALL=C '$CHECK'"
+}
+
+# Helper: run the guard in push mode with an arbitrary before-SHA (after-SHA is
+# always HEAD). A before-SHA that is a different root, or that does not exist
+# in this clone, is exactly what a force-push (rebase) leaves behind in a
+# shallow CI clone.
+#   run_guard_push_from <before_sha>
+run_guard_push_from() {
+  run bash -c "cd '$TMP_REPO' && LC_ALL=C CI_COMMIT_BEFORE_SHA='$1' CI_COMMIT_SHA='$(git -C "$TMP_REPO" rev-parse HEAD)' '$CHECK'"
 }
 
 # Helper: run the guard in push-to-default-branch mode, checking the full
 # range from the base commit (CI_COMMIT_BEFORE_SHA) to HEAD (CI_COMMIT_SHA).
 run_guard_push() {
-  run bash -c "cd '$TMP_REPO' && CI_COMMIT_BEFORE_SHA='$BASE_SHA' CI_COMMIT_SHA='$(git -C "$TMP_REPO" rev-parse HEAD)' '$CHECK'"
+  run_guard_push_from "$BASE_SHA"
+}
+
+# Helper: start a disjoint (second root) history and empty its index, so the
+# next make_commit lands on a root commit with no merge base against main.
+#   start_orphan_root <branch_name>
+start_orphan_root() {
+  git -C "$TMP_REPO" checkout -q --orphan "$1"
+  git -C "$TMP_REPO" rm -rfq .
 }
 
 # ── No .boucle/ changes → pass ─────────────────────────────────────────
@@ -115,4 +132,116 @@ run_guard_push() {
   assert_success
   assert_output --partial "authorized bot update"
   refute_output --partial "without authorization"
+}
+
+# ── Push range resolution: no merge base (force-push / shallow clone) ────
+#
+# Observed on a consumer: after a lane was rebased and force-pushed, the branch
+# pipeline died with `fatal: <A>...<B>: no merge base` (a shallow clone has no
+# merge base for the orphaned before-SHA) — a red pipeline unrelated to
+# .boucle/. The range is now resolved from an explicit base with documented
+# fallbacks (merge base → one bounded deepen → trunk-relative → fail closed),
+# and both the file list and the commit list use two-dot forms.
+
+@test "push mode: before-SHA with no merge base (disjoint root) → trunk fallback, no .boucle/ change → pass" {
+  git -C "$TMP_REPO" checkout -q -b lane
+  make_commit "feat: add src file" "src/app.txt"
+  start_orphan_root root-one
+  make_commit "feat: unrelated root one" "one.txt"
+  before="$(git -C "$TMP_REPO" rev-parse HEAD)"
+  start_orphan_root root-two
+  make_commit "feat: unrelated root two" "two.txt"
+  run_guard_push_from "$before"
+  assert_success
+  assert_output --partial "range main.."
+  assert_output --partial "no changes under .boucle/"
+  refute_output --partial "fatal"
+  refute_output --partial "no merge base"
+}
+
+@test "push mode: before-SHA with no merge base + a new .boucle/ violation → fail, no fatal" {
+  git -C "$TMP_REPO" checkout -q -b lane
+  make_commit "feat: add src file" "src/app.txt"
+  start_orphan_root root-one
+  make_commit "feat: unrelated root one" "one.txt"
+  before="$(git -C "$TMP_REPO" rev-parse HEAD)"
+  start_orphan_root root-two
+  make_commit "feat: meddle with the engine" ".boucle/.gitlab-ci.yml"
+  run_guard_push_from "$before"
+  assert_failure
+  assert_output --partial "range main.."
+  assert_output --partial "modified .boucle/ without authorization"
+  assert_output --partial "feat: meddle with the engine"
+  refute_output --partial "fatal"
+}
+
+@test "push mode: unreachable before-SHA → no fatal, trunk fallback, still fails on .boucle/" {
+  git -C "$TMP_REPO" checkout -q -b lane
+  make_commit "feat: meddle with the engine" ".boucle/.gitlab-ci.yml"
+  run_guard_push_from "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+  assert_failure
+  assert_output --partial "range main.."
+  assert_output --partial "modified .boucle/ without authorization"
+  refute_output --partial "fatal"
+  refute_output --partial "no merge base"
+}
+
+@test "push mode: unreachable before-SHA, clean lane → trunk fallback, pass" {
+  git -C "$TMP_REPO" checkout -q -b lane
+  make_commit "feat: add src file" "src/app.txt"
+  run_guard_push_from "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+  assert_success
+  assert_output --partial "range main.."
+  assert_output --partial "no changes under .boucle/"
+  refute_output --partial "fatal"
+}
+
+@test "push mode: rebased lane — pre-rebase .boucle/ commit is not blamed, the new one is" {
+  git -C "$TMP_REPO" checkout -q -b lane
+  make_commit "feat: old unauthorized engine edit" ".boucle/bin/old"
+  old_head="$(git -C "$TMP_REPO" rev-parse HEAD)"
+  # Force-push: the lane is rebuilt on the trunk base, producing new SHAs.
+  git -C "$TMP_REPO" reset -q --hard "$BASE_SHA"
+  make_commit "feat: rebased engine edit" ".boucle/bin/rebased"
+  make_commit "feat: new unauthorized engine edit" ".boucle/bin/new"
+  run_guard_push_from "$old_head"
+  assert_failure
+  assert_output --partial "modified .boucle/ without authorization"
+  assert_output --partial "feat: new unauthorized engine edit"
+  refute_output --partial "old unauthorized engine edit"
+  refute_output --partial "fatal"
+}
+
+@test "push mode: rebased lane — pre-rebase .boucle/ commit is not blamed and nothing else is → pass" {
+  git -C "$TMP_REPO" checkout -q -b lane
+  make_commit "feat: old unauthorized engine edit" ".boucle/bin/old"
+  old_head="$(git -C "$TMP_REPO" rev-parse HEAD)"
+  git -C "$TMP_REPO" reset -q --hard "$BASE_SHA"
+  make_commit "feat: rebased src change" "src/app.txt"
+  run_guard_push_from "$old_head"
+  assert_success
+  assert_output --partial "no changes under .boucle/"
+  refute_output --partial "old unauthorized engine edit"
+  refute_output --partial "fatal"
+}
+
+@test "unresolvable range (no trunk ref, unreachable before-SHA) → fail closed, exit 1" {
+  git -C "$TMP_REPO" checkout -q -b lane
+  make_commit "feat: add src file" "src/app.txt"
+  # No base left: no origin, no local main, no usable before-SHA.
+  git -C "$TMP_REPO" branch -q -D main
+  run_guard_push_from "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+  assert_failure 1
+  assert_output --partial "cannot resolve a commit range"
+  assert_output --partial "FAILING CLOSED"
+  assert_output --partial "GIT_DEPTH"
+  refute_output --partial "no changes under .boucle/"
+}
+
+@test "merge-request mode: still diffed against the target branch → pass" {
+  git -C "$TMP_REPO" checkout -q -b lane
+  make_commit "feat: add src file" "src/app.txt"
+  run bash -c "cd '$TMP_REPO' && LC_ALL=C CI_MERGE_REQUEST_TARGET_BRANCH_NAME=main '$CHECK'"
+  assert_success
+  assert_output --partial "no changes under .boucle/"
 }
