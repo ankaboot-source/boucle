@@ -86,8 +86,18 @@ fi
 # The token is optional — public repos work without it. When set, it
 # raises the rate limit and grants access to private repos.
 curl_with_auth() {
-  if [ -n "${GITHUB_TOKEN:-${GH_TOKEN:-}}" ]; then
-    curl -fsSL -H "Authorization: Bearer ${GITHUB_TOKEN:-$GH_TOKEN}" "$@"
+  # Token chain (#188 follow-up): on a GitLab consumer GITHUB_TOKEN/GH_TOKEN
+  # are NEVER set — without the BOUCLE_* fallbacks the version probe
+  # (get_upstream_version) and the engine tarball download stay ANONYMOUS
+  # (60/h per shared-runner IP), so a throttled neighbour stalls consumer
+  # self-update for hours while the release downloads themselves are
+  # authenticated via fetch_checked. Same chain, same exclusion: NEVER
+  # BOUCLE_TOKEN — on a GitLab consumer it is the forge PAT, and sending it
+  # to github.com would leak a GitLab credential. Mark whichever token you
+  # provide as MASKED so a CI_DEBUG_TRACE run cannot print it.
+  local tok="${BOUCLE_GITHUB_TOKEN:-${BOUCLE_UPSTREAM_TOKEN:-${GITHUB_TOKEN:-${GH_TOKEN:-}}}}"
+  if [ -n "${tok}" ]; then
+    curl -fsSL -H "Authorization: Bearer ${tok}" "$@"
   else
     curl -fsSL "$@"
   fi
