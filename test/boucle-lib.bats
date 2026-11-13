@@ -2253,3 +2253,306 @@ EOF
   refute_output --partial "state note"
   assert_output --partial "[baderdean — human] real human note"
 }
+# ── Deploy retry on a transient provider failure ──────────────────────────
+#
+# boucle_do_deploy ran BOUCLE_DEPLOY_CMD exactly once, while the URL health
+# check just below it already retried 6× with backoff. A provider-side upload
+# error (Cloudflare Pages POST /pages/assets/upload, 5xx mid-batch) therefore
+# reddened the deploy job and stranded production on the previous build, even
+# though the identical manual retry succeeded. The retry is bounded and fires
+# only for an attempt that FAILED and emitted no URL: a deploy that already
+# printed a URL is never re-run, and keeps the historical WARN path.
+
+# deploy_fixture <path> <succeed_on_attempt>
+#   Writes a deploy command that records each invocation in
+#   $BATS_TEST_TMPDIR/attempts, prints a wrangler-shaped upload line, and
+#   fails WITHOUT a URL unless this is the <succeed_on_attempt>-th call
+#   (0 = never succeeds). The counter lives outside the command so the test
+#   can observe how many attempts ran.
+deploy_fixture() {
+  local path="$1" succeed_on="$2"
+  cat > "$path" << 'SCRIPT'
+#!/usr/bin/env bash
+n=$(cat "$BATS_TEST_TMPDIR/attempts" 2> /dev/null || echo 0)
+n=$((n + 1))
+echo "$n" > "$BATS_TEST_TMPDIR/attempts"
+echo "Uploading... (2680/3732)"
+SCRIPT
+  if [ "$succeed_on" = "0" ]; then
+    cat >> "$path" << 'SCRIPT'
+echo "✘ [ERROR] Failed to upload files. Please try again."
+exit 1
+SCRIPT
+  else
+    cat >> "$path" << SCRIPT
+if [ "\$n" -lt $succeed_on ]; then
+  echo "✘ [ERROR] Failed to upload files. Please try again."
+  exit 1
+fi
+echo "Deployed https://example.com"
+SCRIPT
+  fi
+  chmod +x "$path"
+}
+
+# deploy_driver <path> <fixture> <attempts> <delays> [stub-sleep] [budget]
+#   Writes a driver that runs boucle_do_deploy with stdout and stderr captured
+#   SEPARATELY (the stdout contract is the URL alone), then reports rc, the
+#   elapsed seconds and the attempt count. `stub-sleep` replaces `sleep` with a
+#   recorder so the default backoff ladder can be asserted without waiting.
+#   `budget` sets BOUCLE_DEPLOY_RETRY_BUDGET (wall-clock retry ceiling); empty
+#   leaves the default in place.
+deploy_driver() {
+  local path="$1" fixture="$2" attempts="$3" delays="$4" sleep_stub="${5:-}" budget="${6:-}"
+  cat > "$path" << DRIVER
+#!/usr/bin/env bash
+set -u
+BOUCLE_DEPLOY_MODE=self
+BOUCLE_DEPLOY_URL_REGEX="https://[a-zA-Z0-9./-]+"
+BOUCLE_DEPLOY_ATTEMPTS="$attempts"
+BOUCLE_DEPLOY_RETRY_DELAYS="$delays"
+BOUCLE_DEPLOY_CMD="$fixture"
+BOUCLE_BUILD_CMD="echo BUILD_RAN"
+BOUCLE_BUILD_OUTPUT=""
+BOUCLE_DEFAULT_BRANCH=main
+BOUCLE_FORGE_HOST=github.com
+BOUCLE_PROJECT_ID=1
+curl() { echo "200"; }
+rm -f "$BATS_TEST_TMPDIR/attempts"
+DRIVER
+  if [ -n "$budget" ]; then
+    echo "BOUCLE_DEPLOY_RETRY_BUDGET=\"$budget\"" >> "$path"
+  fi
+  if [ "$sleep_stub" = "stub-sleep" ]; then
+    echo 'sleep() { echo "SLEPT:$1"; }' >> "$path"
+  fi
+  cat >> "$path" << 'DRIVER'
+source lib/boucle.sh
+start=$SECONDS
+out=$(boucle_do_deploy 2> "$BATS_TEST_TMPDIR/stderr")
+rc=$?
+echo "ELAPSED=$((SECONDS - start))"
+echo "OUT=[$out]"
+echo "RC=$rc"
+echo "ATTEMPTS=$(cat "$BATS_TEST_TMPDIR/attempts" 2> /dev/null || echo 0)"
+echo "UPLOADS=$(grep -c 'Uploading' "$BATS_TEST_TMPDIR/stderr" || true)"
+cat "$BATS_TEST_TMPDIR/stderr"
+exit "$rc"
+DRIVER
+  chmod +x "$path"
+}
+
+@test "boucle_do_deploy retries a deploy that failed without a URL, then returns the URL" {
+  local driver fixture
+  driver=$(mktemp)
+  fixture=$(mktemp)
+  deploy_fixture "$fixture" 3
+  deploy_driver "$driver" "$fixture" 3 "0 0"
+  run "$driver"
+  rm -f "$driver" "$fixture"
+  assert_success
+  # stdout carries the URL and nothing else; every diagnostic goes to stderr.
+  assert_output --partial "OUT=[https://example.com]"
+  assert_output --partial "RC=0"
+  assert_output --partial "ATTEMPTS=3"
+  # One stderr notice per retried attempt.
+  assert_output --partial "deploy: attempt 2/3"
+  assert_output --partial "deploy: attempt 2/3 failed (rc=1, no URL emitted)"
+  assert_output --partial "deploy: retrying in 0s (transient provider failure)"
+  assert_output --partial "deploy: attempt 3/3"
+  refute_output --partial "deploy: attempt 4"
+  # Every attempt is preserved once in the single end-of-run dump.
+  assert_output --partial "--- deploy attempt 3/3 ---"
+  assert_output --partial "UPLOADS=3"
+  # The injected backoff really is 0 — the suite must not sleep for real.
+  local elapsed
+  elapsed=$(echo "$output" | sed -n 's/^ELAPSED=//p')
+  [ "$elapsed" -le 3 ]
+}
+
+@test "boucle_do_deploy stops after BOUCLE_DEPLOY_ATTEMPTS failures and dumps the log once" {
+  local driver fixture
+  driver=$(mktemp)
+  fixture=$(mktemp)
+  deploy_fixture "$fixture" 0
+  deploy_driver "$driver" "$fixture" 3 "0 0"
+  run "$driver"
+  rm -f "$driver" "$fixture"
+  assert_failure
+  assert_output --partial "RC=1"
+  # Exactly M attempts: bounded, no unbounded loop.
+  assert_output --partial "ATTEMPTS=3"
+  assert_output --partial "FAIL: deploy exited 1 with no URL"
+  # Each attempt's output appears exactly once (the dump is emitted at the end,
+  # not per attempt) — no duplicated evidence, nothing lost either.
+  assert_output --partial "UPLOADS=3"
+  assert_output --partial "--- deploy attempt 2/3 ---"
+  assert_output --partial "--- deploy attempt 3/3 ---"
+  refute_output --partial "--- deploy attempt 4/3 ---"
+}
+
+@test "boucle_do_deploy never retries a deploy that emitted a URL (WARN path preserved)" {
+  local driver fixture
+  driver=$(mktemp)
+  fixture=$(mktemp)
+  # A deploy that publishes and THEN fails: re-running it could publish a
+  # different tree, so the partial-deploy WARN path must stay single-shot.
+  cat > "$fixture" << 'SCRIPT'
+#!/usr/bin/env bash
+n=$(cat "$BATS_TEST_TMPDIR/attempts" 2> /dev/null || echo 0)
+n=$((n + 1))
+echo "$n" > "$BATS_TEST_TMPDIR/attempts"
+echo "Deployed https://example.com"
+echo "✘ [ERROR] post-publish warning"
+exit 1
+SCRIPT
+  chmod +x "$fixture"
+  deploy_driver "$driver" "$fixture" 3 "0 0"
+  run "$driver"
+  rm -f "$driver" "$fixture"
+  assert_success
+  assert_output --partial "OUT=[https://example.com]"
+  assert_output --partial "RC=0"
+  assert_output --partial "ATTEMPTS=1"
+  assert_output --partial "WARN: deploy exited non-zero (1) but emitted a URL — proceeding (may be a partial deploy)"
+  refute_output --partial "deploy: retrying"
+}
+
+@test "BOUCLE_DEPLOY_ATTEMPTS=1 reproduces the single-shot deploy" {
+  local driver fixture
+  driver=$(mktemp)
+  fixture=$(mktemp)
+  deploy_fixture "$fixture" 0
+  deploy_driver "$driver" "$fixture" 1 "0 0"
+  run "$driver"
+  rm -f "$driver" "$fixture"
+  assert_failure
+  assert_output --partial "ATTEMPTS=1"
+  assert_output --partial "FAIL: deploy exited 1 with no URL"
+  refute_output --partial "deploy: retrying"
+  refute_output --partial "--- deploy attempt"
+}
+
+@test "a non-numeric BOUCLE_DEPLOY_ATTEMPTS falls back to the default instead of crashing" {
+  local driver fixture value
+  fixture=$(mktemp)
+  deploy_fixture "$fixture" 0
+  # `abc` would abort the job at the first `[ -gt ]`; `-1` must not slip past
+  # the lower clamp. Both mean the documented default (3), never a crash.
+  for value in abc -1; do
+    driver=$(mktemp)
+    deploy_driver "$driver" "$fixture" "$value" "0 0"
+    run "$driver"
+    rm -f "$driver"
+    assert_failure
+    assert_output --partial "ATTEMPTS=3"
+    assert_output --partial "WARN: BOUCLE_DEPLOY_ATTEMPTS='$value' is not a number — using 3"
+    assert_output --partial "FAIL: deploy exited 1 with no URL"
+  done
+  rm -f "$fixture"
+}
+
+@test "BOUCLE_DEPLOY_ATTEMPTS is clamped at both ends (0 -> 1, 99 -> 4)" {
+  local driver fixture
+  fixture=$(mktemp)
+  deploy_fixture "$fixture" 0
+
+  driver=$(mktemp)
+  deploy_driver "$driver" "$fixture" 0 "0 0"
+  run "$driver"
+  rm -f "$driver"
+  assert_failure
+  assert_output --partial "ATTEMPTS=1"
+  assert_output --partial "WARN: BOUCLE_DEPLOY_ATTEMPTS=0 would never deploy — using 1 (single shot)"
+  refute_output --partial "deploy: retrying"
+
+  driver=$(mktemp)
+  deploy_driver "$driver" "$fixture" 99 "0 0"
+  run "$driver"
+  rm -f "$driver"
+  assert_failure
+  # 99 would overflow the deploy job timeout budget: clamp to 4, bounded.
+  assert_output --partial "ATTEMPTS=4"
+  assert_output --partial "WARN: BOUCLE_DEPLOY_ATTEMPTS=99 clamped to 4"
+  rm -f "$fixture"
+}
+
+@test "BOUCLE_DEPLOY_RETRY_DELAYS is validated and falls back to the default ladder" {
+  local driver fixture value
+  fixture=$(mktemp)
+  deploy_fixture "$fixture" 0
+
+  # Default (empty) ladder: 20s then 60s, recorded by the sleep stub.
+  driver=$(mktemp)
+  deploy_driver "$driver" "$fixture" 3 "" stub-sleep
+  run "$driver"
+  rm -f "$driver"
+  assert_failure
+  assert_output --partial "SLEPT:20"
+  assert_output --partial "SLEPT:60"
+  refute_output --partial "WARN: BOUCLE_DEPLOY_RETRY_DELAYS"
+
+  # Garbage and absurd values fall back instead of killing the job in `sleep`.
+  for value in abc 9999; do
+    driver=$(mktemp)
+    deploy_driver "$driver" "$fixture" 3 "$value" stub-sleep
+    run "$driver"
+    rm -f "$driver"
+    assert_failure
+    assert_output --partial "WARN: BOUCLE_DEPLOY_RETRY_DELAYS='$value' is not a list of seconds (0-300) — using 20 60"
+    assert_output --partial "SLEPT:20"
+    assert_output --partial "SLEPT:60"
+    assert_output --partial "FAIL: deploy exited 1 with no URL"
+  done
+  rm -f "$fixture"
+}
+
+@test "BOUCLE_DEPLOY_RETRY_BUDGET=0 forbids any retry and still dumps the log" {
+  local driver fixture
+  driver=$(mktemp)
+  fixture=$(mktemp)
+  deploy_fixture "$fixture" 0
+  # Budget 0: elapsed (>= 0) + wait (0) >= 0, so no attempt 2 may start.
+  deploy_driver "$driver" "$fixture" 3 "0 0" "" 0
+  run "$driver"
+  rm -f "$driver" "$fixture"
+  assert_failure
+  assert_output --partial "RC=1"
+  assert_output --partial "ATTEMPTS=1"
+  assert_output --partial "deploy retry budget exhausted"
+  assert_output --partial "not starting attempt 2/3"
+  refute_output --partial "deploy: retrying in"
+  # The guard must not swallow the evidence: the one attempt is still dumped and
+  # the failure is still classified, exactly like a single-shot deploy.
+  assert_output --partial "UPLOADS=1"
+  assert_output --partial "Failed to upload files"
+  assert_output --partial "FAIL: deploy exited 1 with no URL"
+}
+
+@test "a non-numeric BOUCLE_DEPLOY_RETRY_BUDGET falls back to the default instead of crashing" {
+  local driver fixture
+  driver=$(mktemp)
+  fixture=$(mktemp)
+  deploy_fixture "$fixture" 2
+  deploy_driver "$driver" "$fixture" 3 "0 0" "" "abc"
+  run "$driver"
+  rm -f "$driver" "$fixture"
+  assert_success
+  assert_output --partial "WARN: BOUCLE_DEPLOY_RETRY_BUDGET='abc' is not a number of seconds — using 480"
+  # The fallback keeps the ladder usable: attempt 2 runs and publishes.
+  assert_output --partial "OUT=[https://example.com]"
+  assert_output --partial "ATTEMPTS=2"
+}
+
+@test "BOUCLE_DEPLOY_RETRY_BUDGET above one hour is clamped with a WARN" {
+  local driver fixture
+  driver=$(mktemp)
+  fixture=$(mktemp)
+  deploy_fixture "$fixture" 2
+  deploy_driver "$driver" "$fixture" 2 "0" "" 9999
+  run "$driver"
+  rm -f "$driver" "$fixture"
+  assert_success
+  assert_output --partial "clamped to 3600 — it MUST stay under the deploy job timeout"
+  assert_output --partial "ATTEMPTS=2"
+}
