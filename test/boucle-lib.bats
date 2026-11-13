@@ -2295,15 +2295,37 @@ SCRIPT
   chmod +x "$path"
 }
 
-# deploy_driver <path> <fixture> <attempts> <delays> [stub-sleep] [budget]
+# deploy_hang_fixture <path>
+#   Attempt 1 never returns (the observed Cloudflare symptom: the upload is
+#   accepted, then silence); attempt 2 publishes. `exec` replaces the script
+#   process with the sleep, so the watchdog's TERM reaches it directly.
+deploy_hang_fixture() {
+  local path="$1"
+  cat > "$path" << 'SCRIPT'
+#!/usr/bin/env bash
+n=$(cat "$BATS_TEST_TMPDIR/attempts" 2> /dev/null || echo 0)
+n=$((n + 1))
+echo "$n" > "$BATS_TEST_TMPDIR/attempts"
+echo "Uploading... (2680/3732)"
+if [ "$n" -lt 2 ]; then
+  exec sleep 30
+fi
+echo "Deployed https://example.com"
+SCRIPT
+  chmod +x "$path"
+}
+
+# deploy_driver <path> <fixture> <attempts> <delays> [stub-sleep] [budget] [attempt-timeout]
 #   Writes a driver that runs boucle_do_deploy with stdout and stderr captured
 #   SEPARATELY (the stdout contract is the URL alone), then reports rc, the
 #   elapsed seconds and the attempt count. `stub-sleep` replaces `sleep` with a
-#   recorder so the default backoff ladder can be asserted without waiting.
-#   `budget` sets BOUCLE_DEPLOY_RETRY_BUDGET (wall-clock retry ceiling); empty
-#   leaves the default in place.
+#   recorder so the default backoff ladder can be asserted without waiting —
+#   never combine it with `attempt-timeout`, whose watchdog needs a real sleep.
+#   `budget` sets BOUCLE_DEPLOY_RETRY_BUDGET (wall-clock retry ceiling) and
+#   `attempt-timeout` sets BOUCLE_DEPLOY_ATTEMPT_TIMEOUT (per-attempt ceiling);
+#   empty leaves the default in place.
 deploy_driver() {
-  local path="$1" fixture="$2" attempts="$3" delays="$4" sleep_stub="${5:-}" budget="${6:-}"
+  local path="$1" fixture="$2" attempts="$3" delays="$4" sleep_stub="${5:-}" budget="${6:-}" attempt_timeout="${7:-}"
   cat > "$path" << DRIVER
 #!/usr/bin/env bash
 set -u
@@ -2322,6 +2344,9 @@ rm -f "$BATS_TEST_TMPDIR/attempts"
 DRIVER
   if [ -n "$budget" ]; then
     echo "BOUCLE_DEPLOY_RETRY_BUDGET=\"$budget\"" >> "$path"
+  fi
+  if [ -n "$attempt_timeout" ]; then
+    echo "BOUCLE_DEPLOY_ATTEMPT_TIMEOUT=\"$attempt_timeout\"" >> "$path"
   fi
   if [ "$sleep_stub" = "stub-sleep" ]; then
     echo 'sleep() { echo "SLEPT:$1"; }' >> "$path"
@@ -2555,4 +2580,72 @@ SCRIPT
   assert_success
   assert_output --partial "clamped to 3600 — it MUST stay under the deploy job timeout"
   assert_output --partial "ATTEMPTS=2"
+}
+
+@test "a hung deploy attempt is killed at BOUCLE_DEPLOY_ATTEMPT_TIMEOUT and retried" {
+  local driver fixture
+  driver=$(mktemp)
+  fixture=$(mktemp)
+  deploy_hang_fixture "$fixture"
+  # Real sleeps here, not the stub: the watchdog needs them. Ceiling 1 s, no backoff.
+  deploy_driver "$driver" "$fixture" 3 "0 0" "" "" 1
+  run "$driver"
+  rm -f "$driver" "$fixture"
+  assert_success
+  assert_output --partial "deploy: attempt 1 killed after 1s (BOUCLE_DEPLOY_ATTEMPT_TIMEOUT)"
+  # The hang became an ordinary no-URL failure, so the existing retry gate fired.
+  assert_output --partial "deploy: attempt 1/3 failed (rc=124, no URL emitted)"
+  assert_output --partial "OUT=[https://example.com]"
+  assert_output --partial "ATTEMPTS=2"
+  # The killed attempt's partial output still reaches the single end-of-run dump.
+  assert_output --partial "UPLOADS=2"
+  # Discriminator: without the watchdog the hung fixture would burn its full 30 s.
+  local elapsed
+  elapsed=$(echo "$output" | sed -n 's/^ELAPSED=//p')
+  [ "$elapsed" -lt 25 ]
+}
+
+@test "the attempt watchdog never fires on a healthy deploy" {
+  local driver fixture
+  driver=$(mktemp)
+  fixture=$(mktemp)
+  deploy_fixture "$fixture" 1
+  deploy_driver "$driver" "$fixture" 3 "0 0" "" "" 60
+  run "$driver"
+  rm -f "$driver" "$fixture"
+  assert_success
+  assert_output --partial "OUT=[https://example.com]"
+  assert_output --partial "ATTEMPTS=1"
+  refute_output --partial "killed after"
+  # A backgrounded attempt must not add latency: `wait` reaps it immediately.
+  local elapsed
+  elapsed=$(echo "$output" | sed -n 's/^ELAPSED=//p')
+  [ "$elapsed" -le 3 ]
+}
+
+@test "a non-numeric BOUCLE_DEPLOY_ATTEMPT_TIMEOUT falls back to disabled with a WARN" {
+  local driver fixture
+  driver=$(mktemp)
+  fixture=$(mktemp)
+  deploy_fixture "$fixture" 1
+  deploy_driver "$driver" "$fixture" 2 "0" "" "" "abc"
+  run "$driver"
+  rm -f "$driver" "$fixture"
+  assert_success
+  assert_output --partial "WARN: BOUCLE_DEPLOY_ATTEMPT_TIMEOUT='abc' is not a number of seconds — using 0 (disabled)"
+  assert_output --partial "ATTEMPTS=1"
+  refute_output --partial "killed after"
+}
+
+@test "BOUCLE_DEPLOY_ATTEMPT_TIMEOUT above one hour is clamped with a WARN" {
+  local driver fixture
+  driver=$(mktemp)
+  fixture=$(mktemp)
+  deploy_fixture "$fixture" 1
+  deploy_driver "$driver" "$fixture" 2 "0" "" "" 99999
+  run "$driver"
+  rm -f "$driver" "$fixture"
+  assert_success
+  assert_output --partial "WARN: BOUCLE_DEPLOY_ATTEMPT_TIMEOUT=99999 clamped to 3600"
+  assert_output --partial "ATTEMPTS=1"
 }

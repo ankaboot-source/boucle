@@ -121,6 +121,7 @@ clock:
 | `BOUCLE_DEPLOY_ATTEMPTS` | `3` | Total attempts, not retries. Clamped to `1..4`; a non-numeric value falls back to the default with a `WARN`. `1` reproduces the historical single-shot behaviour. |
 | `BOUCLE_DEPLOY_RETRY_DELAYS` | `20 60` | Seconds waited before each retry, consumed left to right; the last value repeats once the list is exhausted. Every entry MUST be an integer in `0..300`, else the whole list falls back to the default with a `WARN`. Set `0 0` in tests so the suite never really sleeps. |
 | `BOUCLE_DEPLOY_RETRY_BUDGET` | `480` | Wall-clock ceiling in seconds for the retry ladder, measured from the first attempt. A retry starts only while `elapsed + wait < budget`; past it the job fails exactly like a single-shot deploy. Clamped to `3600`. |
+| `BOUCLE_DEPLOY_ATTEMPT_TIMEOUT` | `0` (off) | Seconds a single deploy attempt may run before its watchdog kills it (rc `124`, retryable like any other no-URL failure). Clamped to `3600`. Off by default: a badly set ceiling would kill a slow-but-legitimate deploy. See [Deploy retry](#deploy-retry-transient-provider-failures). |
 
 ```mermaid
 flowchart TD
@@ -151,6 +152,24 @@ deploy — log dumped, failure classified, doctor escalates — into a job kille
 the timeout, with no dump and no classification. A consumer whose nominal deploy
 is slow MUST raise the job timeout in its root `.gitlab-ci.yml` shim (the
 job-level `timeout:` cannot read a CI variable) and raise the budget with it.
+
+**A hanging attempt is a different failure than a failing one.** An attempt that
+never returns produces no `rc`, so the retry gate cannot fire: the job sits
+until the runner kills it, with no log dump and no FAIL classification — and
+some runners do not enforce the job-level `timeout:` at all (observed twice in
+one evening: a deploy job still alive 27 min and 14 min past its 10 m ceiling,
+during a *Partially Degraded Service* window; nominal duration, 199 s). When a
+provider behaves this way, set `BOUCLE_DEPLOY_ATTEMPT_TIMEOUT` above the nominal
+deploy duration: the ceiling converts the hang into rc `124` with no URL, which
+the retry gate replays exactly like any other failed attempt. The attempt stays
+a subshell of `boucle_do_deploy` — exported functions and the job-local `BRANCH`
+survive, unlike under `timeout bash -c` — and it is watched by a foreground poll
+loop (1 s cadence): polls are reaped the instant they exit, so nothing outlives
+the attempt, and a healthy deploy ends within one poll, adding no latency. (A
+detached watchdog sleeper was tried first and removed — killing its bash
+orphans the `sleep` it sits in, and that orphan keeps the caller's capture
+descriptors open.) Off by default: only a consumer that has observed hangs sets
+it, and it MUST stay above the nominal deploy duration.
 
 ### Inline deploy (GitLab only)
 

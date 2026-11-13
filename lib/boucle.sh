@@ -2850,6 +2850,7 @@ boucle_do_deploy() {
   local BRANCH deploy_log deploy_attempt_log deploy_rc url
   local deploy_attempt deploy_max deploy_delays_ok deploy_delay
   local deploy_started deploy_budget deploy_elapsed
+  local deploy_attempt_timeout deploy_child deploy_child_start deploy_timed_out
   local -a deploy_delays
   BRANCH="${BOUCLE_DEFAULT_BRANCH}"
   deploy_log=$(mktemp)
@@ -2924,6 +2925,25 @@ boucle_do_deploy() {
   fi
   deploy_started=$(date +%s)
 
+  # Opt-in per-attempt wall clock, in seconds; 0 (the default) disables it.
+  # A deploy that HANGS — the provider accepted the connection and then went
+  # silent — never returns an rc, so the retry gate below can never fire: the
+  # job sits until the runner kills it, with no log dump and no FAIL
+  # classification, and production stays on the previous build. Killing the
+  # attempt turns the hang into an ordinary failure with no URL, which IS
+  # retryable. Disabled by default because a ceiling set too low would kill a
+  # slow but legitimate deploy; a consumer whose provider degrades this way opts
+  # in (observed on a 199 s nominal deploy: hangs of 27 min and 14 min, and the
+  # runner did not enforce the job's own `timeout: 10m`).
+  deploy_attempt_timeout="${BOUCLE_DEPLOY_ATTEMPT_TIMEOUT:-0}"
+  if ! [[ "$deploy_attempt_timeout" =~ ^[0-9]{1,5}$ ]]; then
+    echo "WARN: BOUCLE_DEPLOY_ATTEMPT_TIMEOUT='$deploy_attempt_timeout' is not a number of seconds — using 0 (disabled)" >&2
+    deploy_attempt_timeout=0
+  elif [ "$deploy_attempt_timeout" -gt 3600 ]; then
+    echo "WARN: BOUCLE_DEPLOY_ATTEMPT_TIMEOUT=$deploy_attempt_timeout clamped to 3600 — it MUST stay under the deploy job timeout" >&2
+    deploy_attempt_timeout=3600
+  fi
+
   deploy_attempt=0
   deploy_rc=0
   url=""
@@ -2939,7 +2959,42 @@ boucle_do_deploy() {
     # non-zero deploy would abort the job before deploy_rc is captured and the
     # retry would never happen. `$?` in the else branch is the eval's status —
     # the `if`'s own status is not assigned until after the branch runs.
-    if (eval "$BOUCLE_DEPLOY_CMD") > "$deploy_attempt_log" 2>&1; then
+    if [ "$deploy_attempt_timeout" -gt 0 ]; then
+      # Ceiling-on-an-attempt, by polling. The attempt stays a subshell of THIS
+      # shell, so exported functions and the job-local BRANCH survive — `timeout
+      # bash -c` would lose both. A detached watchdog sleeper was tried first
+      # and replaced: killing its bash orphans the `sleep` child it sits in, and
+      # that orphan keeps the caller's capture descriptors open — in a test
+      # harness stdout then never reaches EOF and the whole run hangs. With
+      # foreground polls there is nothing left to clean: bash reaps its exited
+      # jobs itself, so `kill -0` flips to "gone" as soon as the attempt ends,
+      # and `wait` returns the saved status. rc is forced to 124 (the
+      # timeout(1) convention) to keep "killed at the ceiling" apart from an
+      # ordinary non-zero exit.
+      deploy_child_start=$SECONDS
+      deploy_timed_out=false
+      (eval "$BOUCLE_DEPLOY_CMD") > "$deploy_attempt_log" 2>&1 &
+      deploy_child=$!
+      while kill -0 "$deploy_child" 2> /dev/null; do
+        if [ "$((SECONDS - deploy_child_start))" -ge "$deploy_attempt_timeout" ]; then
+          deploy_timed_out=true
+          echo "deploy: attempt $deploy_attempt killed after ${deploy_attempt_timeout}s (BOUCLE_DEPLOY_ATTEMPT_TIMEOUT)" >&2
+          kill -TERM "$deploy_child" 2> /dev/null || true
+          sleep 5   # grace: let a well-behaved attempt flush and exit on TERM
+          kill -KILL "$deploy_child" 2> /dev/null || true
+          break
+        fi
+        sleep 1
+      done
+      if wait "$deploy_child"; then
+        deploy_rc=0
+      else
+        deploy_rc=$?
+      fi
+      if [ "$deploy_timed_out" = true ]; then
+        deploy_rc=124
+      fi
+    elif (eval "$BOUCLE_DEPLOY_CMD") > "$deploy_attempt_log" 2>&1; then
       deploy_rc=0
     else
       deploy_rc=$?
