@@ -578,6 +578,21 @@ the change.
 `.boucle-state/` is **runtime state** (gitignored) — agents write there freely
 (`state.md`, `iterations.md`, etc.). It is never committed and never synced.
 
+**How the guard resolves its range.** `bin/check-boucle-sync` resolves **one**
+explicit base and then uses two-dot forms (`git diff BASE AFTER`,
+`git log BASE..AFTER`), so the file list and the commit list cannot disagree —
+and only commits the push introduced are judged. On a push the order is:
+merge base of `CI_COMMIT_BEFORE_SHA` and `CI_COMMIT_SHA` → one bounded,
+best-effort `git fetch --deepen=200 origin` plus a retry (a shallow clone has
+no merge base for the orphaned before-SHA of a force-push) →
+`origin/$CI_DEFAULT_BRANCH`, else `$CI_DEFAULT_BRANCH` → **fail closed**. An
+unresolvable range **NEVER** becomes a silent pass, and neither does a
+degenerate one: a fallback base that already **is** the pushed head (a push to
+the trunk whose before-SHA is unreachable) would otherwise produce an empty
+range that judges nothing. The guard exits 1 with an actionable message (raise
+`GIT_DEPTH`, or fetch the before-SHA). A no-op push whose before-SHA **is**
+reachable still passes — the rejection is scoped to the fallback.
+
 To change **consumer config** (deploy mode, build command, review mode, ...):
 use **CI variables** (Settings → CI/CD → Variables) or the **root
 `.gitlab-ci.yml` shim** — NEVER `.boucle/.gitlab-ci.yml`.
