@@ -1539,6 +1539,65 @@ boucle_metrics_publish() {
   return 0
 }
 
+# boucle_metrics_heartbeat [stage]
+#
+# Append a liveness row to <metrics branch>:<metrics file> — one per loop run,
+# carrying NO issue data:
+#   {"schema":1,"timestamp":…,"event":"heartbeat","stage":…,"project":…}
+#
+# Why a separate row: boucle_metrics_publish only runs at a terminal
+# transition, so a consumer whose collector is unwired (or whose pushes always
+# fail) closes issues while the branch carries nothing, and no machine step can
+# tell "the loop never finished an issue" from "the collector never wrote". The
+# heartbeat proves the whole path — credential, branch, push — independently of
+# any terminal state, and gives the retro a `last metrics row` that moves even
+# in a quiet window.
+#
+# Readers that aggregate ISSUE metrics MUST skip rows without an `issue` field.
+# They already do (bin/skills-stats selects `has("issue")`); the retro digest
+# filters heartbeats out of its blackout/coverage counts and keeps them in the
+# last-row timestamp. See LOOP.md §"Loop measurement".
+#
+# Fail-open, never silent: a heartbeat that cannot push says so, exactly like
+# boucle_metrics_sync_health — a quiet failure here is the blackout this row
+# exists to detect. Opt out with BOUCLE_METRICS_HEARTBEAT=false (same falsy
+# spellings as BOUCLE_METRICS_ENABLED) when a consumer does not want one push
+# per loop run.
+boucle_metrics_heartbeat() {
+  local stage="${1:-unknown}"
+  if ! boucle_metrics_enabled; then
+    # Same loud opt-out as boucle_metrics_publish: a documented switch nobody
+    # wired is worse than no switch, and silence reads as "nothing to report".
+    echo "[boucle:metrics] disabled (BOUCLE_METRICS_ENABLED=${BOUCLE_METRICS_ENABLED:-}) — heartbeat not written; health.jsonl is still written locally" >&2
+    return 0
+  fi
+  case "$(printf '%s' "${BOUCLE_METRICS_HEARTBEAT:-true}" | tr '[:upper:]' '[:lower:]')" in
+    false | 0 | no | off) return 0 ;;
+  esac
+
+  # Stage is free text from the CLI; keep the row valid JSON whatever it is.
+  stage=$(printf '%s' "$stage" | tr -cd 'A-Za-z0-9_-')
+  [ -n "$stage" ] || stage=unknown
+
+  local rowfile row
+  rowfile=$(mktemp 2> /dev/null) || {
+    echo "[boucle:metrics] WARN: could not create a heartbeat row — the metrics sink stays unproven for this run" >&2
+    return 0
+  }
+  row=$(printf '{"schema":1,"timestamp":"%s","event":"heartbeat","stage":"%s","project":"%s"}' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$stage" "${BOUCLE_PROJECT_ID:-}")
+  printf '%s\n' "$row" > "$rowfile"
+  if boucle_metrics_git_append "$BOUCLE_METRICS_FILE" "$rowfile" \
+    "metrics: heartbeat ($stage)"; then
+    echo "[boucle:metrics] heartbeat recorded on $BOUCLE_METRICS_BRANCH:$BOUCLE_METRICS_FILE (stage: $stage)" >&2
+  else
+    echo "[boucle:metrics] WARN: heartbeat could not be pushed to $BOUCLE_METRICS_BRANCH — the metrics sink is not proven for this run (the loop is unaffected)" >&2
+    boucle_ci_warning "boucle metrics heartbeat could not be pushed to $BOUCLE_METRICS_BRANCH — the metrics sink is not proven for this run"
+  fi
+  rm -f "$rowfile"
+  return 0
+}
+
 # boucle_metrics_git_append <relpath> <src-file> <commit-msg>
 #
 # Append the lines of <src-file> to <relpath> on the metrics branch, skipping
@@ -1684,6 +1743,82 @@ boucle_metrics_sync_health() {
     "metrics: raw health for issue #$iid"; then
     echo "[boucle:metrics] WARN: could not sync raw health for issue #$iid to $BOUCLE_METRICS_BRANCH — the loop is unaffected, the measurement is not durable for this run" >&2
   fi
+  return 0
+}
+
+# boucle_metrics_probe [--offline]
+#
+# Print ONE line of key=value tokens describing the metrics sink as the branch
+# actually is:
+#
+#   enabled=yes|no branch=<name> fetch=yes|no rows=<n> heartbeats=<n> last=<iso|never>
+#
+# `rows` counts ISSUE rows only (objects carrying an `issue`) — the evidence
+# the retro needs — while `last` is the newest row of ANY kind, so the
+# heartbeat appended on every loop run moves it in a quiet window. That
+# distinction is the point: rows=0 with a recent `last` and heartbeats>0 means
+# "the sink is alive and no issue has finished", rows=0 with heartbeats=0 means
+# "the sink has never been written" (the blackout nobody could see before).
+#
+# Reads through the working repo's own remote, for the same credential reason
+# boucle_metrics_git_append does. `--offline` never touches the network: it
+# reads the local remote-tracking ref instead, for callers that must stay
+# read-only and non-blocking (bin/doctor --audit, which runs before a project
+# is even reachable). Fail-open: no git, no remote, no jq, no branch →
+# fetch=no with zero counts. Never fails the caller.
+boucle_metrics_probe() {
+  local offline=no
+  if [ "${1:-}" = "--offline" ]; then
+    offline=yes
+  fi
+  local branch="${BOUCLE_METRICS_BRANCH:-boucle/metrics}"
+  local file="${BOUCLE_METRICS_FILE:-metrics.jsonl}"
+  local enabled=no fetch=no rows=0 heartbeats=0 last=never
+  boucle_metrics_enabled && enabled=yes
+
+  local tmp
+  tmp=$(mktemp -d 2> /dev/null) || {
+    printf 'enabled=%s branch=%s fetch=%s rows=%s heartbeats=%s last=%s\n' \
+      "$enabled" "$branch" "$fetch" "$rows" "$heartbeats" "$last"
+    return 0
+  }
+  local readable=no
+  if command -v jq > /dev/null 2>&1 \
+    && git rev-parse --git-dir > /dev/null 2>&1 \
+    && git remote get-url origin > /dev/null 2>&1; then
+    if [ "$offline" = yes ]; then
+      local ref
+      ref=$(git rev-parse --verify --quiet "refs/remotes/origin/$branch" 2> /dev/null || echo "")
+      if [ -n "$ref" ]; then
+        git cat-file -p "$ref:$file" > "$tmp/metrics.jsonl" 2> /dev/null && readable=yes
+      fi
+    elif GIT_TERMINAL_PROMPT=0 git fetch -q --depth 1 origin "$branch" 2> /dev/null; then
+      git cat-file -p "FETCH_HEAD:$file" > "$tmp/metrics.jsonl" 2> /dev/null && readable=yes
+    fi
+  fi
+  if [ "$readable" = yes ]; then
+    fetch=yes
+    if [ -s "$tmp/metrics.jsonl" ]; then
+      local counts
+      counts=$(jq -s -r '
+        [.[] | select(type == "object")] as $r
+        | ($r | map(select(.issue != null and .issue != "")) | length) as $issues
+        | ($r | map(select(.event == "heartbeat")) | length) as $hb
+        | ([$r[] | .timestamp // empty] | max // "never") as $last
+        | "\($issues) \($hb) \($last)"
+      ' "$tmp/metrics.jsonl" 2> /dev/null || echo "")
+      if [ -n "$counts" ]; then
+        read -r rows heartbeats last <<< "$counts"
+      fi
+    fi
+  fi
+  rm -rf "$tmp"
+
+  case "$rows" in '' | *[!0-9]*) rows=0 ;; esac
+  case "$heartbeats" in '' | *[!0-9]*) heartbeats=0 ;; esac
+  [ -n "$last" ] || last=never
+  printf 'enabled=%s branch=%s fetch=%s rows=%s heartbeats=%s last=%s\n' \
+    "$enabled" "$branch" "$fetch" "$rows" "$heartbeats" "$last"
   return 0
 }
 

@@ -124,6 +124,19 @@ else
     || echo "")
 fi
 
+# Heartbeat rows are LIVENESS, not measurements: they carry event=heartbeat
+# and no `issue` field. Counting them would report more issues than the
+# aggregates grouped (TOTAL is a line count, AGG filters on has("issue")),
+# and a branch with only heartbeats would render as "0 issues" instead of
+# "No metrics yet". Drop them here, once, so every figure below agrees.
+HEARTBEATS=$(printf '%s\n' "$ROWS" | jq -s \
+  '[.[] | select(type == "object" and .event == "heartbeat")] | length' \
+  2> /dev/null || echo 0)
+case "$HEARTBEATS" in '' | *[!0-9]*) HEARTBEATS=0 ;; esac
+ROWS_FILTERED=$(printf '%s\n' "$ROWS" | jq -c 'select(type == "object" and has("issue"))' 2> /dev/null) \
+  || ROWS_FILTERED="$ROWS"
+ROWS="$ROWS_FILTERED"
+
 if [ -z "$(printf '%s' "$ROWS" | tr -d '[:space:]')" ]; then
   echo "No metrics yet."
   echo
@@ -137,6 +150,13 @@ if [ -z "$(printf '%s' "$ROWS" | tr -d '[:space:]')" ]; then
   echo "     false/0/no/off somewhere. It defaults to ON; unset it to restore."
   echo "  2. The write failed. Check the job log for '[boucle:metrics]' lines,"
   echo "     which say either 'published', 'disabled', or why it could not."
+  if [ "$HEARTBEATS" -gt 0 ]; then
+    echo
+    echo "The branch carries $HEARTBEATS heartbeat row(s) but no issue row: the"
+    echo "sink itself is writable, so the terminal transition is not publishing."
+    echo "A heartbeat is appended on every loop run — it proves the credential,"
+    echo "branch and push path, and it is not a measurement."
+  fi
   exit 0
 fi
 

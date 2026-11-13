@@ -29,4 +29,24 @@ if ! declare -F "$FUNC" > /dev/null 2>&1; then
   exit 1
 fi
 
+# ── Metrics liveness ─────────────────────────────────────────────────────────
+# Every loop stage proves the metrics path (credential, branch, push) with one
+# heartbeat row, independently of any issue reaching a terminal state. Without
+# it, a collector that was never wired is invisible: the retro can only see the
+# ABSENCE of issue rows, which a genuinely quiet window produces too (see
+# boucle_metrics_heartbeat in lib/boucle.sh).
+#
+# Gated on a CI job id so a local `bin/boucle-ci <stage>` never pushes a row to
+# the consumer's metrics branch, and skipped for stages that are not loop runs
+# (`check` is lint, `cmd-*` is the interactive operator surface). Fail-open:
+# the heartbeat must never be what stops a stage.
+case "$STAGE" in
+  check | cmd-*) ;;
+  *)
+    if [ "${BOUCLE_JOB_ID:-0}" != "0" ]; then
+      boucle_metrics_heartbeat "$STAGE" || true
+    fi
+    ;;
+esac
+
 "$FUNC" "$@"

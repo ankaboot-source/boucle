@@ -1305,3 +1305,231 @@ digest_liveness_run() {
   assert_output --partial "disabled — BOUCLE_METRICS_ENABLED opted out"
   refute_output --partial "wired-failing"
 }
+
+# ── Liveness heartbeat (#177) ───────────────────────────────────────────
+#
+# The publish path only runs at a terminal transition, so a consumer whose
+# collector was never wired closes issues while the branch stays empty — and no
+# machine step can tell that from a quiet window. The heartbeat proves the sink
+# on every loop run and gives the retro a last-row timestamp that moves, while
+# never counting as evidence about an issue.
+
+@test "heartbeat: a loop run leaves a liveness row on the metrics branch" {
+  lib
+  metrics_remote
+  boucle_metrics_heartbeat dispatch
+  run remote_file "metrics.jsonl"
+  assert_success
+  assert_output --partial '"event":"heartbeat"'
+  assert_output --partial '"stage":"dispatch"'
+  assert_output --partial '"timestamp":"'
+  # No issue data: an aggregator must never mistake it for a measurement.
+  refute_output --partial '"issue"'
+}
+
+@test "heartbeat: the same row is never appended twice" {
+  # The row is deduped by boucle_metrics_git_append like any other line, so a
+  # retry (or two runs in the same second) cannot inflate the branch.
+  lib
+  metrics_remote
+  local row="$TMP/heartbeat-row"
+  printf '%s\n' '{"schema":1,"timestamp":"2026-10-02T10:00:00Z","event":"heartbeat","stage":"dispatch"}' > "$row"
+  boucle_metrics_git_append "metrics.jsonl" "$row" "metrics: heartbeat"
+  boucle_metrics_git_append "metrics.jsonl" "$row" "metrics: heartbeat"
+  run bash -c "git -C '$TMP/origin.git' show '$BOUCLE_METRICS_BRANCH:metrics.jsonl' | wc -l"
+  assert_output "1"
+}
+
+@test "heartbeat: a failed push warns and returns 0 — never blocks the loop" {
+  # Same contract as the publish/raw-sync paths: instrumentation is fail-open,
+  # but never silent — the WARN is the only trace of an unwired sink.
+  lib
+  git init -q "$TMP/noheartbeat"
+  run bash -c "cd '$TMP/noheartbeat' && . '$REPO/lib/boucle.sh' 2>/dev/null;
+    BOUCLE_PROJECT_ID=owner/repo boucle_metrics_heartbeat worker; echo \"rc=\$?\""
+  assert_success
+  assert_output --partial "rc=0"
+  assert_output --partial "WARN: heartbeat could not be pushed"
+}
+
+@test "heartbeat: disabled metrics says so and writes nothing" {
+  lib
+  metrics_remote
+  run bash -c "cd '$TMP/work' && . '$REPO/lib/boucle.sh' 2>/dev/null;
+    BOUCLE_METRICS_ENABLED=false boucle_metrics_heartbeat dispatch 2>&1"
+  assert_success
+  assert_output --partial "disabled"
+  run bash -c "git --git-dir='$TMP/origin.git' rev-parse --verify '$BOUCLE_METRICS_BRANCH' 2>&1 || echo ABSENT"
+  assert_output --partial "ABSENT"
+}
+
+@test "heartbeat: BOUCLE_METRICS_HEARTBEAT=false opts out of the per-run row" {
+  lib
+  metrics_remote
+  BOUCLE_METRICS_HEARTBEAT=false boucle_metrics_heartbeat dispatch
+  run bash -c "git --git-dir='$TMP/origin.git' rev-parse --verify '$BOUCLE_METRICS_BRANCH' 2>&1 || echo ABSENT"
+  assert_output --partial "ABSENT"
+}
+
+@test "heartbeat: the loop entrypoint wires it for CI stages only" {
+  # A local bin/boucle-ci <stage> must never push a row to the consumer's
+  # branch, and stages that are not loop runs (lint, operator commands) must
+  # not heartbeat either.
+  run grep -n 'boucle_metrics_heartbeat "\$STAGE"' "$REPO/bin/boucle-ci"
+  assert_success
+  run grep -n 'check | cmd-\*' "$REPO/bin/boucle-ci"
+  assert_success
+  run grep -n 'BOUCLE_JOB_ID:-0' "$REPO/bin/boucle-ci"
+  assert_success
+}
+
+# ── The probe: what the sink actually is ────────────────────────────────
+
+@test "probe: a heartbeat-only branch reports no issue rows but a live last-row timestamp" {
+  lib
+  metrics_remote
+  boucle_metrics_heartbeat dispatch
+  run boucle_metrics_probe
+  assert_success
+  assert_output --partial "enabled=yes"
+  assert_output --partial "fetch=yes"
+  assert_output --partial "rows=0"
+  assert_output --partial "heartbeats=1"
+  refute_output --partial "last=never"
+}
+
+@test "probe: an unpopulated sink reports fetch=no, never" {
+  lib
+  metrics_remote
+  run boucle_metrics_probe
+  assert_success
+  assert_output --partial "fetch=no"
+  assert_output --partial "rows=0"
+  assert_output --partial "heartbeats=0"
+  assert_output --partial "last=never"
+}
+
+@test "probe: --offline reads a local ref and never touches the network" {
+  lib
+  metrics_remote
+  boucle_metrics_heartbeat dispatch
+  # Point origin at nothing after capturing the ref locally: an online probe
+  # must fail, so fetch=yes under --offline proves it read the local ref.
+  git -C "$TMP/work" fetch -q origin \
+    "refs/heads/$BOUCLE_METRICS_BRANCH:refs/remotes/origin/$BOUCLE_METRICS_BRANCH"
+  git -C "$TMP/work" remote set-url origin "file:///definitely/not/a/repo"
+  run boucle_metrics_probe --offline
+  assert_success
+  assert_output --partial "fetch=yes"
+  assert_output --partial "heartbeats=1"
+  run boucle_metrics_probe
+  assert_output --partial "fetch=no"
+}
+
+# ── Digest: heartbeats are not evidence, but they are liveness ──────────
+
+@test "digest: heartbeats keep the last-row timestamp moving but never satisfy the blackout check" {
+  lib
+  WORK="$TMP/liveness-heartbeat"
+  digest_liveness_setup "$WORK" \
+    '{"schema":1,"timestamp":"2026-10-02T10:00:00Z","event":"heartbeat","stage":"dispatch"}' ""
+  run digest_liveness_run "$WORK" "$TMP/heartbeat.md"
+  assert_success
+  # The branch proves it is writable, yet the window still has no ISSUE row —
+  # the blackout must stand, and it is not a "never populated" escalation.
+  refute_output --partial "metrics_blackout=never-populated"
+  run cat "$TMP/heartbeat.md"
+  assert_output --partial "WARNING: metrics blackout"
+  assert_output --partial "metrics rows: 0 in window, 0 on branch"
+  assert_output --partial "heartbeats: 1 on branch"
+  assert_output --partial "last metrics row: 2026-10-02T10:00:00Z"
+  assert_output --partial "the sink is writable (heartbeat rows exist on the branch)"
+}
+
+@test "digest: a never-populated branch emits the machine-readable escalation marker" {
+  lib
+  WORK="$TMP/liveness-never"
+  digest_liveness_setup "$WORK" "" ""
+  run digest_liveness_run "$WORK" "$TMP/never.md"
+  assert_success
+  assert_output --partial "metrics_blackout=never-populated"
+  run cat "$TMP/never.md"
+  assert_output --partial "Escalation: metrics_blackout=never-populated"
+}
+
+@test "digest: an absent branch proven absent by ls-remote also escalates" {
+  # No branch exists at all (every push failed since the first run). The digest
+  # cannot fetch it, but ls-remote proves the ref was never created — that is
+  # the evidence the marker needs, not a guess from a failed fetch.
+  lib
+  WORK="$TMP/liveness-absent"
+  metrics_remote > /dev/null
+  stub_forge
+  run bash -c "
+    set -euo pipefail
+    unset GITHUB_REPOSITORY BOUCLE_PROJECT_ID BOUCLE_PROJECT_PATH || true
+    export BOUCLE_WORKSPACE='$TMP/work' BOUCLE_HOME='$REPO'
+    source '$REPO/lib/boucle.sh' 2> /dev/null || true
+    source '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null || true
+    cd '$TMP/work'
+    forge_issue_list_all() { echo '[{\"iid\":7,\"title\":\"Closed\",\"closed_at\":\"2026-10-03T00:00:00Z\"}]'; }
+    retro_upstream_ready() { return 1; }
+    _retro_build_digest '$TMP/absent.md' '2026-09-15T00:00:00Z'
+  "
+  assert_success
+  assert_output --partial "metrics_blackout=never-populated"
+}
+
+@test "digest: a disabled collector never emits the escalation marker" {
+  lib
+  WORK="$TMP/liveness-never-disabled"
+  digest_liveness_setup "$WORK" "" ""
+  BOUCLE_METRICS_ENABLED=false run digest_liveness_run "$WORK" "$TMP/never-disabled.md"
+  assert_success
+  refute_output --partial "metrics_blackout=never-populated"
+}
+
+@test "escalation: never-populated flags the run, a dry run does not" {
+  run bash -c ". '$REPO/lib/boucle.sh' 2> /dev/null;
+    . '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null;
+    _retro_blackout_escalate never-populated no 2>&1; echo \"rc=\$?\""
+  assert_success
+  assert_output --partial "ESCALATION: metrics_blackout=never-populated"
+  assert_output --partial "rc=1"
+
+  run bash -c ". '$REPO/lib/boucle.sh' 2> /dev/null;
+    . '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null;
+    _retro_blackout_escalate never-populated yes; echo \"rc=\$?\""
+  assert_success
+  assert_output --partial "would escalate metrics_blackout=never-populated"
+  assert_output --partial "rc=0"
+
+  run bash -c ". '$REPO/lib/boucle.sh' 2> /dev/null;
+    . '$REPO/lib/boucle-ci/retro.sh' 2> /dev/null;
+    _retro_blackout_escalate '' no; echo \"rc=\$?\""
+  assert_success
+  assert_output --partial "rc=0"
+}
+
+@test "stats: heartbeats are not counted as issues, and name the terminal-hook fault" {
+  # A heartbeat-only branch proves the sink is writable. Reporting it as
+  # "N issues" would invent measurements; reporting it as plain "No metrics
+  # yet" would send the operator back to the credential that demonstrably
+  # works. The reader names the actual remaining fault.
+  printf '%s\n' \
+    '{"schema":1,"timestamp":"2026-10-02T10:00:00Z","event":"heartbeat","stage":"dispatch"}' \
+    > "$TMP/hb.jsonl"
+  run "$REPO/bin/skills-stats" --file "$TMP/hb.jsonl"
+  assert_success
+  assert_output --partial "No metrics yet"
+  assert_output --partial "1 heartbeat row(s) but no issue row"
+  refute_output --partial "issue(s), grouped"
+
+  printf '%s\n' \
+    '{"schema":1,"timestamp":"2026-10-02T10:00:00Z","event":"heartbeat","stage":"dispatch"}' \
+    '{"schema":3,"issue":"1","terminal":"done","arm":"full","iterations":1,"skills":[],"skills_n":0,"setup_failures":0,"human_spec":0,"human_delivery":0,"telemetry_gap":[]}' \
+    > "$TMP/mixed.jsonl"
+  run "$REPO/bin/skills-stats" --file "$TMP/mixed.jsonl"
+  assert_success
+  assert_output --partial "1 issue(s)"
+}

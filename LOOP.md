@@ -596,9 +596,10 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_DND_TZ` | `UTC` | Quiet-hours timezone (IANA name, e.g. `Europe/Paris`); seeded by `bin/setup` from the machine's timezone. |
 | `BOUCLE_DND_EXCLUDE_DAYS` | *(empty)* | Comma-separated weekday names never in DND (e.g. `Fri,Sat`). |
 | `BOUCLE_EXPERIMENT` | `off` | Skill-effectiveness randomisation. `on` assigns each issue to `full` / `lessons` / `none` by a hash of its id, so `bin/skills-stats --experiment` can be read causally. **Opt-in**: two arms out of three ship a deliberately degraded prompt and cost real iterations. Off = every issue gets the full prompt (current behaviour), and the arm is still recorded. |
-| `BOUCLE_METRICS_ENABLED` | `true` | Publish one measurement row per issue to the metrics branch at the terminal transition. **On by default, opt-out**: only `false` / `0` / `no` / `off` (any case) disable it; any other value leaves it on, so a well-meant `=1` cannot silently switch it off. Disabling is logged, never silent. Scope is the branch write alone — `health.jsonl` keeps being written locally either way, because `bin/health` and the escalation diagnostic depend on it. |
+| `BOUCLE_METRICS_ENABLED` | `true` | Publish to the metrics branch: one measurement row per issue at the terminal transition, plus one liveness heartbeat row per loop run. **On by default, opt-out**: only `false` / `0` / `no` / `off` (any case) disable it; any other value leaves it on, so a well-meant `=1` cannot silently switch it off. Disabling is logged, never silent. Scope is the branch write alone — `health.jsonl` keeps being written locally either way, because `bin/health` and the escalation diagnostic depend on it. |
 | `BOUCLE_METRICS_BRANCH` | `boucle/metrics` | Orphan branch holding the append-only measurement log. Shares no history with the consumer's code. |
-| `BOUCLE_METRICS_FILE` | `metrics.jsonl` | File on that branch, one JSON object per issue. |
+| `BOUCLE_METRICS_FILE` | `metrics.jsonl` | File on that branch: one JSON object per issue, plus one `event=heartbeat` liveness row per loop run. A row without an `issue` field is never evidence about an issue. |
+| `BOUCLE_METRICS_HEARTBEAT` | `true` | Append a heartbeat row (`event=heartbeat`, timestamp, stage — no issue data) on every loop run. It proves the whole write path (credential, branch, push) independently of any issue reaching a terminal state, and keeps the digest's last-row timestamp moving in a quiet window. Opt-out with the same falsy spellings as `BOUCLE_METRICS_ENABLED`; turn it off only if one push per loop run is unacceptable. Skipped for lint (`check`) and operator commands (`cmd-*`), and on a local run with no CI job id. |
 | `BOUCLE_METRICS_RAW_DIR` | `raw` | Directory on that branch holding `<issue>.jsonl` — the raw per-run health lines the summary row is computed from, pushed as they are written so they outlive the ephemeral job that produced them. |
 | `BOUCLE_METRICS_SYNC` | `true` | Push each health line to the branch as it is appended. Opt-out, same falsy spellings as `BOUCLE_METRICS_ENABLED`. Turning it off costs a network round-trip per agent run and gives up the summary row for any issue whose terminal label is applied by a different job than the one that did the work — which is most of them. |
 | `BOUCLE_PROFILE` | *(empty)* | Install profile: `site` (a static site boucle builds and deploys), `infra` (a non-site repo: external deploy, diff review, command-mode e2e, neutral build — see [Non-site consumer (infra)](#non-site-consumer-infra)), or `auto` (defer the decision to the first triaged issue, #186 — see [First-issue profile determination](#first-issue-profile-determination-186)). Set by `bin/setup --profile ...` (written into the root shim as an explicit variable); an empty value is treated as `auto`. An explicit `site`/`infra` permanently suppresses the first-issue determination. |
@@ -990,9 +991,13 @@ its own completeness** before it renders:
 - the data-source line carries the fetch status in **three** states —
   `fetched: yes`, `fetched: yes, 0 rows on the branch`, `fetch failed —
   <branch> unavailable (branch, credential or
-  remote missing)` — plus the metrics row counts (in window / whole branch),
-  the issue-row count and the **last metrics row timestamp**. The timestamp
-  separates "the collector stopped at date X" from "the collector never ran";
+  remote missing)` — plus the ISSUE-row counts (in window / whole branch), the
+  **heartbeat** count, the issue-row count and the **last metrics row
+  timestamp**. The timestamp is the newest row of ANY kind: a heartbeat keeps
+  it moving while the loop is alive, so "collector stopped at date X" is
+  visible even in a window with no finished issue. Heartbeats are liveness,
+  never evidence — a window with heartbeats and zero issue rows is still a
+  blackout, classified as `unwired` with the sink proven writable;
 - a window with **closed issues and ZERO metrics rows** renders
   `WARNING: metrics blackout — 0 metrics rows for N closed issue(s) in
   window; the retro evidence layer is missing`. The banner is
@@ -1009,7 +1014,17 @@ its own completeness** before it renders:
   fetch — is still classified `wired-failing`; `unclassified` remains only
   for a fetch failure with no mirrored event either;
 - a genuinely quiet window (no closed issues, no metrics rows) stays silent —
-  inactivity is NOT a blackout.
+  inactivity is NOT a blackout;
+- a **never-populated** window — issues closed and the branch has never carried
+  a single row, not even a heartbeat — also prints the machine-readable marker
+  `metrics_blackout=never-populated` on stdout, and the stage **exits 1 after
+  its bookkeeping**. The digest warning alone changes nothing; a red retro job
+  (plus a run annotation on GitHub) is the escalation a human sees. The marker
+  is only claimed on evidence: a readable empty branch, or `ls-remote` proving
+  the ref was never created. A failed fetch with no such proof stays
+  `unclassified` — a transient must not be reported as a wiring defect. An
+  explicit `BOUCLE_METRICS_ENABLED=false` never escalates, and a dry run logs
+  `would escalate` without raising a flag.
 
 The banner is a finding, not a rendering detail: the retro MUST cite it in the
 local report instead of reading the empty aggregates as "no activity".
@@ -1050,6 +1065,12 @@ open-route would triage it). The next retro **closes the previous report**
   tests); the run record still advances the cadence.
 - `BOUCLE_RETRO_FORCE=true` → only an explicitly dispatched job ignores the
   threshold; the doctor is unaffected.
+- The ONE deliberate red exit: a window that closes issues while the metrics
+  branch has never carried a row (`metrics_blackout=never-populated`). This is
+  not a transient failure to retry — the measurement layer was never wired,
+  and a digest warning nobody reads changes nothing. The run exits 1 after
+  recording itself, so the cadence advances and the flag fires once per
+  window, not once per sweep.
 
 ## Configuration audit
 
@@ -1074,6 +1095,14 @@ Readiness: 54/100  (1 blocker(s), 0 degraded, 2 advisory)
 Blockers dominate on purpose: a repository that cannot complete a loop must
 not score well because everything else is tidy. A blocker exits non-zero, so
 the audit works as a CI check.
+
+The audit also reports the **metrics wiring**: `BOUCLE_METRICS_ENABLED`, the
+branch, its issue/heartbeat counts and the last-row age. It reads the local
+remote-tracking ref only (`--offline`) because the audit runs before a project
+is even reachable; a branch it cannot see is reported as **unproven**, never as
+empty. The live `bin/doctor` reads through the remote and raises a **WARN**
+when the branch has never carried a row while metrics are enabled — the
+measurement layer is fail-open, so that defect has no other visible symptom.
 
 `bin/setup` prints it on completion — you learn what is missing before the
 first issue, not during it. It never fails the install: a blocker there is a
@@ -1412,6 +1441,31 @@ branch when the issue reaches `boucle:done` or `boucle:human`. Orphan so the
 measurement log never enters the consumer's history or triggers their CI, and
 fail-open throughout: a metrics write must never be what stops an issue
 reaching done.
+
+**Every loop run also proves the sink.** A publish row only exists at a
+terminal transition, so a collector that was never wired (or whose pushes
+always fail) leaves no trace at all — the retro can only see the absence of
+rows, which a quiet window produces too. Each loop run therefore appends a
+heartbeat row (`event=heartbeat`, timestamp, stage, no issue data) through the
+same append path. It is not a measurement: readers that aggregate issues
+(`bin/skills-stats`, the retro coverage line) skip rows without an `issue`
+field, and the heartbeat never satisfies the blackout check. Its job is
+liveness — it moves the last-row timestamp and separates "nothing finished"
+from "nothing works". `bin/doctor` reports the switch, the branch and the
+last-row age, and flags a branch that has never carried a row while metrics
+are enabled.
+
+```mermaid
+flowchart LR
+    A["Loop run"] -->|"every stage"| H["heartbeat row"]
+    T["Issue reaches done/human"] --> R["issue row"]
+    H --> B[("boucle/metrics branch")]
+    R --> B
+    B --> D["Retro digest"]
+    D -->|"issue rows in window"| N["normal window"]
+    D -->|"0 issue rows, heartbeat present"| W["WARNING: blackout<br/>sink proven, hook not wired"]
+    D -->|"0 rows ever, issues closed"| E["metrics_blackout=never-populated<br/>red retro job"]
+```
 
 **A publish that fails says so where the failure outlives the job.** Because
 the path is fail-open, a failed metrics write would otherwise leave only a

@@ -43,6 +43,98 @@ fail() {
 }
 FAILURES=0
 
+# metrics_age <iso8601>
+#
+# Compact age ("3h", "2d", "14m") of a row timestamp, or nothing when this
+# platform's date cannot parse it. GNU date first, then BSD.
+metrics_age() {
+  local ts="${1:-}" epoch now delta
+  if [ -z "$ts" ] || [ "$ts" = "never" ]; then
+    return 0
+  fi
+  epoch=$(date -u -d "$ts" +%s 2> /dev/null || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$ts" +%s 2> /dev/null || echo "")
+  case "$epoch" in '' | *[!0-9]*) return 0 ;; esac
+  now=$(date -u +%s)
+  delta=$((now - epoch))
+  [ "$delta" -ge 0 ] || delta=0
+  if [ "$delta" -ge 86400 ]; then
+    echo "$((delta / 86400))d"
+  elif [ "$delta" -ge 3600 ]; then
+    echo "$((delta / 3600))h"
+  elif [ "$delta" -ge 60 ]; then
+    echo "$((delta / 60))m"
+  else
+    echo "${delta}s"
+  fi
+}
+
+# metrics_status [--offline] — resolve the metrics sink state for both doctor
+# modes. Sets METRICS_STATUS and METRICS_DETAIL; prints nothing.
+#
+# The vocabulary is small because the fixes differ:
+#   disabled          explicit BOUCLE_METRICS_ENABLED opt-out — not a defect
+#   ok                issue rows present
+#   wired-no-rows     heartbeats present but no issue row: the sink is proven,
+#                     no issue has finished (or the terminal hook is not
+#                     calling the collector — the detail carries both counts)
+#   never-populated   enabled, branch readable, ZERO rows ever (not even a
+#                     heartbeat): the collector was never wired
+#   unreadable        the branch could not be read (no branch, credential,
+#                     remote or jq) — state unknown, not proof of absence
+# `--offline` forwards to boucle_metrics_probe so bin/doctor --audit stays
+# read-only and non-blocking.
+metrics_status() {
+  METRICS_STATUS=unreadable
+  METRICS_DETAIL="could not inspect the metrics sink (lib/boucle.sh not loaded)"
+  if ! type boucle_metrics_probe > /dev/null 2>&1; then
+    return 0
+  fi
+  local probe enabled=unknown branch="" fetch=no rows=0 heartbeats=0 last=never tok age=""
+  probe=$(boucle_metrics_probe "$@" 2> /dev/null || echo "")
+  for tok in $probe; do
+    case "$tok" in
+      enabled=*) enabled="${tok#enabled=}" ;;
+      branch=*) branch="${tok#branch=}" ;;
+      fetch=*) fetch="${tok#fetch=}" ;;
+      rows=*) rows="${tok#rows=}" ;;
+      heartbeats=*) heartbeats="${tok#heartbeats=}" ;;
+      last=*) last="${tok#last=}" ;;
+    esac
+  done
+  branch="${branch:-${BOUCLE_METRICS_BRANCH:-boucle/metrics}}"
+  case "$rows" in '' | *[!0-9]*) rows=0 ;; esac
+  case "$heartbeats" in '' | *[!0-9]*) heartbeats=0 ;; esac
+  [ -n "$last" ] || last=never
+  age=$(metrics_age "$last")
+  local last_label="$last"
+  [ -n "$age" ] && last_label="$last, ${age} ago"
+
+  if [ "$enabled" = "no" ]; then
+    METRICS_STATUS=disabled
+    METRICS_DETAIL="disabled (BOUCLE_METRICS_ENABLED=${BOUCLE_METRICS_ENABLED:-}) — no branch write; health.jsonl is still written locally"
+    if [ "$fetch" = "yes" ]; then
+      METRICS_DETAIL="$METRICS_DETAIL; $branch last row: $last_label"
+    fi
+    return 0
+  fi
+  if [ "$fetch" != "yes" ]; then
+    METRICS_STATUS=unreadable
+    METRICS_DETAIL="enabled, but $branch could not be read (no branch, credential, remote or jq) — no row is visible from this checkout, so the sink is unproven"
+    return 0
+  fi
+  if [ "$rows" -gt 0 ]; then
+    METRICS_STATUS=ok
+    METRICS_DETAIL="$branch carries $rows issue row(s) and $heartbeats heartbeat(s); last row: $last_label"
+  elif [ "$heartbeats" -gt 0 ]; then
+    METRICS_STATUS=wired-no-rows
+    METRICS_DETAIL="$branch is writable ($heartbeats heartbeat(s)) but carries no issue row yet — no issue has reached a terminal state, or the terminal hook is not calling the collector; last row: $last_label"
+  else
+    METRICS_STATUS=never-populated
+    METRICS_DETAIL="enabled, but $branch has never carried a row — not even a heartbeat; the collector is not wired"
+  fi
+  return 0
+}
+
 [ "$AUDIT_MODE" -eq 1 ] || echo "boucle doctor — checking prerequisites..."
 
 # Resolve BOUCLE_HOME early (needed for forge source + agents check)
@@ -178,6 +270,25 @@ run_config_audit() {
         audit_advisory "BOUCLE_RETRO_ENABLED=true with no jcode LLM config (BOUCLE_LLM_API_KEY / any freeride key / pre-installed config)" \
           "Retro participation is skipped (fail-open): the retro agent cannot start. Set BOUCLE_LLM_BASE_URL + BOUCLE_LLM_API_KEY, any freeride provider key, or a pre-installed ~/.jcode/config.toml on the runner — or set BOUCLE_RETRO_ENABLED=false."
       fi
+      ;;
+  esac
+
+  # ── Metrics wiring / liveness ──────────────────────────────────────────
+  # The measurement layer is fail-open by design, so a collector that was
+  # never wired is undetectable from issue rows alone: every window is simply
+  # empty. Report the switch, the branch and the last-row age here, and flag
+  # a branch that has never carried a row while metrics are enabled.
+  #
+  # --offline: the audit runs before a project is even reachable, so it must
+  # not fetch. An unreadable branch is reported as unproven, not as absent.
+  metrics_status --offline
+  case "$METRICS_STATUS" in
+    never-populated)
+      audit_advisory "metrics are enabled but ${BOUCLE_METRICS_BRANCH:-boucle/metrics} has never carried a row" \
+        "${METRICS_DETAIL}. Expected on a fresh install before the first loop run; if issues have already closed, the collector is not wired — check the heartbeat line in the loop job log and the bot's push access to the branch."
+      ;;
+    *)
+      pass "metrics: $METRICS_DETAIL"
       ;;
   esac
 
@@ -622,6 +733,31 @@ elif [ "$DEPLOY_MODE" = "self" ]; then
 else
   warn "Unknown BOUCLE_DEPLOY_MODE='$DEPLOY_MODE' — expected 'self' or 'external'"
 fi
+
+# ── Metrics wiring / liveness ────────────────────────────────────────────
+# Live mode reads the branch through the repo's own remote, so the report
+# carries the actual last-row age. The failure this catches is silent by
+# construction: the metrics path is fail-open, so a collector that was never
+# wired closes issues forever while every retro window stays empty. The
+# heartbeat appended on each loop run is what makes "never populated" a
+# finding rather than an inference (see boucle_metrics_heartbeat).
+if ! type boucle_metrics_probe > /dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$BOUCLE_HOME/lib/boucle.sh" 2> /dev/null || true
+fi
+metrics_status
+case "$METRICS_STATUS" in
+  ok | disabled | wired-no-rows)
+    pass "metrics: $METRICS_DETAIL"
+    ;;
+  *)
+    # never-populated, and unreadable (which in live mode means enabled but
+    # no branch is visible — the same fix for the operator). A loud WARN, not
+    # a failed check: a fresh install legitimately has no row until its first
+    # loop run, and the retro escalates the hard case on its own.
+    warn "metrics: $METRICS_DETAIL"
+    ;;
+esac
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then

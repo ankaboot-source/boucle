@@ -22,7 +22,12 @@
 # Exit semantics: a retro failure must NEVER block the next loop run, so every
 # step is fail-open (log + exit 0) — EXCEPT the agent invocation itself, whose
 # exit 3 (silent failure) / 4 (provider down) is bin/jc's own contract and is
-# propagated so the job is visibly red.
+# propagated so the job is visibly red, and a `metrics_blackout=never-populated`
+# window (issues closed, the metrics branch has never carried a row): the
+# blackout is not a transient failure, it is a measurement layer that was never
+# wired, and a digest WARNING nobody reads changes nothing. That run exits 1
+# after its bookkeeping, so the cadence still advances and the red job is the
+# escalation a human actually sees.
 
 # First-ever retro window, in days. A CONSTANT, not a knob: a first run must
 # be bounded, and a wider window is never more useful than the next run.
@@ -35,6 +40,12 @@ _RETRO_MAX_LESSONS=10
 # metrics_coverage line. The count is always exact; the names are bounded so
 # the line stays one line.
 _RETRO_MAX_MISSING_IDS=8
+# Set by _retro_build_digest: "never-populated" when a window closed issues
+# and the metrics branch has never carried a single row (not even a
+# heartbeat), "" otherwise. boucle_ci_retro reads it to escalate the blackout
+# to a red job instead of leaving the finding inside the digest. A global,
+# like the digest's other outputs, because the digest is a same-shell call.
+_RETRO_METRICS_BLACKOUT=""
 
 # ── Post helpers (agent-facing) ───────────────────────────────────────────
 
@@ -238,7 +249,7 @@ _retro_renumber_map() {
   awk 'NF && !seen[$0]++ { printf "%s\t#%d\n", $0, ++n }'
 }
 
-# _retro_blackout_cause <publish-events> <last-ok> <last-reason> <fetched>
+# _retro_blackout_cause <publish-events> <last-ok> <last-reason> <fetched> [heartbeats]
 #
 # Name WHY a window has closed issues and zero metrics rows, from the outcome
 # events the collector now records on every terminal transition
@@ -246,7 +257,10 @@ _retro_renumber_map() {
 # alone cannot tell the three failures apart, and they have different fixes:
 #
 #   unwired           no metrics_publish event anywhere — the terminal
-#                     transition never invoked the collector.
+#                     transition never invoked the collector. Heartbeat rows
+#                     refine this: their presence proves the sink (credential,
+#                     branch, push) works, so the fault is the terminal hook,
+#                     not the metrics path.
 #   wired-failing     events exist and the last one failed — the collector ran,
 #                     and the reason (disabled | no_health_data |
 #                     git_append_failed) names what broke.
@@ -262,7 +276,9 @@ _retro_renumber_map() {
 # signal that survives a run whose metrics push failed.
 _retro_blackout_cause() {
   local events="${1:-0}" last_ok="${2:-}" last_reason="${3:-unknown}" fetched="${4:-no}"
+  local heartbeats="${5:-0}"
   case "$events" in '' | *[!0-9]*) events=0 ;; esac
+  case "$heartbeats" in '' | *[!0-9]*) heartbeats=0 ;; esac
   if [ "$fetched" != yes ] && [ "$events" -eq 0 ]; then
     echo "unclassified — the metrics branch could not be fetched, so neither rows nor publish events are visible"
     return 0
@@ -270,6 +286,8 @@ _retro_blackout_cause() {
   if [ "$events" -eq 0 ]; then
     if ! boucle_metrics_enabled; then
       echo "disabled — BOUCLE_METRICS_ENABLED opted out of the branch write: the blackout is deliberate, not a defect"
+    elif [ "$heartbeats" -gt 0 ]; then
+      echo "unwired — the sink is writable (heartbeat rows exist on the branch) but no metrics_publish event does: the terminal transition never invoked the collector"
     else
       echo "unwired — no metrics_publish event anywhere for the window: the terminal transition never invoked the collector"
     fi
@@ -284,8 +302,28 @@ _retro_blackout_cause() {
   fi
 }
 
+# _retro_blackout_escalate <marker> <dry-run yes|no>
+#
+# Turn a `never-populated` blackout marker into a flagged outcome. Prints the
+# escalation line; returns 1 when the caller must exit non-zero, 0 when there
+# is nothing to escalate or the run is a dry run (which must never raise a
+# flag). Kept apart from boucle_ci_retro so the decision is testable without a
+# forge, an LLM, or a full retro run.
+_retro_blackout_escalate() {
+  local marker="${1:-}" dry="${2:-no}"
+  [ -n "$marker" ] || return 0
+  if [ "$dry" = yes ]; then
+    echo "[retro] dry-run: would escalate metrics_blackout=$marker — no flag raised in dry-run"
+    return 0
+  fi
+  echo "[retro] ESCALATION: metrics_blackout=$marker — issues closed in this window and $BOUCLE_METRICS_BRANCH has never carried a row; the retro evidence layer is not wired, so every window stays blind until a human fixes it." >&2
+  boucle_ci_warning "boucle retro: metrics_blackout=$marker — $BOUCLE_METRICS_BRANCH has never carried a row while issues closed; the retro cannot measure the loop"
+  return 1
+}
+
 _retro_build_digest() {
   local out="$1" since="$2"
+  _RETRO_METRICS_BLACKOUT=""
   local tmp
   tmp=$(mktemp -d 2> /dev/null) || return 1
   local until
@@ -301,7 +339,15 @@ _retro_build_digest() {
   #                                 whether the collector was unwired, failed,
   #                                 or succeeded and lost its row
   #   metrics_fetch=yes, N rows   → normal
-  local metrics_fetch=no metrics_rows=0 metrics_window_rows=0 metrics_last_ts=""
+  # Heartbeat rows are LIVENESS, not evidence: they carry no issue and must
+  # never satisfy the blackout check. `metrics_rows`/`metrics_window_rows`
+  # therefore count ISSUE rows only, `metrics_heartbeats` counts the liveness
+  # rows, and `metrics_all_rows` is what decides "never populated" (a branch
+  # carrying nothing at all, not even a heartbeat). `metrics_last_ts` stays the
+  # newest row of ANY kind, so it moves in a quiet window — that is the whole
+  # point of the heartbeat.
+  local metrics_fetch=no metrics_all_rows=0 metrics_rows=0 metrics_window_rows=0 metrics_last_ts=""
+  local metrics_heartbeats=0
   : > "$tmp/metrics.jsonl"
   : > "$tmp/raw-list"
   if git rev-parse --git-dir > /dev/null 2>&1 \
@@ -312,19 +358,32 @@ _retro_build_digest() {
     metrics_fetch=yes
   fi
   if [ -s "$tmp/metrics.jsonl" ]; then
-    metrics_rows=$(jq -s 'length' "$tmp/metrics.jsonl" 2> /dev/null || echo 0)
-    metrics_window_rows=$(jq -s --arg since "$since" \
-      '[.[] | select((.timestamp // "") >= $since)] | length' \
-      "$tmp/metrics.jsonl" 2> /dev/null || echo 0)
-    # Last-seen row, NOT last window row: it tells "collector stopped at X"
-    # apart from "collector never ran" in a window where the slice is empty.
-    metrics_last_ts=$(jq -s -r '[.[] | .timestamp // empty] | max // ""' \
-      "$tmp/metrics.jsonl" 2> /dev/null || echo "")
+    local _mstats
+    _mstats=$(jq -s -r --arg since "$since" '
+      [.[] | select(type == "object")] as $r
+      | ($r | map(select(.issue != null and .issue != ""))) as $issues
+      | ($issues | map(select((.timestamp // "") >= $since)) | length) as $window
+      | ($r | map(select(.event == "heartbeat")) | length) as $hb
+      # Last-seen row of ANY kind, NOT last window row: it tells "collector
+      # stopped at X" apart from "collector never ran" in a window whose slice
+      # is empty, and a heartbeat keeps it moving while the loop is alive.
+      | ([$r[] | .timestamp // empty] | max // "") as $last
+      | "\($r | length)\t\($issues | length)\t\($window)\t\($hb)\t\($last)"
+    ' "$tmp/metrics.jsonl" 2> /dev/null || echo "")
+    if [ -n "$_mstats" ]; then
+      metrics_all_rows=$(printf '%s' "$_mstats" | cut -f1)
+      metrics_rows=$(printf '%s' "$_mstats" | cut -f2)
+      metrics_window_rows=$(printf '%s' "$_mstats" | cut -f3)
+      metrics_heartbeats=$(printf '%s' "$_mstats" | cut -f4)
+      metrics_last_ts=$(printf '%s' "$_mstats" | cut -f5)
+    fi
     # A jq parse error can still emit partial output, so coerce the counts back
     # to integers: a count is compared with -eq, never trusted as text (the
     # `grep -c` "0\n0" class of bug).
+    case "$metrics_all_rows" in '' | *[!0-9]*) metrics_all_rows=0 ;; esac
     case "$metrics_rows" in '' | *[!0-9]*) metrics_rows=0 ;; esac
     case "$metrics_window_rows" in '' | *[!0-9]*) metrics_window_rows=0 ;; esac
+    case "$metrics_heartbeats" in '' | *[!0-9]*) metrics_heartbeats=0 ;; esac
   fi
 
   # Which issues are in the window? Newest 40 by terminal timestamp when the
@@ -333,7 +392,8 @@ _retro_build_digest() {
   local issue_list="" issue_list_source=metrics
   if [ -s "$tmp/metrics.jsonl" ]; then
     issue_list=$(jq -s -r --arg since "$since" --argjson max "$_RETRO_MAX_ISSUES" \
-      '[.[] | select((.timestamp // "") >= $since)]
+      '[.[] | select(.issue != null and .issue != "")
+            | select((.timestamp // "") >= $since)]
        | sort_by(.timestamp) | reverse | .[0:$max]
        | .[] | .issue // empty' \
       "$tmp/metrics.jsonl" 2> /dev/null || echo "")
@@ -537,7 +597,10 @@ _retro_build_digest() {
     --argjson named_max "$_RETRO_MAX_MISSING_IDS" \
     --argjson closed "$closed_ids" \
     --slurpfile m "$tmp/metrics.jsonl" '
-    ($m | map(select((.timestamp // "") >= $since))) as $window
+    # Heartbeats are liveness, not coverage: a row with no `issue` is not a
+    # measurement of an issue and must never count toward the ratio.
+    ($m | map(select(.issue != null and .issue != "")
+              | select((.timestamp // "") >= $since))) as $window
     | ($window | map(select(((.telemetry_gap // []) | index("no_health_data")) == null)
                      | (.issue | tostring))) as $usable
     | ($window | map(select(((.telemetry_gap // []) | index("no_health_data")) != null))
@@ -609,12 +672,39 @@ _retro_build_digest() {
   if [ "$closed_count" -gt 0 ] && [ "$metrics_window_rows" -eq 0 ]; then
     blackout=yes
   fi
+  # NEVER POPULATED is the loudest blackout there is: issues are closing and
+  # the branch carries no row at all, so nothing about this collector has ever
+  # worked (unwired, or every push failed since the first run). A branch that
+  # carries heartbeats but no issue row is a DIFFERENT fault — the sink is
+  # proven, the terminal hook is not — and does not set this marker. An
+  # explicit BOUCLE_METRICS_ENABLED opt-out is never an escalation.
+  #
+  # The claim needs EVIDENCE. A failed fetch alone cannot tell "the branch is
+  # empty" from "this checkout could not read it" (network, credential), and
+  # escalating the second as a wiring defect would be a false positive on a
+  # transient. When the fetch failed, ask ls-remote whether the ref exists at
+  # all: an empty listing is proof of a branch that has never been written.
+  local metrics_branch_absent=no
+  if [ "$metrics_fetch" != yes ] && [ "$blackout" = yes ]; then
+    local ls_remote="" ls_rc=0
+    ls_remote=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin "$BOUCLE_METRICS_BRANCH" 2> /dev/null) || ls_rc=$?
+    if [ "$ls_rc" -eq 0 ] && [ -z "$ls_remote" ]; then
+      metrics_branch_absent=yes
+    fi
+  fi
+  if [ "$blackout" = yes ] && [ "$metrics_all_rows" -eq 0 ] && boucle_metrics_enabled \
+    && { [ "$metrics_fetch" = yes ] || [ "$metrics_branch_absent" = yes ]; }; then
+    _RETRO_METRICS_BLACKOUT=never-populated
+    # Machine-readable on stdout: the digest file is the agent's input, but CI
+    # reads the job log. One line, greppable, no consumer data.
+    echo "metrics_blackout=$_RETRO_METRICS_BLACKOUT"
+  fi
   local digest_rows fetch_label last_label list_label
   digest_rows=$(wc -l < "$tmp/rows.out.jsonl" 2> /dev/null | tr -d ' ')
   case "$digest_rows" in '' | *[!0-9]*) digest_rows=0 ;; esac
   case "$metrics_fetch" in
     yes)
-      if [ "$metrics_rows" -gt 0 ]; then
+      if [ "$metrics_all_rows" -gt 0 ]; then
         # Distinguish "fetched with rows" from "fetched, 0 rows": the first is
         # normal, the second needs the blackout-cause diagnosis below — it is
         # NOT necessarily "unwired" any more.
@@ -637,10 +727,13 @@ _retro_build_digest() {
     echo "# Retro window digest"
     echo
     echo "Window: $since → $until"
-    echo "Data source: $BOUCLE_METRICS_BRANCH ($fetch_label; metrics rows: $metrics_window_rows in window, $metrics_rows on branch; issue rows: $digest_rows, bounded to $_RETRO_MAX_ISSUES; list: $list_label; last metrics row: $last_label)"
+    echo "Data source: $BOUCLE_METRICS_BRANCH ($fetch_label; metrics rows: $metrics_window_rows in window, $metrics_rows on branch; heartbeats: $metrics_heartbeats on branch; issue rows: $digest_rows, bounded to $_RETRO_MAX_ISSUES; list: $list_label; last metrics row: $last_label)"
     echo "$coverage_line"
     if [ "$blackout" = yes ]; then
-      echo "WARNING: metrics blackout — 0 metrics rows for $closed_count closed issue(s) in window; the retro evidence layer is missing: $(_retro_blackout_cause "$publish_events" "$publish_last_ok" "$publish_last_reason" "$metrics_fetch")."
+      echo "WARNING: metrics blackout — 0 metrics rows for $closed_count closed issue(s) in window; the retro evidence layer is missing: $(_retro_blackout_cause "$publish_events" "$publish_last_ok" "$publish_last_reason" "$metrics_fetch" "$metrics_heartbeats")."
+      if [ -n "$_RETRO_METRICS_BLACKOUT" ]; then
+        echo "Escalation: metrics_blackout=$_RETRO_METRICS_BLACKOUT — the branch has NEVER carried a row while issues closed; CI flags this run for a human."
+      fi
     fi
     echo "Anonymisation: every consumer identifier is ALREADY replaced by retro_scrub — [consumer], [host], [user], [email], boucle/N-. Do not try to de-anonymise; the generics are the data."
     echo
@@ -688,7 +781,7 @@ _retro_build_digest() {
     echo "- metrics_coverage: usable metrics rows / closed issues in the window. A closed issue with no row is delivery this digest cannot see at all — report the gap, never read the absence as a zero."
     echo "- tokens / cost_usd: null when no run reported a number — never a fake zero; gaps names which fields are missing and why."
     echo "- issue numbers are renumbered per window (#1..#N in order of first appearance); branch prefixes are anonymized by the scrub."
-    echo "- data source: metrics rows are the collector's rows in the window; on branch = all of them. The last metrics row distinguishes 'collector stopped at date X' from 'never ran'. A line beginning 'WARNING: metrics' means the window has closed issues but no metrics evidence — cite it verbatim; never read the empty aggregates as 'no activity'."
+    echo "- data source: metrics rows are the collector's ISSUE rows in the window; on branch = all of them. Heartbeats are liveness rows (event=heartbeat, no issue): they move the last-row timestamp while the loop runs but are NEVER evidence about an issue, so they cannot silence the missing-evidence banner. The last metrics row distinguishes 'collector stopped at date X' from 'never ran'. A line beginning 'WARNING: metrics' means the window has closed issues but no metrics evidence — cite it verbatim; never read the empty aggregates as 'no activity'. A line beginning 'Escalation: metrics_' means the branch has never carried a row at all and CI flags the run."
   } | retro_scrub > "$out" 2> /dev/null || return 1
   [ -s "$out" ] || return 1
 
@@ -1062,5 +1155,16 @@ boucle_ci_retro() {
   fi
 
   echo "[retro] result: created=${created:-none} enriched=${enriched:-none} report=${report:-none} implementable=${implementable:-none}"
+
+  # ── Escalation: the metrics layer was never wired ──────────────────────
+  # A digest WARNING alone changes nothing: the next window starts just as
+  # blind, and nothing on the run summary asks a human to look. When the
+  # window closed issues and the branch has never carried a single row (the
+  # marker _retro_build_digest sets), the run itself is the escalation: a red
+  # job plus a run annotation on GitHub. Bookkeeping already happened above,
+  # so the cadence advances and this fires ONCE per window, not once per job.
+  if ! _retro_blackout_escalate "${_RETRO_METRICS_BLACKOUT:-}" "$dry"; then
+    exit 1
+  fi
   exit 0
 }
