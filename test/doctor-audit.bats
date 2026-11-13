@@ -8,6 +8,13 @@
 setup() {
   load 'test_helper/bats-support/load'
   load 'test_helper/bats-assert/load'
+  REPO="$BATS_TEST_DIRNAME/.."
+  TMP=$(mktemp -d)
+}
+
+teardown() {
+  cd "$BATS_TEST_DIRNAME" 2> /dev/null || cd / || true
+  rm -rf "$TMP"
 }
 
 audit() {
@@ -130,4 +137,60 @@ audit() {
 @test "audit: bin/setup prints it without failing the install" {
   run grep -q 'doctor" --audit || true' bin/setup
   assert_success
+}
+
+# ── Metrics wiring / liveness (#177) ──────────────────────────────────
+# The audit stays OFFLINE: it runs before a project is even reachable, so it
+# reads the local remote-tracking ref instead of fetching. These tests prove
+# the branch state and the "never populated" flag reach the operator without a
+# network round-trip.
+
+# metrics_audit_work <dir> <metrics-jsonl-content-or-empty>
+metrics_audit_work() {
+  local work="$1" metrics="$2"
+  git init -q --bare "$work.origin.git"
+  git init -q "$work"
+  git -C "$work" remote add origin "$work.origin.git"
+  git -C "$work" -c user.email=a@b -c user.name=a commit -q --allow-empty -m init
+  git -C "$work" push -q origin HEAD:main
+  git -C "$work" checkout -q --orphan boucle/metrics
+  printf '%s' "$metrics" > "$work/metrics.jsonl"
+  git -C "$work" add -A
+  git -C "$work" -c user.email=a@b -c user.name=a commit -q -m metrics
+  git -C "$work" push -q origin boucle/metrics
+  git -C "$work" fetch -q origin \
+    "refs/heads/boucle/metrics:refs/remotes/origin/boucle/metrics"
+}
+
+@test "audit: metrics wiring reports the branch counts and last-row age" {
+  WORK="$TMP/metrics-audit"
+  metrics_audit_work "$WORK" '{"schema":3,"timestamp":"2026-10-02T10:00:00Z","issue":"7","terminal":"done"}
+{"schema":1,"timestamp":"2026-10-02T11:00:00Z","event":"heartbeat","stage":"dispatch"}
+'
+  cd "$WORK" || return 1
+  run env -i PATH="$PATH" HOME="$HOME" BOUCLE_LLM_API_KEY=k bash "$REPO/bin/doctor" --audit
+  assert_success
+  assert_output --partial "metrics: boucle/metrics carries 1 issue row(s)"
+  assert_output --partial "1 heartbeat(s)"
+  assert_output --partial "last row: 2026-10-02T11:00:00Z"
+}
+
+@test "audit: a never-populated branch with metrics enabled is flagged" {
+  WORK="$TMP/metrics-empty"
+  metrics_audit_work "$WORK" ''
+  cd "$WORK" || return 1
+  run env -i PATH="$PATH" HOME="$HOME" BOUCLE_LLM_API_KEY=k bash "$REPO/bin/doctor" --audit
+  assert_success
+  assert_output --partial "ADVISORY"
+  assert_output --partial "metrics are enabled but boucle/metrics has never carried a row"
+}
+
+@test "audit: a disabled metrics switch is reported, never flagged" {
+  WORK="$TMP/metrics-disabled"
+  metrics_audit_work "$WORK" ''
+  cd "$WORK" || return 1
+  run env -i PATH="$PATH" HOME="$HOME" BOUCLE_LLM_API_KEY=k BOUCLE_METRICS_ENABLED=false bash "$REPO/bin/doctor" --audit
+  assert_success
+  assert_output --partial "metrics: disabled"
+  refute_output --partial "has never carried a row"
 }

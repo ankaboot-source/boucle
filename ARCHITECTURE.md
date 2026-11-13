@@ -235,6 +235,11 @@ jcode --provider-profile "$BOUCLE_PROVIDER_PROFILE" --model "$MODEL" --tools '*'
   `health.jsonl` + `cost.json` for a per-issue loop-health summary.
 - **Loop-health measurement.** An RSS sampler polls `/proc` VmRSS for jcode
   processes to diagnose runner memory bottlenecks.
+- **Durable sink + liveness.** One issue row per terminal transition is
+  appended to the orphan `boucle/metrics` branch, and one `event=heartbeat`
+  row is appended on every loop run. The heartbeat carries no issue data: it
+  proves the write path (credential, branch, push) independently of any issue
+  finishing, so a quiet window and an unwired collector are distinguishable.
 - **Agent transcript.** Agent stdout+stderr go to `$AGENT_LOG`
   (agent-output.log) for the CI log-scraping fallback, then are echoed to the
   job log. Secrets are scrubbed before invocation.
@@ -377,6 +382,14 @@ repo itself, T2 (`BOUCLE_RETRO_CONTRIBUTE`, `auto`) additionally chains the
 bounded `retro-impl` role, which opens a `retro/<slug>` PR like a human
 contributor; the PR NEVER enters the state machine on its own — standard human
 review applies.
+
+The window digest cross-checks its own completeness. A window that closes
+issues with zero metrics rows raises `WARNING: metrics blackout`, and when
+the branch has never carried a single row (not even a heartbeat) the stage
+also prints `metrics_blackout=never-populated` and exits non-zero after its
+bookkeeping. That is the one deliberate red exit in an otherwise fail-open
+stage: a measurement layer that was never wired is not a transient to retry,
+and a digest warning nobody reads leaves every following window equally blind.
 
 The consumer-visible trace is one local report issue per run (label
 `boucle:retro`, never dispatched, mirror of `boucle:board`); the next retro

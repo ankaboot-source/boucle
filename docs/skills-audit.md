@@ -217,6 +217,17 @@ final. Orphan so the log never enters the consumer's history or triggers their
 CI; fail-open throughout, so a metrics write can never be what stops an issue
 reaching done.
 
+**Liveness is measured separately from evidence.** A publish row only exists
+at a terminal transition, so a collector that was never wired (or whose pushes
+always fail) is indistinguishable from a quiet window: both leave zero rows.
+Every loop run therefore appends a heartbeat row (`event=heartbeat`, timestamp,
+stage — no issue data) through the same append path. Readers that aggregate
+issues skip rows without an `issue` field; the retro keeps the heartbeat in its
+last-row timestamp and out of its blackout/coverage counts, and `bin/doctor`
+reports the switch, the branch and the last-row age. A window that closes
+issues while the branch has never carried a row escalates as
+`metrics_blackout=never-populated` instead of only warning in the digest.
+
 **A failed publish is itself measured.** Because the path is fail-open, a
 failed write would otherwise leave only a stderr `WARN` in an ephemeral job
 log. Each terminal transition appends a `metrics_publish` outcome event

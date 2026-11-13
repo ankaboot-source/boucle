@@ -507,3 +507,77 @@ extract_unlabeled_scan() {
   triage_line=$(echo "$block" | grep -n 'LAST_TRIAGE_NOTE_ID=' | head -1 | cut -d: -f1)
   [ -n "$opt_line" ] && [ -n "$triage_line" ] && [ "$opt_line" -lt "$triage_line" ]
 }
+
+# ── Metrics wiring / liveness (#177) ──────────────────────────────────
+# bin/doctor's metrics check is the operator-facing half of the liveness
+# signal: the metrics path is fail-open, so a collector that was never wired
+# closes issues forever while every retro window stays empty. The check must
+# name the switch, the branch and the last-row age, and must never call an
+# unreadable branch "empty" — those have different fixes.
+
+doctor_metrics_fns() {
+  awk '/^metrics_age\(\) \{/,/^\}/' bin/doctor
+  awk '/^metrics_status\(\) \{/,/^\}/' bin/doctor
+}
+
+doctor_metrics_run() {
+  local probe="$1"
+  shift
+  bash -c "
+    $(doctor_metrics_fns)
+    boucle_metrics_probe() { echo '$probe'; }
+    metrics_status $*
+    echo \"\$METRICS_STATUS|\$METRICS_DETAIL\"
+  "
+}
+
+@test "metrics_status: a populated branch is ok and names the counts and last-row age" {
+  run doctor_metrics_run 'enabled=yes branch=boucle/metrics fetch=yes rows=3 heartbeats=9 last=2026-10-02T10:00:00Z'
+  assert_success
+  assert_output --partial "ok|boucle/metrics carries 3 issue row(s) and 9 heartbeat(s)"
+  assert_output --partial "last row: 2026-10-02T10:00:00Z"
+}
+
+@test "metrics_status: enabled with no row at all is NEVER-POPULATED, not ok" {
+  # The class this exists to catch: metrics on, branch readable, zero rows.
+  run doctor_metrics_run 'enabled=yes branch=boucle/metrics fetch=yes rows=0 heartbeats=0 last=never'
+  assert_success
+  assert_output --partial "never-populated|"
+  assert_output --partial "has never carried a row"
+}
+
+@test "metrics_status: heartbeats without issue rows are wired, not never-populated" {
+  # The sink is proven; no issue has finished. Reporting this as unwired would
+  # send an operator chasing a working collector.
+  run doctor_metrics_run 'enabled=yes branch=boucle/metrics fetch=yes rows=0 heartbeats=4 last=2026-10-02T10:00:00Z'
+  assert_success
+  assert_output --partial "wired-no-rows|"
+  assert_output --partial "4 heartbeat(s)"
+  refute_output --partial "never-populated"
+}
+
+@test "metrics_status: an unreadable branch is unproven, never called empty" {
+  run doctor_metrics_run 'enabled=yes branch=boucle/metrics fetch=no rows=0 heartbeats=0 last=never'
+  assert_success
+  assert_output --partial "unreadable|"
+  assert_output --partial "could not be read"
+  refute_output --partial "never-populated"
+}
+
+@test "metrics_status: a disabled switch is not a defect, even with no rows" {
+  run doctor_metrics_run 'enabled=no branch=boucle/metrics fetch=no rows=0 heartbeats=0 last=never'
+  assert_success
+  assert_output --partial "disabled|"
+  assert_output --partial "BOUCLE_METRICS_ENABLED"
+}
+
+@test "bin/doctor wires the metrics check into both modes" {
+  # The audit must stay offline (it runs before the forge is reachable); the
+  # live mode is what proves the sink and reports the last-row age.
+  run grep -n 'metrics_status --offline' bin/doctor
+  assert_success
+  run grep -n '^metrics_status$' bin/doctor
+  assert_success
+  run grep -n 'never-populated)' bin/doctor
+  assert_success
+}
