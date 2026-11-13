@@ -2761,7 +2761,11 @@ boucle_worker_deploy() {
 #       echo empty (no-op — the caller resolves the URL).
 #     - boucle_is_external_deploy: echo empty (no-op).
 #     - Cloudflare/other: build + eval "$BOUCLE_DEPLOY_CMD" + regex-extract
-#       URL from deploy log + 200-verify with retry + echo URL.
+#       URL from deploy log + 200-verify with retry + echo URL. The deploy
+#       command itself is retried (BOUCLE_DEPLOY_ATTEMPTS, default 3) when an
+#       attempt fails AND printed no URL — a transient provider upload error
+#       must not strand production. A deploy that printed a URL is never
+#       re-run; it keeps the historical WARN "partial deploy" path.
 boucle_do_deploy() {
   set +o pipefail
 
@@ -2843,15 +2847,134 @@ boucle_do_deploy() {
   # expands it at runtime with the job-local value). Restore it before the
   # eval or any template referencing $$BRANCH (wrangler, netlify, rsync)
   # dies on `BRANCH: unbound variable` under set -u.
-  local BRANCH deploy_log deploy_rc url
+  local BRANCH deploy_log deploy_attempt_log deploy_rc url
+  local deploy_attempt deploy_max deploy_delays_ok deploy_delay
+  local deploy_started deploy_budget deploy_elapsed
+  local -a deploy_delays
   BRANCH="${BOUCLE_DEFAULT_BRANCH}"
   deploy_log=$(mktemp)
-  (eval "$BOUCLE_DEPLOY_CMD") > "$deploy_log" 2>&1
-  deploy_rc=$?
-  url=$(grep -oE "$BOUCLE_DEPLOY_URL_REGEX" "$deploy_log" | head -1)
+  deploy_attempt_log=$(mktemp)
+
+  # Bounded retry on a TRANSIENT provider failure. The deploy command uploads
+  # to a remote API; one 5xx or dropped connection mid-batch used to redden
+  # the job and strand production on the previous build, while the provider's
+  # own message said "Please try again" and the identical manual retry
+  # succeeded. Retry ONLY when an attempt failed AND emitted no URL: a deploy
+  # that already published something is never re-run (a second run could
+  # publish a different tree), so the WARN/FAIL classification below keeps its
+  # exact meaning.
+  deploy_max="${BOUCLE_DEPLOY_ATTEMPTS:-3}"
+  # Validate BEFORE comparing: `[ "$x" -lt 1 ]` aborts the whole job under
+  # `set -e` on a non-numeric value, and a 19+ digit value overflows the
+  # comparison — it can read as negative, survive the lower clamp, and leave
+  # the retry loop unbounded. One or two digits is the entire sane range.
+  if ! [[ "$deploy_max" =~ ^[0-9]{1,2}$ ]]; then
+    echo "WARN: BOUCLE_DEPLOY_ATTEMPTS='$deploy_max' is not a number — using 3" >&2
+    deploy_max=3
+  fi
+  if [ "$deploy_max" -lt 1 ]; then
+    echo "WARN: BOUCLE_DEPLOY_ATTEMPTS=0 would never deploy — using 1 (single shot)" >&2
+    deploy_max=1
+  fi
+  if [ "$deploy_max" -gt 4 ]; then
+    echo "WARN: BOUCLE_DEPLOY_ATTEMPTS=$deploy_max clamped to 4 — the worst case must fit the deploy job timeout (see LOOP.md)" >&2
+    deploy_max=4
+  fi
+
+  # Backoff between attempts, in seconds, consumed left to right; the last
+  # value repeats once the list is exhausted. Injectable so the test suite
+  # never really sleeps.
+  deploy_delays=(20 60)
+  if [ -n "${BOUCLE_DEPLOY_RETRY_DELAYS:-}" ]; then
+    read -r -a deploy_delays <<< "$BOUCLE_DEPLOY_RETRY_DELAYS"
+    # A whitespace-only value yields an empty array, and expanding
+    # `"${arr[@]}"` on one is an unbound-variable error under `set -u` before
+    # bash 4.4 — never let the list reach the loop empty.
+    if [ "${#deploy_delays[@]}" -eq 0 ]; then
+      deploy_delays=(20 60)
+    fi
+    deploy_delays_ok=true
+    for deploy_delay in "${deploy_delays[@]}"; do
+      case "$deploy_delay" in
+        '' | *[!0-9]*) deploy_delays_ok=false ;;
+        *) if [ "$deploy_delay" -gt 300 ]; then deploy_delays_ok=false; fi ;;
+      esac
+    done
+    if [ "$deploy_delays_ok" != "true" ]; then
+      echo "WARN: BOUCLE_DEPLOY_RETRY_DELAYS='$BOUCLE_DEPLOY_RETRY_DELAYS' is not a list of seconds (0-300) — using 20 60" >&2
+      deploy_delays=(20 60)
+    fi
+  fi
+
+  # Wall-clock ceiling for the whole retry ladder, in seconds. The attempt
+  # count alone is not a sufficient bound: the `deploy` job has its own timeout
+  # (10 m in the GitLab template) and, with BOUCLE_DEPLOY_INLINE=true, it also
+  # runs the build. A consumer whose nominal deploy is slow can therefore
+  # exhaust the job timeout mid-attempt-2 — which turns a red deploy (log
+  # dumped, FAIL classified, doctor escalates) into a killed job (no dump, no
+  # classification). A retry is started only while elapsed + wait stays under
+  # the budget; past it the job fails exactly like a single-shot deploy would.
+  deploy_budget="${BOUCLE_DEPLOY_RETRY_BUDGET:-480}"
+  if ! [[ "$deploy_budget" =~ ^[0-9]{1,4}$ ]]; then
+    echo "WARN: BOUCLE_DEPLOY_RETRY_BUDGET='$deploy_budget' is not a number of seconds — using 480" >&2
+    deploy_budget=480
+  elif [ "$deploy_budget" -gt 3600 ]; then
+    echo "WARN: BOUCLE_DEPLOY_RETRY_BUDGET=$deploy_budget clamped to 3600 — it MUST stay under the deploy job timeout" >&2
+    deploy_budget=3600
+  fi
+  deploy_started=$(date +%s)
+
+  deploy_attempt=0
+  deploy_rc=0
+  url=""
+  while [ "$deploy_attempt" -lt "$deploy_max" ]; do
+    deploy_attempt=$((deploy_attempt + 1))
+    if [ "$deploy_attempt" -gt 1 ]; then
+      echo "deploy: attempt $deploy_attempt/$deploy_max" >&2
+      # Separator in the ARCHIVED log only: the URL is grepped from the
+      # per-attempt log below, so this line can never be read as output.
+      echo "--- deploy attempt $deploy_attempt/$deploy_max ---" >> "$deploy_log"
+    fi
+    # The attempt is a *condition*, not a bare command: under `set -e` a
+    # non-zero deploy would abort the job before deploy_rc is captured and the
+    # retry would never happen. `$?` in the else branch is the eval's status —
+    # the `if`'s own status is not assigned until after the branch runs.
+    if (eval "$BOUCLE_DEPLOY_CMD") > "$deploy_attempt_log" 2>&1; then
+      deploy_rc=0
+    else
+      deploy_rc=$?
+    fi
+    cat "$deploy_attempt_log" >> "$deploy_log"
+    # Extract from THIS attempt's output alone: grepping the accumulated log
+    # would let a later attempt inherit an earlier one's URL and report a
+    # deploy that never published.
+    url=$(grep -oE "$BOUCLE_DEPLOY_URL_REGEX" "$deploy_attempt_log" | head -1)
+    if [ "$deploy_rc" -eq 0 ] || [ -n "$url" ]; then
+      break
+    fi
+    echo "deploy: attempt $deploy_attempt/$deploy_max failed (rc=$deploy_rc, no URL emitted)" >&2
+    if [ "$deploy_attempt" -lt "$deploy_max" ]; then
+      deploy_delay=${deploy_delays[0]}
+      if [ "${#deploy_delays[@]}" -gt 1 ]; then
+        deploy_delays=("${deploy_delays[@]:1}")
+      fi
+      # Budget guard: never START an attempt that cannot finish inside the
+      # deploy job timeout. Elapsed is measured from the first attempt, so it
+      # covers the deploy runs and the waits alike.
+      deploy_elapsed=$(( $(date +%s) - deploy_started ))
+      if [ $((deploy_elapsed + deploy_delay)) -ge "$deploy_budget" ]; then
+        echo "WARN: deploy retry budget exhausted (${deploy_elapsed}s elapsed + ${deploy_delay}s wait >= ${deploy_budget}s) — not starting attempt $((deploy_attempt + 1))/$deploy_max" >&2
+        break
+      fi
+      echo "deploy: retrying in ${deploy_delay}s (transient provider failure)" >&2
+      sleep "$deploy_delay"
+    fi
+  done
   # Observability: surface the deploy command output on EVERY run, not only
-  # on failure (same contract as the worker preview deploy above).
+  # on failure (same contract as the worker preview deploy above). Attempts
+  # are concatenated in order, so a retry sequence reads as one log.
   cat "$deploy_log" >&2
+  rm -f "$deploy_attempt_log"
   if [ "$deploy_rc" -ne 0 ] && [ -n "$url" ]; then
     echo "WARN: deploy exited non-zero ($deploy_rc) but emitted a URL — proceeding (may be a partial deploy)" >&2
   fi

@@ -107,6 +107,51 @@ Boucle supports two deploy modes and two review modes, orthogonal and composable
 | `self` (default) | Boucle runs `BOUCLE_DEPLOY_CMD` to deploy a preview (worker) and production (post-merge). URL is derived from deploy output via `BOUCLE_DEPLOY_URL_REGEX`, then falls back to `https://${BOUCLE_DEPLOY_PROJECT}.pages.dev`. |
 | `external` | Boucle does NOT deploy. Post-merge waits for the consumer's own CI/CD on the merged commit (via `forge_commit_check_suites`), then hands `BOUCLE_LIVE_URL` to e2e. `BOUCLE_LIVE_URL` is required for **URL-mode** e2e; a consumer that publishes no site (an Ansible playbook, a backend service) sets `BOUCLE_E2E_COMMAND` instead and omits it — see [Non-static-site consumers](#non-static-site-consumers). |
 
+### Deploy retry (transient provider failures)
+
+`BOUCLE_DEPLOY_CMD` uploads the build to a remote API. One 5xx or one dropped
+connection mid-batch used to redden the `deploy` job and strand production on
+the previous build, while the provider's own message said *"Please try again"*
+and the identical manual retry succeeded minutes later. `boucle_do_deploy`
+therefore re-runs the command, bounded by BOTH an attempt count and a wall
+clock:
+
+| Variable | Default | Contract |
+|----------|---------|----------|
+| `BOUCLE_DEPLOY_ATTEMPTS` | `3` | Total attempts, not retries. Clamped to `1..4`; a non-numeric value falls back to the default with a `WARN`. `1` reproduces the historical single-shot behaviour. |
+| `BOUCLE_DEPLOY_RETRY_DELAYS` | `20 60` | Seconds waited before each retry, consumed left to right; the last value repeats once the list is exhausted. Every entry MUST be an integer in `0..300`, else the whole list falls back to the default with a `WARN`. Set `0 0` in tests so the suite never really sleeps. |
+| `BOUCLE_DEPLOY_RETRY_BUDGET` | `480` | Wall-clock ceiling in seconds for the retry ladder, measured from the first attempt. A retry starts only while `elapsed + wait < budget`; past it the job fails exactly like a single-shot deploy. Clamped to `3600`. |
+
+```mermaid
+flowchart TD
+    A["attempt N: eval BOUCLE_DEPLOY_CMD"] --> B{"rc == 0 OR a URL was printed?"}
+    B -- yes --> C["classify: OK, or WARN partial deploy"]
+    B -- no --> D{"N < BOUCLE_DEPLOY_ATTEMPTS?"}
+    D -- no --> E["FAIL: dump log, return 1"]
+    D -- yes --> F{"elapsed + wait < BOUCLE_DEPLOY_RETRY_BUDGET?"}
+    F -- no --> E
+    F -- yes --> G["sleep wait"] --> A
+```
+
+**The retry gate is narrow on purpose: the command is re-run ONLY when the
+attempt failed (`rc != 0`) AND emitted no URL.** A deploy that printed a URL
+already published something — re-running it could publish a different tree — so
+it is never retried and keeps the historical `WARN: partial deploy` path.
+`rc == 0` with no URL keeps its existing meaning too. Each attempt's output is
+URL-matched **separately**: grepping the accumulated log would let a later
+attempt inherit an earlier one's URL and report a deploy that never published.
+All attempts are concatenated into the single end-of-run log dump, so a retry
+sequence reads as one trace.
+
+**Budget the worst case.** `attempts × deploy duration + sum(delays)` MUST fit
+the `deploy` job timeout (`10m` in the GitLab template), which ALSO covers the
+build when `BOUCLE_DEPLOY_INLINE=true`. That is what
+`BOUCLE_DEPLOY_RETRY_BUDGET` exists for: a retry started too late converts a red
+deploy — log dumped, failure classified, doctor escalates — into a job killed by
+the timeout, with no dump and no classification. A consumer whose nominal deploy
+is slow MUST raise the job timeout in its root `.gitlab-ci.yml` shim (the
+job-level `timeout:` cannot read a CI variable) and raise the budget with it.
+
 ### Inline deploy (GitLab only)
 
 By default on GitLab, `build-site` builds the site once and hands
@@ -544,6 +589,9 @@ Complete reference of all boucle CI/CD variables (set as repo secrets/variables)
 | `BOUCLE_DEPLOY_PROVIDER` | *(empty)* | Deploy provider profile: `gitlab-pages` (declarative, token-less — leave `BOUCLE_DEPLOY_CMD` empty, live URL = `$CI_PAGES_URL`) or `github-pages` (declarative, token-less — worker pushes `$BOUCLE_BUILD_OUTPUT` to `gh-pages`, live URL = `https://<owner>.github.io/<repo>/`). Empty = deploy via `BOUCLE_DEPLOY_CMD`. |
 | `BOUCLE_DEPLOY_CMD` | `npx wrangler pages deploy ...` | Deploy command (self mode). |
 | `BOUCLE_DEPLOY_URL_REGEX` | `https://[a-z0-9.-]+\.pages\.dev` | Regex to extract URL from deploy output. |
+| `BOUCLE_DEPLOY_ATTEMPTS` | `3` | Total attempts at `BOUCLE_DEPLOY_CMD`, clamped `1..4`. An attempt is repeated ONLY when it failed **and** emitted no URL — a deploy that published is never re-run. `1` = the historical single-shot behaviour. See [Deploy retry](#deploy-retry-transient-provider-failures). |
+| `BOUCLE_DEPLOY_RETRY_DELAYS` | `20 60` | Seconds waited before each retry, consumed left to right (last value repeats). Every entry MUST be an integer `0..300`, else the list falls back to the default. See [Deploy retry](#deploy-retry-transient-provider-failures). |
+| `BOUCLE_DEPLOY_RETRY_BUDGET` | `480` | Wall-clock ceiling (s) for the retry ladder, from the first attempt; clamped `3600`. Past it no further attempt starts, so the job fails classified instead of being killed by the `deploy` job timeout. See [Deploy retry](#deploy-retry-transient-provider-failures). |
 | `BOUCLE_DEPLOY_PROJECT` | `""` | Cloudflare Pages project name (self mode). |
 | `BOUCLE_LIVE_URL` | `""` | Production/live URL (overrides regex/pages.dev fallback; **required** in external mode for URL-mode e2e — optional when `BOUCLE_E2E_COMMAND` is set). |
 | `BOUCLE_PRODUCTION_URL` | `""` | Production URL fallback for e2e. |
