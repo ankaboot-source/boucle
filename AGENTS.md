@@ -165,8 +165,19 @@ boucle workflow adapted for interactive execution:
     Acceptance criteria checklist.
 6. **Docs** — the harness updates impacted charter docs (AGENTS.md,
    DESIGN.md, LOOP.md, CONTEXT.md) in the same MR as the code.
+7. **Housekeeping** — zero entropy after the work lands: the harness
+   deletes the issue's branches (local AND forge), closes issues whose
+   work is verified merged (evidence comment citing commit SHAs on the
+   default branch), and removes its own worktree lanes. Stale branches
+   and open issues whose work already shipped ARE debt the doctor cannot
+   see — the forge issue list stays truthful, or the loop re-triages
+   finished work forever.
 
 ### FORBIDDEN for interactive agents
+
+- **NEVER** leave a merged issue's branches behind or keep an issue open
+  when its work is verified landed — housekeeping is part of the issue
+  work, not an optional afterthought. Each merge runs its cleanup.
 
 - **NEVER** implement non-trivial work without creating an issue first.
 - **NEVER** keep the spec only in the chat session — the forge issue is
