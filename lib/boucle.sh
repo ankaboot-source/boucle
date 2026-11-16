@@ -2980,7 +2980,7 @@ boucle_do_deploy() {
           deploy_timed_out=true
           echo "deploy: attempt $deploy_attempt killed after ${deploy_attempt_timeout}s (BOUCLE_DEPLOY_ATTEMPT_TIMEOUT)" >&2
           kill -TERM "$deploy_child" 2> /dev/null || true
-          sleep 5   # grace: let a well-behaved attempt flush and exit on TERM
+          sleep 5 # grace: let a well-behaved attempt flush and exit on TERM
           kill -KILL "$deploy_child" 2> /dev/null || true
           break
         fi
