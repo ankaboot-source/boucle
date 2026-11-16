@@ -253,6 +253,24 @@ setup() {
   assert_output "."
 }
 
+@test "ENGINE_DIR resolves .boucle when invoked through the root bin symlink (#217)" {
+  # The consumer's documented root symlinks (bin/ → .boucle/bin) made an
+  # invocation as `bin/update` report …/consumer/bin, and the legacy case then
+  # matched ENGINE_DIR="." — download_and_extract then replaced THE CONSUMER
+  # ROOT (root .gitlab-ci.yml, lib/, LOOP.md) with engine content while
+  # .boucle/ stayed untouched (issue #217, observed 2026-11-16).
+  local tmpdir="$BATS_TEST_TMPDIR"
+  mkdir -p "$tmpdir/.boucle/bin"
+  cp "$BATS_TEST_DIRNAME/../bin/update" "$tmpdir/.boucle/bin/update"
+  ln -s ".boucle/bin" "$tmpdir/bin"
+  cd "$tmpdir" || return
+  run bash -c 'source bin/update && echo "$ENGINE_DIR"'
+  assert_success
+  assert_output ".boucle"
+  # The consumer root did not receive engine copies: no lib/ appeared.
+  [ ! -e "lib" ]
+}
+
 @test "get_current_version falls back to submodule pointer when BOUCLE_VERSION unset" {
   # When BOUCLE_VERSION env var is unset, get_current_version derives the
   # version from the .boucle submodule gitlink. This replaces the old
@@ -802,4 +820,53 @@ setup() {
   [ -f .jcode/prompt-overlay.md ]
   cd - >/dev/null || exit 1
   rm -rf "$tmp"
+}
+
+# ── push_update (explicit refspec, issue #217) ────────────────────────
+
+@test "push_update pushes HEAD:refs/heads/<BOUCLE_DEFAULT_BRANCH> (#217)" {
+  # Schedule pipelines run detached HEAD, where a bare `git push` refuses
+  # ("You are not currently on a branch") and the "will retry next pipeline"
+  # fallback was false: every next pipeline detaches again. The update commit
+  # stayed local forever while BOUCLE_VERSION already claimed the new version
+  # (issue #217).
+  local log="$BATS_TEST_TMPDIR/push.log"
+  git() {
+    if [ "$1" = "push" ]; then
+      shift
+      printf '%s\n' "$*" >> "$log"
+      printf '%s\n' "Everything up-to-date"
+      return 0
+    fi
+    return 1
+  }
+  export -f git
+  export BOUCLE_DEFAULT_BRANCH="master"
+  run push_update
+  assert_success
+  assert_equal "origin HEAD:refs/heads/master" "$(tail -n 1 "$log")"
+  unset BOUCLE_DEFAULT_BRANCH
+  unset -f git
+}
+
+@test "push_update falls back to origin/HEAD for the branch name (#217)" {
+  local log="$BATS_TEST_TMPDIR/push2.log"
+  git() {
+    if [ "$1" = "push" ]; then
+      shift
+      printf '%s\n' "$*" >> "$log"
+      return 0
+    fi
+    if [ "$1" = "symbolic-ref" ]; then
+      printf '%s\n' "origin/trunk"
+      return 0
+    fi
+    return 1
+  }
+  export -f git
+  unset BOUCLE_DEFAULT_BRANCH
+  run push_update
+  assert_success
+  assert_equal "origin HEAD:refs/heads/trunk" "$(tail -n 1 "$log")"
+  unset -f git
 }
