@@ -28,10 +28,19 @@ UPSTREAM_TARBALL="$UPSTREAM_API/tarball"
 # This auto-detects the install model — no env var needed. The engine
 # files (bin/, lib/, .jcode/, .gitlab-ci.yml, LOOP.md) are synced INTO
 # ENGINE_DIR, not the consumer repo root.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENGINE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Resolve PHYSICALLY (pwd -P): logical pwd inherits the invocation path. The
+# consumer's documented root symlinks (bin/ → .boucle/bin, AGENTS.md §"Consumer
+# repos") make an invocation as `bin/update` report …/consumer/bin, and the
+# legacy case below then matched ENGINE_DIR="." — download_and_extract then
+# REPLACED THE CONSUMER ROOT (root .gitlab-ci.yml, lib/, LOOP.md) with engine
+# content while .boucle/ stayed untouched (issue #217, observed 2026-11-16).
+# A physical resolution walks through the symlinks so the engine files always
+# land in ENGINE_DIR; the legacy/dogfood layout (a real bin/update at a repo
+# root) is unchanged because its path is already physical.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+ENGINE_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 # Make ENGINE_DIR relative to CWD for cleaner git operations.
-CWD="$(pwd)"
+CWD="$(pwd -P)"
 case "$ENGINE_DIR" in
   "$CWD") ENGINE_DIR="." ;;
   "$CWD"/*) ENGINE_DIR="${ENGINE_DIR#"$CWD"/}" ;;
@@ -242,8 +251,28 @@ push_update() {
     echo "[boucle] ERROR: refusing to push — the effective credential is not the configured bot PAT (see above)." >&2
     return 1
   fi
-  local out status
-  out="$(git push 2>&1)"
+  local out status default_branch push_spec
+  # Push with an EXPLICIT refspec. Schedule pipelines (doctor) check out the
+  # default branch detached, where a bare `git push` refuses with "You are not
+  # currently on a branch" — and this function's "will retry next pipeline"
+  # fallback is false for schedule-driven consumers: every next pipeline
+  # detaches again, so the update commit made above stayed local forever
+  # while BOUCLE_VERSION already claimed the new version (issue #217: the
+  # consumer read f2c81e0… in the Variable with the engine files at b1e46a5…).
+  # An explicit refspec publishes HEAD from any checkout state, and turns a
+  # manual run from a feature branch into a default-branch push — the branch
+  # the protected-branch diagnosis below already speaks about — instead of
+  # that feature branch.
+  default_branch="${BOUCLE_DEFAULT_BRANCH:-}"
+  if [ -z "$default_branch" ]; then
+    default_branch="$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')"
+  fi
+  if [ -n "$default_branch" ]; then
+    push_spec="HEAD:refs/heads/$default_branch"
+  else
+    push_spec="HEAD"
+  fi
+  out="$(git push origin "$push_spec" 2>&1)"
   status=$?
   [ "$status" -eq 0 ] && return 0
   case "$out" in
