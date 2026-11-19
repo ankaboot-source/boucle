@@ -1475,10 +1475,23 @@ digest_liveness_run() {
     echo "heartbeat dispatch block not found"
     false
   }
-  run bash -c "STAGE=worker; boucle_metrics_heartbeat() { echo \"HB:\$1\"; }; $block; echo 'STAGE-RAN'"
+  run bash -c "STAGE=worker BOUCLE_JOB_ID=123; boucle_metrics_heartbeat() { echo \"HB:\$1\"; }; $block; echo 'STAGE-RAN'"
   assert_success
   assert_line --index 0 "HB:worker"
   assert_line --index 1 "STAGE-RAN"
+}
+
+@test "dispatcher: a local run never pushes a heartbeat — no CI job id" {
+  # `bin/boucle-ci <stage>` on a developer machine must not write to the
+  # consumer's metrics branch. BOUCLE_JOB_ID is 0 outside CI.
+  block=$(awk '/^case "\$STAGE" in/,/^esac$/' bin/boucle-ci)
+  [ -n "$block" ] || {
+    echo "heartbeat dispatch block not found"
+    false
+  }
+  run bash -c "STAGE=worker BOUCLE_JOB_ID=0; boucle_metrics_heartbeat() { echo \"HB:\$1\"; }; $block; echo 'DONE'"
+  assert_success
+  assert_output "DONE"
 }
 
 @test "dispatcher: check, deploy and human commands do not heartbeat — they are not loop runs" {
@@ -1490,8 +1503,34 @@ digest_liveness_run() {
     false
   }
   for stage in check deploy cmd-log cmd-status; do
-    run bash -c "STAGE=$stage; boucle_metrics_heartbeat() { echo \"HB:\$1\"; }; $block; echo 'DONE'"
+    run bash -c "STAGE=$stage BOUCLE_JOB_ID=123; boucle_metrics_heartbeat() { echo \"HB:\$1\"; }; $block; echo 'DONE'"
     assert_success
     assert_output "DONE"
   done
+}
+
+# ── skills-stats: heartbeats are liveness, not issue rows ────────────────
+
+@test "stats: heartbeat rows are not issue rows and are named when only they exist" {
+  printf '%s\n' \
+    '{"schema":1,"timestamp":"2026-10-01T09:00:00Z","event":"heartbeat","source":"doctor"}' \
+    '{"schema":1,"timestamp":"2026-10-01T09:10:00Z","event":"heartbeat","source":"dispatch"}' \
+    > "$TMP/hb-only.jsonl"
+  run "$REPO/bin/skills-stats" --file "$TMP/hb-only.jsonl"
+  assert_success
+  assert_output --partial "No metrics yet."
+  assert_output --partial "carries 2 heartbeat row(s) but no issue row"
+  assert_output --partial "it is not a measurement"
+  refute_output --partial "issue(s), grouped"
+}
+
+@test "stats: a heartbeat row beside an issue row does not inflate the issue count" {
+  printf '%s\n' \
+    '{"schema":3,"issue":"1","terminal":"done","arm":"full","iterations":1,"skills":[],"skills_n":0,"lessons":[],"lessons_n":0,"setup_failures":0,"human_spec":0,"human_delivery":0,"telemetry_gap":[]}' \
+    '{"schema":1,"timestamp":"2026-10-01T09:00:00Z","event":"heartbeat","source":"doctor"}' \
+    > "$TMP/hb-mixed.jsonl"
+  run "$REPO/bin/skills-stats" --file "$TMP/hb-mixed.jsonl"
+  assert_success
+  assert_output --partial "1 issue(s)"
+  refute_output --partial "2 issue(s)"
 }

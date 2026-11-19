@@ -41,7 +41,11 @@ fi
 # never fails and is never the reason a stage does not start.
 case "$STAGE" in
   dispatch | triage | worker | reviewer | e2e | merger | post-merge | catchup | automerge | doctor | doctor-opportunistic | retro)
-    boucle_metrics_heartbeat "$STAGE" || true
+    # A local `bin/boucle-ci <stage>` has no CI job id and MUST NOT push to
+    # the consumer's metrics branch; BOUCLE_JOB_ID is 0 outside CI.
+    if [ "${BOUCLE_JOB_ID:-0}" != "0" ]; then
+      boucle_metrics_heartbeat "$STAGE" || true
+    fi
     ;;
 esac
 

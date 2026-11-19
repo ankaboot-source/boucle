@@ -1440,8 +1440,9 @@ work independently of any issue reaching a terminal state. A failed heartbeat is
 loud (stderr + `::warning::`), never silent, and a disabled one keeps its
 explicit notice on every run — a documented switch nobody wired must not be
 quieter than a working one. Readers that aggregate per-issue rows MUST select
-on `issue`; `bin/skills-stats` and the retro digest already do, and the digest
-counts heartbeats separately so they can never mask a blackout.
+on `issue`; `bin/skills-stats` drops them before counting and names a
+heartbeat-only branch, and the retro digest counts them separately so they can
+never mask a blackout.
 
 **`bin/doctor` reports the wiring, not only the switch.** The Day-0 check reads
 the branch through `boucle_metrics_liveness` and reports
