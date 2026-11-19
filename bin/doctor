@@ -43,6 +43,85 @@ fail() {
 }
 FAILURES=0
 
+# metrics_age <iso-timestamp>
+# Human-readable age of a metrics row, for the wiring check below. Prints
+# "never" for an empty value, and the raw timestamp when the platform's date
+# cannot parse it (macOS without GNU date) — the caller always has the value.
+metrics_age() {
+  local ts="${1:-}"
+  [ -n "$ts" ] || {
+    echo "never"
+    return 0
+  }
+  local epoch now secs
+  epoch=$(date -u -d "$ts" +%s 2> /dev/null || echo "")
+  if [ -z "$epoch" ]; then
+    echo "$ts"
+    return 0
+  fi
+  now=$(date -u +%s)
+  secs=$((now - epoch))
+  if [ "$secs" -lt 0 ]; then
+    secs=0
+  fi
+  if [ "$secs" -lt 3600 ]; then
+    echo "$((secs / 60))m ago"
+  elif [ "$secs" -lt 86400 ]; then
+    echo "$((secs / 3600))h ago"
+  else
+    echo "$((secs / 86400))d ago"
+  fi
+}
+
+# doctor_metrics_check
+#
+# Report the metrics collector's wiring: the switch, the branch, the heartbeat
+# and issue-row counts, the last-row age. Extracted as a function so the
+# decision table is testable in isolation: "never wired", "wired but only
+# heartbeats", "disabled" and "unverifiable" are four different fixes, and
+# collapsing them sends the human to the wrong one.
+doctor_metrics_check() {
+  local metrics_json
+  if type boucle_metrics_liveness > /dev/null 2>&1; then
+    metrics_json=$(boucle_metrics_liveness 2> /dev/null || echo "")
+  else
+    metrics_json=""
+  fi
+  if [ -z "$metrics_json" ]; then
+    warn "metrics wiring check skipped — lib/boucle.sh (boucle_metrics_liveness) is not loadable"
+    return 0
+  fi
+
+  local metrics_enabled metrics_branch metrics_remote_ok metrics_branch_exists
+  local metrics_fetched metrics_issue_rows metrics_heartbeats
+  local metrics_last_ts metrics_last_issue_ts
+  metrics_enabled=$(printf '%s' "$metrics_json" | jq -r '.enabled' 2> /dev/null || echo "")
+  metrics_branch=$(printf '%s' "$metrics_json" | jq -r '.branch // "boucle/metrics"' 2> /dev/null || echo "boucle/metrics")
+  metrics_remote_ok=$(printf '%s' "$metrics_json" | jq -r '.remote_ok' 2> /dev/null || echo false)
+  metrics_branch_exists=$(printf '%s' "$metrics_json" | jq -r '.branch_exists' 2> /dev/null || echo false)
+  metrics_fetched=$(printf '%s' "$metrics_json" | jq -r '.fetched' 2> /dev/null || echo false)
+  metrics_issue_rows=$(printf '%s' "$metrics_json" | jq -r '.issue_rows' 2> /dev/null || echo 0)
+  metrics_heartbeats=$(printf '%s' "$metrics_json" | jq -r '.heartbeats' 2> /dev/null || echo 0)
+  metrics_last_ts=$(printf '%s' "$metrics_json" | jq -r '.last_ts // empty' 2> /dev/null || echo "")
+  metrics_last_issue_ts=$(printf '%s' "$metrics_json" | jq -r '.last_issue_ts // empty' 2> /dev/null || echo "")
+  case "$metrics_issue_rows" in '' | *[!0-9]*) metrics_issue_rows=0 ;; esac
+  case "$metrics_heartbeats" in '' | *[!0-9]*) metrics_heartbeats=0 ;; esac
+
+  if [ "$metrics_enabled" = false ]; then
+    pass "metrics branch write disabled (BOUCLE_METRICS_ENABLED=${BOUCLE_METRICS_ENABLED:-}) — health.jsonl is still written locally"
+  elif [ "$metrics_fetched" = true ] && [ "$metrics_issue_rows" -gt 0 ]; then
+    pass "metrics collector wired: $metrics_issue_rows issue row(s) on $metrics_branch (last issue row $(metrics_age "$metrics_last_issue_ts"); last row $(metrics_age "$metrics_last_ts"))"
+  elif [ "$metrics_fetched" = true ] && [ "$metrics_heartbeats" -gt 0 ]; then
+    warn "metrics collector half-wired: $metrics_branch carries $metrics_heartbeats heartbeat(s) but 0 issue rows — the push path works, the terminal publish hook does not (last row $(metrics_age "$metrics_last_ts"))"
+  elif [ "$metrics_fetched" = true ]; then
+    fail "metrics enabled but $metrics_branch carries no row at all (last row: never) — the collector has never been populated"
+  elif [ "$metrics_remote_ok" = true ] && [ "$metrics_branch_exists" = false ]; then
+    fail "metrics enabled but $metrics_branch does not exist (last row: never) — the collector was never wired: no loop run has ever pushed to the branch"
+  else
+    warn "metrics enabled but the branch could not be verified (no git checkout, no origin remote, or the remote is unreachable) — branch existence and last-row age unknown"
+  fi
+}
+
 [ "$AUDIT_MODE" -eq 1 ] || echo "boucle doctor — checking prerequisites..."
 
 # Resolve BOUCLE_HOME early (needed for forge source + agents check)
@@ -365,6 +444,14 @@ if [ "$FORGE" = "github" ]; then
   source "$BOUCLE_HOME/bin/forge/github.sh"
 fi
 
+# Shared engine helpers (the metrics wiring check below). Sourced defensively:
+# an install without lib/ still runs every check; the metrics check reports
+# itself unverifiable instead of inventing a state.
+if ! type boucle_metrics_liveness > /dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "${BOUCLE_HOME:-.}/lib/boucle.sh" 2> /dev/null || true
+fi
+
 # ── Forge-specific checks ──────────────────────────────────────────────
 if [ "$FORGE" = "gitlab" ]; then
 
@@ -601,6 +688,16 @@ else
       discard every action you take and the loop will never fire for you. Either give boucle a
       distinct identity (a bot/service account), or set BOUCLE_MONO_USER=true to run single-account."
 fi
+
+# ── Metrics collector wiring ─────────────────────────────────────────────
+# The publish path is fail-open by design: a metrics write must never stop an
+# issue from reaching done. Fail-open with no liveness check, though, makes a
+# collector that was never wired — or whose pushes always fail — undetectable
+# by any machine step, and the retro can only report that its window was blind.
+# This reports the switch, the branch, the last-row age and the heartbeat
+# state, and FAILS when the switch is on and the branch has never carried an
+# issue row: the measurement layer is missing, not merely quiet.
+doctor_metrics_check
 
 # ── Mode-specific checks ─────────────────────────────────────────────────
 DEPLOY_MODE="${BOUCLE_DEPLOY_MODE:-self}"

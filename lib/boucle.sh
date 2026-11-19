@@ -1539,6 +1539,69 @@ boucle_metrics_publish() {
   return 0
 }
 
+# boucle_metrics_heartbeat [source]
+#
+# Append ONE liveness row to <metrics branch>:<metrics file>, independent of any
+# issue's terminal state.
+#
+# Why this exists: the publish path is fail-open by design — a metrics write
+# must never be the thing that stops a loop from reaching done — and fail-open
+# with no liveness signal makes a collector that was never wired, or whose
+# pushes always fail, undetectable by any machine step. The retro digest can
+# refuse to read an empty window as zero activity, but it cannot make the next
+# window less blind. A heartbeat turns "the branch has not moved" into a fact
+# somebody can check.
+#
+# The row carries event=heartbeat, a timestamp, the project and the stage that
+# wrote it. It carries NO issue data: it is not a measurement, it is proof that
+# the credential, the branch and the push path work. Readers that aggregate
+# per-issue rows MUST ignore it (they select on `issue`), and the retro counts
+# it separately so it can never mask a window with no issue rows.
+#
+# Called once per loop-run stage (bin/boucle-ci) when metrics are enabled.
+# Fail-open: returns 0 always. A failed heartbeat is loud on stderr and, on
+# GitHub Actions, as a run annotation — never silent, because the silent
+# failure is the defect this exists to catch.
+boucle_metrics_heartbeat() {
+  local source="${1:-${BOUCLE_ROLE:-unknown}}"
+  # Same "say so" contract as boucle_metrics_publish: a documented switch
+  # nobody wired must not be quieter than a working one.
+  if ! boucle_metrics_enabled; then
+    echo "[boucle:metrics] disabled (BOUCLE_METRICS_ENABLED=${BOUCLE_METRICS_ENABLED:-}) — no heartbeat row written; health.jsonl is still written locally" >&2
+    return 0
+  fi
+  command -v jq > /dev/null 2>&1 || {
+    echo "[boucle:metrics] WARN: jq is not available — no heartbeat row written; the collector's liveness is unproven this run" >&2
+    return 0
+  }
+
+  local row tmp
+  row=$(jq -n -c \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg project "${BOUCLE_PROJECT_ID:-}" \
+    --arg source "$source" \
+    '{schema: 1, timestamp: $ts, project: $project, event: "heartbeat", source: $source}' \
+    2> /dev/null) || row=""
+  if [ -z "$row" ] || [ "$row" = "null" ]; then
+    echo "[boucle:metrics] WARN: could not build a heartbeat row — the loop continues, the liveness signal does not" >&2
+    return 0
+  fi
+
+  tmp=$(mktemp 2> /dev/null) || {
+    echo "[boucle:metrics] WARN: could not create a heartbeat file — the loop continues, the liveness signal does not" >&2
+    return 0
+  }
+  printf '%s\n' "$row" > "$tmp"
+  if boucle_metrics_git_append "$BOUCLE_METRICS_FILE" "$tmp" "metrics: heartbeat ($source)"; then
+    echo "[boucle:metrics] heartbeat ($source) → $BOUCLE_METRICS_BRANCH:$BOUCLE_METRICS_FILE" >&2
+  else
+    echo "[boucle:metrics] WARN: heartbeat push failed — $BOUCLE_METRICS_BRANCH is not writable from this job (branch, credential or remote missing); the loop continues, the liveness signal does not" >&2
+    boucle_ci_warning "boucle metrics heartbeat failed — the metrics branch is not writable from this job (branch=$BOUCLE_METRICS_BRANCH, source=$source). The loop continues; the measurement does not."
+  fi
+  rm -f "$tmp"
+  return 0
+}
+
 # boucle_metrics_git_append <relpath> <src-file> <commit-msg>
 #
 # Append the lines of <src-file> to <relpath> on the metrics branch, skipping
@@ -1621,7 +1684,10 @@ boucle_metrics_git_append() {
       printf '%s\n' \
         "# boucle metrics" "" \
         "Append-only measurement log." "" \
-        "- \`$BOUCLE_METRICS_FILE\` — one JSON object per finished issue." \
+        "- \`$BOUCLE_METRICS_FILE\` — one JSON object per finished issue, plus" \
+        "  \`event=heartbeat\` liveness rows (no issue data) written by every" \
+        "  loop run. Heartbeats prove the push path works; they are NOT" \
+        "  measurements and MUST be ignored by per-issue aggregation." \
         "- \`$BOUCLE_METRICS_RAW_DIR/<issue>.jsonl\` — the raw per-run health" \
         "  lines that row was computed from, pushed as they are written so" \
         "  they outlive the ephemeral job that produced them." "" \
@@ -1720,6 +1786,93 @@ boucle_metrics_hydrate_health() {
     return 0
   fi
   rm -rf "$tmp"
+  return 0
+}
+
+# boucle_metrics_liveness
+#
+# Print ONE JSON object describing the metrics collector's wiring and
+# liveness. This is the machine-readable half of `bin/doctor`'s metrics check:
+#
+#   {"branch":"boucle/metrics","file":"metrics.jsonl",
+#    "enabled":true|false, "remote_ok":true|false,
+#    "branch_exists":true|false, "fetched":true|false,
+#    "rows":N, "issue_rows":N, "heartbeats":N,
+#    "last_ts":"<iso|empty>", "last_issue_ts":"<iso|empty>"}
+#
+# The states are deliberately distinct, because they have different fixes and
+# conflating them makes the report useless:
+#
+#   enabled=false          the branch write is off by configuration — a loud
+#                          pass, never a failure (the explicit opt-out works).
+#   remote_ok=false        the remote could not be queried at all: credentials
+#                          or network. Wiring is UNVERIFIABLE, not absent.
+#   fetched=false,         the remote answered and the branch is not there:
+#   branch_exists=false    the collector was never wired (or never pushed).
+#   fetched=true, rows=0   the branch exists but carries no row at all.
+#   issue_rows=0,          heartbeats prove the push path, but no ISSUE row
+#   heartbeats>0           was ever published: the terminal hook is the
+#                          missing half. Never reported as healthy.
+#
+# Read-only and fail-open: prints the zero-state JSON when it cannot measure.
+# Returns 0 unless jq is missing (the caller then reports the check as
+# unverifiable rather than inventing a state).
+boucle_metrics_liveness() {
+  local branch="${BOUCLE_METRICS_BRANCH:-boucle/metrics}"
+  local file="${BOUCLE_METRICS_FILE:-metrics.jsonl}"
+  local enabled=false remote_ok=false branch_exists=false fetched=false
+  local tmp=""
+  # An `if`, not `cmd && assignment`: the bare short-circuit returns 1 when
+  # metrics are disabled, and every caller runs under `set -e`.
+  if boucle_metrics_enabled; then
+    enabled=true
+  fi
+  command -v jq > /dev/null 2>&1 || return 1
+
+  tmp=$(mktemp 2> /dev/null) || tmp=""
+  if [ "$enabled" = true ] && [ -n "$tmp" ] \
+    && git rev-parse --git-dir > /dev/null 2>&1 \
+    && git remote get-url origin > /dev/null 2>&1; then
+    if git fetch -q --depth 1 origin "$branch" 2> /dev/null; then
+      fetched=true
+      branch_exists=true
+      remote_ok=true
+      git cat-file -p "FETCH_HEAD:$file" > "$tmp" 2> /dev/null || : > "$tmp"
+    elif git ls-remote --heads origin "$branch" > /dev/null 2>&1; then
+      # The remote answered: the branch is genuinely absent. If ls-remote
+      # itself fails, the remote is unreachable and absence cannot be claimed.
+      remote_ok=true
+    fi
+  fi
+
+  local stats slurp="${tmp:-/dev/null}"
+  stats=$(jq -n -c \
+    --arg branch "$branch" \
+    --arg file "$file" \
+    --argjson enabled "$enabled" \
+    --argjson remote_ok "$remote_ok" \
+    --argjson branch_exists "$branch_exists" \
+    --argjson fetched "$fetched" \
+    --slurpfile m "$slurp" '
+    ($m | map(select(type == "object"))) as $rows
+    | ($rows | map(select(.issue != null and .issue != ""))) as $issues
+    | ($rows | map(select(.event == "heartbeat"))) as $hb
+    | {
+        branch: $branch,
+        file: $file,
+        enabled: $enabled,
+        remote_ok: $remote_ok,
+        branch_exists: $branch_exists,
+        fetched: $fetched,
+        rows: ($rows | length),
+        issue_rows: ($issues | length),
+        heartbeats: ($hb | length),
+        last_ts: ([$rows[] | .timestamp // empty] | max // ""),
+        last_issue_ts: ([$issues[] | .timestamp // empty] | max // "")
+      }' 2> /dev/null) || stats=""
+  [ -z "$tmp" ] || rm -f "$tmp"
+  [ -n "$stats" ] || return 1
+  printf '%s\n' "$stats"
   return 0
 }
 
@@ -2980,7 +3133,7 @@ boucle_do_deploy() {
           deploy_timed_out=true
           echo "deploy: attempt $deploy_attempt killed after ${deploy_attempt_timeout}s (BOUCLE_DEPLOY_ATTEMPT_TIMEOUT)" >&2
           kill -TERM "$deploy_child" 2> /dev/null || true
-          sleep 5   # grace: let a well-behaved attempt flush and exit on TERM
+          sleep 5 # grace: let a well-behaved attempt flush and exit on TERM
           kill -KILL "$deploy_child" 2> /dev/null || true
           break
         fi
@@ -3016,7 +3169,7 @@ boucle_do_deploy() {
       # Budget guard: never START an attempt that cannot finish inside the
       # deploy job timeout. Elapsed is measured from the first attempt, so it
       # covers the deploy runs and the waits alike.
-      deploy_elapsed=$(( $(date +%s) - deploy_started ))
+      deploy_elapsed=$(($(date +%s) - deploy_started))
       if [ $((deploy_elapsed + deploy_delay)) -ge "$deploy_budget" ]; then
         echo "WARN: deploy retry budget exhausted (${deploy_elapsed}s elapsed + ${deploy_delay}s wait >= ${deploy_budget}s) — not starting attempt $((deploy_attempt + 1))/$deploy_max" >&2
         break

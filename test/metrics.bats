@@ -1305,3 +1305,193 @@ digest_liveness_run() {
   assert_output --partial "disabled — BOUCLE_METRICS_ENABLED opted out"
   refute_output --partial "wired-failing"
 }
+
+# ── Liveness heartbeat: wiring is proven, not assumed (#177) ──────────────
+#
+# The publish path is fail-open, so a collector that was never wired — or whose
+# pushes always fail — used to leave nothing anywhere. A heartbeat row proves
+# the credential, the branch and the push path work independently of any
+# issue's terminal state. It MUST stay out of every per-issue figure: a
+# liveness row that counted as a measurement would make an empty evidence
+# layer look populated, which is the exact blindness this exists to catch.
+
+@test "heartbeat: a loop run leaves a liveness row with no issue data" {
+  lib
+  metrics_remote
+  run bash -c "cd '$TMP/work' && . '$REPO/lib/boucle.sh' 2>/dev/null;
+    BOUCLE_WORKSPACE='$TMP/work' BOUCLE_PROJECT_ID=owner/repo boucle_metrics_heartbeat doctor 2>&1"
+  assert_success
+  assert_output --partial "heartbeat (doctor)"
+  run remote_file "metrics.jsonl"
+  assert_success
+  assert_output --partial '"event":"heartbeat"'
+  assert_output --partial '"source":"doctor"'
+  # Proof of wiring, not a measurement: no issue, no terminal.
+  refute_output --partial '"issue"'
+  refute_output --partial '"terminal"'
+}
+
+@test "heartbeat: disabled says so and pushes nothing" {
+  lib
+  metrics_remote
+  run bash -c "cd '$TMP/work' && . '$REPO/lib/boucle.sh' 2>/dev/null;
+    BOUCLE_METRICS_ENABLED=false BOUCLE_WORKSPACE='$TMP/work' boucle_metrics_heartbeat doctor 2>&1"
+  assert_success
+  assert_output --partial "disabled"
+  assert_output --partial "no heartbeat row"
+  run bash -c "git --git-dir='$TMP/origin.git' rev-parse --verify '$BOUCLE_METRICS_BRANCH' 2>&1 || echo ABSENT"
+  assert_output --partial "ABSENT"
+}
+
+@test "heartbeat: a failed push is loud, never silent" {
+  # Fail-open is correct for loop availability; fail-open AND silent is what
+  # made an unwired collector undetectable. The annotation survives the job.
+  lib
+  WORK="$TMP/hb-nowhere"
+  mkdir -p "$WORK/.boucle-state"
+  git init -q "$WORK"
+  git -C "$WORK" remote add origin "file:///definitely/not/a/repo"
+  run bash -c "cd '$WORK' && . '$REPO/lib/boucle.sh' 2>/dev/null;
+    GITHUB_ACTIONS=true BOUCLE_WORKSPACE='$WORK' boucle_metrics_heartbeat doctor 2>&1"
+  assert_success
+  assert_output --partial "::warning::"
+  assert_output --partial "heartbeat push failed"
+}
+
+@test "liveness: reports the switch, the branch and the last-row age" {
+  lib
+  metrics_remote
+  run bash -c "cd '$TMP/work' && . '$REPO/lib/boucle.sh' 2>/dev/null;
+    export BOUCLE_WORKSPACE='$TMP/work' BOUCLE_PROJECT_ID=owner/repo
+    boucle_metrics_heartbeat doctor >/dev/null 2>&1
+    boucle_metrics_liveness | jq -c '[.enabled, .fetched, .rows, .issue_rows, .heartbeats, (.last_ts != \"\")]'"
+  assert_success
+  assert_output '[true,true,1,0,1,true]'
+}
+
+@test "liveness: a missing branch and an unreachable remote are different states" {
+  # "Never populated" is a claim only the remote can support. If ls-remote
+  # fails, the wiring is unverifiable — never silently reported as absent.
+  lib
+  metrics_remote
+  run bash -c "cd '$TMP/work' && . '$REPO/lib/boucle.sh' 2>/dev/null;
+    boucle_metrics_liveness | jq -c '[.remote_ok, .branch_exists, .fetched]'"
+  assert_output '[true,false,false]'
+
+  WORK="$TMP/hb-dead"
+  mkdir -p "$WORK"
+  git init -q "$WORK"
+  git -C "$WORK" remote add origin "file:///definitely/not/a/repo"
+  run bash -c "cd '$WORK' && . '$REPO/lib/boucle.sh' 2>/dev/null;
+    boucle_metrics_liveness | jq -c '[.remote_ok, .branch_exists, .fetched]'"
+  assert_output '[false,false,false]'
+}
+
+@test "liveness: a disabled collector is reported, not judged" {
+  lib
+  run bash -c "cd '$REPO' && . lib/boucle.sh 2>/dev/null;
+    BOUCLE_METRICS_ENABLED=false boucle_metrics_liveness | jq -c '[.enabled, .fetched]'"
+  assert_success
+  assert_output '[false,false]'
+}
+
+# ── Digest: heartbeats never fake an evidence layer ──────────────────────
+
+@test "digest: heartbeats move the last-row signal but never count as evidence" {
+  # The blackout this issue comes from: three consecutive windows with closed
+  # issues and no metrics row. A heartbeat makes the branch demonstrably alive;
+  # it MUST NOT make the window look measured. The machine marker is the
+  # escalation — a WARNING the agent may cite is not actionable by any CI step.
+  lib
+  WORK="$TMP/liveness-heartbeat"
+  digest_liveness_setup "$WORK" \
+    '{"schema":1,"timestamp":"2026-10-01T09:00:00Z","event":"heartbeat","source":"doctor"}
+{"schema":1,"timestamp":"2026-10-02T09:00:00Z","event":"heartbeat","source":"dispatch"}' ""
+  run digest_liveness_run "$WORK" "$TMP/heartbeat.md"
+  assert_success
+  assert_output --partial "metrics_blackout=never-populated"
+  run cat "$TMP/heartbeat.md"
+  assert_output --partial "WARNING: metrics blackout"
+  assert_output --partial "metrics rows: 0 in window, 0 on branch"
+  assert_output --partial "heartbeats: 2 on branch"
+  assert_output --partial "last metrics row: 2026-10-02T09:00:00Z"
+  assert_output --partial "last issue row: never"
+  # Coverage stays honest: a heartbeat is not an issue row.
+  assert_output --partial "metrics_coverage: 0/1"
+}
+
+@test "digest: an issue row present keeps the window measured beside heartbeats" {
+  lib
+  WORK="$TMP/liveness-heartbeat-row"
+  digest_liveness_setup "$WORK" \
+    '{"schema":3,"timestamp":"2026-10-01T10:00:00Z","issue":"4242","terminal":"done"}
+{"schema":1,"timestamp":"2026-10-02T09:00:00Z","event":"heartbeat","source":"doctor"}' ""
+  run digest_liveness_run "$WORK" "$TMP/heartbeat-row.md"
+  assert_success
+  refute_output --partial "metrics_blackout="
+  run cat "$TMP/heartbeat-row.md"
+  refute_output --partial "WARNING: metrics blackout"
+  assert_output --partial "metrics rows: 1 in window, 1 on branch"
+  assert_output --partial "heartbeats: 1 on branch"
+  assert_output --partial "last metrics row: 2026-10-02T09:00:00Z"
+  assert_output --partial "last issue row: 2026-10-01T10:00:00Z"
+  assert_output --partial "metrics_coverage: 1/1"
+}
+
+@test "digest: an issue row older than the window is not never-populated" {
+  # The branch HAS rows; this window simply has none. That is "collector
+  # stopped / rows lost", not "never wired". The loud escalation is reserved
+  # for a branch that has never carried an issue row.
+  lib
+  WORK="$TMP/liveness-old-row"
+  digest_liveness_setup "$WORK" \
+    '{"schema":3,"timestamp":"2026-08-01T10:00:00Z","issue":"9001","terminal":"done"}' ""
+  run digest_liveness_run "$WORK" "$TMP/old-row.md"
+  assert_success
+  refute_output --partial "metrics_blackout="
+  run cat "$TMP/old-row.md"
+  assert_output --partial "WARNING: metrics blackout"
+  assert_output --partial "metrics rows: 0 in window, 1 on branch"
+  assert_output --partial "last issue row: 2026-08-01T10:00:00Z"
+}
+
+@test "digest: a disabled collector never escalates — the opt-out is deliberate" {
+  lib
+  WORK="$TMP/liveness-disabled-escalation"
+  digest_liveness_setup "$WORK" \
+    '{"schema":1,"timestamp":"2026-10-02T09:00:00Z","event":"heartbeat","source":"doctor"}' ""
+  BOUCLE_METRICS_ENABLED=false run digest_liveness_run "$WORK" "$TMP/disabled-esc.md"
+  assert_success
+  refute_output --partial "metrics_blackout="
+  run cat "$TMP/disabled-esc.md"
+  assert_output --partial "disabled — BOUCLE_METRICS_ENABLED opted out"
+}
+
+# ── Dispatcher: every loop-run stage proves the wiring before it starts ──
+
+@test "dispatcher: a loop-run stage heartbeats before the stage runs" {
+  block=$(awk '/^case "\$STAGE" in/,/^esac$/' bin/boucle-ci)
+  [ -n "$block" ] || {
+    echo "heartbeat dispatch block not found"
+    false
+  }
+  run bash -c "STAGE=worker; boucle_metrics_heartbeat() { echo \"HB:\$1\"; }; $block; echo 'STAGE-RAN'"
+  assert_success
+  assert_line --index 0 "HB:worker"
+  assert_line --index 1 "STAGE-RAN"
+}
+
+@test "dispatcher: check, deploy and human commands do not heartbeat — they are not loop runs" {
+  # A lint gate and a human `boucle log` are not loop runs. Heartbeating them
+  # would put rows on the branch that say nothing about the loop's liveness.
+  block=$(awk '/^case "\$STAGE" in/,/^esac$/' bin/boucle-ci)
+  [ -n "$block" ] || {
+    echo "heartbeat dispatch block not found"
+    false
+  }
+  for stage in check deploy cmd-log cmd-status; do
+    run bash -c "STAGE=$stage; boucle_metrics_heartbeat() { echo \"HB:\$1\"; }; $block; echo 'DONE'"
+    assert_success
+    assert_output "DONE"
+  done
+}

@@ -29,4 +29,20 @@ if ! declare -F "$FUNC" > /dev/null 2>&1; then
   exit 1
 fi
 
+# ── Metrics liveness heartbeat ────────────────────────────────────────────
+# Every LOOP RUN — a stage that does work on the board — appends one heartbeat
+# row to the metrics branch when metrics are enabled. It proves the credential,
+# the branch and the push path work independently of any issue's terminal
+# state: the publish path is fail-open, so without this a collector that was
+# never wired, or whose pushes always fail, leaves no trace anywhere.
+#
+# Scope is deliberately the work stages only: `check` is a lint gate and
+# `cmd-*` are human commands, not loop runs. Fail-open by contract — the helper
+# never fails and is never the reason a stage does not start.
+case "$STAGE" in
+  dispatch | triage | worker | reviewer | e2e | merger | post-merge | catchup | automerge | doctor | doctor-opportunistic | retro)
+    boucle_metrics_heartbeat "$STAGE" || true
+    ;;
+esac
+
 "$FUNC" "$@"

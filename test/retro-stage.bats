@@ -629,16 +629,20 @@ digest_run() {
   run digest_run "$WORK" "$TMP/blackout.md" \
     '[{"id":11,"title":"One","closed_at":"2026-10-03T00:00:00Z"},{"id":12,"title":"Two","closed_at":"2026-10-04T00:00:00Z"},{"id":13,"title":"Old","closed_at":"2026-08-01T00:00:00Z"}]'
   assert_success
+  # The machine-readable escalation is printed on stdout, beside the digest:
+  # a warning that lives only in a file the agent reads is not actionable by CI.
+  assert_output --partial "metrics_blackout=never-populated"
   run cat "$TMP/blackout.md"
   # The count is window-scoped (the August issue is out) and names the two
   # fault modes apart: fetched-but-empty is NOT a failed fetch. With no
   # metrics_publish event anywhere, the cause is named as unwired rather than
   # offered as a disjunction with "rows dropped".
   assert_output --partial "WARNING: metrics blackout — 0 metrics rows for 2 closed issue(s) in window; the retro evidence layer is missing: unwired — no metrics_publish event anywhere for the window: the terminal transition never invoked the collector."
-  assert_output --partial "fetched: yes, 0 rows on the branch"
+  assert_output --partial "fetched: yes, 0 issue rows on the branch"
   refute_output --partial "collector unwired or never ran"
   assert_output --partial "metrics rows: 0 in window, 0 on branch"
   assert_output --partial "last metrics row: never"
+  assert_output --partial "last issue row: never"
   assert_output --partial "list: raw file names (metrics-window list empty)"
   # The per-issue section must not read as "no data"; it points at the finding.
   assert_output --partial "metrics blackout"
@@ -677,7 +681,7 @@ digest_run() {
   run cat "$TMP/quiet.md"
   refute_output --partial "WARNING: metrics blackout"
   refute_output --partial "blackout"
-  assert_output --partial "fetched: yes, 0 rows on the branch"
+  assert_output --partial "fetched: yes, 0 issue rows on the branch"
 }
 
 @test "digest: a failed fetch is named as such, and a closed-issue window still warns" {
@@ -687,10 +691,38 @@ digest_run() {
   run digest_run "$WORK" "$TMP/nofetch.md" \
     '[{"id":9,"title":"Closed","closed_at":"2026-10-03T00:00:00Z"}]'
   assert_success
+  # A failed fetch is not the same claim as a fetched-but-empty branch: the
+  # machine marker says `unreachable`, never `never-populated`.
+  assert_output --partial "metrics_blackout=unreachable"
   run cat "$TMP/nofetch.md"
   assert_output --partial "fetch failed — boucle/metrics unavailable (branch, credential or remote missing)"
   assert_output --partial "WARNING: metrics blackout — 0 metrics rows for 1 closed issue(s) in window"
   refute_output --partial "fetched: yes, 0 rows"
+}
+
+# ── Escalation: a blackout that only prose describes is repeated forever ──
+
+@test "stage: a never-populated metrics blackout fails the stage and annotates the run" {
+  # The digest's WARNING is a finding the agent may cite; it is not something a
+  # CI step can act on. The stage must surface the machine marker, keep the
+  # bookkeeping (so the cadence advances instead of re-firing every sweep) and
+  # exit non-zero so a human is sent to fix the collector.
+  run stage "export GITHUB_ACTIONS=true
+    _retro_build_digest() { printf '# digest\n' > \"\$1\"; _RETRO_METRICS_BLACKOUT=never-populated; echo 'metrics_blackout=never-populated'; }"
+  assert_failure
+  assert_output --partial "metrics_blackout=never-populated"
+  assert_output --partial "::warning::"
+  # The work still happened: the window was analysed and the run recorded.
+  run cat "$TMP/capture"
+  assert_output --partial "JC-ROLE:retro"
+  assert_output --partial "RECORD:"
+}
+
+@test "stage: no blackout marker keeps the stage green" {
+  run stage
+  assert_success
+  refute_output --partial "metrics_blackout="
+  assert_output --partial "result:"
 }
 
 # ── Doctor advisory: the engine's self-targeting token ──────────────────
