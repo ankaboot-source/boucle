@@ -507,3 +507,68 @@ extract_unlabeled_scan() {
   triage_line=$(echo "$block" | grep -n 'LAST_TRIAGE_NOTE_ID=' | head -1 | cut -d: -f1)
   [ -n "$opt_line" ] && [ -n "$triage_line" ] && [ "$opt_line" -lt "$triage_line" ]
 }
+
+# ── Metrics collector wiring (#177) ─────────────────────────────────────
+# The publish path is fail-open: a collector that was never wired, or whose
+# pushes always fail, is invisible unless the doctor asks the branch. The
+# decision table has four outcomes with four different fixes, and these tests
+# pin them apart — "unverifiable" must never be reported as "absent".
+
+doctor_metrics_run() {
+  local json="$1" enabled="${2:-true}"
+  bash -c "
+    set -euo pipefail
+    FAILURES=0
+    BOUCLE_METRICS_ENABLED='$enabled'
+    source <(awk 'BEGIN{p=0} /^(pass|warn|fail|metrics_age|doctor_metrics_check)\(\) \{/{p=1; print; next} p==1 && /^\}/{print; p=0; next} p==1{print}' 'bin/doctor')
+    boucle_metrics_liveness() { printf '%s\n' '$json'; }
+    doctor_metrics_check
+    echo \"FAILURES=\$FAILURES\"
+  "
+}
+
+@test "doctor metrics: a never-populated branch with metrics enabled FAILS" {
+  run doctor_metrics_run '{"branch":"boucle/metrics","enabled":true,"remote_ok":true,"branch_exists":false,"fetched":false,"issue_rows":0,"heartbeats":0,"last_ts":"","last_issue_ts":""}'
+  assert_success
+  assert_output --partial "the collector was never wired"
+  assert_output --partial "FAILURES=1"
+}
+
+@test "doctor metrics: an existing branch with no rows FAILS as never populated" {
+  run doctor_metrics_run '{"branch":"boucle/metrics","enabled":true,"remote_ok":true,"branch_exists":true,"fetched":true,"issue_rows":0,"heartbeats":0,"last_ts":"","last_issue_ts":""}'
+  assert_success
+  assert_output --partial "carries no row at all"
+  assert_output --partial "FAILURES=1"
+}
+
+@test "doctor metrics: heartbeats only is a loud WARN, not a healthy pass" {
+  run doctor_metrics_run '{"branch":"boucle/metrics","enabled":true,"remote_ok":true,"branch_exists":true,"fetched":true,"issue_rows":0,"heartbeats":2,"last_ts":"2026-10-02T09:00:00Z","last_issue_ts":""}'
+  assert_success
+  assert_output --partial "half-wired"
+  assert_output --partial "2 heartbeat(s) but 0 issue rows"
+  assert_output --partial "FAILURES=0"
+}
+
+@test "doctor metrics: issue rows are a pass and report the last-row age" {
+  run doctor_metrics_run '{"branch":"boucle/metrics","enabled":true,"remote_ok":true,"branch_exists":true,"fetched":true,"issue_rows":3,"heartbeats":5,"last_ts":"2026-10-02T09:00:00Z","last_issue_ts":"2026-10-01T10:00:00Z"}'
+  assert_success
+  assert_output --partial "metrics collector wired: 3 issue row(s)"
+  assert_output --partial "last issue row"
+  assert_output --partial "FAILURES=0"
+}
+
+@test "doctor metrics: disabled is a loud pass, never a failure" {
+  run doctor_metrics_run '{"branch":"boucle/metrics","enabled":false,"remote_ok":false,"branch_exists":false,"fetched":false,"issue_rows":0,"heartbeats":0,"last_ts":"","last_issue_ts":""}' false
+  assert_success
+  assert_output --partial "metrics branch write disabled"
+  assert_output --partial "health.jsonl is still written locally"
+  assert_output --partial "FAILURES=0"
+}
+
+@test "doctor metrics: an unreachable remote is a WARN, never 'absent'" {
+  run doctor_metrics_run '{"branch":"boucle/metrics","enabled":true,"remote_ok":false,"branch_exists":false,"fetched":false,"issue_rows":0,"heartbeats":0,"last_ts":"","last_issue_ts":""}'
+  assert_success
+  assert_output --partial "could not be verified"
+  refute_output --partial "never wired"
+  assert_output --partial "FAILURES=0"
+}
