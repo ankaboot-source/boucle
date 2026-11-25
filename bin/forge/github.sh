@@ -810,6 +810,14 @@ forge_attachment_download() {
 
 # ── Pipeline / workflow triggering ───────────────────────────────────────
 
+forge_trigger_token_status() {
+  # GitHub has no separate pipeline trigger token — workflow dispatches use
+  # the bot PAT, and forge_trigger_role's WARN covers that failure mode.
+  # Contract requires the stub (bin/forge/common.sh).
+  echo "skipped"
+  return 0
+}
+
 forge_trigger_role() {
   local issue_iid="$1" role="$2"
   shift 2
@@ -829,8 +837,16 @@ forge_trigger_role() {
     val="${kv#*=}"
     inputs_json=$(printf '%s' "$inputs_json" | jq -c --arg k "$key" --arg v "$val" '.[$k] = $v')
   done
-  _gh_api_silent -X POST "/repos/$BOUCLE_PROJECT_ID/actions/workflows/boucle.yml/dispatches" \
-    --input - <<< "$(jq -nc --arg ref "${BOUCLE_DEFAULT_BRANCH:-main}" --argjson inputs "$inputs_json" '{ref: $ref, inputs: $inputs}')" || true
+  # Fail-open with a LOUD warning (same contract as bin/forge/gitlab.sh).
+  # _gh_api_silent hides the status; a revoked PAT or a renamed workflow
+  # would fail every chained re-trigger invisibly. Log the failure so the
+  # job log shows it — the status board's trigger-health line surfaces it
+  # for humans.
+  if ! _gh_api_silent -X POST "/repos/$BOUCLE_PROJECT_ID/actions/workflows/boucle.yml/dispatches" \
+    --input - <<< "$(jq -nc --arg ref "${BOUCLE_DEFAULT_BRANCH:-main}" --argjson inputs "$inputs_json" '{ref: $ref, inputs: $inputs}')"; then
+    echo "[boucle] WARN: forge_trigger_role issue=$issue_iid role=${role:-none} → workflow dispatch failed" \
+      "(role NOT re-triggered — check the gh CLI auth and that the boucle workflow exists)" >&2
+  fi
 }
 
 forge_pipeline_list_active() {
