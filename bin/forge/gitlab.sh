@@ -409,11 +409,31 @@ forge_attachment_upload() {
   local iid="$1" file_path="$2" filename="$3"
   [ ! -f "$file_path" ] && return 0
   local resp
-  resp=$(glab api --hostname "$BOUCLE_FORGE_HOST" -X POST "/projects/$BOUCLE_PROJECT_ID/uploads" \
-    -F "file=@$file_path" 2> /dev/null) || return 0
+  # curl multipart, NOT glab: glab api encodes -F values as JSON (glab
+  # 1.121: `${glab} api -X POST .../uploads -F "file=@x"` → HTTP 400),
+  # so the previous call failed on every upload and the fail-open contract
+  # (empty stdout, no stderr) hid it completely. The bot PAT is already in
+  # CI as BOUCLE_TOKEN. On failure: WARN to stderr + empty stdout — the
+  # contract's fail-open return is preserved, but the silent part stops.
+  if [ -z "${BOUCLE_TOKEN:-}" ]; then
+    echo "[boucle] WARN: forge_attachment_upload file=$filename skipped — BOUCLE_TOKEN not set" >&2
+    return 0
+  fi
+  resp=$(curl -sS --max-time 60 \
+    -H "PRIVATE-TOKEN: $BOUCLE_TOKEN" \
+    -F "file=@$file_path" \
+    "https://$BOUCLE_FORGE_HOST/api/v4/projects/$BOUCLE_PROJECT_ID/uploads" 2> /dev/null) || {
+    echo "[boucle] WARN: forge_attachment_upload file=$filename failed (HTTP error — upload NOT attached)" >&2
+    return 0
+  }
   # Prefer .url (relative /uploads/<hash>/<file>) — the same path GitLab's
   # .markdown field wraps, so callers can embed it as ![alt](<url>).
-  echo "$resp" | jq -r '.url // .full_path // empty' 2> /dev/null || true
+  local out
+  out=$(echo "$resp" | jq -r '.url // .full_path // empty' 2> /dev/null || true)
+  if [ -z "$out" ]; then
+    echo "[boucle] WARN: forge_attachment_upload file=$filename — no .url in the response (upload NOT attached)" >&2
+  fi
+  echo "$out"
 }
 
 forge_branch_url() {
@@ -646,6 +666,37 @@ forge_attachment_download() {
 
 # ── Pipeline / workflow triggering ────────────────────────────────────────
 
+forge_trigger_token_status() {
+  # stdout: ok | missing | skipped | unknown (contract: bin/forge/common.sh)
+  # GET /projects/:id/triggers lists every pipeline trigger token WITH its
+  # value. A deleted "boucle-loop" trigger is the exact incident pattern
+  # that silently froze a consumer for weeks (webhook → HTTP 404, dispatch
+  # never ran, issues stuck in boucle:triage). Exact-match only: report
+  # "missing" when the list is demonstrably unredacted (at least one listed
+  # token full-length) but does not contain ours — some entries/API
+  # versions return truncated token values, and redaction must never
+  # produce a false alarm. Any doubt (empty list, API failure) → "unknown"
+  # (fail open).
+  if [ -z "${BOUCLE_TRIGGER_TOKEN:-}" ]; then
+    echo "unknown"
+    return 0
+  fi
+  local listed
+  listed=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
+    "/projects/$BOUCLE_PROJECT_ID/triggers" 2> /dev/null) || { echo "unknown"; return 0; }
+  echo "$listed" | jq -r --arg t "$BOUCLE_TRIGGER_TOKEN" '
+    (if type == "array" then . else [] end) as $list |
+    if ($list | length) == 0 then
+      "unknown"
+    elif ([$list[].token | select(length >= 20)] | length) == 0 then
+      "unknown"
+    elif ([$list[].token] | index($t)) != null then
+      "ok"
+    else
+      "missing"
+    end' 2> /dev/null || echo "unknown"
+}
+
 forge_trigger_role() {
   local issue_iid="$1" role="$2"
   shift 2
@@ -663,7 +714,21 @@ forge_trigger_role() {
     val="${kv#*=}"
     args+=(-F "variables[$key]=$val")
   done
-  curl "${args[@]}" > /dev/null 2>&1 || true
+  # Fail-open with a LOUD warning. A dead/deleted trigger token returns
+  # HTTP 404 here; every chained role transition and every webhook
+  # delivery (the webhook URL embeds the same token) then fails silently
+  # and the loop appears frozen with zero log evidence. Swallowing the
+  # response kept that failure invisible for weeks on a consumer (issues
+  # sat in boucle:triage for a month). Log the HTTP status so the job log
+  # shows it; the doctor's trigger-health sweep + status board surface it
+  # for humans (lib/boucle.sh:boucle_trigger_health).
+  local resp http_code
+  resp=$(curl "${args[@]}" -w $'\n%{http_code}' 2> /dev/null) || true
+  http_code="${resp##*$'\n'}"
+  if [ "${http_code:-000}" != "201" ]; then
+    echo "[boucle] WARN: forge_trigger_role issue=$issue_iid role=${role:-none} → HTTP ${http_code:-000}" \
+      "(trigger pipeline NOT created — dead/revoked trigger token would also kill the webhook; check the doctor trigger-health line on the status board)" >&2
+  fi
 }
 
 forge_pipeline_list_active() {

@@ -35,6 +35,26 @@ boucle_ci_doctor() {
   # default): one variable check, zero API calls.
   boucle_bot_pr_sweep || true
 
+  # ── Trigger health (silent-dead-token incident) ────────────────────────
+  # MUST run on EVERY doctor pass (before the adaptive-cadence fingerprint
+  # can skip the sweep): a dead trigger token is the one failure mode that
+  # silences the whole loop — webhook deliveries 404, dispatch never runs,
+  # issues pile up in boucle:triage with zero log evidence. Cost: one API
+  # call (forge_trigger_token_status). "missing" → loud WARN here; the
+  # status board carries the same warning for humans (boucle_board_render).
+  # "skipped"/"unknown" → silent (GitHub has no trigger token; a flaky API
+  # must never fake an alarm — fail open).
+  local trigger_health
+  trigger_health=$(boucle_trigger_health 2> /dev/null || echo "unknown")
+  case "$trigger_health" in
+    missing)
+      echo "[boucle] WARN: trigger health — DEAD. BOUCLE_TRIGGER_TOKEN no longer matches any project trigger. Webhook deliveries fail silently and issues never dispatch. Re-create the trigger token (bin/setup §6) and re-point the webhook URL (§7)." >&2
+      ;;
+    ok)
+      echo "[boucle] trigger health: OK"
+      ;;
+  esac
+
   # ── Adaptive cadence (#38) ─────────────────────────────────────────────
   # The doctor runs on a fixed schedule and always performs the full sweep.
   # On an idle repository that is a runner provisioned to confirm nothing

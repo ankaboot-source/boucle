@@ -524,11 +524,42 @@ boucle_bot_pr_sweep() {
 #
 # The board is a forge ISSUE that boucle edits in place — the forge is the
 # UI, which is the whole thesis (CONTEXT.md §7: no new frontend, no server).
+# ── Trigger token health (silent-dead-token incident follow-up) ─────────
+#
+# boucle_trigger_health — stdout: ok | missing | skipped | unknown; never
+# exits non-zero. A deleted/dead trigger token kills the webhook AND every
+# chained re-trigger, both fail-open and silent — the loop then looks
+# frozen with zero evidence. The doctor sweep + status board surface the
+# status; this wrapper centralizes the fail-open default so callers never
+# render an alarm they cannot trust.
+
+boucle_trigger_health() {
+  local status
+  status=$(forge_trigger_token_status 2> /dev/null || true)
+  echo "${status:-unknown}"
+}
+
 boucle_board_render() {
   local body=""
   body="<!-- boucle:board v=1 -->
 _Maintained by boucle. Edited in place — do not reply here; act on the linked issues._
 "
+  # Trigger health: the one failure mode that makes the WHOLE loop silent
+  # (webhook 404s, dispatch never runs, issues pile up in boucle:triage).
+  # The board is the human's entry point — a dead trigger must be visible
+  # here, not only in CI job logs. ok/missing render a line; skipped
+  # (GitHub) and unknown (fail-open) render nothing, so a flaky API call
+  # can never fake an alarm.
+  local trigger_health
+  trigger_health=$(boucle_trigger_health 2> /dev/null || echo "unknown")
+  case "$trigger_health" in
+    ok)
+      body+="⚙️ Trigger health — OK
+" ;;
+    missing)
+      body+="⚠️ **Trigger health — DEAD**: \`BOUCLE_TRIGGER_TOKEN\` no longer matches any project trigger. Webhook deliveries fail silently and issues never dispatch. Re-create the trigger token (\`bin/setup\` §6) and re-point the webhook URL (§7).
+" ;;
+  esac
   local -a groups=(
     "⏳ Waiting on you|boucle:spec-review boucle:approval"
     "🔄 In flight|boucle:triage boucle:todo boucle:working boucle:review boucle:merging"
