@@ -3013,7 +3013,7 @@ boucle_do_deploy() {
           deploy_timed_out=true
           echo "deploy: attempt $deploy_attempt killed after ${deploy_attempt_timeout}s (BOUCLE_DEPLOY_ATTEMPT_TIMEOUT)" >&2
           kill -TERM "$deploy_child" 2> /dev/null || true
-          sleep 5   # grace: let a well-behaved attempt flush and exit on TERM
+          sleep 5 # grace: let a well-behaved attempt flush and exit on TERM
           kill -KILL "$deploy_child" 2> /dev/null || true
           break
         fi
@@ -3049,7 +3049,7 @@ boucle_do_deploy() {
       # Budget guard: never START an attempt that cannot finish inside the
       # deploy job timeout. Elapsed is measured from the first attempt, so it
       # covers the deploy runs and the waits alike.
-      deploy_elapsed=$(( $(date +%s) - deploy_started ))
+      deploy_elapsed=$(($(date +%s) - deploy_started))
       if [ $((deploy_elapsed + deploy_delay)) -ge "$deploy_budget" ]; then
         echo "WARN: deploy retry budget exhausted (${deploy_elapsed}s elapsed + ${deploy_delay}s wait >= ${deploy_budget}s) — not starting attempt $((deploy_attempt + 1))/$deploy_max" >&2
         break
