@@ -555,10 +555,12 @@ _Maintained by boucle. Edited in place — do not reply here; act on the linked 
   case "$trigger_health" in
     ok)
       body+="⚙️ Trigger health — OK
-" ;;
+"
+      ;;
     missing)
       body+="⚠️ **Trigger health — DEAD**: \`BOUCLE_TRIGGER_TOKEN\` no longer matches any project trigger. Webhook deliveries fail silently and issues never dispatch. Re-create the trigger token (\`bin/setup\` §6) and re-point the webhook URL (§7).
-" ;;
+"
+      ;;
   esac
   local -a groups=(
     "⏳ Waiting on you|boucle:spec-review boucle:approval"

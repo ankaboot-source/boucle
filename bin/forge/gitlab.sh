@@ -683,7 +683,10 @@ forge_trigger_token_status() {
   fi
   local listed
   listed=$(glab api --hostname "$BOUCLE_FORGE_HOST" \
-    "/projects/$BOUCLE_PROJECT_ID/triggers" 2> /dev/null) || { echo "unknown"; return 0; }
+    "/projects/$BOUCLE_PROJECT_ID/triggers" 2> /dev/null) || {
+    echo "unknown"
+    return 0
+  }
   echo "$listed" | jq -r --arg t "$BOUCLE_TRIGGER_TOKEN" '
     (if type == "array" then . else [] end) as $list |
     if ($list | length) == 0 then
