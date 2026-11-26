@@ -224,8 +224,8 @@ elif [ -n "${CI_COMMIT_BEFORE_SHA:-}" ] && [ "${CI_COMMIT_BEFORE_SHA}" != "00000
   rev_resolves "${after}" || after="HEAD"
   base=""
   base_source=""
-  resolve_base "${CI_COMMIT_BEFORE_SHA}" "${after}" ||
-    fail_closed "${CI_COMMIT_BEFORE_SHA}" "${after}" unresolved
+  resolve_base "${CI_COMMIT_BEFORE_SHA}" "${after}" \
+    || fail_closed "${CI_COMMIT_BEFORE_SHA}" "${after}" unresolved
   # A trunk-relative base that resolves to the pushed head teaches us nothing:
   # the before-SHA is unreachable AND the trunk ref already points at the head,
   # so the empty range is a fail-open, not a "no changes" answer. Only the

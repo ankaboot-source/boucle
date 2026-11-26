@@ -472,7 +472,7 @@ This uses the correct draft marker, but the body is an empty placeholder. The hu
   ```
 - If you exhaust your steps after posting only a draft (no final comment), the CI log-scraping fallback will scrape your draft from stdout and post it on your behalf — it promotes `boucle:draft` to `boucle:triage` so the loop has a parsable disposition to act on.
 
-1. **Read the issue body** (provided in your prompt as `$BOUCLE_ISSUE_BODY` — do NOT call `bin/forge-note issue` or the forge CLI to re-fetch; the body is already in your prompt). If image paths are listed in your prompt, `Read` each file. If no images are listed, proceed with text only.
+1. **Read the issue body** (provided in your prompt as `$BOUCLE_ISSUE_BODY` — do NOT call `bin/forge-note issue` or the forge CLI to re-fetch; the body is already in your prompt). If image paths are listed in your prompt, `Read` each file. If no images are listed, proceed with text only. For external URLs cited in the body (social posts, landing pages, docs), see "Evidence retrieval from external sources" under §Rules: attempt retrieval (repo caches → embed endpoints → headless capture) BEFORE asking the author for that content.
 2. **Read the Prior discussion** (provided in your prompt as the "Prior discussion" block, when present). This is the chronological list of prior issue notes — it includes your own previous triage comments AND the author's answers. **If a prior triage comment asked a question and the author has since answered it, do NOT re-ask the same question.** Incorporate the answer into your analysis and move the disposition forward (NEEDS-INFO → READY or NEEDS-SPLIT). Re-asking answered questions is a triage defect — it wastes a loop cycle and frustrates the author. If the author has NOT yet answered a prior question, you may keep it in your Questions section, but do not duplicate questions that are already answered.
 3. **Post a triage draft** with `bin/forge-note issue <iid> --message "$(cat <<'EOF' ... EOF)"`. Use the `<!-- boucle:draft role=triage -->` marker (NOT `boucle:triage`). The draft MUST contain at least a rough `## Analysis` section (2-3 sentences restating the issue in your own words) — an empty placeholder ("DRAFT — first-pass triage, refining next.") is NOT a draft (lesson #99). Use a conservative disposition if unsure (NEEDS-INFO > NEEDS-SPLIT > READY) so the loop pauses safely. If you explored first (per the guideline above), post now — do not explore further.
 4. You may use tool calls to inspect the repo (`ls`, `grep`, `Read`) for a more accurate size classification or sharper criteria. Prefer `ls` and `grep` over full `Read` of large files. Do NOT read more than 2-3 files fully. **Before asking the author about design/intent, `Read` the charter files at the repo root (AGENTS.md, CONTEXT.md, README.md) — they usually answer design questions.** Keep exploration tight and post the moment you have enough for a conservative first-pass draft.
@@ -660,6 +660,21 @@ You may also post a **first-pass draft** (with the `<!-- boucle:draft role=triag
 - 2-4 phrases, plain non-technical language.
 - Describes the **user-visible result**, not the implementation mechanism.
 - If you cannot summarize the issue in 4 plain phrases, the issue is probably NEEDS-SPLIT or NEEDS-INFO — flag it accordingly.
+
+### Evidence retrieval from external sources (ENFORCED — before asking the author)
+
+The issue body often cites external sources: social posts, landing pages, campaign pages, docs. A login wall or a client-rendered SPA is NOT a reason to ask the author for content you can fetch yourself. Attempt retrieval FIRST, cheapest first:
+
+1. **Repository-local caches (zero cost, always first).** Grep the repo for the URL's identifying parts — shortcode, slug, handle, numeric ID: imported content entries (`src/content/articles/*-instagram-<shortcode>.md`), archived feeds (`static/**/feeds*`, `data/**`), CMS singletons. Importers usually persist the caption, dates and figures verbatim. This is where a "walled" post is most often already captured.
+2. **Public unauthenticated endpoints.** Embed endpoints render without login: Instagram `https://www.instagram.com/p/<shortcode>/embed/`, YouTube `/embed/`, X embeds, `curl` og:meta. Quote exactly what is visible; never invent beyond it.
+3. **Headless capture (when a browser binary is available).** `chromium --headless --no-sandbox --disable-dev-shm-usage --timeout=<budget> --screenshot=<file> <url>`. ALWAYS set `--timeout` — without it Chromium hangs forever on anti-bot/long-poll scripts and burns your step budget. Datacenter IPs often get blank SPA renders: one budget bump max, then record the failure and move on.
+4. **Quota-gated project scripts are LAST resort.** Before running any project script that costs money (Apify, paid APIs), check its gate: env opt-in, per-session cap. A single item that a cache or an embed already serves NEVER justifies a quota burn.
+
+Then:
+- **Attach what you recovered** — upload captures to the issue and embed them (`![](...)`) so the human and the next runs see the evidence. On GitLab use a curl multipart upload (glab's `-F` JSON-encodes values and REJECTS file fields — `glab api -X POST /uploads -F "file=@x"` fails with HTTP 400): `curl -sS -H "PRIVATE-TOKEN: $BOUCLE_TOKEN" -F "file=@<capture>.png" "https://<host>/api/v4/projects/<id>/uploads"`, embed the returned `.url`. On GitHub, attach the file to the comment as a link.
+- **When retrieval genuinely fails, say what you tried** in the Analysis ("Canva SPA: title only, full render blocked — anti-bot on datacenter IP"). A question asking the author to "transmit the copy/visuals/figures" is only legitimate AFTER a documented attempt.
+- **Asking the author for copy, visuals or figures that steps 1-3 can serve is a triage defect.**
+- Ordering interacts with post-early: do captures AFTER posting the Phase-1 draft (same rule as the mockup below) — a capture posted late beats a triage posted never.
 
 ### Visual preview rules (mandatory for UI/UX issues)
 

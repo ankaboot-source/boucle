@@ -252,3 +252,37 @@ STUB
   refute_output --partial "| #73 | Enhance How boucle works messages | merging |"
   rm -f "$TMPF"
 }
+
+# ── Trigger health lines (silent-dead-token incident) ─────────────────────
+
+@test "board: renders a DEAD trigger warning when the token no longer matches" {
+  TMPF=$(mktemp); board_funcs "$TMPF"
+  run bash -c "$(stub_forge); source '$TMPF'
+    boucle_trigger_health() { echo 'missing'; }
+    boucle_board_render"
+  assert_success
+  assert_output --partial "Trigger health — DEAD"
+  assert_output --partial "Re-create the trigger token"
+  rm -f "$TMPF"
+}
+
+@test "board: renders an OK line when the trigger token matches" {
+  TMPF=$(mktemp); board_funcs "$TMPF"
+  run bash -c "$(stub_forge); source '$TMPF'
+    boucle_trigger_health() { echo 'ok'; }
+    boucle_board_render"
+  assert_success
+  assert_output --partial "Trigger health — OK"
+  refute_output --partial "DEAD"
+  rm -f "$TMPF"
+}
+
+@test "board: omits the trigger-health line when the status is unknown (fail open)" {
+  TMPF=$(mktemp); board_funcs "$TMPF"
+  run bash -c "$(stub_forge); source '$TMPF'
+    boucle_trigger_health() { echo 'unknown'; }
+    boucle_board_render"
+  assert_success
+  refute_output --partial "Trigger health"
+  rm -f "$TMPF"
+}

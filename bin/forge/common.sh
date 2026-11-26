@@ -586,6 +586,22 @@ forge_reaction_canonical() {
 #   (GitLab: https://<host>/<project>/-/tree/<branch>;
 #    GitHub: https://<host>/<project>/tree/<branch>.)
 
+# ── Contract: trigger token health ───────────────────────────────────────
+#
+# forge_trigger_token_status
+#   Verify the pipeline trigger token still exists on the forge (a deleted
+#   token kills the webhook AND every chained re-trigger, both fail-open
+#   and silent). Returns exactly one word on stdout, never exits non-zero:
+#   "ok"      — the configured token matches an existing trigger
+#   "missing" — the token no longer matches any trigger (loud alarm)
+#   "skipped" — the forge has no separate trigger token concept (GitHub
+#               dispatches use the bot PAT; the forge_trigger_role WARN
+#               covers that failure mode)
+#   "unknown" — API failure or redacted token list (fail open, no alarm)
+#   (GitLab: GET /projects/:id/triggers, exact token match; the comparison
+#    only reports "missing" when the list looks unredacted — see comment.
+#    GitHub: stub returning "skipped".)
+
 # ── Contract: attachment upload (triage visual preview) ──────────────────
 #
 # forge_attachment_upload <iid> <file_path> <filename>

@@ -105,3 +105,152 @@ setup() {
   assert_success
   assert_output "1"
 }
+
+# ── forge_trigger_token_status (silent-dead-token incident) ───────────────
+
+@test "gitlab forge_trigger_token_status: ok when the list contains our token" {
+  run bash -c '
+    BOUCLE_PROJECT_ID="126561"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
+    BOUCLE_TRIGGER_TOKEN="glptt-abcdefghijklmnopqrstuvwx"
+    glab() { echo "[{\"id\":1,\"token\":\"glptt-abcdefghijklmnopqrstuvwx\",\"description\":\"boucle-loop\"}]"; }
+    source bin/forge/gitlab.sh
+    forge_trigger_token_status
+  '
+  assert_success
+  assert_output "ok"
+}
+
+@test "gitlab forge_trigger_token_status: missing when an unredacted list lacks our token" {
+  run bash -c '
+    BOUCLE_PROJECT_ID="126561"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
+    BOUCLE_TRIGGER_TOKEN="glptt-abcdefghijklmnopqrstuvwx"
+    glab() { echo "[{\"id\":9,\"token\":\"glptt-zzzzzzzzzzzzzzzzzzzzzz\",\"description\":\"other\"}]"; }
+    source bin/forge/gitlab.sh
+    forge_trigger_token_status
+  '
+  assert_success
+  assert_output "missing"
+}
+
+@test "gitlab forge_trigger_token_status: unknown when the token is unset" {
+  run bash -c '
+    BOUCLE_PROJECT_ID="126561"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
+    unset BOUCLE_TRIGGER_TOKEN
+    glab() { echo "[{\"id\":9,\"token\":\"glptt-zzzzzzzzzzzzzzzzzzzzzz\"}]"; }
+    source bin/forge/gitlab.sh
+    forge_trigger_token_status
+  '
+  assert_success
+  assert_output "unknown"
+}
+
+@test "gitlab forge_trigger_token_status: unknown when every listed token is truncated" {
+  run bash -c '
+    BOUCLE_PROJECT_ID="126561"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
+    BOUCLE_TRIGGER_TOKEN="glptt-abcdefghijklmnopqrstuvwx"
+    glab() { echo "[{\"id\":2,\"token\":\"QWe9\"},{\"id\":3,\"token\":\"Ab12\"}]"; }
+    source bin/forge/gitlab.sh
+    forge_trigger_token_status
+  '
+  assert_success
+  assert_output "unknown"
+}
+
+@test "gitlab forge_trigger_token_status: unknown when the glab call fails" {
+  run bash -c '
+    BOUCLE_PROJECT_ID="126561"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
+    BOUCLE_TRIGGER_TOKEN="glptt-abcdefghijklmnopqrstuvwx"
+    glab() { return 1; }
+    source bin/forge/gitlab.sh
+    forge_trigger_token_status
+  '
+  assert_success
+  assert_output "unknown"
+}
+
+# ── forge_trigger_role WARN (silent-dead-token incident) ─────────────────
+
+@test "gitlab forge_trigger_role: WARN to stderr on non-201, exit still 0 (fail-open)" {
+  run bash -c '
+    BOUCLE_PROJECT_ID="126561"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
+    BOUCLE_TRIGGER_TOKEN="glptt-deaddeaddeaddeaddead"
+    BOUCLE_DEFAULT_BRANCH="master"
+    curl() { printf "{\"message\":\"404\"}\n404\n"; }
+    source bin/forge/gitlab.sh
+    forge_trigger_role "359" "worker"
+  '
+  assert_success
+  assert_output --partial "[boucle] WARN: forge_trigger_role issue=359 role=worker → HTTP 404"
+}
+
+@test "gitlab forge_trigger_role: silent on HTTP 201" {
+  run bash -c '
+    BOUCLE_PROJECT_ID="126561"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
+    BOUCLE_TRIGGER_TOKEN="glptt-alivealivealivealive"
+    BOUCLE_DEFAULT_BRANCH="master"
+    curl() { printf "{\"id\":1}\n201\n"; }
+    source bin/forge/gitlab.sh
+    forge_trigger_role "359" "worker"
+  '
+  assert_success
+  refute_output --partial "WARN"
+}
+
+# ── forge_attachment_upload (curl multipart) ──────────────────────────────
+
+@test "gitlab forge_attachment_upload: uploads via curl multipart and returns .url" {
+  tmp=$(mktemp -d)
+  : > "$tmp/slide.jpg"
+  run bash -c '
+    BOUCLE_PROJECT_ID="126561"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
+    BOUCLE_TOKEN="pat123"
+    export BOUCLE_TOKEN
+    curl() { echo "{\"id\":147675,\"url\":\"/uploads/abc/slide.jpg\",\"full_path\":\"/-/project/126561/uploads/abc/slide.jpg\"}"; }
+    glab() { echo "glab must not be used for multipart uploads: $*" >&2; return 1; }
+    source bin/forge/gitlab.sh
+    forge_attachment_upload "359" "'"$tmp"'/slide.jpg" "slide.jpg"
+  '
+  assert_success
+  assert_output "/uploads/abc/slide.jpg"
+  rm -rf "$tmp"
+}
+
+@test "gitlab forge_attachment_upload: WARN + empty output when BOUCLE_TOKEN is unset" {
+  tmp=$(mktemp -d)
+  : > "$tmp/slide.jpg"
+  run bash -c '
+    unset BOUCLE_TOKEN
+    BOUCLE_PROJECT_ID="126561"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
+    curl() { echo "curl must not run"; }
+    source bin/forge/gitlab.sh
+    forge_attachment_upload "359" "'"$tmp"'/slide.jpg" "slide.jpg"
+  '
+  assert_success
+  assert_output --partial "BOUCLE_TOKEN not set"
+  rm -rf "$tmp"
+}
+
+@test "gitlab forge_attachment_upload: WARN + empty output on HTTP failure (fail-open, loud)" {
+  tmp=$(mktemp -d)
+  : > "$tmp/slide.jpg"
+  run bash -c '
+    BOUCLE_PROJECT_ID="126561"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
+    BOUCLE_TOKEN="pat123"
+    curl() { return 1; }
+    source bin/forge/gitlab.sh
+    forge_attachment_upload "359" "'"$tmp"'/slide.jpg" "slide.jpg"
+  '
+  assert_success
+  assert_output --partial "upload NOT attached"
+  rm -rf "$tmp"
+}
