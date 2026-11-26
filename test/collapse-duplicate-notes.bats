@@ -344,3 +344,74 @@ setup() {
   ' 2> /dev/null | sort -n)"
   [ -z "$orphan_ids" ]
 }
+
+# ── No-op collapse: identical target body must not write ───────────────
+# Every PUT and every cross-run stale-final DELETE is a forge note event
+# (webhook → trigger pipeline). When the target already carries the newest
+# final body, the collapse MUST be a pure no-op: no PUT, no deletes.
+
+# run_collapse_with_stub <target_body>
+#
+# Runs bin/collapse-duplicate-notes against a glab stub. The notes list
+# holds a stale cross-run final (id=10 < pre_id=100) and this run's final
+# (id=101). The single-note GET returns <target_body> as note 101's body.
+# Echoes the script output; call log at $BATS_TEST_TMPDIR/calls.log.
+run_collapse_with_stub() {
+  local target_body="$1"
+  local stubdir="$BATS_TEST_TMPDIR/bin"
+  local notes_file="$BATS_TEST_TMPDIR/notes.json"
+  local target_file="$BATS_TEST_TMPDIR/target.txt"
+  mkdir -p "$stubdir"
+  printf '%s' '[
+    {"id": 10, "body": "<!-- boucle:triage v=1 -->\n\n## TL;DR\nstale\n\n## Disposition\nREADY"},
+    {"id": 101, "body": "<!-- boucle:triage v=1 -->\n\n## TL;DR\nnew\n\n## Disposition\nREADY"}
+  ]' > "$notes_file"
+  printf '%s' "$target_body" > "$target_file"
+  : > "$BATS_TEST_TMPDIR/calls.log"
+  cat > "$stubdir/glab" << 'STUB'
+#!/usr/bin/env bash
+method=GET prev="" url=""
+for a in "$@"; do
+  [ "$prev" = "-X" ] && method="$a"
+  case "$a" in /projects/*) url="$a" ;; esac
+  prev="$a"
+done
+printf "%s %s\n" "$method" "$url" >> "$CALLS"
+case "$method $url" in
+  "GET "*/notes?per_page=100) cat "$NOTES_FILE" ;;
+  "GET "*/notes/*) jq -Rs '{id: 101, body: .}' < "$TARGET_FILE" ;;
+  *) : ;;
+esac
+STUB
+  chmod +x "$stubdir/glab"
+  CALLS="$BATS_TEST_TMPDIR/calls.log" \
+    NOTES_FILE="$notes_file" \
+    TARGET_FILE="$target_file" \
+    PATH="$stubdir:$PATH" \
+    BOUCLE_HOME="$PWD" \
+    BOUCLE_PROJECT_ID="126561" \
+    BOUCLE_FORGE_HOST="gitlab.example.com" \
+    BOUCLE_FORGE=gitlab \
+    bash bin/collapse-duplicate-notes triage 126561 42 100 gitlab.example.com 2>&1
+}
+
+@test "collapse: identical target body → no write (no PUT, no cross-run DELETE)" {
+  target_body=$'<!-- boucle:triage v=1 -->\n\n## TL;DR\nnew\n\n## Disposition\nREADY'
+  output=$(run_collapse_with_stub "$target_body")
+  echo "$output" | grep -q "collapse: unchanged — no write"
+  run grep -q "^PUT " "$BATS_TEST_TMPDIR/calls.log"
+  assert_failure
+  run grep -q "^DELETE " "$BATS_TEST_TMPDIR/calls.log"
+  assert_failure
+}
+
+@test "collapse: changed target body → PUT + cross-run stale-final cleanup" {
+  target_body=$'<!-- boucle:triage v=1 -->\n\n## TL;DR\nold\n\n## Disposition\nREADY'
+  output=$(run_collapse_with_stub "$target_body")
+  run grep -q "collapse: unchanged — no write" <<< "$output"
+  assert_failure
+  run grep -q "^PUT .*/notes/101" "$BATS_TEST_TMPDIR/calls.log"
+  assert_success
+  run grep -q "^DELETE .*/notes/10" "$BATS_TEST_TMPDIR/calls.log"
+  assert_success
+}

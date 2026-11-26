@@ -198,8 +198,30 @@ log "collapse-duplicate-notes: replacing $TYPE draft(s) in place — target note
 # Bodies contain newlines, so they are fetched via a separate jq query.
 NEWEST_BODY="$(printf '%s' "$NOTES_JSON" | jq -r "${FILTER} | select(.id > ${PRE_ID}) | select(.id == ${NEWEST_FINAL_ID}) | .body" 2> /dev/null)"
 
+# Fetch the TARGET note's CURRENT body. Every PUT and every cross-run
+# stale-final DELETE is a forge write event (note webhook → trigger
+# pipeline); when the target already carries the newest final body, the
+# collapse is a no-op and re-writing it merely echoes the same content back
+# into the loop. The fetch is best-effort: an empty/failed GET is NOT
+# "unchanged" — the body must still be landed.
+TARGET_JSON=""
+if [[ -n "$TARGET_ID" ]]; then
+  if [ "$KIND" = "mr" ]; then
+    TARGET_JSON="$(forge_mr_note_get "$NOTE_IID" "$TARGET_ID" 2> /dev/null || true)"
+  else
+    TARGET_JSON="$(forge_issue_note_get "$NOTE_IID" "$TARGET_ID" 2> /dev/null || true)"
+  fi
+fi
+TARGET_BODY="$(printf '%s' "$TARGET_JSON" | jq -r '.body // empty' 2> /dev/null || true)"
+COLLAPSE_UNCHANGED=false
+if [[ -n "$TARGET_ID" && -n "$NEWEST_BODY" && "$TARGET_BODY" = "$NEWEST_BODY" ]]; then
+  COLLAPSE_UNCHANGED=true
+fi
+
 # PUT the newest final body onto the target note id (replace in place).
-if [[ -n "$TARGET_ID" && -n "$NEWEST_BODY" ]]; then
+if [[ "$COLLAPSE_UNCHANGED" = true ]]; then
+  log "collapse: unchanged — no write (target note $TARGET_ID already carries the newest $TYPE final)"
+elif [[ -n "$TARGET_ID" && -n "$NEWEST_BODY" ]]; then
   log "collapse-duplicate-notes: PUT $ENDPOINT/$TARGET_ID (newest final body onto target id)"
   if [ "$KIND" = "mr" ]; then
     forge_mr_note_update "$NOTE_IID" "$TARGET_ID" "$NEWEST_BODY" 2> /dev/null \
@@ -228,8 +250,10 @@ done
 # Cross-run: delete stale finals from previous runs (id <= pre_id) that
 # are NOT the target. The target is the oldest note from this run; stale
 # finals are older still. They are redundant now that the newest final
-# body is on the target.
-if [[ -n "${ALL_FINAL_IDS:-}" ]]; then
+# body is on the target. Skipped when the target already carried that body:
+# the cross-run cleanup would be pure DELETE churn (one note webhook each,
+# i.e. one trigger pipeline each) for content that does not change.
+if [[ "$COLLAPSE_UNCHANGED" != true && -n "${ALL_FINAL_IDS:-}" ]]; then
   printf '%s\n' "$ALL_FINAL_IDS" | while IFS= read -r STALE_ID; do
     [[ -z "$STALE_ID" ]] && continue
     # Skip the target (it now holds the newest body).
