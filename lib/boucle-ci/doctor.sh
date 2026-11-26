@@ -13,6 +13,36 @@
 #
 # Extracted from the .gitlab-ci.yml doctor job (lines 4006-4632).
 
+# doctor_human_reply_count <notes_json> <last_triage_note_id> [author]
+#
+# Count the notes that are GENUINE human replies after the last triage
+# note. A note counts iff:
+#   - its body does NOT carry the <!-- boucle:agent --> marker (issue #100:
+#     marker-based classification, independent of the author account); and
+#   - it is NOT a forge SYSTEM note (.system == true). Label, assignee and
+#     state-change events are emitted as notes but carry no human intent —
+#     counting them made every gated issue look "answered" on the next
+#     staleness sweep and re-chained it to full triage (observed on a
+#     consumer: 28/28 "replies" were system notes); and
+#   - when <author> is non-empty, it was written by that user. Dispatch's
+#     spec_approver_ok only accepts the issue AUTHOR's amendment, so the
+#     doctor MUST apply the same parity — otherwise a colleague's note
+#     re-triggers triage on the next sweep after dispatch refused it.
+#
+# Emits an integer. A malformed/empty payload yields 0 (fail-safe: never
+# invent a reply).
+doctor_human_reply_count() {
+  local notes_json="$1" last_triage_note_id="$2" author="${3:-}"
+  echo "$notes_json" | jq -r --arg tid "$last_triage_note_id" --arg author "$author" '
+        [.[]
+          | select((.body // "") | contains("<!-- boucle:agent -->") | not)
+          | select(.system != true)
+          | select($author == "" or .author.username == $author)
+          | select(.id > ($tid | tonumber))]
+        | length
+      ' 2> /dev/null || echo 0
+}
+
 boucle_ci_doctor() {
   # Disable pipefail: grep in $(...) exits 1 on no-match, killing the script
   # under set -eo pipefail. Without pipefail, the var is just empty (which
@@ -201,6 +231,7 @@ boucle_ci_doctor() {
     notes=$(forge_mr_notes "$mr_iid" 2> /dev/null || echo "[]")
     if echo "$notes" | jq -e '
               [.[] | select((.body // "") | contains("<!-- boucle:agent -->") | not)
+                | select(.system != true)
                 | (.body | split("\n")[0] | gsub("^\\s+|\\s+$"; "") | ascii_downcase == "approved")]
               | any
           ' > /dev/null 2>&1; then
@@ -260,14 +291,12 @@ boucle_ci_doctor() {
     # Find the last triage comment (has <!-- boucle:triage marker).
     LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
 
-    # Find the last human (non-bot) note after the triage comment.
+    # Find the last human note after the triage comment.
     # Issue #100: marker-based classification — a note is boucle's iff its
     # body carries <!-- boucle:agent --> (stamped by every forge_*_note
     # path); everything else is human, regardless of author account.
-    HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" '
-          [.[] | select((.body // "") | contains("<!-- boucle:agent -->") | not) | select(.id > ($tid | tonumber))]
-          | length
-        ')
+    # System notes (label/assignee/state events) are NEVER replies.
+    HUMAN_REPLY_AFTER_TRIAGE=$(doctor_human_reply_count "$NOTES" "$LAST_TRIAGE_NOTE_ID")
 
     if [ "$HUMAN_REPLY_AFTER_TRIAGE" -gt 0 ]; then
       echo "  → #$IID has a human reply after last triage comment — orphaned triage detected"
@@ -309,21 +338,6 @@ boucle_ci_doctor() {
     NOTES=$(forge_issue_notes "$IID")
     # Find the last triage comment (same as needs-info recovery above).
     LAST_TRIAGE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("<!-- boucle:triage"))] | first | .id // 0')
-    # Detect any human note after the last triage comment (issue #100:
-    # marker-based, not identity-based — see needs-info recovery above).
-    HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" '
-          [.[] | select((.body // "") | contains("<!-- boucle:agent -->") | not) | select(.id > ($tid | tonumber))]
-          | length
-        ')
-    # Check for an approval emoji on the triage comment AND any standalone
-    # spec-review note. The validation instructions are appended to the
-    # triage comment itself (single message to read/approve), so the
-    # "React with" lookup usually resolves to the same note as the triage
-    # comment. The fallback path (triage note unresolved / PUT failed)
-    # posts a standalone note — poll both to cover that case too.
-    # Polls the award_emoji API — recovers even if the emoji webhook was
-    # missed (emoji_events disabled or webhook delivery failed).
-    SPEC_INVITE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("React with"))] | last | .id // 0')
     # The reaction has to be the AUTHOR's, exactly as in the dispatch
     # (spec_approver_ok). Accepting any non-bot reaction here would make the
     # gate bypassable by waiting: dispatch refuses a colleague's 👍, then the
@@ -333,6 +347,21 @@ boucle_ci_doctor() {
     SPEC_AUTHOR=$(resolve_reporter_username "$IID" 2> /dev/null || echo "")
     [ -n "$SPEC_AUTHOR" ] \
       || echo "  → WARN: could not resolve the author of #$IID — accepting a reaction from any non-bot user (previous behaviour)"
+    # Detect any human note after the last triage comment (issue #100:
+    # marker-based, not identity-based — see needs-info recovery above).
+    # Pass the author: the doctor accepts only the author's amendment, the
+    # same parity dispatch enforces (a colleague's reply is not an
+    # amendment the loop may act on). System notes never count.
+    HUMAN_REPLY_AFTER_TRIAGE=$(doctor_human_reply_count "$NOTES" "$LAST_TRIAGE_NOTE_ID" "$SPEC_AUTHOR")
+    # Check for an approval emoji on the triage comment AND any standalone
+    # spec-review note. The validation instructions are appended to the
+    # triage comment itself (single message to read/approve), so the
+    # "React with" lookup usually resolves to the same note as the triage
+    # comment. The fallback path (triage note unresolved / PUT failed)
+    # posts a standalone note — poll both to cover that case too.
+    # Polls the award_emoji API — recovers even if the emoji webhook was
+    # missed (emoji_events disabled or webhook delivery failed).
+    SPEC_INVITE_NOTE_ID=$(echo "$NOTES" | jq -r '[.[] | select(.body | contains("React with"))] | last | .id // 0')
     EMOJI_APPROVAL_FOUND=false
     # Issue #100: also exclude reactors who authored an agent-marker note
     # (mono-user mode: boucle reacts under the human's own account).
@@ -536,13 +565,11 @@ boucle_ci_doctor() {
       continue
     fi
 
-    # Is there a human reply after the last triage comment? (issue #100:
+    # Is there a human reply after the last triage comment? Issue #100:
     # marker-based classification — agent-marker notes are never "human",
-    # even when posted from the human's own account in mono-user mode.)
-    HUMAN_REPLY_AFTER_TRIAGE=$(echo "$NOTES" | jq -r --arg tid "$LAST_TRIAGE_NOTE_ID" '
-          [.[] | select((.body // "") | contains("<!-- boucle:agent -->") | not) | select(.id > ($tid | tonumber))]
-          | length
-        ')
+    # even when posted from the human's own account in mono-user mode.
+    # System notes (label/assignee events) are not replies either.
+    HUMAN_REPLY_AFTER_TRIAGE=$(doctor_human_reply_count "$NOTES" "$LAST_TRIAGE_NOTE_ID")
     if [ "$HUMAN_REPLY_AFTER_TRIAGE" -eq 0 ]; then
       echo "  → #$IID: triage comment exists but no human reply — still waiting"
       continue
