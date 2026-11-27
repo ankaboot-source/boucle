@@ -1512,3 +1512,47 @@ unlabeled_decision() {
   run grep -q 'unlabeled' lib/boucle-ci/dispatch.sh
   assert_success
 }
+
+# ── Empty-body note guard (defense in depth) ──────────────────────────
+# A note event with no body (deleted note, stripped/restricted payload)
+# carries no human intent. It must exit as a no-op, like a system note,
+# instead of falling through to the label/issue routing below.
+
+extract_empty_body_guard() {
+  awk '/# ── Empty-body note \(deleted\/absent payload\)/{p=1} p{print} p && /^    fi$/{exit}' lib/boucle-ci/dispatch.sh
+}
+
+@test "dispatch: a note event with an empty body is a no-op" {
+  guard=$(extract_empty_body_guard)
+  [ -n "$guard" ] || {
+    echo "empty-body note guard not found"
+    false
+  }
+  echo '{"object_kind":"note","object_attributes":{"note":""}}' > "$PAYLOAD"
+  OBJECT_KIND=note
+  NOTE_BODY=$(BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" dispatch_note_body)
+  [ -z "$NOTE_BODY" ]
+  NOOP=0
+  dispatch_noop() { NOOP=1; }
+  eval "$guard"
+  [ "$NOOP" = "1" ]
+}
+
+@test "dispatch: a note event with a human body still routes past the guard" {
+  guard=$(extract_empty_body_guard)
+  echo '{"object_kind":"note","object_attributes":{"note":"please add dark mode"}}' > "$PAYLOAD"
+  OBJECT_KIND=note
+  NOTE_BODY=$(BOUCLE_TRIGGER_PAYLOAD="$PAYLOAD" dispatch_note_body)
+  NOOP=0
+  dispatch_noop() { NOOP=1; }
+  eval "$guard"
+  [ "$NOOP" = "0" ]
+}
+
+@test "guard shape: the empty-body note guard follows the system-note filter" {
+  sys_line=$(grep -n 'NOTE_SYSTEM=.*object_attributes.system' lib/boucle-ci/dispatch.sh | head -1 | cut -d: -f1)
+  empty_line=$(grep -n 'Note with empty body' lib/boucle-ci/dispatch.sh | head -1 | cut -d: -f1)
+  cmd_line=$(grep -n '/boucle command parser' lib/boucle-ci/dispatch.sh | head -1 | cut -d: -f1)
+  [ -n "$sys_line" ] && [ -n "$empty_line" ] && [ -n "$cmd_line" ]
+  [ "$sys_line" -lt "$empty_line" ] && [ "$empty_line" -lt "$cmd_line" ]
+}

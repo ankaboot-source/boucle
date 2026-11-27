@@ -194,9 +194,33 @@ forge_issue_note_get() {
   glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/issues/$iid/notes/$note_id" 2> /dev/null || true
 }
 
+forge_mr_note_get() {
+  local mr_iid="$1" note_id="$2"
+  glab api --hostname "$BOUCLE_FORGE_HOST" "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/notes/$note_id" 2> /dev/null || true
+}
+
+# forge_note_write_is_noop <current_json> <new_body>
+#
+# True when the API's current note JSON already carries <new_body> byte for
+# byte. A PUT is not free: the forge records a Note *update* event, so on a
+# project whose hook forwards note events the write itself fires a webhook
+# and spawns another trigger pipeline — a self-sustaining echo when an
+# agent re-posts the same body on every run. The GET is best-effort: an
+# empty/failed fetch or a malformed payload is NOT a no-op (the update must
+# never be silently dropped).
+forge_note_write_is_noop() {
+  local current_json="$1" new_body="$2"
+  [ -n "$current_json" ] \
+    && printf '%s' "$current_json" | jq -e --arg body "$new_body" '.body == $body' > /dev/null 2>&1
+}
+
 forge_issue_note_update() {
   local iid="$1" note_id="$2" new_body="$3" rc=0
   new_body=$(stamp_agent_marker "$new_body")
+  if forge_note_write_is_noop "$(forge_issue_note_get "$iid" "$note_id")" "$new_body"; then
+    echo "note unchanged — skipping write (issue #$iid note $note_id)"
+    return 0
+  fi
   glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$BOUCLE_PROJECT_ID/issues/$iid/notes/$note_id" \
     -f body="$new_body" > /dev/null 2>&1 || rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -208,6 +232,10 @@ forge_issue_note_update() {
 forge_mr_note_update() {
   local mr_iid="$1" note_id="$2" new_body="$3" rc=0
   new_body=$(stamp_agent_marker "$new_body")
+  if forge_note_write_is_noop "$(forge_mr_note_get "$mr_iid" "$note_id")" "$new_body"; then
+    echo "note unchanged — skipping write (MR !$mr_iid note $note_id)"
+    return 0
+  fi
   glab api --hostname "$BOUCLE_FORGE_HOST" -X PUT "/projects/$BOUCLE_PROJECT_ID/merge_requests/$mr_iid/notes/$note_id" \
     -f body="$new_body" > /dev/null 2>&1 || rc=$?
   if [ "$rc" -ne 0 ]; then

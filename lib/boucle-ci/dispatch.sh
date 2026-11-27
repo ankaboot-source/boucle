@@ -683,6 +683,16 @@ boucle_ci_dispatch() {
         dispatch_noop
       fi
     fi
+    # ── Empty-body note (deleted/absent payload) ───────────────────────
+    # A note event with no body carries no human intent: the note was
+    # deleted, or the payload was stripped (restricted visibility). It
+    # cannot be a reply, an amendment, or a /boucle command — falling
+    # through would route it against the issue's current labels and start
+    # a pipeline for nothing. Treat it like a system note: a no-op.
+    if [ "$OBJECT_KIND" = "note" ] && [ -z "$NOTE_BODY" ]; then
+      echo "Note with empty body (deleted/absent payload) — skipping"
+      dispatch_noop
+    fi
     # ── /boucle command parser (issue comments only, #61) ─────────────
     # After the system-note filter, only genuine human notes reach here.
     # The agent-marker skip already ran upstream, so boucle's own stamped

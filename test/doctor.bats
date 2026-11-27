@@ -367,10 +367,11 @@ extract_spec_review_recovery() {
   assert_success
 }
 
-extract_first_reply_counter() {
-  # Extract the first HUMAN_REPLY_AFTER_TRIAGE assignment (needs-info path).
-  local q="'"
-  awk -v q="$q" '/HUMAN_REPLY_AFTER_TRIAGE=\$\(echo "\$NOTES"/{p=1} p{print} p && $0 ~ q"\\)"{exit}' lib/boucle-ci/doctor.sh
+extract_reply_counter_helper() {
+  # Extract the shared doctor_human_reply_count helper. The needs-info,
+  # spec-review and unlabeled scans all call it; the inline jq each used to
+  # carry counted SYSTEM notes as human replies.
+  awk '/^doctor_human_reply_count\(\) \{/{p=1} p{print} p && /^\}/{exit}' lib/boucle-ci/doctor.sh
 }
 
 @test "doctor counts human replies by marker, not identity (mono-user)" {
@@ -382,7 +383,8 @@ extract_first_reply_counter() {
     {"id": 3, "body": "here are the answers", "author": {"username": "alice"}}
   ]'
   LAST_TRIAGE_NOTE_ID="1"
-  eval "$(extract_first_reply_counter)"
+  eval "$(extract_reply_counter_helper)"
+  HUMAN_REPLY_AFTER_TRIAGE=$(doctor_human_reply_count "$NOTES" "$LAST_TRIAGE_NOTE_ID")
   [ "$HUMAN_REPLY_AFTER_TRIAGE" = "1" ]
 }
 
@@ -394,8 +396,60 @@ extract_first_reply_counter() {
     {"id": 2, "body": "old-style bot note without marker", "author": {"username": "up-bot"}}
   ]'
   LAST_TRIAGE_NOTE_ID="1"
-  eval "$(extract_first_reply_counter)"
+  eval "$(extract_reply_counter_helper)"
+  HUMAN_REPLY_AFTER_TRIAGE=$(doctor_human_reply_count "$NOTES" "$LAST_TRIAGE_NOTE_ID")
   [ "$HUMAN_REPLY_AFTER_TRIAGE" = "1" ]
+}
+
+@test "doctor: system notes after the newest triage are NOT human replies (no re-trigger)" {
+  # Observed on a consumer: the doctor counted GitLab SYSTEM notes
+  # (label/assignee/state events) as human replies, so an issue gated on
+  # the author was re-chained to full triage on every staleness sweep
+  # (28/28 "replies" were system notes). Must be 0.
+  NOTES='[
+    {"id": 10, "body": "<!-- boucle:triage v=1 --> waiting for the spec author", "author": {"username": "alice"}},
+    {"id": 11, "body": "added boucle:spec-review label", "author": {"username": "alice"}, "system": true},
+    {"id": 12, "body": "assigned to @up-bot", "author": {"username": "alice"}, "system": true}
+  ]'
+  eval "$(extract_reply_counter_helper)"
+  HUMAN_REPLY_AFTER_TRIAGE=$(doctor_human_reply_count "$NOTES" "10")
+  [ "$HUMAN_REPLY_AFTER_TRIAGE" = "0" ]
+}
+
+@test "doctor: a real author note after the newest triage still counts" {
+  NOTES='[
+    {"id": 10, "body": "<!-- boucle:triage v=1 --> waiting", "author": {"username": "alice"}},
+    {"id": 11, "body": "added boucle:spec-review label", "author": {"username": "alice"}, "system": true},
+    {"id": 12, "body": "here is the amendment", "author": {"username": "alice"}}
+  ]'
+  eval "$(extract_reply_counter_helper)"
+  HUMAN_REPLY_AFTER_TRIAGE=$(doctor_human_reply_count "$NOTES" "10")
+  [ "$HUMAN_REPLY_AFTER_TRIAGE" = "1" ]
+}
+
+@test "doctor: spec-review parity — a different user's note is not the author's amendment" {
+  # Dispatch's spec_approver_ok refuses a colleague's amendment; the doctor
+  # MUST apply the same author parity, or it re-triggers triage on the next
+  # sweep for a reply dispatch ignored.
+  NOTES='[
+    {"id": 10, "body": "<!-- boucle:triage v=1 --> waiting", "author": {"username": "alice"}},
+    {"id": 11, "body": "I think we should also do X", "author": {"username": "bob"}}
+  ]'
+  eval "$(extract_reply_counter_helper)"
+  HUMAN_REPLY_AFTER_TRIAGE=$(doctor_human_reply_count "$NOTES" "10" "alice")
+  [ "$HUMAN_REPLY_AFTER_TRIAGE" = "0" ]
+  # No author (unknown lookup → fail-open) keeps the previous behaviour.
+  HUMAN_REPLY_AFTER_TRIAGE=$(doctor_human_reply_count "$NOTES" "10")
+  [ "$HUMAN_REPLY_AFTER_TRIAGE" = "1" ]
+}
+
+@test "doctor spec-review recovery passes the issue author to the reply counter" {
+  block=$(extract_spec_review_recovery)
+  echo "$block" | grep -q 'doctor_human_reply_count "\$NOTES" "\$LAST_TRIAGE_NOTE_ID" "\$SPEC_AUTHOR"'
+  # SPEC_AUTHOR must be resolved before the counter runs.
+  author_line=$(echo "$block" | grep -n 'SPEC_AUTHOR=' | head -1 | cut -d: -f1)
+  reply_line=$(echo "$block" | grep -n 'HUMAN_REPLY_AFTER_TRIAGE=$(doctor_human_reply_count' | head -1 | cut -d: -f1)
+  [ -n "$author_line" ] && [ -n "$reply_line" ] && [ "$author_line" -lt "$reply_line" ]
 }
 
 @test "doctor_mr_approval_magic_word ignores boucle's own notes in mono-user" {
@@ -412,6 +466,27 @@ extract_first_reply_counter() {
   # A real human note (no marker) with standalone `approved` approves.
   forge_mr_notes() {
     printf '[{"id": 5, "body": "<!-- boucle:agent --> status update", "author": {"username": "alice"}}, {"id": 6, "body": "Approved", "author": {"username": "alice"}}]'
+  }
+  eval "$extract"
+  run doctor_mr_approval_magic_word 42
+  assert_output "1"
+}
+
+@test "doctor_mr_approval_magic_word ignores system notes" {
+  extract="$(awk '/^  doctor_mr_approval_magic_word\(\) \{/{p=1} p{print} p && /^  \}/{exit}' lib/boucle-ci/doctor.sh)"
+  # A label/state change is emitted as a note whose first line can be the
+  # magic word ("approved" is also a label name). System notes carry no
+  # human intent and must never approve the merge gate.
+  forge_mr_notes() {
+    printf '[{"id": 5, "body": "approved", "author": {"username": "alice"}, "system": true}]'
+  }
+  eval "$extract"
+  run doctor_mr_approval_magic_word 42
+  assert_output "0"
+
+  # A real human note still approves (the filter did not over-reach).
+  forge_mr_notes() {
+    printf '[{"id": 5, "body": "approved", "author": {"username": "alice"}, "system": false}]'
   }
   eval "$extract"
   run doctor_mr_approval_magic_word 42

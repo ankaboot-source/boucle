@@ -254,3 +254,96 @@ setup() {
   assert_output --partial "upload NOT attached"
   rm -rf "$tmp"
 }
+
+# ── No-op note updates: a PUT is a webhook, not a free write ───────────
+# Re-writing an identical body makes the forge emit a note-update event,
+# which on a note-forwarding hook starts another trigger pipeline (echo).
+# The update functions MUST skip the PUT when the stamped body already
+# matches the current one — and MUST still PUT when it differs (or when
+# the GET fails, since an unknown body is not "unchanged").
+
+@test "gitlab forge_issue_note_update: identical body skips the PUT" {
+  tmp=$(mktemp -d)
+  LOG="$tmp/calls.log"
+  run env TEST_LOG="$LOG" bash -c '
+    BOUCLE_PROJECT_ID="126561"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
+    glab() {
+      local method="GET" prev="" a
+      for a in "$@"; do
+        [ "$prev" = "-X" ] && method="$a"
+        prev="$a"
+      done
+      printf "%s %s\n" "$method" "$*" >> "$TEST_LOG"
+      if [ "$method" = "GET" ]; then
+        printf "%s\n" "{\"id\":7,\"body\":\"final body\\n\\n<!-- boucle:agent -->\"}"
+      fi
+      return 0
+    }
+    source bin/forge/gitlab.sh
+    forge_issue_note_update "42" "7" "final body"
+  '
+  assert_success
+  assert_output --partial "note unchanged — skipping write"
+  run grep -q "^PUT " "$LOG"
+  assert_failure
+  run grep -q "^GET " "$LOG"
+  assert_success
+  rm -rf "$tmp"
+}
+
+@test "gitlab forge_issue_note_update: changed body still PUTs" {
+  tmp=$(mktemp -d)
+  LOG="$tmp/calls.log"
+  run env TEST_LOG="$LOG" bash -c '
+    BOUCLE_PROJECT_ID="126561"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
+    glab() {
+      local method="GET" prev="" a
+      for a in "$@"; do
+        [ "$prev" = "-X" ] && method="$a"
+        prev="$a"
+      done
+      printf "%s %s\n" "$method" "$*" >> "$TEST_LOG"
+      if [ "$method" = "GET" ]; then
+        printf "%s\n" "{\"id\":7,\"body\":\"old body\\n\\n<!-- boucle:agent -->\"}"
+      fi
+      return 0
+    }
+    source bin/forge/gitlab.sh
+    forge_issue_note_update "42" "7" "final body"
+  '
+  assert_success
+  refute_output --partial "skipping write"
+  run grep -q "^PUT " "$LOG"
+  assert_success
+  rm -rf "$tmp"
+}
+
+@test "gitlab forge_mr_note_update: identical body skips the PUT" {
+  tmp=$(mktemp -d)
+  LOG="$tmp/calls.log"
+  run env TEST_LOG="$LOG" bash -c '
+    BOUCLE_PROJECT_ID="126561"
+    BOUCLE_FORGE_HOST="gitlab.example.com"
+    glab() {
+      local method="GET" prev="" a
+      for a in "$@"; do
+        [ "$prev" = "-X" ] && method="$a"
+        prev="$a"
+      done
+      printf "%s %s\n" "$method" "$*" >> "$TEST_LOG"
+      if [ "$method" = "GET" ]; then
+        printf "%s\n" "{\"id\":7,\"body\":\"final body\\n\\n<!-- boucle:agent -->\"}"
+      fi
+      return 0
+    }
+    source bin/forge/gitlab.sh
+    forge_mr_note_update "9" "7" "final body"
+  '
+  assert_success
+  assert_output --partial "note unchanged — skipping write"
+  run grep -q "^PUT " "$LOG"
+  assert_failure
+  rm -rf "$tmp"
+}
